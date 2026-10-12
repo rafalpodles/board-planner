@@ -516,3 +516,142 @@ describe("a turn still running", () => {
     stream.close();
   });
 });
+
+/**
+ * BP-1029. "PM is thinking…" and Stop appear before the send has reached the server's lock, and a
+ * Stop pressed then was answered "no turn is running", read as "it finished on its own", and
+ * dropped: the composer stayed on "Stopping…" while the turn started and ran to the end.
+ */
+describe("a Stop pressed before the server has taken the turn", () => {
+  const NO_TURN = Object.assign(new Error("No PM turn is running for this project"), {
+    status: 404,
+    body: { error: "No PM turn is running for this project" },
+  });
+  const stopButton = () => screen.getByRole("button", { name: /stop the pm turn/i });
+  const interrupts = () =>
+    api.post.mock.calls.filter(([path]) => String(path).endsWith("/pm/interrupt")).length;
+
+  /** A send whose answer the test holds back until it chooses */
+  async function sendHeld() {
+    let answer!: (response: Response) => void;
+    api.stream.mockReturnValue(new Promise<Response>((resolve) => (answer = resolve)));
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const box = await screen.findByRole("textbox");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "Never mind.");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: /send/i }).click();
+    });
+    return { answer };
+  }
+
+  it("is asked again the moment the send is answered, and then reaches the turn", async () => {
+    const { answer } = await sendHeld();
+    api.post.mockRejectedValueOnce(NO_TURN).mockResolvedValue({ interrupted: true });
+
+    await act(async () => stopButton().click());
+    expect(interrupts(), "asked once, and told there is no turn yet").toBe(1);
+    expect(screen.getByText("Stopping…")).toBeTruthy();
+
+    await act(async () => {
+      answer(heldStream().response);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(interrupts(), "asked again once the lock is held").toBe(2));
+  });
+
+  it("does not ask again for a turn that was already running and has finished", async () => {
+    const turn = heldStream();
+    api.stream.mockResolvedValue(turn.response);
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const box = await screen.findByRole("textbox");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "Never mind.");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: /send/i }).click();
+    });
+    await screen.findByRole("button", { name: /stop the pm turn/i });
+    api.post.mockRejectedValue(NO_TURN);
+
+    await act(async () => stopButton().click());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(interrupts(), "the turn was held and is gone: nothing left to stop").toBe(1);
+  });
+
+  it("asks again when the answer to the send came while the first Stop was in flight", async () => {
+    const { answer } = await sendHeld();
+    let tooLate!: (error: Error) => void;
+    api.post
+      .mockReturnValueOnce(new Promise((_, reject) => (tooLate = reject)))
+      .mockResolvedValue({ interrupted: true });
+
+    await act(async () => stopButton().click());
+    // The server took the lock between looking and answering: the 404 is already stale
+    await act(async () => {
+      answer(heldStream().response);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      tooLate(NO_TURN);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(interrupts()).toBe(2));
+  });
+
+  it("does not stop the next turn with a Stop that was answered after its own send was refused", async () => {
+    const first = await sendHeld();
+    let late!: (error: Error) => void;
+    api.post.mockReturnValueOnce(new Promise((_, reject) => (late = reject)));
+    await act(async () => stopButton().click());
+    // Refused first, and only then does the server's "no turn" reach the browser
+    await act(async () => {
+      first.answer(new Response(JSON.stringify({ error: "Someone is already talking" }), { status: 409 }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.queryByText("Stopping…")).toBeNull());
+    await act(async () => {
+      late(NO_TURN);
+      await Promise.resolve();
+    });
+
+    api.stream.mockResolvedValue(heldStream().response);
+    const box = screen.getByRole("textbox");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "Another try.");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: /send/i }).click();
+    });
+    await screen.findByRole("button", { name: /stop the pm turn/i });
+
+    expect(interrupts(), "the old Stop was not applied to a turn nobody stopped").toBe(1);
+  });
+
+  it("leaves no \"Stopping…\" behind when the send is refused", async () => {
+    const { answer } = await sendHeld();
+    api.post.mockRejectedValue(NO_TURN);
+    await act(async () => stopButton().click());
+    expect(screen.getByText("Stopping…")).toBeTruthy();
+
+    await act(async () => {
+      answer(
+        new Response(JSON.stringify({ error: "Someone is already talking to the PM agent" }), { status: 409 })
+      );
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.queryByText("Stopping…")).toBeNull());
+    expect(interrupts(), "a refused send has no turn to stop").toBe(1);
+    expect(screen.getByRole("button", { name: /send/i })).toBeTruthy();
+  });
+});
