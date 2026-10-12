@@ -128,7 +128,7 @@ export function ProjectWizard() {
 
         <section className="flex min-w-0 flex-col rounded-xl border border-border bg-bg-card">
           <header className="border-b border-border px-4 py-3">
-            <h2 ref={heading} tabIndex={-1} className="text-[15px] font-semibold outline-none">
+            <h2 ref={heading} tabIndex={-1} className="text-[15px] font-semibold">
               {current.title}
             </h2>
             <p className="mt-0.5 text-xs text-text-muted">{current.description}</p>
