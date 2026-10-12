@@ -4,6 +4,12 @@ import { hasControlCharacters } from "@/lib/identifiers";
 export const MAX_COLUMNS = 12;
 export const MAX_COLUMN_LABEL = 40;
 
+// What a board loses with its last column of the role, in the refusal's own words
+export const LOAD_BEARING_ROLES: Partial<Record<ColumnRole, string>> = {
+  done: "sprint progress reads 0% for ever and no worker will take a task from it",
+  active: "a worker has nowhere to move a task it takes, so it claims nothing",
+};
+
 export function slugify(label: string): string {
   return label
     .toLowerCase()

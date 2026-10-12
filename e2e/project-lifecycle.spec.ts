@@ -1,6 +1,7 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import {
   ADMIN_PASSWORD,
+  API_TOKEN,
   ADMIN_USERNAME,
   MEMBER_PASSWORD,
   MEMBER_USERNAME,
@@ -13,6 +14,7 @@ import {
   seedAssignmentOutsider,
 } from "./seed";
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
+import { skipToReview } from "./new-project-wizard";
 
 /**
  * BP-388, the identity-and-access half: creating a board, renaming it, deleting it, and handing
@@ -56,7 +58,9 @@ async function openCreateForm(page: Page, key: string) {
   await expect(keyInput).toHaveValue(key.toUpperCase());
 }
 
+/** From Review: the one request that creates the board */
 async function submitCreate(page: Page) {
+  await expect(page.getByRole("heading", { level: 2, name: "Review" })).toBeVisible();
   const answered = page.waitForResponse(
     (r) => new URL(r.url()).pathname === "/api/projects" && r.request().method() === "POST"
   );
@@ -84,6 +88,7 @@ test.describe("creating a board", () => {
 
     await openCreateForm(page, NEW_KEY);
     await page.getByLabel("Project Name").fill(NEW_NAME);
+    await skipToReview(page);
     const response = await submitCreate(page);
     expect(response.status()).toBe(201);
 
@@ -94,26 +99,65 @@ test.describe("creating a board", () => {
     await expect(sidebarLink(page, NEW_NAME)).toBeVisible();
   });
 
-  test("refuses a key another board already holds, and takes a free one after", async ({
+  // BP-199: the wizard knows the keys of the boards it can see, so a taken key is refused on the
+  // first step and nothing is posted at all
+  test("holds a key another board already holds on the first step, and takes a free one after", async ({
     page,
   }) => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
-
     await openCreateForm(page, PROJECT_KEY);
     await page.getByLabel("Project Name").fill("Second board on a taken key");
-    const refused = await submitCreate(page);
 
-    // Asserted on the status, not only on a message: an error paragraph appears for any failure,
-    // and "the key is taken" has to be told apart from "the request fell over"
-    expect(refused.status()).toBe(409);
-    await expect(page.getByText("That key is already used by another board")).toBeVisible();
-    await expect(page).toHaveURL(/\/projects\/new$/);
+    await expect(page.getByText(`${PROJECT_KEY} is already used by another board.`)).toBeVisible();
+    const next = page.getByRole("button", { name: /^Next: Workflow/ });
+    await expect(next).toBeDisabled();
+    await expect(page.getByRole("button", { name: /^Workflow/ })).toBeDisabled();
     await expect(sidebarLink(page, "Second board on a taken key")).toHaveCount(0);
 
-    // The control, on the same form and the same submit path: a free key goes through
+    // The control, on the same wizard and the same path: a free key goes through
     const keyInput = page.getByLabel("Project Key");
     await keyInput.fill(SECOND_KEY.toLowerCase());
     await expect(keyInput).toHaveValue(SECOND_KEY);
+    await expect(next).toBeEnabled();
+    await skipToReview(page);
+    const accepted = await submitCreate(page);
+    expect(accepted.status()).toBe(201);
+    await expect(page).toHaveURL(new RegExp(`/projects/${SECOND_KEY}$`));
+  });
+
+  // The client cannot know a key somebody took after the page loaded; the server still refuses it,
+  // and the wizard says so on Review without losing what was entered
+  test("answers a key taken in the meantime on Review, and creates nothing", async ({ page, request }) => {
+    await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await openCreateForm(page, NEW_KEY);
+    await page.getByLabel("Project Name").fill(NEW_NAME);
+    await skipToReview(page);
+
+    // Setup, not the subject: somebody else's request, from a context with no session of its own
+    const rival = await request.post("/api/projects", {
+      headers: { Authorization: `Bearer ${API_TOKEN}` },
+      data: { name: "Rival board", key: NEW_KEY },
+    });
+    expect(rival.status()).toBe(201);
+
+    const refused = await submitCreate(page);
+    expect(refused.status()).toBe(409);
+    // Not every alert: the framework keeps an empty one of its own for route changes
+    const alert = page.getByRole("alert").filter({ hasText: "Project not created" });
+    await expect(alert).toContainText("That key is already used by another board");
+    await expect(alert).toContainText("Nothing was saved");
+    await expect(page).toHaveURL(/\/projects\/new$/);
+    await expect(page.getByRole("heading", { level: 2, name: "Review" })).toBeVisible();
+    // Nothing of the refused board exists: the rival holds the key, and there is no second board
+    const boards = await request.get("/api/projects", { headers: { Authorization: `Bearer ${API_TOKEN}` } });
+    const names = ((await boards.json()) as { name: string }[]).map((p) => p.name);
+    expect(names).toContain("Rival board");
+    expect(names).not.toContain(NEW_NAME);
+
+    // Back to the key, a free one, and the same wizard creates the board
+    await page.getByRole("button", { name: "Edit Basics" }).click();
+    await page.getByLabel("Project Key").fill(SECOND_KEY.toLowerCase());
+    await skipToReview(page);
     const accepted = await submitCreate(page);
     expect(accepted.status()).toBe(201);
     await expect(page).toHaveURL(new RegExp(`/projects/${SECOND_KEY}$`));
@@ -172,6 +216,7 @@ test.describe("deleting a board", () => {
   async function createBoard(page: Page, name: string, key: string) {
     await openCreateForm(page, key);
     await page.getByLabel("Project Name").fill(name);
+    await skipToReview(page);
     expect((await submitCreate(page)).status()).toBe(201);
     await expect(page).toHaveURL(new RegExp(`/projects/${key}$`));
   }

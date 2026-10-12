@@ -5,7 +5,10 @@ import { isValidProjectKey, PROJECT_KEY_RULE } from "@/lib/identifiers";
 import { connectDB } from "@/lib/db";
 import { withAuth, withAdmin } from "@/lib/middleware";
 import { accessibleProjectIds, administeredProjectIds } from "@/lib/grants";
-import { legacyFieldSeeds } from "@/lib/legacy-fields";
+import { LEGACY_FIELD_NAMES, legacyFieldSeeds } from "@/lib/legacy-fields";
+import { auditAccess, announceAccess } from "@/lib/board-access";
+import { parseProjectSetup } from "@/lib/project-setup";
+import { logProjectAudit } from "@/lib/projectAudit";
 import { sanitizeMcpServers } from "@/lib/pm/config";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
@@ -77,6 +80,39 @@ export const POST = withAdmin(async (request, { user, db }) => {
     return NextResponse.json({ error: PROJECT_KEY_RULE }, { status: 400 });
   }
 
+  const parsed = parseProjectSetup(body);
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  const setup = parsed.value;
+
+  // The creator is the owner already; naming them again would be a second grant on the same pair
+  const others = setup.access.filter((a) => a.userId !== String(user._id));
+  const people = others.length
+    ? await db.User.find({
+        _id: { $in: others.map((a) => a.userId) },
+        kind: { $ne: "machine" },
+        deactivatedAt: null,
+      })
+        .select("username")
+        .lean()
+    : [];
+  if (people.length !== others.length) {
+    return NextResponse.json(
+      { error: "Some of the people you chose no longer exist or are deactivated. Nothing was created." },
+      { status: 400 }
+    );
+  }
+
+  // A fresh project looks like a fresh project always did — the difference is
+  // that all three are now editable and removable (CP-213)
+  const customFields = legacyFieldSeeds({});
+  for (const [fieldName, options] of [
+    [LEGACY_FIELD_NAMES.component, setup.components],
+    [LEGACY_FIELD_NAMES.labels, setup.labels],
+  ] as const) {
+    const field = customFields.find((f) => f.name === fieldName);
+    if (field && options) field.options = options;
+  }
+
   let project;
   try {
     project = await db.Project.create({
@@ -84,9 +120,12 @@ export const POST = withAdmin(async (request, { user, db }) => {
       key: storedKey,
       description: description || "",
       createdBy: user._id,
-      // A fresh project looks like a fresh project always did — the difference is
-      // that all three are now editable and removable (CP-213)
-      customFields: legacyFieldSeeds({}),
+      customFields,
+      ...(setup.icon !== undefined && { icon: setup.icon }),
+      ...(setup.columns && { columns: setup.columns }),
+      ...(setup.categories && { categories: setup.categories }),
+      ...(setup.repositoryUrl && { repositoryUrl: setup.repositoryUrl }),
+      ...(setup.pmEnabled !== undefined && { pm: { enabled: setup.pmEnabled } }),
     });
   } catch (e) {
     if (duplicateKeyField(e)) {
@@ -106,9 +145,46 @@ export const POST = withAdmin(async (request, { user, db }) => {
       object: project._id,
       createdBy: user._id,
     });
+    if (others.length > 0) {
+      await db.Grant.insertMany(
+        others.map((a) => ({
+          subject: a.userId,
+          relation: a.relation,
+          objectType: "project",
+          object: project._id,
+          createdBy: user._id,
+        }))
+      );
+    }
   } catch (e) {
-    await db.Project.deleteOne({ _id: project._id });
+    // Nothing of a half-made board survives: not the project, and not the grants that did land.
+    // Both are tried whatever the other does, so one more failure cannot keep the project
+    await Promise.allSettled([
+      db.Grant.deleteMany({ objectType: "project", object: project._id }),
+      db.Project.deleteOne({ _id: project._id }),
+    ]);
     throw e;
+  }
+
+  const chosen = [
+    ...(setup.pmEnabled ? ["PM agent: enabled at creation"] : []),
+    ...(setup.repositoryUrl ? [`Repository: ${setup.repositoryUrl}`] : []),
+  ];
+  if (chosen.length > 0) {
+    void logProjectAudit(db, String(project._id), user._id, "settings_updated", chosen);
+  }
+
+  const names = new Map(people.map((p) => [String(p._id), p.username]));
+  for (const person of others) {
+    auditAccess(db, String(project._id), user._id, names.get(person.userId) ?? person.userId, undefined, person.relation);
+    void announceAccess(db, {
+      projectId: String(project._id),
+      recipientId: person.userId,
+      actorId: String(user._id),
+      actorName: user.fullName || user.username,
+      relation: person.relation,
+      added: true,
+    });
   }
 
   const populated = await project.populate({ path: "createdBy", select: "username fullName", match: { organisation: db.organisation } });

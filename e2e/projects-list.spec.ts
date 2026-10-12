@@ -18,6 +18,7 @@ import {
   seedSecondProject,
 } from "./seed";
 import { signIn, signInThroughForm } from "./session";
+import { skipToReview } from "./new-project-wizard";
 
 /**
  * BP-469: `/projects`, the list every reader lands on.
@@ -221,6 +222,7 @@ test("the create form accepts a key as long as the product allows", async ({ pag
   await expect(key).toHaveAttribute("maxlength", "20");
 
   await page.getByLabel("Project Name").fill("A key as long as the product allows");
+  await skipToReview(page);
   const created = page.waitForResponse(
     (response) => response.url().endsWith("/api/projects") && response.request().method() === "POST"
   );

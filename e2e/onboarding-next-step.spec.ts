@@ -10,6 +10,7 @@ import {
   seedAssignmentOutsider,
 } from "./seed";
 import { signIn, signInThroughForm } from "./session";
+import { skipToReview } from "./new-project-wizard";
 import { db, setGlobalCell } from "./notification-grid";
 
 /**
@@ -199,6 +200,7 @@ test("the new-board form suggests a key from the name and says it is permanent",
     `(${PROJECT_KEY}2-1, ${PROJECT_KEY}2-2…)`
   );
   await key.fill("sat");
+  await skipToReview(page);
 
   const created = page.waitForResponse(
     (r) => new URL(r.url()).pathname === "/api/projects" && r.request().method() === "POST"
