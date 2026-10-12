@@ -376,7 +376,10 @@ describe("the task fields", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]);
     expect(document.activeElement).toBe(field);
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove api" }));
+    // Pressed the way a person presses it: the button has the focus, and it is about to go away
+    const remove = screen.getByRole("button", { name: "Remove api" });
+    remove.focus();
+    fireEvent.click(remove);
     expect(document.activeElement).toBe(field);
   });
 });
@@ -728,6 +731,16 @@ describe("the PM agent", () => {
     ["an administrator has locked it", { pmLocked: true }, /locked the PM agent off/],
     ["the plan does not include it", { pmNeedsPlan: true }, /needs a plan with managed AI/],
     ["its key cannot be read", { pmKeyUnreadable: true }, /cannot be read/],
+    [
+      "several things are wrong, the lock is what is said",
+      { pmLocked: true, pmKeyUnreadable: true, pmNeedsPlan: true },
+      /locked the PM agent off/,
+    ],
+    [
+      "the key is unreadable and a plan is needed, the key is what is said",
+      { pmKeyUnreadable: true, pmNeedsPlan: true },
+      /cannot be read/,
+    ],
   ])("explains it when %s", async (_why, reason, message) => {
     answer({ ...SETUP_OK, pmAvailable: false, ...reason });
     render(<NewProjectPage />);

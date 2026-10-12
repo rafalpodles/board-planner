@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getAuthUser = vi.fn();
 const pmAvailability = vi.fn();
+const githubWebBase = vi.fn(() => "https://github.com");
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -9,6 +10,7 @@ vi.mock("@/lib/auth", () => ({
   RateLimitError: class RateLimitError extends Error {},
 }));
 vi.mock("@/lib/pm/config", () => ({ pmAvailability }));
+vi.mock("@/lib/github-host", () => ({ githubWebBase }));
 
 const { GET } = await import("./route");
 
@@ -37,12 +39,13 @@ describe("GET /api/projects/setup", () => {
     expect(body.pmAvailable).toBe(false);
   });
 
-  it("says where a repository address counts as GitHub", async () => {
+  it("says where a repository address counts as GitHub, which is not always github.com", async () => {
     pmAvailability.mockResolvedValue(null);
+    githubWebBase.mockReturnValueOnce("https://git.example.test");
 
     const body = await (await GET(request(), ctx())).json();
 
-    expect(body.githubWebBase).toMatch(/^https?:\/\//);
+    expect(body.githubWebBase).toBe("https://git.example.test");
   });
 
   it("is an administrator's", async () => {
