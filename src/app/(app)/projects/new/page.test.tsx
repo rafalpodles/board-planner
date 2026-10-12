@@ -433,7 +433,7 @@ describe("automation and access", () => {
 
     type(search, "an");
 
-    expect(await screen.findByText("Already on the list")).toBeTruthy();
+    expect((await screen.findAllByText("Already on the list")).length).toBeGreaterThan(0);
   });
 });
 
@@ -654,6 +654,34 @@ describe("the people search", () => {
     await screen.findByRole("option");
     fireEvent.keyDown(search, { key: "Escape" });
     expect(screen.queryByRole("option")).toBeNull();
+  });
+
+  it("announces a new result after an add has been announced", async () => {
+    const search = await opened();
+    type(search, "an");
+    fireEvent.click(await screen.findByRole("option"));
+    expect(screen.getAllByRole("status").map((el) => el.textContent).join(" ")).toContain("added as a member");
+
+    // Everything the search can find is on the list now
+    type(search, "an");
+
+    await waitFor(() => {
+      const statuses = screen.getAllByRole("status").map((el) => el.textContent);
+      expect(statuses.some((t) => t?.includes("Already on the list"))).toBe(true);
+    });
+    expect(screen.getAllByRole("status").map((el) => el.textContent).join(" ")).not.toContain("added as a member");
+  });
+
+  it("does not pick the option Escape closed", async () => {
+    const search = await opened();
+    type(search, "an");
+    await screen.findByRole("option");
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+
+    fireEvent.keyDown(search, { key: "Escape" });
+    fireEvent.keyDown(search, { key: "Enter" });
+
+    expect(screen.queryByLabelText("Access for anna")).toBeNull();
   });
 
   it("says so when the search fails, outside the list of people", async () => {

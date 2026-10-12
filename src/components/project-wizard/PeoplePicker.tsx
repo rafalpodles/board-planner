@@ -96,7 +96,8 @@ export function PeoplePicker({ chosen, you, onAdd, onRelation, onRemove }: Peopl
   const wasOpen = useRef(false);
   useEffect(() => {
     if (open && offered.length > 0 && !wasOpen.current) {
-      wrapper.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+      const calm = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      wrapper.current?.scrollIntoView({ block: "start", behavior: calm ? "auto" : "smooth" });
     }
     wasOpen.current = open && offered.length > 0;
   }, [open, offered.length]);
@@ -136,8 +137,10 @@ export function PeoplePicker({ chosen, you, onAdd, onRelation, onRemove }: Peopl
       if (active >= 0 && offered[active]) pick(offered[active]);
     } else if (e.key === "Escape" && query) {
       e.preventDefault();
-      if (open) setDismissed(true);
-      else {
+      if (open) {
+        setDismissed(true);
+        setActive(-1);
+      } else {
         setQuery("");
         setResults(null);
       }
@@ -175,13 +178,20 @@ export function PeoplePicker({ chosen, you, onAdd, onRelation, onRemove }: Peopl
           onChange={(e) => {
             setQuery(e.target.value);
             setDismissed(false);
+            // What was said about an add or a removal is spent; the next thing said is the search's
+            setAnnouncement("");
           }}
           onFocus={() => setDismissed(false)}
           onKeyDown={onKeyDown}
           className="focus-ring min-h-[44px] w-full rounded-lg border border-border bg-bg-input px-3 py-2 text-text placeholder:text-text-muted"
         />
         {open && (
-          <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-border bg-bg-card shadow-lg">
+          <div
+            // Safari gives a pressed button no focus, so the input's blur would close the list
+            // before the click that picks from it
+            onMouseDown={(e) => e.preventDefault()}
+            className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-border bg-bg-card shadow-lg"
+          >
             {offered.length > 0 && (
               <div
                 ref={listbox}

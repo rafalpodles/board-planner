@@ -166,7 +166,7 @@ export function FieldsStep({ state, onChange }: FieldsStepProps) {
                         type="button"
                         onClick={() => remove(g.id, i)}
                         aria-label={`Remove ${name}`}
-                        className="focus-ring -my-2 -mr-2 grid h-9 w-9 shrink-0 place-items-center rounded-full leading-none"
+                        className="focus-ring -mr-1.5 grid h-7 w-7 shrink-0 place-items-center rounded-full leading-none"
                       >
                         ✕
                       </button>
