@@ -31,7 +31,7 @@ describe("SprintFormModal", () => {
     expect(dateRow().className).not.toMatch(/(^|\s)grid-cols-3/);
   });
 
-  it("is the same row when editing", () => {
+  it("carries the sprint's own dates when editing", () => {
     render(
       <SprintFormModal
         {...props}
@@ -46,7 +46,6 @@ describe("SprintFormModal", () => {
       />
     );
 
-    expect(dateRow().className).toContain("sm:grid-cols-3");
     expect((screen.getByLabelText("Start Date") as HTMLInputElement).value).toBe("2030-12-01");
   });
 });

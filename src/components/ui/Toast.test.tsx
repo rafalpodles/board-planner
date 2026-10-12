@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { ToastProvider, useToast } from "@/components/ui/Toast";
 import { registerLayer } from "@/lib/focus-trap";
 import { Modal } from "@/components/ui/Modal";
@@ -538,8 +538,9 @@ describe("a toast with an action", () => {
   });
 });
 
-// BP-1033. The tray mounts with its first toast, and a live region that arrives with its content is
-// often not announced. These regions are always there; only their text changes.
+// BP-1033. A live region that arrives with its content is often not announced, so the region is there
+// before the first toast and the tray is added to it. The region is the tray's own container: no
+// second copy of the text exists for a query to find twice.
 describe("what a screen reader hears", () => {
   afterEach(() => cleanup());
 
@@ -552,23 +553,20 @@ describe("what a screen reader hears", () => {
       </>
     );
   }
-  const region = (politeness: "polite" | "assertive") =>
-    document.querySelector<HTMLElement>(`[aria-live="${politeness}"]`)!;
+  const region = () => document.querySelector<HTMLElement>('[aria-live="polite"]')!;
 
-  it("has both regions before any toast is raised, and empty", () => {
+  it("is there, and empty, before any toast is raised", () => {
     render(
       <ToastProvider>
         <Raiser />
       </ToastProvider>
     );
 
-    expect(region("polite")).toBeTruthy();
-    expect(region("assertive")).toBeTruthy();
-    expect(region("polite").textContent).toBe("");
-    expect(region("assertive").textContent).toBe("");
+    expect(region()).toBeTruthy();
+    expect(region().textContent).toBe("");
   });
 
-  it("says a success politely and an error assertively, each in its own region", () => {
+  it("holds each toast's own element, so what is announced is what is shown", () => {
     render(
       <ToastProvider>
         <Raiser />
@@ -578,18 +576,31 @@ describe("what a screen reader hears", () => {
     act(() => screen.getByText("save").click());
     act(() => screen.getByText("fail").click());
 
-    expect(region("polite").textContent).toBe("Saved");
-    expect(region("assertive").textContent).toBe("Could not save");
+    const toasts = within(region()).getAllByTestId("toast");
+    expect(toasts.map((t) => t.textContent)).toEqual(["Saved", "Could not save"]);
   });
 
-  // Not `status` or `alert`: a permanent one of those would join every query that wants the one
-  // on the page
+  it("puts each message on the page once", () => {
+    render(
+      <ToastProvider>
+        <Raiser />
+      </ToastProvider>
+    );
+
+    act(() => screen.getByText("save").click());
+
+    expect(screen.getAllByText("Saved")).toHaveLength(1);
+  });
+
+  // Not `status` or `alert`: a permanent one of those would join every query that wants the one on
+  // the page
   it("takes no role, so it is never mistaken for a message about the page", () => {
     render(
       <ToastProvider>
         <Raiser />
       </ToastProvider>
     );
+    act(() => screen.getByText("save").click());
 
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
