@@ -36,6 +36,48 @@ describe("the CI jobs and the groups agree", () => {
   });
 });
 
+// BP-1042. A group is cut into shards because the longest one sets how long the whole run takes.
+// What the list of groups cannot say is that every group has a shard count, that no count asks for
+// a shard the matrix does not run (its spec files would then run in no job at all), and that each
+// shard's job runs its own slice.
+describe("the e2e shards", () => {
+  const counts: Record<string, number> = JSON.parse(
+    workflow.match(/^\s*SHARDS: '(\{[^']*\})'/m)?.[1] ?? "null"
+  );
+  const matrix = (workflow.match(/^\s*shard: \[([^\]]*)\]/m)?.[1] ?? "")
+    .split(",")
+    .map((n) => Number(n.trim()));
+
+  it("gives every group, and only the groups, a shard count", () => {
+    expect(counts, "SHARDS is missing from ci.yml").not.toBeNull();
+    expect(Object.keys(counts).sort()).toEqual(Object.keys(GROUPS).sort());
+  });
+
+  it("asks for no more shards than the matrix runs, which would leave spec files in no job", () => {
+    expect(matrix.length).toBeGreaterThan(0);
+    for (const [group, count] of Object.entries(counts)) {
+      expect(Number.isInteger(count) && count >= 1, group).toBe(true);
+      expect(count, group).toBeLessThanOrEqual(matrix.length);
+    }
+  });
+
+  it("numbers the matrix's shards from one, with none missing", () => {
+    expect(matrix).toEqual(matrix.map((_, i) => i + 1));
+  });
+
+  it("hands each job its own slice of the group", () => {
+    expect(workflow).toContain(
+      "npx playwright test --project=${{ matrix.group }} --shard=${{ matrix.shard }}/${{ steps.affected.outputs.shards }}"
+    );
+  });
+
+  // upload-artifact refuses a second artifact of the same name, which would cost the traces of
+  // every shard but the first to fail
+  it("keeps each shard's artifacts apart", () => {
+    expect(workflow).toContain("name: playwright-artifacts-${{ matrix.group }}-${{ matrix.shard }}");
+  });
+});
+
 describe("every end-to-end spec belongs to exactly one group", () => {
   it("names no spec that does not exist", () => {
     expect(grouped.filter((f) => !specs.includes(f))).toEqual([]);
