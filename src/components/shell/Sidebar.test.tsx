@@ -20,6 +20,8 @@ const { api, auth, nav, theme, projectsState, replace } = vi.hoisted(() => ({
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("@/hooks/use-projects", () => ({ useProjects: () => projectsState }));
+const guideState = vi.hoisted(() => ({ guide: null as unknown }));
+vi.mock("@/hooks/use-setup-guide", () => ({ useSetupGuide: () => ({ guide: guideState.guide, hide: vi.fn() }) }));
 vi.mock("@/components/ThemeProvider", () => ({ useTheme: () => theme }));
 vi.mock("next/navigation", () => ({
   usePathname: () => nav.pathname,
@@ -68,6 +70,7 @@ beforeEach(() => {
   auth.isAdmin = true;
   nav.pathname = "/projects";
   projectsState.projects = [];
+  guideState.guide = null;
   localStorage.clear();
 });
 
@@ -540,5 +543,72 @@ describe("Logout (BP-1023)", () => {
 
     expect(replace).toHaveBeenCalledWith("/login");
     expect(assign).not.toHaveBeenCalled();
+  });
+});
+
+// BP-1034
+describe("Sidebar and the setup guide", () => {
+  const guide = {
+    show: true,
+    steps: [
+      { id: "tasks", group: "board", done: false, locked: false },
+      { id: "team", group: "board", done: false, locked: false },
+    ],
+  };
+
+  beforeEach(() => {
+    setViewport(false);
+    nav.pathname = "/projects/ORB";
+    guideState.guide = guide;
+  });
+
+  it("opens the full sidebar for the guide from the collapsed rail, and leaves what the person chose alone", async () => {
+    localStorage.setItem("sidebar-mode", "collapsed");
+    renderSidebar();
+
+    fireEvent.click(await screen.findByTestId("setup-guide-card"));
+
+    expect(await screen.findByTestId("setup-guide-panel")).toBeTruthy();
+    expect(localStorage.getItem("sidebar-mode")).toBe("collapsed");
+  });
+
+  it("goes back to the rail, as chosen, when the guide is closed", async () => {
+    localStorage.setItem("sidebar-mode", "collapsed");
+    renderSidebar();
+    fireEvent.click(await screen.findByTestId("setup-guide-card"));
+
+    fireEvent.click(await screen.findByTestId("setup-guide-close"));
+
+    expect(screen.getByTestId("setup-guide-card").getAttribute("aria-label")).toMatch(/^Setup guide/);
+    expect(localStorage.getItem("sidebar-mode")).toBe("collapsed");
+    expect(document.activeElement).toBe(screen.getByTestId("setup-guide-card"));
+  });
+
+  it("puts focus on the guide's heading when it opens", async () => {
+    renderSidebar();
+
+    fireEvent.click(await screen.findByTestId("setup-guide-card"));
+
+    expect(document.activeElement?.textContent?.trim()).toBe("Setup guide");
+  });
+
+  it("closes the guide when the sidebar is collapsed with its own button", async () => {
+    renderSidebar();
+    fireEvent.click(await screen.findByTestId("setup-guide-card"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+
+    expect(screen.queryByTestId("setup-guide-panel")).toBeNull();
+  });
+
+  it("gives only the guide up with the collapse button when the person chose the rail, and says so", async () => {
+    localStorage.setItem("sidebar-mode", "collapsed");
+    renderSidebar();
+    fireEvent.click(await screen.findByTestId("setup-guide-card"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Close setup guide" }));
+
+    expect(screen.queryByTestId("setup-guide-panel")).toBeNull();
+    expect(localStorage.getItem("sidebar-mode")).toBe("collapsed");
   });
 });

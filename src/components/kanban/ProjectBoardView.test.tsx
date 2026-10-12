@@ -14,9 +14,11 @@ vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({ user: { username: "owner", collapseEmptyColumns: false }, isAdmin: false }),
 }));
+const search = vi.hoisted(() => ({ value: "" }));
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "p1" }),
   useRouter: () => ({ push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(search.value),
 }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 
@@ -695,5 +697,44 @@ describe("ProjectBoardView's rows on the board", () => {
 
     const update = setSelectedTasks.mock.calls.at(-1)![0] as (prev: Set<string>) => Set<string>;
     expect([...update(new Set(["t1", "t2"]))]).toEqual(["t2"]);
+  });
+});
+
+// BP-1034: the setup guide links to ?new=1, often from this very board, so the address is watched
+describe("?new=1 on the address", () => {
+  afterEach(() => {
+    search.value = "";
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("opens the new-task modal and takes the parameter off the address", () => {
+    search.value = "new=1";
+    window.history.replaceState(null, "", "/projects/TP?new=1");
+    const setShowNewTask = vi.fn();
+
+    render(<ProjectBoardView board={makeBoard({ tasks, setShowNewTask })} />);
+
+    expect(setShowNewTask).toHaveBeenCalledWith(true);
+    expect(window.location.search).toBe("");
+  });
+
+  it("opens it again for a second arrival on a board that is already showing", () => {
+    const setShowNewTask = vi.fn();
+    const { rerender } = render(<ProjectBoardView board={makeBoard({ tasks, setShowNewTask })} />);
+    expect(setShowNewTask).not.toHaveBeenCalled();
+
+    search.value = "new=1";
+    rerender(<ProjectBoardView board={makeBoard({ tasks, setShowNewTask })} />);
+
+    expect(setShowNewTask).toHaveBeenCalledWith(true);
+  });
+
+  it("asks for nothing on a read-only board", () => {
+    search.value = "new=1";
+    const setShowNewTask = vi.fn();
+
+    render(<ProjectBoardView board={makeBoard({ tasks, setShowNewTask })} readOnly />);
+
+    expect(setShowNewTask).not.toHaveBeenCalled();
   });
 });

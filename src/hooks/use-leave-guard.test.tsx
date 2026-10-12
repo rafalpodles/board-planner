@@ -16,6 +16,8 @@ function Page({ dirty, navigate }: { dirty: boolean; navigate: (href: string) =>
       }}
     >
       <a href="/agents">Agents</a>
+      <a href="/agents/a1?section=board">Another section</a>
+      <a href="/agents/a1?tab=runs">Another tab</a>
       <a href="https://example.com/elsewhere">Elsewhere</a>
       <a href="/agents" target="_blank">New tab</a>
     </div>
@@ -198,5 +200,27 @@ describe("mayLeave", () => {
     expect(mayLeave()).toBe(true);
 
     expect(confirm).not.toHaveBeenCalled();
+  });
+
+  // BP-1034: the setup guide links to ?section=… on the settings page that is open, where every
+  // section stays mounted, so nothing is lost by going there
+  it("lets a link to another section of the page that is open through without asking", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const navigate = vi.fn();
+    render(<Page dirty navigate={navigate} />);
+
+    click("Another section");
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith("/agents/a1?section=board");
+  });
+
+  it("still asks when the rest of the address changes", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<Page dirty navigate={vi.fn()} />);
+
+    click("Another tab");
+
+    expect(confirm).toHaveBeenCalledWith("Leave without saving?");
   });
 });

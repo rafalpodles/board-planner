@@ -477,6 +477,18 @@ const INLINE_RECIPES: Record<string, InlineRecipe> = {
     member: { status: 403, body: /Only the board's owner may delete a task/ },
     owner: { status: 200, body: /Task deleted/ },
   },
+  // BP-1034: the setup guide is shown to the board's owner, and a member is answered with nothing
+  "GET /api/projects/[projectId]/setup-guide": {
+    send: get,
+    read: field((guide: { show: boolean }) => guide.show),
+    member: { status: 200, body: NO },
+    owner: { status: 200, body: YES },
+  },
+  "PUT /api/projects/[projectId]/setup-guide": {
+    send: withBody("put", {}),
+    member: { status: 403, body: /Forbidden/ },
+    owner: { status: 200, body: /"ok":true/ },
+  },
   "GET /api/projects/[projectId]/handover": {
     send: get,
     read: field((readiness: Listed) => readiness.canAdmin),

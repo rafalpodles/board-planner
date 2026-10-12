@@ -13,6 +13,9 @@ import { useFocusTrap } from "@/hooks/use-focus-trap";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { isNavItemActive } from "@/lib/nav-active";
 import { useProjects } from "@/hooks/use-projects";
+import { useSetupGuide } from "@/hooks/use-setup-guide";
+import { SetupGuideCard, SetupGuidePanel } from "./SetupGuide";
+import { projectRefFromPathname } from "@/lib/urls";
 import { useOrganisation } from "@/hooks/use-organisation";
 import { PlanBadge } from "./PlanBadge";
 import { ProjectTree } from "./ProjectTree";
@@ -172,6 +175,13 @@ export function Sidebar({
   const [dragging, setDragging] = useState(false);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const returnFocusToCard = useRef(false);
+  const focusPanelOnMount = useRef(false);
+  useEffect(() => {
+    returnFocusToCard.current = false;
+    focusPanelOnMount.current = false;
+  });
   const [unreadCount, setUnreadCount] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -210,6 +220,7 @@ export function Sidebar({
   }, []);
 
   const toggleCollapsed = useCallback(() => {
+    setGuideOpen(false);
     chooseMode(mode === "expanded" ? narrowMode : "expanded");
   }, [chooseMode, mode, narrowMode]);
 
@@ -264,16 +275,32 @@ export function Sidebar({
     returnFocusTo: menuButtonRef,
   });
 
+  const projectRef = projectRefFromPathname(pathname);
+  const { guide, hide: hideGuide } = useSetupGuide(projectRef, pathname, !!user);
+
+  useEffect(() => setGuideOpen(false), [projectRef]);
+
   if (!user) return null;
 
   // The drawer is always full width, so the icon-only rail is a desktop-only state
   const peeking = mode === "hover" && (hovered || focusedWithin || menuOpen || dragging);
-  const compact = (mode === "collapsed" || (mode === "hover" && !peeking)) && !mobileOpen;
+  // The guide is read in the full sidebar, which opens for it without changing what the person chose
+  const guideOpenNow = guideOpen && !!guide && !!projectRef;
+  const compact = (mode === "collapsed" || (mode === "hover" && !peeking)) && !mobileOpen && !guideOpenNow;
   const floats = mode === "hover";
 
   const isActive = (href: string) => isNavItemActive(pathname, href);
 
-  const drawerAwareCollapseLabel = isDrawer
+  // With the guide open on a rail the person chose, the button gives the guide up and nothing else
+  const guideOnRail = guideOpenNow && mode !== "expanded" && !isDrawer;
+  const collapseButton = () => {
+    if (guideOnRail) setGuideOpen(false);
+    else toggleCollapsed();
+  };
+
+  const drawerAwareCollapseLabel = guideOnRail
+    ? "Close setup guide"
+    : isDrawer
     ? "Close navigation"
     : mode === "hover"
       ? "Pin sidebar open"
@@ -307,7 +334,7 @@ export function Sidebar({
         floats ? "md:fixed md:top-0 md:z-[45]" : "md:sticky md:top-0 md:z-30"
       } ${mobileOpen ? "translate-x-0" : "-translate-x-full"} ${
         compact ? "md:w-14" : "md:w-[260px]"
-      } ${floats && peeking ? "md:shadow-xl" : ""}`}
+      } ${floats && (peeking || guideOpenNow) ? "md:shadow-xl" : ""}`}
     >
       <div
         className={`flex items-center gap-2 px-3.5 pb-2.5 pt-3.5 ${
@@ -324,7 +351,7 @@ export function Sidebar({
           {!compact && <span className="truncate text-[15px] font-bold">{APP_NAME}</span>}
         </Link>
         <button
-          onClick={isDrawer ? onCloseMobile : toggleCollapsed}
+          onClick={isDrawer ? onCloseMobile : collapseButton}
           title={drawerAwareCollapseLabel}
           aria-label={drawerAwareCollapseLabel}
           className={`focus-ring flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-hover hover:text-text md:min-h-0 md:min-w-0 md:p-1 ${
@@ -345,6 +372,21 @@ export function Sidebar({
         </Link>
       )}
 
+      {guide && projectRef && guideOpenNow ? (
+        <SetupGuidePanel
+          guide={guide}
+          projectRef={projectRef}
+          focusOnMount={focusPanelOnMount.current}
+          onClose={() => {
+            returnFocusToCard.current = true;
+            setGuideOpen(false);
+          }}
+          onHide={() => {
+            setGuideOpen(false);
+            void hideGuide();
+          }}
+        />
+      ) : (
       <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-2.5">
         <div>
           {/* In the drawer this is a page like the two rows under it, because the phone's
@@ -402,6 +444,19 @@ export function Sidebar({
           />
         )}
       </nav>
+      )}
+
+      {guide && !guideOpenNow && (
+        <SetupGuideCard
+          guide={guide}
+          compact={compact}
+          focusOnMount={returnFocusToCard.current}
+          onOpen={() => {
+            focusPanelOnMount.current = true;
+            setGuideOpen(true);
+          }}
+        />
+      )}
 
       <PlanBadge compact={compact} />
 

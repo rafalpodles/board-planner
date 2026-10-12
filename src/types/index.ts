@@ -164,6 +164,8 @@ export interface IUser {
   /** Today's failed digest attempts, so a permanently undeliverable address is not retried all day. */
   digestRetry?: { day: string; attempts: number };
   collapseEmptyColumns: boolean;
+  /** Boards whose "Get this board ready" list this person hid; capped, see MAX_DISMISSED_BOARD_READY */
+  dismissedSetupGuides?: Types.ObjectId[];
   role: UserRole;
   // A worker's identity is a user record so authorship, mentions, avatars and history keep
   // working unchanged — but it is not a person, so it stays out of the lists where people are
@@ -2004,6 +2006,29 @@ export interface ApiHandoverReadiness {
   bindingError: string;
   /** Who halted the reader's machine, when `machine` is "paused" or "stopped" */
   haltedBy: WorkerHaltSource | null;
+}
+
+export type SetupGuideStepId =
+  | "tasks" | "team" | "columns" | "fields" | "sprint"
+  | "repository" | "channel" | "webhook" | "mcp"
+  | "pm" | "aiKey"
+  | "runs" | "machine" | "handover"
+  | "sso" | "plan";
+
+export type SetupGuideGroupId = "board" | "connections" | "ai" | "agents" | "organisation";
+
+export interface ApiSetupGuideStep {
+  id: SetupGuideStepId;
+  group: SetupGuideGroupId;
+  done: boolean;
+  /** Only an instance admin can take this step: they locked agent runs off for the board */
+  locked: boolean;
+}
+
+/** What GET /setup-guide answers: the guide for this reader on this board, or nothing to show */
+export interface ApiSetupGuide {
+  show: boolean;
+  steps: ApiSetupGuideStep[];
 }
 
 /** One of the reader's own machines, as Settings → Machines lists it */

@@ -5,9 +5,12 @@ import { render, screen, cleanup, act } from "@testing-library/react";
 import ProjectSettingsPage from "./page";
 import { ApiProject } from "@/types";
 
-const { api } = vi.hoisted(() => ({ api: { get: vi.fn() } }));
+const { api, search } = vi.hoisted(() => ({ api: { get: vi.fn() }, search: { value: "" } }));
 
-vi.mock("next/navigation", () => ({ useParams: () => ({ projectId: "TP" }) }));
+vi.mock("next/navigation", () => ({
+  useParams: () => ({ projectId: "TP" }),
+  useSearchParams: () => new URLSearchParams(search.value),
+}));
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ isAdmin: false, user: { _id: "u1" } }) }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
@@ -19,7 +22,7 @@ vi.mock("@/components/settings/SettingsShell", () => ({
 vi.mock("./sections/GeneralSection", () => ({
   GeneralSection: ({ project }: { project: ApiProject }) => <p>Showing {project.name}</p>,
 }));
-vi.mock("./sections/BoardSection", () => ({ BoardSection: () => null }));
+vi.mock("./sections/BoardSection", () => ({ BoardSection: () => <p>Board section</p> }));
 vi.mock("./sections/TaskFieldsSection", () => ({ TaskFieldsSection: () => null }));
 vi.mock("./sections/IntegrationsSection", () => ({ IntegrationsSection: () => null }));
 vi.mock("./sections/NotificationsSection", () => ({ NotificationsSection: () => null }));
@@ -87,5 +90,25 @@ describe("ProjectSettingsPage project read", () => {
 
     expect(screen.getByText("Showing Fresh")).toBeTruthy();
     expect(screen.queryByText(/Failed to load/)).toBeNull();
+  });
+});
+
+// BP-1034: the setup guide links to ?section=… on this very page, which is a soft navigation
+describe("a link to another section of the page", () => {
+  afterEach(() => {
+    search.value = "";
+  });
+
+  it("switches to that section though the page is already showing", async () => {
+    api.get.mockResolvedValue(loaded("Orbit"));
+    const { rerender } = render(<ProjectSettingsPage />);
+    expect(await screen.findByText("Showing Orbit")).toBeTruthy();
+
+    search.value = "section=board";
+    rerender(<ProjectSettingsPage />);
+
+    await act(async () => {});
+    expect(screen.getByText("Board section").parentElement!.className).not.toContain("hidden");
+    expect(screen.getByText("Showing Orbit").parentElement!.className).toContain("hidden");
   });
 });

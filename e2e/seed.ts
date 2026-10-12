@@ -2623,6 +2623,79 @@ export async function setBoardReadiness(fields: {
   await mongoose.disconnect();
 }
 
+/** Leaves the seeded board with its owner alone on it: no other grant, so nobody has been invited. */
+export async function removeNonOwnerGrants() {
+  const db = (await connect()).db!;
+  await db.collection("grants").deleteMany({ object: PROJECT_ID, relation: { $ne: "owner" } });
+  await mongoose.disconnect();
+}
+
+/** Leaves the seeded board with no task on it at all, as a board nobody has used yet. */
+export async function removeAllTasks() {
+  const db = (await connect()).db!;
+  await db.collection("tasks").deleteMany({ project: PROJECT_ID });
+  await mongoose.disconnect();
+}
+
+/**
+ * The seeded board as a person finds it a minute after making it: no task, nobody invited, no
+ * repository, channel, webhook, sprint, token or machine, columns and fields as the product gave
+ * them, agent runs off. Nothing a setup-guide step looks at is left done.
+ */
+export async function makeBoardFresh() {
+  const db = (await connect()).db!;
+  await db.collection("projects").updateOne(
+    { _id: PROJECT_ID },
+    {
+      $set: {
+        columns: [],
+        customFields: [],
+        notificationChannels: [],
+        webhooks: [],
+        repositoryUrl: "",
+        githubRepo: "",
+        "worker.enabled": false,
+        "worker.lockedByInstance": false,
+        "pm.enabled": false,
+      },
+    }
+  );
+  await db.collection("tasks").deleteMany({ project: PROJECT_ID });
+  await db.collection("sprints").deleteMany({ project: PROJECT_ID });
+  await db.collection("grants").deleteMany({ object: PROJECT_ID, relation: { $ne: "owner" } });
+  await db.collection("apitokens").deleteMany({});
+  await db.collection("oauthtokens").deleteMany({});
+  await db.collection("workers").deleteMany({});
+  await db.collection("settings").updateMany({}, { $unset: { openrouterKey: "", openrouterKeyHint: "", sso: "" } });
+  await db.collection("users").updateMany({}, { $set: { dismissedSetupGuides: [] } });
+  await mongoose.disconnect();
+}
+
+/** An MCP client `user` approved: what Connected apps lists, valid for another hour. */
+export async function seedMcpConnection(user: mongoose.Types.ObjectId) {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("oauthtokens").insertOne({
+    accessTokenHash: "e2e-access-hash",
+    refreshTokenHash: "e2e-refresh-hash",
+    clientId: "e2e-mcp-client",
+    user,
+    scope: "mcp",
+    allowedProjects: [],
+    accessExpiresAt: new Date(now.getTime() + 60 * 60_000),
+    refreshExpiresAt: new Date(now.getTime() + 60 * 60_000),
+    createdAt: now,
+  });
+  await stampOrganisationAndDisconnect();
+}
+
+/** Every machine last heard of a day ago, as after a laptop was closed overnight. */
+export async function makeMachinesStale() {
+  const db = (await connect()).db!;
+  await db.collection("workers").updateMany({}, { $set: { lastSeenAt: new Date(Date.now() - 24 * 60 * 60_000) } });
+  await mongoose.disconnect();
+}
+
 /** A machine `owner` enrolled, holding a checkout of `remote`, last seen `seenAgoMs` ago. */
 export async function seedMachine(
   remote: string,

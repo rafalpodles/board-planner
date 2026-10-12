@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
@@ -194,6 +194,18 @@ export default function ProjectSettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A link to another section of this page, such as the setup guide's, is a soft navigation on it
+  const requestedSection = useSearchParams()?.get("section") ?? "";
+  const lastRequested = useRef(requestedSection);
+  useEffect(() => {
+    if (requestedSection === lastRequested.current) return;
+    lastRequested.current = requestedSection;
+    if (requestedSection) {
+      setSection(requestedSection);
+      scrollSettingsToTop();
+    }
+  }, [requestedSection]);
+
   // Strict Mode's first mount read can answer after a save and put the old project back (BP-784)
   useEffect(() => {
     let current = true;
@@ -249,6 +261,8 @@ export default function ProjectSettingsPage() {
   }, [visible, section]);
 
   const goToSection = useCallback((id: string, scroll = true) => {
+    // The address below is this page's own doing, not a link arriving
+    lastRequested.current = id;
     setSection(id);
     window.history.replaceState(
       null,
