@@ -188,7 +188,7 @@ export function PeoplePicker({ chosen, you, onAdd, onRelation, onRemove }: Peopl
                 id={`${listId}-list`}
                 role="listbox"
                 aria-label="People"
-                className="max-h-60 overflow-y-auto"
+                className="max-h-48 overflow-y-auto sm:max-h-60"
               >
                 {offered.map((p, i) => (
                   <button
