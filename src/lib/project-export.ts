@@ -20,7 +20,7 @@ export class ProjectExportCutShortError extends Error {
 }
 
 function idsIn(node: unknown, into: Set<string>): void {
-  if (node === null || typeof node !== "object" || node instanceof Date) return;
+  if (!node || typeof node !== "object" || node instanceof Date) return;
   if ((node as { _bsontype?: string })._bsontype === "ObjectId") {
     into.add(String(node));
     return;
