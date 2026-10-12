@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useId, useState } from "react";
+import { FormEvent, useState } from "react";
 import { ApiSprint } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -42,8 +42,6 @@ export function SprintFormModal({
   onSubmit,
   onClose,
 }: SprintFormModalProps) {
-  const startId = useId();
-  const endId = useId();
   // Mounted only while open, so the suggested name and dates are computed once on
   // open rather than recomputed under the 10s poll while somebody is typing
   const [initial] = useState<SprintFormValues>(() => {
@@ -103,14 +101,12 @@ export function SprintFormModal({
             reads "/12/2030" is a date nobody can check */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
-            <label htmlFor={startId} className="block text-sm font-medium mb-1">Start Date</label>
-            <input
-              id={startId}
+            <Input
+              label="Start Date"
               type="date"
               value={startDate}
               onChange={(e) => handleStartDateChange(e.target.value)}
               required
-              className="focus-ring w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm"
             />
           </div>
           <div>
@@ -123,15 +119,13 @@ export function SprintFormModal({
             />
           </div>
           <div>
-            <label htmlFor={endId} className="block text-sm font-medium mb-1">End Date</label>
-            <input
-              id={endId}
+            <Input
+              label="End Date"
               type="date"
               value={endDate}
               min={startDate || undefined}
               onChange={(e) => setEndDate(e.target.value)}
               required
-              className="focus-ring w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm"
             />
           </div>
         </div>

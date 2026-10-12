@@ -375,12 +375,17 @@ test.describe("the sprint form at phone width", () => {
     const boxes = async () => {
       const start = (await form.getByLabel("Start Date").boundingBox())!;
       const end = (await form.getByLabel("End Date").boundingBox())!;
+      const duration = (await form.getByLabel("Duration").boundingBox())!;
       const dialog = (await form.boundingBox())!;
-      return { start, end, dialog };
+      return { start, end, duration, dialog };
     };
     const desktop = await boxes();
     // The control for the rule below: on a desktop the two dates share a row
     expect(Math.abs(desktop.start.y - desktop.end.y)).toBeLessThan(2);
+    // And the three controls of that row are one height: the dates are the same field as the
+    // dialog's others, not a bare input a third shorter than the select beside it
+    expect(Math.abs(desktop.start.height - desktop.duration.height)).toBeLessThan(1);
+    expect(Math.abs(desktop.end.height - desktop.duration.height)).toBeLessThan(1);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(async () => {
