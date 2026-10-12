@@ -1711,6 +1711,7 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "worker_disabled",
   "worker_renamed",
   "worker_released",
+  "worker_deleted",
   "worker_poll_interval_changed",
   "enrolment_token_minted",
   "enrolment_token_spent",

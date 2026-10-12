@@ -3,7 +3,9 @@ import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth, withWorker } from "@/lib/middleware";
 import { stripControlCharacters } from "@/lib/identifiers";
-import { assignmentsFor, catalogueFor, offersFor, overriddenWorkerPolicy, ownerReachableProjectIds, toApiWorker, usableRepos } from "@/lib/worker-service";
+import { assignmentsFor, catalogueFor, offersFor, overriddenWorkerPolicy, ownerReachableProjectIds, toApiWorker, usableRepos, WORKER_STALE_MS } from "@/lib/worker-service";
+import { taskKeyOf } from "@/lib/task-key";
+import { EXECUTION_LEASE_MS } from "@/lib/execution-lease";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { decisionsForWorker } from "@/lib/task-decisions";
 import { InstanceAuditAction } from "@/types";
@@ -193,6 +195,75 @@ export const PATCH = withAuth(async (request, { params, user, db }) => {
   }
 
   return NextResponse.json(toApiWorker(updated, new Date(), undefined, isHeldByPlan(updated, await claimingMachineIds(db))));
+});
+
+export const DELETE = withAuth(async (_request, { params, user, db }) => {
+  await connectDB();
+
+  if (user.viaMachineCredential) {
+    return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
+  }
+  if (user.role !== "admin") {
+    return NextResponse.json({ error: "Instance admin only" }, { status: 403 });
+  }
+
+  const { workerId } = await params;
+  if (!isValidObjectId(workerId)) {
+    return NextResponse.json({ error: "Worker not found" }, { status: 404 });
+  }
+  const worker = await db.Worker.findById(workerId);
+  if (!worker) {
+    return NextResponse.json({ error: "Worker not found" }, { status: 404 });
+  }
+
+  const held = await db.Task.find({
+    "execution.workerId": workerId,
+    "execution.runId": { $nin: [null, ""] },
+    "execution.startedAt": { $gte: new Date(Date.now() - EXECUTION_LEASE_MS) },
+  })
+    .select("taskNumber project")
+    .populate("project", "key")
+    .limit(5)
+    .lean();
+  if (held.length > 0) {
+    const keys = held.map((task) =>
+      taskKeyOf((task.project as unknown as { key?: string } | null)?.key, task.taskNumber)
+    );
+    return NextResponse.json(
+      {
+        error: `${worker.name} still holds ${keys.join(", ")}. Wait for its lease to run out, up to two hours after the run started, then delete the worker.`,
+        taskKeys: keys,
+      },
+      { status: 409 }
+    );
+  }
+
+  // In the filter so a heartbeat landing after the reads above still wins
+  const cutoff = new Date(Date.now() - WORKER_STALE_MS);
+  const deleted = await db.Worker.deleteOne({
+    _id: workerId,
+    $or: [{ lastSeenAt: null }, { lastSeenAt: { $lt: cutoff } }],
+  });
+  if (deleted.deletedCount !== 1) {
+    return NextResponse.json(
+      { error: `${worker.name} reported in during the last five minutes. Switch it off and stop it on the machine first.` },
+      { status: 409 }
+    );
+  }
+
+  void logInstanceAudit(
+    db,
+    {
+      action: "worker_deleted",
+      target: worker.name,
+      detail: worker.host ? `Host ${worker.host}. Its credential no longer works.` : "Its credential no longer works.",
+      user: String(user._id),
+      actorUsername: user.username,
+    },
+    { strict: false }
+  );
+
+  return NextResponse.json({ deleted: true });
 });
 
 interface WorkerBefore {

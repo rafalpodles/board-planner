@@ -11,6 +11,7 @@ const accessibleProjectIds = vi.fn();
 const userFindOne = vi.fn();
 const workerFindOthers = vi.fn();
 const workerFindOneAndUpdate = vi.fn();
+const workerDeleteOne = vi.fn();
 const logInstanceAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -32,6 +33,7 @@ vi.mock("@/models/worker", () => ({
   Worker: {
     findOne: workerFindOne,
     findOneAndUpdate: workerFindOneAndUpdate,
+    deleteOne: workerDeleteOne,
     find: () => ({ select: workerFindOthers }),
   },
 }));
@@ -48,7 +50,7 @@ vi.mock("@/lib/machine-limit", async (importOriginal) => {
 });
 
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
-const { GET, PATCH } = await import("./route");
+const { GET, PATCH, DELETE } = await import("./route");
 
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
 const OWNER_ID = "6a732075133f935b19154cd2";
@@ -704,5 +706,112 @@ describe("what the fleet audit log records", () => {
     await PATCH(patchRequest({ enabled: false }), ctx());
 
     expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE removes a machine's record and with it its credential", () => {
+  const deleteRequest = () =>
+    new Request(`http://localhost/api/workers/${WORKER_ID}`, { method: "DELETE" });
+  const holding = (tasks: { taskNumber: number; project: { key: string } | null }[]) =>
+    ({
+      select: () => ({ populate: () => ({ limit: () => ({ lean: async () => tasks }) }) }),
+    }) as never;
+
+  beforeEach(() => {
+    getAuthUser.mockResolvedValue({ ...INSTANCE_ADMIN, username: "admin" });
+    workerFindOne.mockResolvedValue({ ...WORKER, lastSeenAt: new Date(Date.now() - 60 * 60_000) });
+    workerDeleteOne.mockResolvedValue({ deletedCount: 1 });
+    taskFind.mockImplementation(() => holding([]));
+  });
+
+  it("deletes a machine nobody has heard from, and records who did it and which machine", async () => {
+    const res = await DELETE(deleteRequest(), ctx());
+
+    expect(res.status).toBe(200);
+    expect(workerDeleteOne).toHaveBeenCalledTimes(1);
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      scopedToDefaultOrganisation(),
+      expect.objectContaining({
+        action: "worker_deleted",
+        target: "rig-laptop",
+        user: "admin-1",
+        actorUsername: "admin",
+        detail: expect.stringContaining("mac.home"),
+      }),
+      { strict: false }
+    );
+  });
+
+  // The cutoff has to be in the delete's own filter: a heartbeat landing after the read would
+  // otherwise be deleted along with the machine
+  it("puts the five-minute quiet period in the delete's filter, not only in a read before it", async () => {
+    const before = Date.now();
+    await DELETE(deleteRequest(), ctx());
+
+    const filter = workerDeleteOne.mock.calls[0][0] as {
+      $or: [{ lastSeenAt: null }, { lastSeenAt: { $lt: Date } }];
+    };
+    expect(filter.$or[0]).toEqual({ lastSeenAt: null });
+    const cutoff = filter.$or[1].lastSeenAt.$lt.getTime();
+    expect(before - cutoff).toBeGreaterThanOrEqual(5 * 60_000 - 1_000);
+    expect(before - cutoff).toBeLessThan(5 * 60_000 + 5_000);
+  });
+
+  it("refuses a machine that reported in between the read and the delete, and writes nothing", async () => {
+    workerDeleteOne.mockResolvedValue({ deletedCount: 0 });
+
+    const res = await DELETE(deleteRequest(), ctx());
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain("rig-laptop");
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  it("refuses a machine that still holds a run, naming the tasks, and deletes nothing", async () => {
+    taskFind.mockImplementation(() =>
+      holding([
+        { taskNumber: 7, project: { key: "BP" } },
+        { taskNumber: 9, project: null },
+      ])
+    );
+
+    const res = await DELETE(deleteRequest(), ctx());
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.taskKeys).toEqual(["BP-7", "#9"]);
+    expect(workerDeleteOne).not.toHaveBeenCalled();
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  // Past its lease the board takes the task back whether or not the machine exists, so a run that
+  // old is no reason to keep a dead machine's row
+  it("counts only runs still inside their lease as held", async () => {
+    const before = Date.now();
+    await DELETE(deleteRequest(), ctx());
+
+    const [filter] = taskFind.mock.calls.at(-1) as unknown as [Record<string, { $gte: Date }>];
+    const cutoff = filter["execution.startedAt"].$gte.getTime();
+    expect(before - cutoff).toBeGreaterThanOrEqual(2 * 60 * 60_000 - 1_000);
+    expect(before - cutoff).toBeLessThan(2 * 60 * 60_000 + 5_000);
+  });
+
+  it("is a 404 for a machine that is not there, and for an id that is not one", async () => {
+    workerFindOne.mockResolvedValue(null);
+    expect((await DELETE(deleteRequest(), ctx())).status).toBe(404);
+
+    const bad = await DELETE(deleteRequest(), { params: Promise.resolve({ workerId: "nope" }) });
+    expect(bad.status).toBe(404);
+    expect(workerDeleteOne).not.toHaveBeenCalled();
+  });
+
+  it("is refused to a member, and to a machine credential even when it belongs to an admin", async () => {
+    getAuthUser.mockResolvedValue(PLAIN_MEMBER);
+    expect((await DELETE(deleteRequest(), ctx())).status).toBe(403);
+
+    getAuthUser.mockResolvedValue(UNSCOPED_ADMIN_TOKEN);
+    expect((await DELETE(deleteRequest(), ctx())).status).toBe(403);
+
+    expect(workerDeleteOne).not.toHaveBeenCalled();
   });
 });
