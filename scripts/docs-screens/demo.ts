@@ -19,7 +19,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { MongoClient, type Db, type Document } from "mongodb";
+import { MongoClient, ObjectId, type Db, type Document } from "mongodb";
 import { EJSON } from "bson";
 import bcrypt from "bcryptjs";
 
@@ -31,6 +31,11 @@ interface DemoData {
 // Like the e2e suite's `_e2e`: `seed` drops the database it is pointed at
 const REQUIRED_SUFFIX = "_docs";
 const PEOPLE = ["alex", "maya", "sam"];
+
+// Every row belongs to an organisation, and a row with none is invisible to every request: the
+// data was captured before that was so, and a sign-in against it answers "Invalid credentials"
+const ORGANISATION = new ObjectId("000000000000000000000001");
+const UNSCOPED = new Set(["organisations", "ratelimits"]);
 
 function shiftDates(value: unknown, ms: number): unknown {
   if (value instanceof Date) return new Date(value.getTime() + ms);
@@ -57,7 +62,12 @@ async function seed(db: Db): Promise<void> {
 
   await db.dropDatabase();
   for (const [name, docs] of Object.entries(data.collections)) {
-    await db.collection(name).insertMany(docs.map((doc) => shiftDates(doc, shift) as Document));
+    await db.collection(name).insertMany(
+      docs.map((doc) => ({
+        ...(shiftDates(doc, shift) as Document),
+        ...(UNSCOPED.has(name) ? {} : { organisation: ORGANISATION }),
+      }))
+    );
   }
 
   const hash = await bcrypt.hash(password, 10);
