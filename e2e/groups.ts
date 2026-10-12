@@ -85,6 +85,7 @@ export const GROUPS = {
     "organisation-on-product-writes.spec.ts",
     "cross-organisation-projects.spec.ts",
     "project-lifecycle.spec.ts",
+    "new-project-wizard.spec.ts",
     "project-delete-grants.spec.ts",
     "project-delete-leftovers.spec.ts",
     "access-change-vs-its-refresh.spec.ts",

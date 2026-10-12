@@ -2475,6 +2475,32 @@ export async function seedManyMentionCandidates() {
   await stampOrganisationAndDisconnect();
 }
 
+export const CREW_USERNAME_PREFIX = "crew-";
+
+/**
+ * BP-199. Fourteen ordinary accounts sharing a username prefix nothing else uses, so one search
+ * matches more people than the ten the new-project wizard's people search returns.
+ */
+export async function seedCrew(count = 14) {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("users").insertMany(
+    Array.from({ length: count }, (_, i) => ({
+      _id: id(`e2e${"0".repeat(16)}d${i.toString(16).padStart(4, "0")}`),
+      username: `${CREW_USERNAME_PREFIX}${i}`,
+      password: ADMIN_PASSWORD_HASH,
+      fullName: `Crew Member ${i}`,
+      email: "",
+      emailNotifications: false,
+      collapseEmptyColumns: false,
+      kind: "human",
+      role: "member",
+      createdAt: now,
+    }))
+  );
+  await stampOrganisationAndDisconnect();
+}
+
 /**
  * BP-695. A board whose repository is on GitLab — the stub at `host` — with one task for the stub
  * to report branches, commits and merge requests about. Its own project, so no spec counting the

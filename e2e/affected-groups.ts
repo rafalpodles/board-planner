@@ -25,6 +25,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   { prefix: "src/components/kanban/BoardHeader", groups: ["board", "project"] },
   { prefix: "src/components/kanban/BoardFilters", groups: ["board", "project"] },
   { prefix: "src/components/sprints/", groups: ["board"] },
+  { prefix: "src/components/project-wizard/", groups: ["project"] },
   // Also imported by kanban/TaskCard.tsx, ProjectBoardView.tsx and ListView.tsx (board renders task
   // cards using these) — verified via grep, not assumed from the directory name alone.
   { prefix: "src/components/tasks/", groups: ["tasks", "task-fields", "board"] },
