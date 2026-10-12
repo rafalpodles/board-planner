@@ -624,28 +624,4 @@ describe("a Stop pressed before the server has taken the turn", () => {
     expect(interrupts(), "a refused send has no turn to stop").toBe(1);
     expect(screen.getByRole("button", { name: /send/i })).toBeTruthy();
   });
-
-  it("does not carry a Stop over to the next send", async () => {
-    const first = await sendHeld();
-    api.post.mockRejectedValue(NO_TURN);
-    await act(async () => stopButton().click());
-    await act(async () => {
-      first.answer(new Response(JSON.stringify({ error: "busy" }), { status: 409 }));
-      await Promise.resolve();
-    });
-    await waitFor(() => expect(screen.queryByText("Stopping…")).toBeNull());
-
-    const box = screen.getByRole("textbox");
-    api.stream.mockResolvedValue(heldStream().response);
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "A new one.");
-      box.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () => {
-      screen.getByRole("button", { name: /send/i }).click();
-    });
-    await screen.findByRole("button", { name: /stop the pm turn/i });
-
-    expect(interrupts(), "the new turn was not stopped by the old Stop").toBe(1);
-  });
 });

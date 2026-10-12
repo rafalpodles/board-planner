@@ -307,7 +307,6 @@ export function PmChat({
     setInput("");
     setStopping(false);
     turnAccepted.current = false;
-    stopPending.current = false;
     setWorking(true);
     setWorkingStatus("PM is thinking…");
     setLiveActions([]);
@@ -344,7 +343,6 @@ export function PmChat({
     function unsend(reason: string, worthRetrying: boolean) {
       // A Stop pressed for a turn that was never taken has nothing left to stop
       stopPending.current = false;
-      setStopping(false);
       setWorking(false);
       setWorkingStatus("");
       setThread((current) => ({ ...current, messages: current.messages.filter((m) => m._id !== optimisticId) }));
