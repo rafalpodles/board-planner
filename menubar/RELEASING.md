@@ -39,17 +39,28 @@ calling job grants.
 - **Create it, until it is allowed to.** *Settings → Actions → General → Workflow permissions →
   Allow GitHub Actions to create and approve pull requests* must be ticked, or the job fails with
   *GitHub Actions is not permitted to create or approve pull requests*.
-- **Run CI on it.** A branch pushed with `GITHUB_TOKEN` triggers no workflow, so `ci.yml` never runs
-  on the release branch. `main` has no branch protection and no ruleset, so nothing blocks the
-  merge; the pull request only changes versions and the changelog, and CI runs on `main` after the
-  merge because that push is yours. To see it green first, **Actions → CI → Run workflow** on the
-  release branch.
+- **Run the required checks on it.** `main`'s ruleset (*All CI green*) requires two checks on the
+  pull request's head commit: `CI passed`, from `ci.yml`, and `Sign-off present, src/ee untouched`,
+  from `contributions.yml`. A branch pushed with `GITHUB_TOKEN` starts neither workflow, so the
+  release PR sits blocked with both checks missing. The live rules, including whether the branch
+  must also be up to date, are `gh api repos/rafalpodles/board-planner/rules/branches/main`.
 
-  Making CI run on its own takes a token that is not `GITHUB_TOKEN`. The least privilege is a GitHub
-  App installed on this repository alone with *Contents* and *Pull requests* read-and-write, its
-  token minted per run by `actions/create-github-app-token` and passed as the action's `token`. That
-  token's tag push then starts `release.yml` by itself, so the `release` job in
-  `release-please.yml` has to go in the same change, or every release builds twice.
+  A manual run does not unblock it: **Actions → CI → Run workflow** goes green, but a dispatch run's
+  check suite is not part of the pull request's status. Do this as the repository owner instead, in
+  this order, because checks attach to the head commit:
+
+  1. Push an empty commit to the release branch (`git commit --allow-empty`). A `push` made by a
+     person starts `ci.yml`, and that run counts.
+  2. Close the pull request and reopen it. The `pull_request` event starts `contributions.yml`,
+     whose job is skipped for a branch of this repository, and a skipped required check counts as
+     passed.
+
+  Making both run on their own takes a token that is not `GITHUB_TOKEN`. The least privilege is a
+  GitHub App installed on this repository alone with *Contents* and *Pull requests* read-and-write,
+  its token minted per run by `actions/create-github-app-token` and passed as the action's `token`.
+  Its pushes then start `ci.yml` and `contributions.yml` by themselves, as does its tag push
+  `release.yml`, so the `release` job in `release-please.yml` has to go in the same change, or every
+  release builds twice.
 
 A tag pushed by hand still releases (below), but release-please does not know about it: bump
 `.release-please-manifest.json` and `package.json` to that version in a commit, or the next release
