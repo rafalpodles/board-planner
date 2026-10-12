@@ -1,17 +1,19 @@
 "use client";
 
 import Image from "next/image";
+import type { ReactNode, Ref } from "react";
+import { MISSING_PAGE_MESSAGE } from "@/lib/board-load-failure";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { APP_NAME } from "@/lib/brand";
 import styles from "./not-found.module.css";
 
 export type MissingKind = "page" | "organisation" | "suspended";
-export type MissingDesign = "card" | "map" | "ticket";
 
 const copy = {
   page: {
     eyebrow: "404 / PAGE NOT FOUND",
     title: "This one slipped off the board.",
-    description: "We couldn’t find this page. The link may have changed, or this page may not be available to you.",
+    description: MISSING_PAGE_MESSAGE,
     action: "Back to projects",
     note: "Your next move is still on the board.",
   },
@@ -27,7 +29,7 @@ const copy = {
     title: "This organisation is suspended",
     description: "Its boards and data are kept, but nobody can use them until the service lifts the suspension. Contact the person who runs your account with the service.",
     action: "",
-    note: "This page will return when access is restored.",
+    note: "Your boards are kept while access is on hold.",
   },
 } as const;
 
@@ -55,67 +57,47 @@ function CardArt({ paused }: { paused: boolean }) {
   );
 }
 
-function MapArt({ paused }: { paused: boolean }) {
-  return (
-    <div className={styles.mapArt} aria-hidden="true">
-      <div className={styles.mapGrid} />
-      <div className={styles.orbit}><span /><span /><span /></div>
-      <div className={styles.mapNumber}>{paused ? "Ⅱ" : "404"}</div>
-      <div className={styles.mapLabel}>YOU ARE HERE</div>
-      <div className={styles.waypoint}><i />Projects</div>
-      <div className={styles.destination}>{paused ? "Access on hold" : "Unknown destination"}<span>×</span></div>
-      <svg className={styles.routeLine} viewBox="0 0 520 300" preserveAspectRatio="none" fill="none">
-        <path className={styles.desktopRoute} d="M100 234 H184 Q202 234 202 216 V186 Q202 168 220 168 H320 Q346 168 346 142 V104 Q346 82 368 82 H419" stroke="currentColor" strokeWidth="2" strokeDasharray="5 7" />
-        <path className={styles.mobileRoute} d="M110 239 H185 Q205 239 205 219 Q205 202 225 202 H270" stroke="currentColor" strokeWidth="2" strokeDasharray="5 7" />
-      </svg>
-      <div className={styles.mapCoordinates}>BOARD / {paused ? "PAUSED" : "UNMAPPED"}</div>
-    </div>
-  );
-}
-
-function TicketArt({ paused }: { paused: boolean }) {
-  return (
-    <div className={styles.ticketArt} aria-hidden="true">
-      <span className={styles.ticketBack} />
-      <div className={styles.ticket}>
-        <div className={styles.ticketHeader}><span>BOARD PLANNER</span><span>{paused ? "HOLD" : "LOST & FOUND"}</span></div>
-        <div className={styles.ticketNumber}>{paused ? "Ⅱ" : "404"}<span>{paused ? "ACCESS ON PAUSE" : "ONE PAGE MISSING"}</span></div>
-        <div className={styles.ticketRule} />
-        <div className={styles.ticketStub}><span>{paused ? "KEEP YOUR BOARDS" : "RETURN TO PROJECTS"}<small>{paused ? "Access can be restored" : "No detour required"}</small></span><div className={styles.barcode} /></div>
-      </div>
-      <span className={styles.ticketAnnotation}>{paused ? "kept, not gone." : "keep the plan. lose the dead end."}</span>
-    </div>
-  );
-}
-
 /** A resource and an inaccessible resource deliberately have exactly the same copy. */
 export function NotFoundExperience({
   kind = "page",
-  design = "card",
   standalone = false,
   signIn,
+  description,
+  detail,
+  children,
+  headingRef,
+  actionHref,
+  actionLabel,
 }: {
   kind?: MissingKind;
-  design?: MissingDesign;
   standalone?: boolean;
   signIn?: string | null;
+  description?: ReactNode;
+  detail?: ReactNode;
+  children?: ReactNode;
+  headingRef?: Ref<HTMLHeadingElement>;
+  actionHref?: string;
+  actionLabel?: string;
 }) {
   const content = copy[kind];
-  const title = kind === "page" && design === "map" ? "A little outside the plan."
-    : kind === "page" && design === "ticket" ? "Good plans. Bad links."
-    : content.title;
-  const href = kind === "page" ? "/projects" : signIn ? `${signIn}/?switch` : "/?switch";
+  useDocumentTitle(`${kind === "suspended" ? "Organisation suspended" : kind === "organisation" ? "Organisation not found" : "Page not found"} — ${APP_NAME}`);
+  const href = actionHref ?? (kind === "page" ? "/projects" : signIn ? `${signIn}/?switch` : "/?switch");
+  const action = actionLabel ?? content.action;
 
   return (
-    <section className={`${styles.experience} ${standalone ? styles.standalone : ""}`} data-testid={kind === "organisation" ? "no-organisation-here" : `missing-${kind}`}>
+    <section className={`${styles.experience} ${standalone ? styles.standalone : ""}`} role={kind === "suspended" ? "status" : "alert"} data-testid={kind === "organisation" ? "no-organisation-here" : `missing-${kind}`}>
       {standalone && <div className={styles.brand}><Image src="/logo.svg" alt="" width={26} height={26} /><span>{APP_NAME}</span></div>}
       <div className={styles.composition}>
-        {design === "card" ? <CardArt paused={kind === "suspended"} /> : design === "map" ? <MapArt paused={kind === "suspended"} /> : <TicketArt paused={kind === "suspended"} />}
+        <CardArt paused={kind === "suspended"} />
         <div className={styles.text}>
           <p className={styles.eyebrow}>{content.eyebrow}</p>
-          <h1>{title}</h1>
-          <p className={styles.description}>{content.description}</p>
-          {content.action && <a href={href} className={`focus-ring ${styles.action}`}>{content.action}<span aria-hidden="true">→</span></a>}
+          <h1 ref={headingRef} tabIndex={headingRef ? -1 : undefined}>{content.title}</h1>
+          {detail}
+          <p className={styles.description}>{description ?? content.description}</p>
+          {(action || children) && <div className={styles.actions}>
+            {action && <a href={href} className={`focus-ring ${styles.action}`}>{action}<span aria-hidden="true">→</span></a>}
+            {children}
+          </div>}
           <p className={styles.note}>{content.note}</p>
         </div>
       </div>

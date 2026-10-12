@@ -2,25 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { OrganisationSuspended } from "@/components/OrganisationSuspended";
+import { NotFoundExperience } from "@/components/not-found/NotFoundExperience";
 import { ORGANISATION_SUSPENDED_HEADER } from "@/lib/organisation-limit-header";
 
 type HostState = { kind: "organisation" } | { kind: "suspended" } | { kind: "none" | "platform"; signIn: string | null };
 
 function NoOrganisationHere({ kind, signIn }: { kind: "none" | "platform"; signIn: string | null }) {
-  const host = typeof window === "undefined" ? "" : window.location.host;
+  if (kind === "none") return <NotFoundExperience kind="organisation" standalone signIn={signIn} />;
   return (
     <div className="flex items-center justify-center min-h-screen px-4">
       <div className="w-full max-w-sm text-center" data-testid="no-organisation-here">
         <h1 className="text-lg font-semibold mb-2">
-          {kind === "platform" ? "Sign in from the front page" : <>There is no organisation at {host}</>}
+          Sign in from the front page
         </h1>
         <p className="text-sm text-text mb-6">
-          {kind === "platform"
-            ? "This address signs you in to any organisation: start with your e-mail address."
-            : "Check the address you were given. If you do not remember your organisation's address, sign in with your e-mail address instead."}
+          This address signs you in to any organisation: start with your e-mail address.
         </p>
         <a
-          href={kind === "platform" ? "/?switch" : signIn ? `${signIn}/?switch` : "/"}
+          href="/?switch"
           className="focus-ring inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary-solid px-4 py-2 text-sm font-medium text-white hover:bg-primary-solid-hover"
         >
           Sign in with your e-mail address

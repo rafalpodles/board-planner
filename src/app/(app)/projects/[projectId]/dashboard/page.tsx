@@ -8,6 +8,7 @@ import { ApiProject, ROLE_LABELS, STATUS_LABELS, TaskStatus } from "@/types";
 import { columnIdsWithRole, effectiveColumns } from "@/lib/columns";
 import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { NotFoundExperience } from "@/components/not-found/NotFoundExperience";
 
 interface Stats {
   total: number;
@@ -307,6 +308,7 @@ export default function DashboardPage() {
    * page showed a toast for three seconds and then span for ever. Nothing said what happened.
    */
   if (!stats) {
+    if (refused) return <div data-testid="dashboard-error"><NotFoundExperience /></div>;
     return (
       <div className="max-w-7xl mx-auto w-full">
         <PageHeader title="Dashboard" subtitle={projectName} />

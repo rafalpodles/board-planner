@@ -46,6 +46,7 @@ export const GROUPS = {
     "search-page.spec.ts",
   ],
   board: [
+    "not-found.spec.ts",
     "kanban-board-core.spec.ts",
     "task-number-not-burnt.spec.ts",
     "column-roles.spec.ts",

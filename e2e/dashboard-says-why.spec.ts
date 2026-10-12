@@ -60,23 +60,25 @@ test("a reader with no grant is told that, and is not left with a spinner", asyn
   await signInThroughForm(page, OUTSIDER_USERNAME, OUTSIDER_PASSWORD);
   await page.goto(DASHBOARD);
 
-  await expect(errorBanner(page)).toContainText("You do not have access to this board");
+  await expect(errorBanner(page)).toContainText("We couldn’t find this page. The link may have changed, or this page may not be available to you.");
 
   /**
    * The point of the ticket, and it cannot be made without the wait: a toast is removed after
    * three seconds, so an assertion that runs immediately passes against the broken page too.
    */
   await page.waitForTimeout(3500);
-  await expect(errorBanner(page)).toContainText("You do not have access to this board");
+  await expect(errorBanner(page)).toContainText("We couldn’t find this page. The link may have changed, or this page may not be available to you.");
   await expect(page.locator(".animate-spin")).toHaveCount(0);
 });
 
-test("a board that does not exist says that instead — a different sentence", async ({ page }) => {
+test("a missing dashboard uses the same neutral recovery as a refused dashboard", async ({ page }) => {
   await signIn(page);
   await page.goto("/projects/NOSUCHKEY/dashboard");
 
-  await expect(errorBanner(page)).toContainText("There is no board here");
-  // The two refusals must not collapse into one message, which is what the old code did
+  await expect(errorBanner(page)).toContainText("We couldn’t find this page. The link may have changed, or this page may not be available to you.");
+  await expect(errorBanner(page).getByRole("heading", { name: "This one slipped off the board." })).toBeVisible();
+  await expect(errorBanner(page).getByRole("link", { name: "Back to projects" })).toHaveAttribute("href", "/projects");
+  // A reader without a grant must not learn whether the project exists.
   await expect(errorBanner(page)).not.toContainText("do not have access");
 });
 

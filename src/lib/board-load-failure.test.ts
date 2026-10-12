@@ -3,12 +3,12 @@ import { boardRefusal } from "./board-load-failure";
 
 describe("boardRefusal", () => {
   it("names a refusal", () => {
-    expect(boardRefusal({ status: 403, message: "Forbidden" })).toBe("You do not have access to this board.");
+    expect(boardRefusal({ status: 403, message: "Forbidden" })).toBe("We couldn’t find this page. The link may have changed, or this page may not be available to you.");
   });
 
   it("names a board that is not there", () => {
     expect(boardRefusal({ status: 404, message: "Project not found" })).toBe(
-      "There is no board here — the link may be stale."
+      "We couldn’t find this page. The link may have changed, or this page may not be available to you."
     );
   });
 

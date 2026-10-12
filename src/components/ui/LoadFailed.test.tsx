@@ -18,9 +18,9 @@ describe("LoadFailed", () => {
 
   // A refusal reads the same on every retry, so a button offering one says the page is broken
   it("offers no Retry when there is nothing a retry could change", () => {
-    render(<LoadFailed message="You do not have access to this board." />);
+    render(<LoadFailed message="We couldn’t find this page. The link may have changed, or this page may not be available to you." />);
 
-    expect(screen.getByRole("alert").textContent).toContain("You do not have access to this board.");
+    expect(screen.getByRole("alert").textContent).toContain("We couldn’t find this page. The link may have changed, or this page may not be available to you.");
     expect(screen.queryByRole("button")).toBeNull();
   });
 
@@ -36,8 +36,8 @@ describe("LoadFailed", () => {
 
 describe("BoardLoadFailed", () => {
   it.each([
-    [403, "You do not have access to this board."],
-    [404, "There is no board here — the link may be stale."],
+    [403, "We couldn’t find this page. The link may have changed, or this page may not be available to you."],
+    [404, "We couldn’t find this page. The link may have changed, or this page may not be available to you."],
   ])("names a %i and offers no Retry", (status, text) => {
     render(<BoardLoadFailed reason={{ status }} onRetry={vi.fn()} />);
 

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/hooks/use-auth";
 import { CONTACT_EMAIL } from "@/lib/brand";
+import { NotFoundExperience } from "@/components/not-found/NotFoundExperience";
 
 export function OrganisationSuspended() {
   const heading = useRef<HTMLHeadingElement>(null);
@@ -20,28 +21,27 @@ export function OrganisationSuspended() {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen px-4">
-      <div role="status" className="w-full max-w-sm text-center">
-        <h1 ref={heading} tabIndex={-1} className="text-lg font-semibold mb-2">
-          This organisation is suspended
-        </h1>
-        {address && (
+    <NotFoundExperience
+      kind="suspended"
+      standalone
+      headingRef={heading}
+      detail={address && (
           <p className="text-sm text-text-muted mb-2" data-testid="suspended-address">
             {address}
           </p>
-        )}
-        <p className="text-sm text-text mb-4">
+      )}
+      description={<>
           Its boards and data are kept, but nobody can sign in or use them until the service lifts the
           suspension. Write to{" "}
           <a href={`mailto:${CONTACT_EMAIL}`} className="underline">
             {CONTACT_EMAIL}
           </a>
           .
-        </p>
+      </>}
+    >
         <Button variant="secondary" onClick={() => void signOut()} disabled={leaving}>
           Sign out
         </Button>
-      </div>
-    </div>
+    </NotFoundExperience>
   );
 }
