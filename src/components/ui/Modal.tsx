@@ -31,6 +31,8 @@ interface ModalProps {
    * (BP-556, BP-565).
    */
   closeDisabled?: boolean;
+  /** The id of the element in `children` that says what the dialog is about; read after its title */
+  describedBy?: string;
 }
 
 export function Modal({
@@ -42,6 +44,7 @@ export function Modal({
   returnFocusTo,
   bare = false,
   closeDisabled = false,
+  describedBy,
 }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -114,6 +117,7 @@ export function Modal({
         // the caller's own "Saving…" label.
         aria-busy={closeDisabled || undefined}
         aria-labelledby={named && !bare ? titleId : undefined}
+        aria-describedby={describedBy}
         aria-label={named && !bare ? undefined : named ? title : UNNAMED_DIALOG_LABEL}
         tabIndex={-1}
         className={`flex w-full flex-col bg-bg-card ${SIZE_CLASSES[size]} sm:mx-4

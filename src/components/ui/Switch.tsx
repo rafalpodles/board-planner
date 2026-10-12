@@ -25,6 +25,7 @@ export function Switch({
   labelHidden,
 }: SwitchProps) {
   const hintId = useId();
+  const labelId = useId();
 
   return (
     <label
@@ -36,7 +37,11 @@ export function Switch({
         checked={checked}
         disabled={disabled}
         aria-describedby={hint ? hintId : undefined}
+        // The wrapping <label> would otherwise name the control with its hint as well, and the same
+        // hint is its description: said twice, and the name no longer the label a test or a person
+        // looks for. `aria-label` names it directly when the row already shows the setting's name.
         aria-label={labelHidden ? label : undefined}
+        aria-labelledby={labelHidden ? undefined : labelId}
         onChange={(e) => onChange(e.target.checked)}
         className="peer sr-only"
       />
@@ -51,7 +56,7 @@ export function Switch({
       />
       {!labelHidden && (
         <span className="min-w-0">
-          <span className="flex items-center gap-1.5 text-[13.5px] font-medium text-text">
+          <span id={labelId} className="flex items-center gap-1.5 text-[13.5px] font-medium text-text">
             {label}
             {dirty && (
               <span

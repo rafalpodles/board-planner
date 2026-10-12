@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
 
@@ -31,9 +32,12 @@ export function ConfirmDialog({
   loading = false,
   error,
 }: ConfirmDialogProps) {
+  const messageId = useId();
   return (
-    <Modal open={open} onClose={onClose} closeDisabled={loading} title={title}>
-      <p className="text-sm text-text-muted mb-6">{message}</p>
+    <Modal open={open} onClose={onClose} closeDisabled={loading} title={title} describedBy={messageId}>
+      {/* What the dialog asks is often the whole point (a count, a consequence): it is the
+          description, so it is read with the title rather than left for a reader to find */}
+      <p id={messageId} className="text-sm text-text-muted mb-6">{message}</p>
       {error && (
         <p role="alert" className="text-sm text-danger -mt-3 mb-6">
           {error}

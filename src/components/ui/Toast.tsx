@@ -251,6 +251,21 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={{ toast, dismiss: removeToast }}>
       {children}
+      {/* The tray below mounts with its first toast, and a live region that arrives with its
+          content is often not announced at all. These two are always there and only their text
+          changes, which is what a screen reader reports. No `role`: an always-present `alert` or
+          `status` would join every query that looks for the one on the page. Errors interrupt,
+          the rest wait their turn. */}
+      <div aria-live="polite" className="sr-only">
+        {toasts.filter((t) => t.type !== "error").map((t) => (
+          <p key={t.id}>{t.message}</p>
+        ))}
+      </div>
+      <div aria-live="assertive" className="sr-only">
+        {toasts.filter((t) => t.type === "error").map((t) => (
+          <p key={t.id}>{t.message}</p>
+        ))}
+      </div>
       {toasts.length > 0 && (
         <div
           ref={trayRef}

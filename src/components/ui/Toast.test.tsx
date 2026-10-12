@@ -537,3 +537,61 @@ describe("a toast with an action", () => {
     expect(screen.getAllByTestId("toast").map((t) => t.textContent)).toEqual(["Saved"]);
   });
 });
+
+// BP-1033. The tray mounts with its first toast, and a live region that arrives with its content is
+// often not announced. These regions are always there; only their text changes.
+describe("what a screen reader hears", () => {
+  afterEach(() => cleanup());
+
+  function Raiser() {
+    const { toast } = useToast();
+    return (
+      <>
+        <button onClick={() => toast("Saved", "success")}>save</button>
+        <button onClick={() => toast("Could not save", "error")}>fail</button>
+      </>
+    );
+  }
+  const region = (politeness: "polite" | "assertive") =>
+    document.querySelector<HTMLElement>(`[aria-live="${politeness}"]`)!;
+
+  it("has both regions before any toast is raised, and empty", () => {
+    render(
+      <ToastProvider>
+        <Raiser />
+      </ToastProvider>
+    );
+
+    expect(region("polite")).toBeTruthy();
+    expect(region("assertive")).toBeTruthy();
+    expect(region("polite").textContent).toBe("");
+    expect(region("assertive").textContent).toBe("");
+  });
+
+  it("says a success politely and an error assertively, each in its own region", () => {
+    render(
+      <ToastProvider>
+        <Raiser />
+      </ToastProvider>
+    );
+
+    act(() => screen.getByText("save").click());
+    act(() => screen.getByText("fail").click());
+
+    expect(region("polite").textContent).toBe("Saved");
+    expect(region("assertive").textContent).toBe("Could not save");
+  });
+
+  // Not `status` or `alert`: a permanent one of those would join every query that wants the one
+  // on the page
+  it("takes no role, so it is never mistaken for a message about the page", () => {
+    render(
+      <ToastProvider>
+        <Raiser />
+      </ToastProvider>
+    );
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
