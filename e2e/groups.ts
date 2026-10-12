@@ -215,6 +215,7 @@ export const GROUPS = {
     "user-card-names.spec.ts",
     "assignee-access.spec.ts",
     "admin-only-screens.spec.ts",
+    "version-identity.spec.ts",
     "self-hosted-copy.spec.ts",
     "delete-sole-owner.spec.ts",
     "singleton-first-read.spec.ts",
