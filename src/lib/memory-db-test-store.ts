@@ -3,7 +3,7 @@ type Filter = Record<string, unknown>;
 
 const same = (a: unknown, b: unknown) => String(a) === String(b);
 
-const KNOWN = new Set(["$in", "$ne", "$regex", "$options"]);
+const KNOWN = new Set(["$in", "$nin", "$ne", "$regex", "$options"]);
 
 function matchesValue(actual: unknown, wanted: unknown): boolean {
   // Mongo matches null against a missing field too
@@ -15,6 +15,7 @@ function matchesValue(actual: unknown, wanted: unknown): boolean {
       if (key.startsWith("$") && !KNOWN.has(key)) throw new Error(`memoryDb does not understand ${key}`);
     }
     if ("$in" in condition) return (condition.$in as unknown[]).some((w) => matchesValue(actual, w));
+    if ("$nin" in condition) return !(condition.$nin as unknown[]).some((w) => matchesValue(actual, w));
     if ("$ne" in condition) return !matchesValue(actual, condition.$ne);
     if ("$regex" in condition) {
       return new RegExp(String(condition.$regex), String(condition.$options ?? "")).test(String(actual ?? ""));
@@ -44,7 +45,7 @@ function project(row: Row, fields: string[] | null): Row {
 /**
  * A scoped database held in memory, whose filters really select: a fake that returns its seed
  * whatever it is asked cannot tell a query on the right person from one on everybody. Understands
- * equality, $or, $in, $ne and $regex, and $set / $pull in updates.
+ * equality, $or, $in, $nin, $ne and $regex, sort and limit on strings, distinct, and $set / $pull in updates.
  */
 export function memoryDb(seed: Record<string, Row[]> = {}) {
   const store: Record<string, Row[]> = Object.fromEntries(Object.entries(seed).map(([name, rows]) => [name, rows.map((r) => ({ ...r }))]));
@@ -60,15 +61,42 @@ export function memoryDb(seed: Record<string, Row[]> = {}) {
 
   const model = (name: string) => ({
     find: (filter: Filter = {}) => {
-      calls.push({ model: name, op: "find", filter });
+      const call: { model: string; op: string; filter: Filter; options?: unknown } = { model: name, op: "find", filter };
+      calls.push(call);
       let fields: string[] | null = null;
+      let max = Infinity;
+      let order: [string, number][] = [];
       const chain = {
         select: (list: string) => {
           fields = list.split(/\s+/).filter(Boolean);
           return chain;
         },
-        sort: () => chain,
-        lean: async () => rowsOf(name).filter((row) => matches(row, filter)).map((row) => project(row, fields)),
+        sort: (spec: Record<string, number> = {}) => {
+          order = Object.entries(spec);
+          return chain;
+        },
+        limit: (n: number) => {
+          max = n;
+          call.options = { ...(call.options as object), limit: n };
+          return chain;
+        },
+        lean: async () =>
+          rowsOf(name)
+            .filter((row) => matches(row, filter))
+            .sort((a, b) => {
+              for (const [key, direction] of order) {
+                // Compared as text, so a Date or a number would be ordered wrongly and silently
+                for (const value of [a[key], b[key]]) {
+                  if (value != null && typeof value !== "string") throw new Error(`memoryDb sorts text only, not ${key}`);
+                }
+                const x = String(a[key] ?? "");
+                const y = String(b[key] ?? "");
+                if (x !== y) return (x < y ? -1 : 1) * direction;
+              }
+              return 0;
+            })
+            .slice(0, max)
+            .map((row) => project(row, fields)),
       };
       return chain;
     },
@@ -84,6 +112,17 @@ export function memoryDb(seed: Record<string, Row[]> = {}) {
         lean: async () => (found ? project(found, fields) : null),
       };
       return chain;
+    },
+    distinct: async (field: string, filter: Filter = {}) => {
+      calls.push({ model: name, op: "distinct", filter });
+      const seen = new Map<string, unknown>();
+      for (const row of rowsOf(name).filter((r) => matches(r, filter))) {
+        const value = row[field];
+        for (const item of Array.isArray(value) ? value : [value]) {
+          if (item !== null && item !== undefined) seen.set(String(item), item);
+        }
+      }
+      return [...seen.values()];
     },
     deleteMany: async (filter: Filter) => {
       calls.push({ model: name, op: "deleteMany", filter });

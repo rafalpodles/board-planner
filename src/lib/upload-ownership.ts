@@ -42,11 +42,13 @@ export function organisationUploads(db: ScopedDb) {
       bucket.openUploadStream(name, { metadata: { ...metadata, organisation: db.organisation } }),
     count: (): Promise<number> =>
       mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.files`).countDocuments({ "metadata.organisation": db.organisation }),
-    async *rows(): AsyncGenerator<{ collection: string; document: Record<string, unknown> }> {
+    // `project` narrows to one board's files; an upload records it as the id or as its hex string
+    async *rows(project?: mongoose.Types.ObjectId | string): AsyncGenerator<{ collection: string; document: Record<string, unknown> }> {
       const files = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.files`);
       const chunks = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.chunks`);
+      const owned = project ? { "metadata.project": { $in: [new mongoose.Types.ObjectId(String(project)), String(project)] } } : {};
       // Read up front, one file's chunks at a time: no cursor stays open across a slow download
-      for (const file of await files.find({ "metadata.organisation": db.organisation }).sort({ _id: 1 }).toArray()) {
+      for (const file of await files.find({ "metadata.organisation": db.organisation, ...owned }).sort({ _id: 1 }).toArray()) {
         yield { collection: `${UPLOAD_BUCKET}.files`, document: file };
         for (const chunk of await chunks.find({ files_id: file._id }).sort({ n: 1 }).toArray()) {
           yield { collection: `${UPLOAD_BUCKET}.chunks`, document: chunk };

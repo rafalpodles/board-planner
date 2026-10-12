@@ -322,6 +322,20 @@ describe("once it has been answered", () => {
 
     expect(screen.getByTestId("decision-decided-by").textContent).toContain(said);
   });
+
+  it("still says it was answered, and when, after the account that answered has been deleted", () => {
+    panel({ state: "declined", decidedBy: null, decidedAt: new Date(NOW - 1000).toISOString() });
+
+    const line = screen.getByTestId("decision-decided-by").textContent ?? "";
+    expect(line).toContain("Declined by Deleted user");
+    expect(line).toContain(new Date(NOW - 1000).toLocaleString());
+  });
+
+  it("says nothing about an answer on a record nobody has answered", () => {
+    panel({ state: "pending", decidedBy: null, decidedAt: null });
+
+    expect(screen.queryByTestId("decision-decided-by")).toBeNull();
+  });
 });
 
 /**

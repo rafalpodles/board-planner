@@ -5,7 +5,9 @@ const removeUploads = vi.fn(async (_ids: string[]) => {});
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/upload-ownership", () => ({ organisationUploads: () => ({ remove: removeUploads }) }));
 
-const { eraseAccountTraces, erasedLabel } = await import("./account-erasure");
+const { eraseAccountTraces, erasedLabel, findOrphanReferences, eraseOrphanReferences, ORPHAN_SOURCES } = await import("./account-erasure");
+const { DELETED_AGENT } = await import("@/types");
+const { Types } = await import("mongoose");
 const { isErasedLabel } = await import("./erased-label");
 
 const JAN = "6a9d0f0b5d781bded2cb975a";
@@ -249,5 +251,350 @@ describe("erasing the traces of a deleted account", () => {
     expect(mine.credentialHash).not.toBe("held");
     expect(theirs).toMatchObject({ owner: OLA, enabled: true, credentialHash: "held" });
     expect(rows("User").map((u) => u.fullName)).toEqual(["MacBook", "Ola Nowak · Studio"]);
+  });
+});
+
+describe("what a person authored for the machines", () => {
+  const seed = () =>
+    memoryDb({
+      Agent: [
+        { _id: "g1", scope: "user", owner: JAN, name: "Jan's refactorer" },
+        { _id: "g2", scope: "user", owner: OLA, name: "Ola's agent" },
+        { _id: "g3", scope: "project", owner: null, project: "p1", name: "Release agent" },
+        { _id: "g4", scope: "global", owner: null, name: "Default" },
+      ],
+      Task: [
+        { _id: "t1", agent: "g1", assignee: JAN, watchers: [] },
+        { _id: "t2", agent: "g2", assignee: OLA, watchers: [] },
+        { _id: "t3", agent: "g3", assignee: JAN, watchers: [] },
+      ],
+      AgentRun: [
+        { _id: "r1", agent: "g1", agentName: "Jan's refactorer", detail: "ok" },
+        { _id: "r2", agent: "g2", agentName: "Ola's agent", detail: "ok" },
+      ],
+      AgentBlock: [
+        { _id: "b1", key: "mine", createdBy: JAN },
+        { _id: "b2", key: "theirs", createdBy: OLA },
+        { _id: "b3", key: "builtin", createdBy: null },
+      ],
+    });
+
+  it("deletes the person's personal agents and keeps every other agent", async () => {
+    const { db, rows } = seed();
+    await eraseAccountTraces(db, USER);
+    expect(rows("Agent").map((a) => a._id)).toEqual(["g2", "g3", "g4"]);
+  });
+
+  it("takes the deleted agent off the tasks that named it, whoever else those tasks name", async () => {
+    const { db, rows } = seed();
+    await eraseAccountTraces(db, USER);
+    expect(rows("Task").map((t) => [t._id, t.agent])).toEqual([
+      ["t1", null],
+      ["t2", "g2"],
+      ["t3", "g3"],
+    ]);
+  });
+
+  it("keeps a run in the history but not the name the person gave the agent", async () => {
+    const { db, rows } = seed();
+    await eraseAccountTraces(db, USER);
+    expect(rows("AgentRun")).toEqual([
+      { _id: "r1", agent: null, agentName: DELETED_AGENT, detail: "ok" },
+      { _id: "r2", agent: "g2", agentName: "Ola's agent", detail: "ok" },
+    ]);
+  });
+
+  it("hands a block the person created to nobody and keeps the block", async () => {
+    const { db, rows } = seed();
+    await eraseAccountTraces(db, USER);
+    expect(rows("AgentBlock").map((b) => [b.key, b.createdBy])).toEqual([
+      ["mine", null],
+      ["theirs", OLA],
+      ["builtin", null],
+    ]);
+  });
+
+  it("rewrites the agent's names in task history, a renamed one included, and keeps the names of agents that stay", async () => {
+    const { db, rows } = memoryDb({
+      Agent: [
+        { _id: "g1", scope: "user", owner: JAN, name: "Jan's night agent" },
+        { _id: "g4", scope: "global", owner: null, name: "Default" },
+      ],
+      ActivityLog: [
+        { _id: "h1", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "Jan's first name for it" },
+        { _id: "h2", task: "t1", user: OLA, field: "agent", oldValue: "Jan's first name for it", newValue: "" },
+        { _id: "h3", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "Default" },
+        { _id: "h4", task: "t2", user: OLA, field: "agent", oldValue: "", newValue: "Jan's night agent" },
+        { _id: "h5", task: "t1", user: JAN, field: "title", oldValue: "Jan's night agent", newValue: "x" },
+        { _id: "h6", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "g1" },
+        { _id: "h7", task: "t1", user: JAN, field: "agent", oldValue: "g4", newValue: DELETED_AGENT },
+        { _id: "h8", task: "t2", user: OLA, field: "agent", oldValue: "Somebody else's agent", newValue: "" },
+      ],
+    });
+    await eraseAccountTraces(db, USER);
+    expect(rows("ActivityLog").map((r) => [r._id, r.oldValue, r.newValue])).toEqual([
+      ["h1", "", DELETED_AGENT],
+      ["h2", DELETED_AGENT, ""],
+      ["h3", "", "Default"],
+      ["h4", "", "Jan's night agent"],
+      ["h5", "Jan's night agent", "x"],
+      ["h6", "", DELETED_AGENT],
+      ["h7", "g4", DELETED_AGENT],
+      ["h8", "Somebody else's agent", ""],
+    ]);
+  });
+
+  it("also reaches a task that carries the agent with no row of its own, and a custom field called agent is left alone", async () => {
+    const { db, rows } = memoryDb({
+      Agent: [{ _id: "g1", scope: "user", owner: JAN, name: "Jan's refactorer" }],
+      Task: [{ _id: "t5", agent: "g1", assignee: null, watchers: [] }],
+      ActivityLog: [
+        { _id: "h1", task: "t5", user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+        { _id: "h2", task: "t5", user: OLA, field: "agent", customField: true, oldValue: "Jan's refactorer", newValue: "x" },
+      ],
+    });
+    await eraseAccountTraces(db, USER);
+    expect(rows("ActivityLog").map((r) => r.oldValue)).toEqual([DELETED_AGENT, "Jan's refactorer"]);
+  });
+
+  it("follows a recurring series: an occurrence somebody else cleared holds the name too, an unrelated task does not", async () => {
+    const { db, rows } = memoryDb({
+      Agent: [{ _id: "g1", scope: "user", owner: JAN, name: "Jan's refactorer" }],
+      Task: [
+        { _id: "t1", agent: null, recurringParentId: null, watchers: [] },
+        { _id: "t2", agent: null, recurringParentId: "t1", watchers: [] },
+        { _id: "t3", agent: null, recurringParentId: "t2", watchers: [] },
+        { _id: "t9", agent: null, recurringParentId: null, watchers: [] },
+      ],
+      ActivityLog: [
+        { _id: "h1", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "Jan's refactorer" },
+        { _id: "h2", task: "t2", user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+        { _id: "h3", task: "t3", user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+        { _id: "h9", task: "t9", user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+      ],
+    });
+    await eraseAccountTraces(db, USER);
+    expect(rows("ActivityLog").map((r) => [r._id, r.oldValue])).toEqual([
+      ["h1", ""],
+      ["h2", DELETED_AGENT],
+      ["h3", DELETED_AGENT],
+      ["h9", "Jan's refactorer"],
+    ]);
+  });
+
+  it("walks a series back to the occurrences before the one the person changed", async () => {
+    const { db, rows } = memoryDb({
+      Agent: [{ _id: "g1", scope: "user", owner: JAN, name: "Jan's refactorer" }],
+      Task: [
+        { _id: "t1", agent: null, recurringParentId: null, watchers: [] },
+        { _id: "t2", agent: null, recurringParentId: "t1", watchers: [] },
+        { _id: "t3", agent: null, recurringParentId: "t2", watchers: [] },
+      ],
+      ActivityLog: [
+        { _id: "h1", task: "t1", user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+        { _id: "h2", task: "t2", user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+        { _id: "h3", task: "t3", user: JAN, field: "agent", oldValue: "", newValue: "Jan's refactorer" },
+      ],
+    });
+    await eraseAccountTraces(db, USER);
+    expect(rows("ActivityLog").map((r) => [r._id, r.oldValue, r.newValue])).toEqual([
+      ["h1", DELETED_AGENT, ""],
+      ["h2", DELETED_AGENT, ""],
+      ["h3", "", DELETED_AGENT],
+    ]);
+  });
+
+  it("reaches the end of a long series, and ends on one whose parent links loop", async () => {
+    const length = 120;
+    const tasks = Array.from({ length }, (_, i) => ({
+      _id: `s${i}`,
+      agent: null,
+      recurringParentId: i === 0 ? null : `s${i - 1}`,
+      watchers: [],
+    }));
+    const { db, rows } = memoryDb({
+      Agent: [{ _id: "g1", scope: "user", owner: JAN, name: "Jan's refactorer" }],
+      Task: [...tasks, { _id: "c1", agent: null, recurringParentId: "c2", watchers: [] }, { _id: "c2", agent: null, recurringParentId: "c1", watchers: [] }],
+      ActivityLog: [
+        { _id: "first", task: "s0", user: JAN, field: "agent", oldValue: "", newValue: "Jan's refactorer" },
+        { _id: "last", task: `s${length - 1}`, user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+        { _id: "loop", task: "c1", user: JAN, field: "agent", oldValue: "", newValue: "Jan's refactorer" },
+      ],
+    });
+    await eraseAccountTraces(db, USER);
+    expect(rows("ActivityLog").map((r) => [r._id, r.oldValue, r.newValue])).toEqual([
+      ["first", "", DELETED_AGENT],
+      ["last", DELETED_AGENT, ""],
+      ["loop", "", DELETED_AGENT],
+    ]);
+  });
+
+  it("leaves history alone when the person had no personal agent", async () => {
+    const { db, rows } = memoryDb({
+      ActivityLog: [{ _id: "h1", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "Default" }],
+    });
+    await eraseAccountTraces(db, USER);
+    expect(rows("ActivityLog")[0].newValue).toBe("Default");
+  });
+
+  it("changes tasks, runs and blocks without moving their edit time", async () => {
+    const { db, calls } = seed();
+    await eraseAccountTraces(db, USER);
+    for (const model of ["Task", "AgentRun", "AgentBlock"]) {
+      const writes = calls.filter((c) => c.model === model && c.op === "updateMany");
+      expect(writes.length).toBeGreaterThan(0);
+      expect(writes.every((c) => (c.options as { timestamps?: boolean } | undefined)?.timestamps === false)).toBe(true);
+    }
+  });
+
+  it("releases the machines last, so a failure before that leaves a live account its machines", async () => {
+    const { db, calls } = memoryDb({ Worker: [{ _id: "w1", owner: JAN, name: "MacBook", identity: "m1" }], User: [{ _id: "m1", fullName: "Jan · MacBook" }] });
+    await eraseAccountTraces(db, USER);
+    const lastScrub = calls.map((c) => c.model).lastIndexOf("ProjectAuditLog");
+    const release = calls.findIndex((c) => c.model === "Worker" && c.op === "updateOne");
+    expect(lastScrub).toBeGreaterThan(-1);
+    expect(release).toBeGreaterThan(lastScrub);
+  });
+
+  it("renames the machine's own account before it lets the machine go, so a stop between the two is found again", async () => {
+    const { db, calls } = memoryDb({ Worker: [{ _id: "w1", owner: JAN, name: "MacBook", identity: "m1" }], User: [{ _id: "m1", fullName: "Jan · MacBook" }] });
+    await eraseAccountTraces(db, USER);
+    const rename = calls.findIndex((c) => c.model === "User" && c.op === "updateOne");
+    const release = calls.findIndex((c) => c.model === "Worker" && c.op === "updateOne");
+    expect(rename).toBeGreaterThan(-1);
+    expect(rename).toBeLessThan(release);
+  });
+
+  it("deletes the agent only after everything that names it has been rewritten", async () => {
+    const { db, calls } = memoryDb({
+      Agent: [{ _id: "g1", scope: "user", owner: JAN, name: "Jan's refactorer" }],
+      Task: [{ _id: "t1", agent: "g1", watchers: [] }],
+      AgentRun: [{ _id: "r1", agent: "g1", agentName: "Jan's refactorer" }],
+      ActivityLog: [{ _id: "h1", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "Jan's refactorer" }],
+    });
+    await eraseAccountTraces(db, USER);
+    const at = (model: string, op: string) => calls.findIndex((c) => c.model === model && c.op === op);
+    const remove = at("Agent", "deleteMany");
+    expect(remove).toBeGreaterThan(-1);
+    for (const [model, op] of [["ActivityLog", "updateMany"], ["Task", "updateMany"], ["AgentRun", "updateMany"]] as const) {
+      expect(calls.findIndex((c, i) => c.model === model && c.op === op && i > calls.findIndex((x) => x.model === "Agent" && x.op === "find"))).toBeLessThan(remove);
+    }
+  });
+
+  it("does nothing a second time", async () => {
+    const { db, rows } = seed();
+    await eraseAccountTraces(db, USER);
+    const first = JSON.stringify([rows("Agent"), rows("Task"), rows("AgentRun"), rows("AgentBlock")]);
+    await eraseAccountTraces(db, USER);
+    expect(JSON.stringify([rows("Agent"), rows("Task"), rows("AgentRun"), rows("AgentBlock")])).toBe(first);
+  });
+});
+
+describe("references an earlier deletion left behind", () => {
+  const GONE = new Types.ObjectId();
+  const ALSO_GONE = new Types.ObjectId();
+  const HERE = new Types.ObjectId();
+
+  it("names an id nobody holds an account for, once, with where it was found", async () => {
+    const { db } = memoryDb({
+      User: [{ _id: HERE }],
+      Task: [
+        { _id: "t1", assignee: GONE, assignedBy: HERE, pmAssignedFor: null, watchers: [GONE, HERE] },
+        { _id: "t2", assignee: HERE, assignedBy: ALSO_GONE, pmAssignedFor: null, watchers: [] },
+      ],
+    });
+    const orphans = await findOrphanReferences(db);
+    expect(orphans.ids.sort()).toEqual([String(GONE), String(ALSO_GONE)].sort());
+    expect(orphans.bySource).toMatchObject({ "Task.assignee": 1, "Task.watchers": 1, "Task.assignedBy": 1 });
+    expect(orphans.userCount).toBe(1);
+  });
+
+  it("clears them from the tasks and leaves a live account's alone", async () => {
+    const { db, rows } = memoryDb({
+      User: [{ _id: HERE }],
+      Task: [{ _id: "t1", assignee: GONE, assignedBy: HERE, pmAssignedFor: GONE, watchers: [GONE, HERE] }],
+    });
+    const erased = await eraseOrphanReferences(db, await findOrphanReferences(db));
+    expect(erased).toBe(1);
+    expect(rows("Task")).toEqual([{ _id: "t1", assignee: null, assignedBy: HERE, pmAssignedFor: null, watchers: [HERE] }]);
+  });
+
+  it.each([...ORPHAN_SOURCES])("finds an id that only %s still names", async (model, field) => {
+    const { db } = memoryDb({
+      User: [{ _id: HERE }],
+      [model]: [{ _id: "x", [field]: field === "watchers" ? [GONE, HERE] : GONE }],
+    });
+    const orphans = await findOrphanReferences(db);
+    expect(orphans.ids).toEqual([String(GONE)]);
+    expect(orphans.bySource).toEqual({ [`${model}.${field}`]: 1 });
+  });
+
+  it("looks in exactly the places an account's id is stored", () => {
+    expect(ORPHAN_SOURCES.map(([model, field]) => `${model}.${field}`).sort()).toEqual(
+      [
+        "Agent.owner",
+        "AgentBlock.createdBy",
+        "Invitation.acceptedBy",
+        "Notification.actor",
+        "Notification.recipient",
+        "OAuthConsent.user",
+        "PmMessage.triggeredBy",
+        "Task.assignedBy",
+        "Task.assignee",
+        "Task.pmAssignedFor",
+        "Task.watchers",
+        "Worker.owner",
+      ].sort()
+    );
+  });
+
+  it("ignores a value that is not an object id rather than failing on it", async () => {
+    const { db, rows } = memoryDb({
+      User: [{ _id: HERE }],
+      Task: [{ _id: "t1", assignee: "not-an-id", assignedBy: String(GONE), pmAssignedFor: null, watchers: [] }],
+    });
+    const orphans = await findOrphanReferences(db);
+    expect(orphans.ids).toEqual([]);
+    expect(await eraseOrphanReferences(db, orphans)).toBe(0);
+    expect(rows("Task")[0].assignee).toBe("not-an-id");
+  });
+
+  it("removes what an orphan authored and was sent, the way a deletion does, and releases its machines", async () => {
+    const { db, rows } = memoryDb({
+      User: [{ _id: HERE }, { _id: "m1", fullName: "Gone · Studio" }],
+      Agent: [{ _id: "a1", scope: "user", owner: GONE, name: "Gone's agent" }, { _id: "a2", scope: "global", owner: null, name: "Default" }],
+      AgentRun: [{ _id: "r1", agent: "a1", agentName: "Gone's agent" }],
+      AgentBlock: [{ _id: "b1", key: "k", createdBy: GONE }],
+      Notification: [{ _id: "n1", recipient: GONE, actor: HERE }, { _id: "n2", recipient: HERE, actor: HERE }],
+      Task: [{ _id: "t1", agent: "a1", assignee: HERE, watchers: [] }],
+      Worker: [{ _id: "w1", owner: GONE, name: "Studio", identity: "m1", enabled: true, credentialHash: "held" }],
+    });
+    const orphans = await findOrphanReferences(db);
+    expect(await eraseOrphanReferences(db, orphans)).toBe(1);
+
+    expect(rows("Agent").map((a) => a._id)).toEqual(["a2"]);
+    expect(rows("AgentRun")[0]).toMatchObject({ agent: null, agentName: DELETED_AGENT });
+    expect(rows("AgentBlock")[0].createdBy).toBeNull();
+    expect(rows("Notification").map((n) => n._id)).toEqual(["n2"]);
+    expect(rows("Task")[0].agent).toBeNull();
+    expect(rows("Worker")[0]).toMatchObject({ owner: null, enabled: false });
+    expect(rows("User").find((u) => u._id === "m1")?.fullName).toBe("Studio");
+  });
+
+  it("skips an id whose account exists by the time it is erased", async () => {
+    const { db, rows, store } = memoryDb({
+      User: [{ _id: HERE }],
+      Task: [{ _id: "t1", assignee: GONE, assignedBy: null, pmAssignedFor: null, watchers: [] }],
+    });
+    const orphans = await findOrphanReferences(db);
+    expect(orphans.ids).toEqual([String(GONE)]);
+    store.User.push({ _id: GONE });
+    expect(await eraseOrphanReferences(db, orphans)).toBe(0);
+    expect(rows("Task")[0].assignee).toBe(GONE);
+  });
+
+  it("refuses to run against a database with no accounts in it", async () => {
+    const { db } = memoryDb({ User: [], Task: [{ _id: "t1", assignee: GONE, watchers: [] }] });
+    await expect(eraseOrphanReferences(db, await findOrphanReferences(db))).rejects.toThrow(/no users/);
   });
 });

@@ -29,6 +29,8 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   // Also imported by kanban/TaskCard.tsx, ProjectBoardView.tsx and ListView.tsx (board renders task
   // cards using these) — verified via grep, not assumed from the directory name alone.
   { prefix: "src/components/tasks/", groups: ["tasks", "task-fields", "board"] },
+  // Its record is driven in refused-change-decision.spec.ts, and the line about who answered after a deletion in account-deletion-residue.spec.ts
+  { prefix: "src/components/tasks/DecisionPanel", groups: ["tasks", "task-fields", "board", "automation", "people"] },
   { prefix: "src/components/tasks/GitlabActivity", groups: ["tasks", "task-fields", "board", "project"] },
   // Their failed reads and the tab counts are pinned in failed-read-states.spec.ts, which is in the project group
   { prefix: "src/components/tasks/Comments", groups: ["tasks", "task-fields", "board", "project"] },

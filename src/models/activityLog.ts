@@ -69,6 +69,8 @@ const activityLogSchema = new Schema<IActivityLog>(
 
 activityLogSchema.index({ task: 1, createdAt: -1 });
 activityLogSchema.index({ task: 1, createdAt: -1, _id: -1 });
+// An account export reads what one person did, across every task
+activityLogSchema.index({ user: 1, createdAt: -1 });
 
 withOrganisation(activityLogSchema);
 

@@ -482,10 +482,15 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
           </a>
         )}
 
-        {decision.decidedBy && decision.decidedAt && (
+        {decision.decidedAt && (
           <div className="text-xs text-text-muted" data-testid="decision-decided-by">
-            {/* With the verb. A bare name and date above the buttons reads as the assignee. */}
-            {ANSWERED_BY[state]} {decision.decidedBy.fullName || decision.decidedBy.username} ·{" "}
+            {/* With the verb. A bare name and date above the buttons reads as the assignee. A time with
+                nobody beside it is an answer by an account that has since been deleted. */}
+            {ANSWERED_BY[state]}{" "}
+            {decision.decidedBy
+              ? decision.decidedBy.fullName || decision.decidedBy.username
+              : "Deleted user"}{" "}
+            ·{" "}
             {new Date(decision.decidedAt).toLocaleString()}
           </div>
         )}

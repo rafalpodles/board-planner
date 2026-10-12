@@ -40,7 +40,7 @@ export function exportableRow(model: string, document: Record<string, unknown>):
   return dropPaths(dropSecrets(model, kept), NOT_EXPORTED_PATHS[model] ?? []);
 }
 
-function modelOf(db: ScopedDb, name: string) {
+export function modelOf(db: ScopedDb, name: string) {
   const model = (db as unknown as Record<string, ScopedDb["User"] | undefined>)[name];
   if (!model) throw new Error(`${name} is a scoped model with no entry in SCOPED_MODELS`);
   return model;
@@ -138,7 +138,7 @@ export async function sweepDeletedOrganisations(now = Date.now()): Promise<numbe
   return expired.length;
 }
 
-const line = (value: unknown) => `${mongoose.mongo.BSON.EJSON.stringify(value, { relaxed: false })}\n`;
+export const line = (value: unknown) => `${mongoose.mongo.BSON.EJSON.stringify(value, { relaxed: false })}\n`;
 
 export class ExportCutShortError extends Error {
   constructor() {
@@ -149,8 +149,36 @@ export class ExportCutShortError extends Error {
 
 // Asked between pages, not once at the start: a delete begun during a long stream would otherwise leave
 // a partial copy that ends as cleanly as a whole one
-async function stillThere(organisation: Types.ObjectId): Promise<void> {
+export async function stillThere(organisation: Types.ObjectId): Promise<void> {
   if ((await Organisation.exists({ _id: organisation, deletedAt: null, deletingAt: null })) === null) throw new ExportCutShortError();
+}
+
+// One model's rows as export lines; `filter` narrows it, and the schema's hidden fields come with them
+export async function* exportedRows(
+  db: ScopedDb,
+  name: string,
+  filter: Record<string, unknown> = {},
+  onRow?: (document: Record<string, unknown>) => void
+): AsyncGenerator<string> {
+  const model = modelOf(db, name);
+  const hidden = hiddenPaths(name);
+  let after: Types.ObjectId | null = null;
+  while (true) {
+    await stillThere(db.organisation);
+    const page = (await model
+      .find(after ? { $and: [filter, { _id: { $gt: after } }] } : filter)
+      .select(hidden.join(" "))
+      .sort({ _id: 1 })
+      .limit(EXPORT_PAGE)
+      .lean()) as unknown as Record<string, unknown>[];
+    for (const document of page) {
+      const row = exportableRow(name, document);
+      onRow?.(row);
+      yield line({ collection: name, document: row });
+    }
+    if (page.length < EXPORT_PAGE) break;
+    after = page[page.length - 1]._id as Types.ObjectId;
+  }
 }
 
 // Paged by _id rather than one long cursor, which the server closes after ten idle minutes of a slow download
@@ -165,23 +193,7 @@ export async function* organisationExport(db: ScopedDb): AsyncGenerator<string> 
     collections: [...exported, `${UPLOAD_BUCKET}.files`, `${UPLOAD_BUCKET}.chunks`],
     notExported: NOT_EXPORTED,
   });
-  for (const name of exported) {
-    const model = modelOf(db, name);
-    const hidden = hiddenPaths(name);
-    let after: Types.ObjectId | null = null;
-    while (true) {
-      await stillThere(db.organisation);
-      const page = (await model
-        .find(after ? { _id: { $gt: after } } : {})
-        .select(hidden.join(" "))
-        .sort({ _id: 1 })
-        .limit(EXPORT_PAGE)
-        .lean()) as unknown as Record<string, unknown>[];
-      for (const document of page) yield line({ collection: name, document: exportableRow(name, document) });
-      if (page.length < EXPORT_PAGE) break;
-      after = page[page.length - 1]._id as Types.ObjectId;
-    }
-  }
+  for (const name of exported) yield* exportedRows(db, name);
   const uploads = organisationUploads(db);
   if (uploads) {
     let sent = 0;

@@ -138,6 +138,7 @@ export const GROUPS = {
     "mcp-config.spec.ts",
   ],
   people: [
+    "account-deletion-residue.spec.ts",
     "account-self-service.spec.ts",
     "day-zero.spec.ts",
     "bounded-bodies.spec.ts",
@@ -178,6 +179,7 @@ export const GROUPS = {
     "organisations-copy.spec.ts",
     "organisations-addresses.spec.ts",
     "organisations-boards.spec.ts",
+    "organisations-project-export.spec.ts",
     "organisations-name.spec.ts",
     "organisations-public-pages.spec.ts",
     "organisations-sign-in.spec.ts",

@@ -1698,7 +1698,8 @@ export type ProjectAuditAction =
   | "bulk_move"
   | "worker_updated"
   | "webhook_secret_revealed"
-  | "webhook_secret_rotated";
+  | "webhook_secret_rotated"
+  | "project_exported";
 
 // The kill switch first, because "who stopped this machine" is the question this log exists to
 // answer. Separate verbs rather than one worker_updated with a detail column: an operator scanning

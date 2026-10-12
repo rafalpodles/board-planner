@@ -66,8 +66,8 @@ const SECTIONS: SectionMeta[] = [
     label: "General",
     title: "General",
     blurb:
-      "What this project is called, who can change its settings, and how to remove it.",
-    keywords: "name key icon description owner admins access delete rename",
+      "What this project is called, who can change its settings, how to take a copy out and how to remove it.",
+    keywords: "name key icon description owner admins access delete rename export download backup copy",
     access: "projectAdmin",
     icon: <Icon d="M4 6h16M4 12h16M4 18h10" />,
   },
