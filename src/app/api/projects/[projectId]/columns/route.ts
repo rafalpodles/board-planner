@@ -9,16 +9,11 @@ import {
   columnLabelOrRefusal,
   effectiveColumns,
   freeColumnId,
+  LOAD_BEARING_ROLES as LOAD_BEARING,
   MAX_COLUMNS,
   MAX_COLUMN_LABEL as MAX_LABEL,
   slugify,
 } from "@/lib/columns";
-
-// What a board loses with its last column of the role, in the refusal's own words
-const LOAD_BEARING: Partial<Record<ColumnRole, string>> = {
-  done: "sprint progress reads 0% for ever and no worker will take a task from it",
-  active: "a worker has nowhere to move a task it takes, so it claims nothing",
-};
 
 export const GET = withProjectOwner(async (_request, { params, db }) => {
   const { projectId } = await params;

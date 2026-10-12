@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
+import { PROJECT_ICONS } from "@/types";
 
 const getAuthUser = vi.fn();
 const accessibleProjectIds = vi.fn();
@@ -8,6 +9,11 @@ const projectFind = vi.fn();
 const projectCreate = vi.fn();
 const projectDeleteOne = vi.fn();
 const grantCreate = vi.fn();
+const grantInsertMany = vi.fn();
+const grantDeleteMany = vi.fn();
+const userFind = vi.fn();
+const auditAccess = vi.fn();
+const announceAccess = vi.fn();
 const taskAggregate = vi.fn();
 const sprintFind = vi.fn();
 
@@ -20,7 +26,11 @@ vi.mock("@/lib/grants", () => ({ accessibleProjectIds, administeredProjectIds })
 vi.mock("@/models/project", () => ({
   Project: { find: projectFind, create: projectCreate, deleteOne: projectDeleteOne },
 }));
-vi.mock("@/models/grant", () => ({ Grant: { create: grantCreate } }));
+vi.mock("@/models/grant", () => ({
+  Grant: { create: grantCreate, insertMany: grantInsertMany, deleteMany: grantDeleteMany },
+}));
+vi.mock("@/models/user", () => ({ User: { find: userFind } }));
+vi.mock("@/lib/board-access", () => ({ auditAccess, announceAccess }));
 vi.mock("@/models/task", () => ({ Task: { aggregate: taskAggregate, findOne: vi.fn() } }));
 vi.mock("@/models/sprint", () => ({ Sprint: { find: sprintFind } }));
 
@@ -65,6 +75,10 @@ beforeEach(() => {
   );
   projectDeleteOne.mockResolvedValue({ deletedCount: 1 });
   grantCreate.mockResolvedValue({ _id: "g1" });
+  grantInsertMany.mockResolvedValue([]);
+  grantDeleteMany.mockResolvedValue({ deletedCount: 0 });
+  userFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
+  announceAccess.mockResolvedValue(undefined);
   taskAggregate.mockResolvedValue([]);
   sprintFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
 });
@@ -179,6 +193,233 @@ describe("POST /api/projects", () => {
     await expect(POST(post({ name: "New", key: "NEW" }), ctx())).rejects.toThrow("duplicate key");
 
     expect(projectDeleteOne).toHaveBeenCalledWith({ _id: NEW_PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID });
+  });
+});
+
+// BP-199: the new-project wizard collects everything first and creates the board in one request, so
+// a failure at any point must leave nothing behind and a success must be the board the person saw
+describe("POST /api/projects — a project created with its setup", () => {
+  const ANNA = "64b0000000000000000000a1";
+  const PIOTR = "64b0000000000000000000a2";
+  const SETUP_COLUMNS = [
+    { label: "Backlog", role: "backlog" },
+    { label: "To Do", role: "approved" },
+    { label: "Doing", role: "active" },
+    { label: "Done", role: "done" },
+  ];
+
+  function people(...rows: { _id: string; username: string }[]) {
+    userFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(rows) }) });
+  }
+
+  it("stores the icon, columns, categories, repository and PM switch it was given", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    const response = await POST(
+      post({
+        name: "Search Revamp",
+        key: "SR",
+        icon: PROJECT_ICONS[1],
+        columns: SETUP_COLUMNS,
+        categories: [{ name: "bug", color: "#ef4444" }],
+        repositoryUrl: " https://github.com/acme/search ",
+        pm: { enabled: true },
+      }),
+      ctx()
+    );
+
+    expect(response.status).toBe(201);
+    const created = projectCreate.mock.calls[0][0];
+    expect(created.icon).toBe(PROJECT_ICONS[1]);
+    expect(created.columns.map((c: { id: string; role: string; order: number }) => [c.id, c.role, c.order])).toEqual([
+      ["backlog", "backlog", 0],
+      ["to_do", "approved", 1],
+      ["doing", "active", 2],
+      ["done", "done", 3],
+    ]);
+    expect(created.categories).toEqual([{ name: "bug", color: "#ef4444" }]);
+    expect(created.repositoryUrl).toBe("https://github.com/acme/search");
+    expect(created.pm).toEqual({ enabled: true });
+  });
+
+  // Without this the test above would pass on a route that always writes every field
+  it("leaves the schema defaults alone for everything it was not given", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    await POST(post({ name: "Plain", key: "PLN" }), ctx());
+
+    const created = projectCreate.mock.calls[0][0];
+    for (const field of ["icon", "columns", "categories", "repositoryUrl", "pm"]) {
+      expect(created).not.toHaveProperty(field);
+    }
+    expect(grantInsertMany).not.toHaveBeenCalled();
+  });
+
+  it("starts the Component and Labels fields with the options it was given", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    await POST(
+      post({
+        name: "Fields",
+        key: "FLD",
+        components: ["api", "web"],
+        labels: [{ name: "Security", color: "#ef4444" }, "Needs docs"],
+      }),
+      ctx()
+    );
+
+    const fields = projectCreate.mock.calls[0][0].customFields as {
+      name: string;
+      options: { value: string; color: string }[];
+    }[];
+    const options = (name: string) => fields.find((f) => f.name === name)?.options.map((o) => [o.value, o.color]);
+    expect(options("Component")?.map(([value]) => value)).toEqual(["api", "web"]);
+    expect(options("Labels")?.[0]).toEqual(["Security", "#ef4444"]);
+    expect(options("Labels")?.[1][0]).toBe("Needs docs");
+    // The Difficulty field is not the wizard's to change
+    expect(options("Difficulty")?.map(([value]) => value)).toEqual(["S", "M", "L", "XL"]);
+  });
+
+  it("grants everyone it was given access for in one write, as the creator", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    people({ _id: ANNA, username: "anna" }, { _id: PIOTR, username: "piotr" });
+
+    const response = await POST(
+      post({
+        name: "Shared",
+        key: "SHR",
+        access: [
+          { userId: ANNA, relation: "member" },
+          { userId: PIOTR, relation: "owner" },
+        ],
+      }),
+      ctx()
+    );
+
+    expect(response.status).toBe(201);
+    expect(grantInsertMany).toHaveBeenCalledTimes(1);
+    expect(grantInsertMany.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ subject: ANNA, relation: "member", object: NEW_PROJECT_ID, createdBy: ADMIN._id }),
+      expect.objectContaining({ subject: PIOTR, relation: "owner", object: NEW_PROJECT_ID, createdBy: ADMIN._id }),
+    ]);
+  });
+
+  it("looks the people up as live human accounts of this organisation", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    people({ _id: ANNA, username: "anna" });
+
+    await POST(post({ name: "Shared", key: "SHR", access: [{ userId: ANNA, relation: "member" }] }), ctx());
+
+    expect(userFind).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _id: { $in: [ANNA] },
+        kind: { $ne: "machine" },
+        deactivatedAt: null,
+        organisation: DEFAULT_ORGANISATION_ID,
+      })
+    );
+  });
+
+  it("does not grant the creator a second time when the request lists them", async () => {
+    getAuthUser.mockResolvedValue({ ...ADMIN, _id: ANNA });
+
+    const response = await POST(
+      post({ name: "Mine", key: "MNE", access: [{ userId: ANNA, relation: "member" }] }),
+      ctx()
+    );
+
+    expect(response.status).toBe(201);
+    expect(grantCreate).toHaveBeenCalledTimes(1);
+    expect(grantCreate.mock.calls[0][0]).toMatchObject({ relation: "owner" });
+    expect(grantInsertMany).not.toHaveBeenCalled();
+  });
+
+  it("creates nothing when somebody it was asked to add is gone or deactivated", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    people({ _id: ANNA, username: "anna" });
+
+    const response = await POST(
+      post({
+        name: "Ghosts",
+        key: "GHO",
+        access: [
+          { userId: ANNA, relation: "member" },
+          { userId: PIOTR, relation: "member" },
+        ],
+      }),
+      ctx()
+    );
+
+    expect(response.status).toBe(400);
+    expect(projectCreate).not.toHaveBeenCalled();
+    expect(grantCreate).not.toHaveBeenCalled();
+  });
+
+  // A board with half its people is worse than no board: the person sees an error and creates it again
+  it("removes the project and every grant that landed when the others cannot be written", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    people({ _id: ANNA, username: "anna" });
+    grantInsertMany.mockRejectedValue(new Error("write failed"));
+
+    await expect(
+      POST(post({ name: "Shared", key: "SHR", access: [{ userId: ANNA, relation: "member" }] }), ctx())
+    ).rejects.toThrow("write failed");
+
+    expect(grantDeleteMany).toHaveBeenCalledWith({
+      objectType: "project",
+      object: NEW_PROJECT_ID,
+      organisation: DEFAULT_ORGANISATION_ID,
+    });
+    expect(projectDeleteOne).toHaveBeenCalledWith({ _id: NEW_PROJECT_ID, organisation: DEFAULT_ORGANISATION_ID });
+  });
+
+  it("records and announces each person it added, and nobody else", async () => {
+    getAuthUser.mockResolvedValue({ ...ADMIN, fullName: "Ada Admin", username: "ada" });
+    people({ _id: ANNA, username: "anna" });
+
+    await POST(post({ name: "Shared", key: "SHR", access: [{ userId: ANNA, relation: "owner" }] }), ctx());
+
+    expect(auditAccess).toHaveBeenCalledTimes(1);
+    expect(auditAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      NEW_PROJECT_ID,
+      ADMIN._id,
+      "anna",
+      undefined,
+      "owner"
+    );
+    expect(announceAccess).toHaveBeenCalledTimes(1);
+    expect(announceAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ recipientId: ANNA, relation: "owner", added: true, actorName: "Ada Admin" })
+    );
+  });
+
+  it.each([
+    ["no column means Done", { columns: [{ label: "Doing", role: "active" }] }],
+    ["no column means In progress", { columns: [{ label: "Done", role: "done" }] }],
+    ["more columns than a board may have", { columns: Array.from({ length: 13 }, (_, i) => ({ label: `C${i}`, role: "done" })) }],
+    ["a category named twice", { categories: [{ name: "Bug" }, { name: "bug" }] }],
+    ["an icon the picker does not offer", { icon: "not-an-icon" }],
+    ["a person with a role that does not exist", { access: [{ userId: "64b0000000000000000000a1", relation: "viewer" }] }],
+    ["the same person twice", { access: [{ userId: "64b0000000000000000000a1", relation: "member" }, { userId: "64b0000000000000000000a1", relation: "owner" }] }],
+  ])("refuses %s, and creates nothing", async (_label, extra) => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    const response = await POST(post({ name: "Bad", key: "BAD", ...extra }), ctx());
+
+    expect(response.status).toBe(400);
+    expect(projectCreate).not.toHaveBeenCalled();
+    expect(grantCreate).not.toHaveBeenCalled();
+  });
+
+  it("still lets only an instance admin create a board", async () => {
+    getAuthUser.mockResolvedValue(MEMBER);
+
+    const response = await POST(post({ name: "Nope", key: "NOP", columns: SETUP_COLUMNS }), ctx());
+
+    expect(response.status).toBe(403);
+    expect(projectCreate).not.toHaveBeenCalled();
   });
 });
 
