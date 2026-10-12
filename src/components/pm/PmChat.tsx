@@ -82,10 +82,14 @@ export function PmChat({
   const [liveActions, setLiveActions] = useState<{ tool: string; taskKey?: string; summary: string }[]>([]);
   const [recovering, setRecovering] = useState(false);
   const [stopping, setStopping] = useState(false);
-  // The server takes a turn's lock before it answers the send, so an answer means the turn is held.
-  // Until then a Stop has nothing to stop: the server says so, and that is not "it finished".
+  // The server takes a turn's lock before it answers the send, and answers at once, so an answer
+  // means the turn is held. Until then a Stop may have nothing to stop: the server says so, and that
+  // is not "it finished".
   const turnAccepted = useRef(false);
   const stopPending = useRef(false);
+  // Which send a Stop was pressed for. A refused send ends its generation, so a Stop answered late
+  // cannot be held over for the next one.
+  const sendGeneration = useRef(0);
   const [errorState, setErrorState] = useState("");
   const [lastFailedInput, setLastFailedInput] = useState("");
   // Separate from the text: a refused image-only send has nothing typed, and `lastFailedInput`
@@ -203,6 +207,7 @@ export function PmChat({
 
   async function requestStop() {
     const heldWhenAsked = turnAccepted.current;
+    const generation = sendGeneration.current;
     try {
       await api.post(`/api/projects/${projectId}/pm/interrupt`, {});
     } catch (error) {
@@ -213,6 +218,8 @@ export function PmChat({
       if (noTurn) {
         // Finished on its own, when the server had answered the send before this was asked
         if (heldWhenAsked) return;
+        // The send this was for has been refused, or replaced: there is no turn coming to stop
+        if (generation !== sendGeneration.current) return;
         // Answered in the meantime, so the lock may have been taken after the server looked: ask again
         if (turnAccepted.current) return requestStop();
         // The send has not reached the lock yet. The turn is about to start, and nothing the person
@@ -307,6 +314,7 @@ export function PmChat({
     setInput("");
     setStopping(false);
     turnAccepted.current = false;
+    sendGeneration.current++;
     setWorking(true);
     setWorkingStatus("PM is thinking…");
     setLiveActions([]);
@@ -343,6 +351,7 @@ export function PmChat({
     function unsend(reason: string, worthRetrying: boolean) {
       // A Stop pressed for a turn that was never taken has nothing left to stop
       stopPending.current = false;
+      sendGeneration.current++;
       setWorking(false);
       setWorkingStatus("");
       setThread((current) => ({ ...current, messages: current.messages.filter((m) => m._id !== optimisticId) }));

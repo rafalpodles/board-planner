@@ -515,8 +515,10 @@ test.describe("a turn, from the box to the bubble", () => {
     expect((await interrupted).status()).toBe(404);
     await expect(page.getByText("Stopping…")).toBeVisible();
 
+    // Inside the 15 s heartbeat: the answer to the send has to leave when the lock is taken, not
+    // with the first event or the first ping, or the second Stop would wait for one of them
     release();
-    await expect(reply(page)).toContainText("⏹ Stopped by user.", { timeout: 20_000 });
+    await expect(reply(page)).toContainText("⏹ Stopped by user.", { timeout: 10_000 });
     await expect(reply(page)).not.toContainText("Too late.");
     await expect(chatBox(page)).toBeEnabled();
     await expect(sendButton(page)).toBeVisible();

@@ -607,6 +607,36 @@ describe("a Stop pressed before the server has taken the turn", () => {
     await waitFor(() => expect(interrupts()).toBe(2));
   });
 
+  it("does not stop the next turn with a Stop that was answered after its own send was refused", async () => {
+    const first = await sendHeld();
+    let late!: (error: Error) => void;
+    api.post.mockReturnValueOnce(new Promise((_, reject) => (late = reject)));
+    await act(async () => stopButton().click());
+    // Refused first, and only then does the server's "no turn" reach the browser
+    await act(async () => {
+      first.answer(new Response(JSON.stringify({ error: "Someone is already talking" }), { status: 409 }));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.queryByText("Stopping…")).toBeNull());
+    await act(async () => {
+      late(NO_TURN);
+      await Promise.resolve();
+    });
+
+    api.stream.mockResolvedValue(heldStream().response);
+    const box = screen.getByRole("textbox");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "Another try.");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: /send/i }).click();
+    });
+    await screen.findByRole("button", { name: /stop the pm turn/i });
+
+    expect(interrupts(), "the old Stop was not applied to a turn nobody stopped").toBe(1);
+  });
+
   it("leaves no \"Stopping…\" behind when the send is refused", async () => {
     const { answer } = await sendHeld();
     api.post.mockRejectedValue(NO_TURN);
