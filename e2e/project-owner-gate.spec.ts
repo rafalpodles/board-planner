@@ -144,6 +144,15 @@ const RECIPES: Record<string, Recipe> = {
     send: (request, path) => request.delete(path, { headers: SAME_ORIGIN }),
     handled: { status: 400, body: /userId is required/ },
   },
+  // BP-862: which identity provider groups give which role on the board
+  "GET /api/projects/[projectId]/group-roles": {
+    send: get,
+    handled: { status: 200, body: /^\{"map":\[\],"hasProvider":(true|false)\}$/ },
+  },
+  "PUT /api/projects/[projectId]/group-roles": {
+    send: withBody("put", { map: "not a list" }),
+    handled: { status: 400, body: /map must be a list of groups and roles/ },
+  },
   "GET /api/projects/[projectId]/invitations": { send: get, handled: { status: 200, body: JSON_ARRAY } },
   "POST /api/projects/[projectId]/invitations": {
     send: withBody("post", {}),
@@ -467,6 +476,18 @@ const INLINE_RECIPES: Record<string, InlineRecipe> = {
     send: (request, path) => request.delete(path, { headers: SAME_ORIGIN }),
     member: { status: 403, body: /Only the board's owner may delete a task/ },
     owner: { status: 200, body: /Task deleted/ },
+  },
+  // BP-1034: the setup guide is shown to the board's owner, and a member is answered with nothing
+  "GET /api/projects/[projectId]/setup-guide": {
+    send: get,
+    read: field((guide: { show: boolean }) => guide.show),
+    member: { status: 200, body: NO },
+    owner: { status: 200, body: YES },
+  },
+  "PUT /api/projects/[projectId]/setup-guide": {
+    send: withBody("put", {}),
+    member: { status: 403, body: /Forbidden/ },
+    owner: { status: 200, body: /"ok":true/ },
   },
   "GET /api/projects/[projectId]/handover": {
     send: get,

@@ -198,12 +198,13 @@ describe("PUT setup guide", () => {
     expect(update).toEqual({ $push: { dismissedSetupGuides: { $each: [PROJECT], $slice: -200 } } });
   });
 
-  it("records nothing for somebody who is shown no guide", async () => {
+  it("refuses, and records nothing, for somebody who is shown no guide", async () => {
     check.mockImplementation(async (_db: unknown, _user: unknown, _project: string, need: string) => need === "access");
 
     const res = await hide();
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "Forbidden" });
     expect(userUpdate).not.toHaveBeenCalled();
   });
 

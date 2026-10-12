@@ -93,7 +93,7 @@ export const PUT = withProjectAccess(async (_request, { params, user, db }) => {
   await connectDB();
 
   // Only somebody who is shown a guide has one to hide; a narrowed token or a member hides nothing
-  if (!(await check(db, user, projectId, "admin"))) return NextResponse.json({ ok: true });
+  if (!(await check(db, user, projectId, "admin"))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const me = await db.User.findById(user._id, "dismissedSetupGuides").lean();
   if (!(me?.dismissedSetupGuides ?? []).some((id) => String(id) === String(projectId))) {
