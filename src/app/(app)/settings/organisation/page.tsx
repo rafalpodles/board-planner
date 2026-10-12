@@ -13,6 +13,7 @@ import { useToast } from "@/components/ui/Toast";
 import { LicenceDetails, type LicenceSummary } from "@/components/settings/LicenceDetails";
 import { Subscription } from "@/components/settings/Subscription";
 import { StorageUsage } from "@/components/settings/StorageUsage";
+import { BuildVersion } from "@/components/settings/BuildVersion";
 
 export default function OrganisationSettingsPage() {
   const api = useApi();
@@ -122,6 +123,7 @@ export default function OrganisationSettingsPage() {
               <StorageUsage key={planKey} />
             </>
           )}
+          <BuildVersion />
         </dl>
       </section>
 
