@@ -35,7 +35,7 @@ export async function accountExport(db: ScopedDb, user: IdentifiedSubject) {
     db.OAuthToken.find({ user: userId }).select("clientId scope allowedProjects createdAt accessExpiresAt").sort({ createdAt: 1 }).lean(),
     db.ActivityLog.find({ user: userId })
       .select("task action field oldValue newValue createdAt")
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: -1, _id: -1 })
       .limit(ACTIVITY_EXPORT_LIMIT + 1)
       .lean(),
     db.Agent.find({ scope: "user", owner: userId }).select("name description composition createdAt").sort({ createdAt: 1 }).lean(),

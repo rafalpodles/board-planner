@@ -60,6 +60,7 @@ function database() {
     Project: [
       { _id: OPEN, key: "BP", name: "Open" },
       { _id: CLOSED, key: "SEC", name: "Closed" },
+      { _id: "6a9d0f0b5d781bded2cb9804", key: "LATER", name: "Only an app reaches it" },
     ],
     Session: [
       { user: JAN, tokenHash: "session-hash-never-exported", userAgent: "Firefox", ip: "203.0.113.5", createdAt: "2026-08-01", lastUsedAt: "2026-08-02", expiresAt: "2026-09-01" },
@@ -68,6 +69,7 @@ function database() {
     OAuthToken: [
       { user: JAN, accessTokenHash: "access-hash-never-exported", refreshTokenHash: "refresh-hash-never-exported", clientId: "claude", scope: "mcp", allowedProjects: [OPEN], createdAt: "2026-08-03", accessExpiresAt: "2026-08-04", refreshExpiresAt: "2026-09-04" },
       { user: JAN, accessTokenHash: "second-access", refreshTokenHash: "second-refresh", clientId: "cursor", scope: "mcp", allowedProjects: [], createdAt: "2026-08-05", accessExpiresAt: "2026-08-06", refreshExpiresAt: "2026-09-06" },
+      { user: JAN, accessTokenHash: "third-access", refreshTokenHash: "third-refresh", clientId: "desktop", scope: "mcp", allowedProjects: ["6a9d0f0b5d781bded2cb9804"], createdAt: "2026-08-07", accessExpiresAt: "2026-08-08", refreshExpiresAt: "2026-09-08" },
       { user: OLA, accessTokenHash: "other-access", refreshTokenHash: "other-refresh", clientId: "olas-client", scope: "mcp", allowedProjects: [] },
     ],
     ActivityLog: [
@@ -108,7 +110,7 @@ describe("a person's own export", () => {
 
   it("never carries a password hash, a token hash, a provider's subject or a webhook address", async () => {
     const text = JSON.stringify(await accountExport(database().db, ME));
-    for (const secret of ["bcrypt-hash-never-exported", "never-exported", "g-secret-subject", "hooks.slack.com", "SECRET", "access-hash", "refresh-hash", "second-access", "second-refresh"]) {
+    for (const secret of ["bcrypt-hash-never-exported", "never-exported", "g-secret-subject", "hooks.slack.com", "SECRET", "access-hash", "refresh-hash", "second-access", "second-refresh", "third-access", "third-refresh"]) {
       expect(text).not.toContain(secret);
     }
   });
@@ -136,6 +138,7 @@ describe("a person's own export", () => {
     expect(data.connectedApps).toEqual([
       { client: "claude", scope: "mcp", boards: ["BP"], grantedAt: "2026-08-03", accessExpiresAt: "2026-08-04" },
       { client: "cursor", scope: "mcp", boards: [], grantedAt: "2026-08-05", accessExpiresAt: "2026-08-06" },
+      { client: "desktop", scope: "mcp", boards: ["LATER"], grantedAt: "2026-08-07", accessExpiresAt: "2026-08-08" },
     ]);
     expect(data.personalAgents).toEqual([
       {
@@ -182,14 +185,21 @@ describe("a person's own export", () => {
     expect(data.activity.at(-1)).toMatchObject({ task: "ELSE-4", from: "a", to: "b" });
   });
 
-  it("stops at a bound and says so, keeping the most recent changes the memory-db sort cannot order", async () => {
-    const { db, store } = database();
-    store.ActivityLog = Array.from({ length: ACTIVITY_EXPORT_LIMIT + 1 }, (_, i) => ({
-      user: JAN, task: "t1", action: "updated", field: "title", oldValue: String(i), newValue: String(i + 1), createdAt: "2026-04-01",
+  it("stops at a bound and says so, keeping the most recent changes in order", async () => {
+    const { db, store, calls } = database();
+    const pad = (n: number) => `2027-${String(n).padStart(6, "0")}`;
+    store.ActivityLog = Array.from({ length: ACTIVITY_EXPORT_LIMIT + 5 }, (_, i) => ({
+      user: JAN, task: "t1", action: "updated", field: "title", oldValue: String(i), newValue: String(i + 1), createdAt: pad(i),
     }));
     const data = await accountExport(db, ME);
+
     expect(data.activity).toHaveLength(ACTIVITY_EXPORT_LIMIT);
     expect((data as { activityTruncated?: boolean }).activityTruncated).toBe(true);
+    expect(data.activity[0]).toMatchObject({ from: "5" });
+    expect(data.activity.at(-1)).toMatchObject({ to: String(ACTIVITY_EXPORT_LIMIT + 5) });
+    // The database is told to stop too: the slice above would hide a query that reads every row
+    const asked = calls.find((c) => c.model === "ActivityLog" && c.op === "find");
+    expect(asked?.options).toMatchObject({ limit: ACTIVITY_EXPORT_LIMIT + 1 });
   });
 
   it("does not flag a history that fits", async () => {

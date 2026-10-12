@@ -314,18 +314,21 @@ describe("what a person authored for the machines", () => {
     ]);
   });
 
-  it("rewrites the agent's name in task history, only on tasks the person pointed it at", async () => {
+  it("rewrites the agent's names in task history, a renamed one included, and keeps the names of agents that stay", async () => {
     const { db, rows } = memoryDb({
       Agent: [
-        { _id: "g1", scope: "user", owner: JAN, name: "Default" },
+        { _id: "g1", scope: "user", owner: JAN, name: "Jan's night agent" },
         { _id: "g4", scope: "global", owner: null, name: "Default" },
       ],
       ActivityLog: [
-        { _id: "h1", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "Default" },
-        { _id: "h2", task: "t1", user: OLA, field: "agent", oldValue: "Default", newValue: "" },
-        { _id: "h3", task: "t2", user: OLA, field: "agent", oldValue: "", newValue: "Default" },
-        { _id: "h4", task: "t1", user: JAN, field: "title", oldValue: "Default", newValue: "x" },
-        { _id: "h5", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "g1" },
+        { _id: "h1", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "Jan's first name for it" },
+        { _id: "h2", task: "t1", user: OLA, field: "agent", oldValue: "Jan's first name for it", newValue: "" },
+        { _id: "h3", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "Default" },
+        { _id: "h4", task: "t2", user: OLA, field: "agent", oldValue: "", newValue: "Jan's night agent" },
+        { _id: "h5", task: "t1", user: JAN, field: "title", oldValue: "Jan's night agent", newValue: "x" },
+        { _id: "h6", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "g1" },
+        { _id: "h7", task: "t1", user: JAN, field: "agent", oldValue: "g4", newValue: DELETED_AGENT },
+        { _id: "h8", task: "t2", user: OLA, field: "agent", oldValue: "Somebody else's agent", newValue: "" },
       ],
     });
     await eraseAccountTraces(db, USER);
@@ -333,9 +336,25 @@ describe("what a person authored for the machines", () => {
       ["h1", "", DELETED_AGENT],
       ["h2", DELETED_AGENT, ""],
       ["h3", "", "Default"],
-      ["h4", "Default", "x"],
-      ["h5", "", DELETED_AGENT],
+      ["h4", "", "Jan's night agent"],
+      ["h5", "Jan's night agent", "x"],
+      ["h6", "", DELETED_AGENT],
+      ["h7", "g4", DELETED_AGENT],
+      ["h8", "Somebody else's agent", ""],
     ]);
+  });
+
+  it("also reaches a task that carries the agent with no row of its own, and a custom field called agent is left alone", async () => {
+    const { db, rows } = memoryDb({
+      Agent: [{ _id: "g1", scope: "user", owner: JAN, name: "Jan's refactorer" }],
+      Task: [{ _id: "t5", agent: "g1", assignee: null, watchers: [] }],
+      ActivityLog: [
+        { _id: "h1", task: "t5", user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+        { _id: "h2", task: "t5", user: OLA, field: "agent", customField: true, oldValue: "Jan's refactorer", newValue: "x" },
+      ],
+    });
+    await eraseAccountTraces(db, USER);
+    expect(rows("ActivityLog").map((r) => r.oldValue)).toEqual([DELETED_AGENT, "Jan's refactorer"]);
   });
 
   it("leaves history alone when the person had no personal agent", async () => {
@@ -372,6 +391,22 @@ describe("what a person authored for the machines", () => {
     const release = calls.findIndex((c) => c.model === "Worker" && c.op === "updateOne");
     expect(rename).toBeGreaterThan(-1);
     expect(rename).toBeLessThan(release);
+  });
+
+  it("deletes the agent only after everything that names it has been rewritten", async () => {
+    const { db, calls } = memoryDb({
+      Agent: [{ _id: "g1", scope: "user", owner: JAN, name: "Jan's refactorer" }],
+      Task: [{ _id: "t1", agent: "g1", watchers: [] }],
+      AgentRun: [{ _id: "r1", agent: "g1", agentName: "Jan's refactorer" }],
+      ActivityLog: [{ _id: "h1", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "Jan's refactorer" }],
+    });
+    await eraseAccountTraces(db, USER);
+    const at = (model: string, op: string) => calls.findIndex((c) => c.model === model && c.op === op);
+    const remove = at("Agent", "deleteMany");
+    expect(remove).toBeGreaterThan(-1);
+    for (const [model, op] of [["ActivityLog", "updateMany"], ["Task", "updateMany"], ["AgentRun", "updateMany"]] as const) {
+      expect(calls.findIndex((c, i) => c.model === model && c.op === op && i > calls.findIndex((x) => x.model === "Agent" && x.op === "find"))).toBeLessThan(remove);
+    }
   });
 
   it("does nothing a second time", async () => {
@@ -422,9 +457,22 @@ describe("references an earlier deletion left behind", () => {
     expect(orphans.bySource).toEqual({ [`${model}.${field}`]: 1 });
   });
 
-  it("covers every model the erasure of one account reaches by id", () => {
-    expect(ORPHAN_SOURCES.map(([model]) => model)).toEqual(
-      expect.arrayContaining(["Task", "Notification", "PmMessage", "OAuthConsent", "Invitation", "Worker", "Agent", "AgentBlock"])
+  it("looks in exactly the places an account's id is stored", () => {
+    expect(ORPHAN_SOURCES.map(([model, field]) => `${model}.${field}`).sort()).toEqual(
+      [
+        "Agent.owner",
+        "AgentBlock.createdBy",
+        "Invitation.acceptedBy",
+        "Notification.actor",
+        "Notification.recipient",
+        "OAuthConsent.user",
+        "PmMessage.triggeredBy",
+        "Task.assignedBy",
+        "Task.assignee",
+        "Task.pmAssignedFor",
+        "Task.watchers",
+        "Worker.owner",
+      ].sort()
     );
   });
 

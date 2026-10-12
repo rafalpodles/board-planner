@@ -101,19 +101,32 @@ async function deleteConversations(db: ScopedDb, userId: Id) {
 }
 
 // A personal agent runs only on its owner's own tasks, so with the owner gone it has no one to run for,
-// and its name and prompts are what they wrote. History stores the name, not the id (BP-730), and only
-// the owner can point a task at a personal agent, so the rows to rewrite are on the tasks they did.
-// The agent goes last: a retry after a stop half way still finds the names to rewrite.
+// and its name and prompts are what they wrote. History stores the name as it was when the change was
+// made (BP-730), so a renamed agent is in it under several. Only the owner can point a task at a
+// personal agent, so the rows are on the tasks where they changed an agent or that still carry one of
+// theirs (a recurring task's next occurrence copies it with no row of its own). On those, a value that
+// is not the name of an agent that still exists is a deleted agent's: it says so instead. The agent
+// goes last: a retry after a stop half way still finds the rows.
 async function removePersonalAgentsOf(db: ScopedDb, userId: Id, quiet: { timestamps: false }) {
-  const agents = await db.Agent.find({ scope: "user", owner: userId }).select("_id name").lean();
+  const agents = await db.Agent.find({ scope: "user", owner: userId }).select("_id").lean();
   if (agents.length === 0) return;
   const ids = agents.map((a) => a._id);
-  const said = [...agents.map((a) => a.name as string), ...ids.map(String)];
+  const going = new Set(ids.map(String));
 
-  const tasks = await db.ActivityLog.distinct("task", { field: "agent", user: userId, newValue: { $in: said } });
+  const [changed, carrying, everyAgent] = await Promise.all([
+    db.ActivityLog.distinct("task", { field: "agent", user: userId }),
+    db.Task.distinct("_id", { agent: { $in: ids } }),
+    db.Agent.find({}).select("name").lean(),
+  ]);
+  const staying = everyAgent.filter((a) => !going.has(String(a._id)));
+  const kept = ["", DELETED_AGENT, ...staying.map((a) => a.name as string), ...staying.map((a) => String(a._id))];
+
+  const tasks = [...changed, ...carrying];
   if (tasks.length > 0) {
-    await db.ActivityLog.updateMany({ field: "agent", task: { $in: tasks }, oldValue: { $in: said } }, { $set: { oldValue: DELETED_AGENT } });
-    await db.ActivityLog.updateMany({ field: "agent", task: { $in: tasks }, newValue: { $in: said } }, { $set: { newValue: DELETED_AGENT } });
+    // Not a custom field that happens to be called "agent"
+    const rows = { field: "agent", customField: { $ne: true }, task: { $in: tasks } };
+    await db.ActivityLog.updateMany({ ...rows, oldValue: { $nin: kept } }, { $set: { oldValue: DELETED_AGENT } });
+    await db.ActivityLog.updateMany({ ...rows, newValue: { $nin: kept } }, { $set: { newValue: DELETED_AGENT } });
   }
   await db.Task.updateMany({ agent: { $in: ids } }, { $set: { agent: null } }, quiet);
   await db.AgentRun.updateMany({ agent: { $in: ids } }, { $set: { agent: null, agentName: DELETED_AGENT } }, quiet);
@@ -165,7 +178,8 @@ export async function eraseAccountTraces(db: ScopedDb, user: ErasedAccount): Pro
 
   await scrubInstanceAudit(db, user, label);
   await scrubBoardAccessAudit(db, user, label);
-  // Last: the one step that cannot be undone for an account that stays, if an earlier one fails
+  // Last: it locks the machines out of their owner, so a failure before it leaves an account that
+  // stays with the machines it had
   await releaseMachinesOf(db, user._id);
   return label;
 }
