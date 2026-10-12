@@ -490,6 +490,39 @@ test.describe("a turn, from the box to the bubble", () => {
     await expect(sendButton(page)).toBeVisible();
   });
 
+  // BP-1029. "PM is thinking…" and Stop are on screen before the send has reached the server's lock.
+  // A Stop pressed then was answered "no turn is running", read as "it finished", and dropped: the
+  // composer stayed on "Stopping…" while the turn started and ran to the end.
+  test("a Stop pressed before the turn has taken its lock still ends the turn", async ({ page }) => {
+    await signIn(page);
+    await openChat(page);
+
+    // The send is held in the browser, so the server has no turn when the Stop reaches it
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/pm/chat", async (route) => {
+      await held;
+      await route.continue();
+    });
+
+    // A minute of stalling against a twenty-second budget, as above: only an interrupt that really
+    // cuts the request can make this green
+    await say(page, "Never mind, actually.", { delayMs: 60_000, say: "Too late." });
+    const interrupted = page.waitForResponse((r) => r.url().endsWith("/pm/interrupt"));
+    await page.getByRole("button", { name: "Stop the PM turn" }).click();
+
+    // Nothing is running yet, which is what the server says, and it is not the turn finishing
+    expect((await interrupted).status()).toBe(404);
+    await expect(page.getByText("Stopping…")).toBeVisible();
+
+    release();
+    await expect(reply(page)).toContainText("⏹ Stopped by user.", { timeout: 20_000 });
+    await expect(reply(page)).not.toContainText("Too late.");
+    await expect(chatBox(page)).toBeEnabled();
+    await expect(sendButton(page)).toBeVisible();
+    await expect(page.getByText("Stopping…")).toHaveCount(0);
+  });
+
   test("what the agent has already done shows while it is still working", async ({ page }) => {
     await signIn(page);
     await openChat(page);
