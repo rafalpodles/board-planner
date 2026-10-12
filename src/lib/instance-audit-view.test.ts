@@ -60,6 +60,11 @@ describe("auditIsNotable", () => {
     expect(auditIsNotable(entry("worker_disabled"))).toBe(true);
   });
 
+  it("marks deleting a machine, which revokes its credential", () => {
+    expect(auditIsNotable(entry("worker_deleted"))).toBe(true);
+    expect(auditActionLabel(entry("worker_deleted"))).toBe("Worker deleted");
+  });
+
   it("marks a pause too, because it also takes work off the machine", () => {
     expect(auditIsNotable(entry("worker_command_sent", "pause"))).toBe(true);
   });

@@ -179,12 +179,14 @@ function StateChip({
  */
 function CommandIcon({
   label,
+  title,
   children,
   onClick,
   disabled,
   danger,
 }: {
   label: string;
+  title?: string;
   children: ReactNode;
   onClick: () => void;
   disabled?: boolean;
@@ -196,7 +198,7 @@ function CommandIcon({
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
-      title={label}
+      title={title ?? label}
       className={`focus-ring inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-lg text-text-muted/90 transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8 ${
         danger ? "hover:bg-danger/10 hover:text-danger" : "hover:bg-bg-hover hover:text-text"
       }`}
@@ -290,6 +292,7 @@ export default function AdminWorkersPage() {
   // it — every other destructive control in this product asks first, and this one is less reversible
   // than most of them.
   const [releasing, setReleasing] = useState<ApiWorker | null>(null);
+  const [deleting, setDeleting] = useState<ApiWorker | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -320,6 +323,20 @@ export default function AdminWorkersPage() {
       setWorkers((prev) => (prev ? prev.map((w) => (w._id === worker._id ? { ...w, ...updated } : w)) : prev));
     } catch (err) {
       toast(err instanceof Error ? err.message : "Update failed", "error");
+      load();
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function remove(worker: ApiWorker) {
+    setSavingId(worker._id);
+    try {
+      await api.del(`/api/workers/${worker._id}`);
+      setWorkers((prev) => (prev ? prev.filter((w) => w._id !== worker._id) : prev));
+      toast(`Deleted ${worker.name}`, "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Delete failed", "error");
       load();
     } finally {
       setSavingId(null);
@@ -406,6 +423,20 @@ export default function AdminWorkersPage() {
           const worker = releasing;
           setReleasing(null);
           if (worker) patch(worker, { owner: null });
+        }}
+      />
+
+      <ConfirmDialog
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        title={`Delete ${deleting?.name ?? ""}?`}
+        message={`The record of ${deleting?.name ?? "this machine"}${deleting?.host ? ` on ${deleting.host}` : ""} is removed and its credential stops working. If that machine is still set up, it has to be enrolled again before it can take work. Past runs keep its name. Nothing here can undo it.`}
+        confirmLabel="Delete"
+        loading={savingId === deleting?._id}
+        onConfirm={() => {
+          const worker = deleting;
+          setDeleting(null);
+          if (worker) remove(worker);
         }}
       />
 
@@ -588,6 +619,21 @@ export default function AdminWorkersPage() {
                             onClick={() => sendCommand(worker, "stop")}
                           >
                             <rect x="6" y="6" width="12" height="12" rx="2" />
+                          </CommandIcon>
+                          <CommandIcon
+                            label="Delete"
+                            danger
+                            title={
+                              worker.currentTask
+                                ? `Holds ${worker.currentTask.taskKey} — release the task first`
+                                : worker.stale
+                                  ? "Delete this worker"
+                                  : "Seen in the last five minutes — switch it off and stop it first"
+                            }
+                            disabled={savingId === worker._id || !worker.stale || !!worker.currentTask}
+                            onClick={() => setDeleting(worker)}
+                          >
+                            <path d="M9 3h6l1 2h4v2H4V5h4zM6 9h12l-1 11a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2z" />
                           </CommandIcon>
                         </div>
                       </div>

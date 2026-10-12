@@ -9,6 +9,7 @@ const LABELS: Partial<Record<InstanceAuditAction, string>> = {
   worker_disabled: "Worker disabled",
   worker_renamed: "Worker renamed",
   worker_released: "Worker released from its owner",
+  worker_deleted: "Worker deleted",
   worker_poll_interval_changed: "Poll interval changed",
   enrolment_token_minted: "Enrolment token minted",
   enrolment_token_spent: "Enrolment token spent",
@@ -72,6 +73,7 @@ const NOTABLE = new Set<InstanceAuditAction>([
   // The one that stops a machine, which is what this set is for. It reads `worker_disabled` since
   // BP-693 collapsed the lock into it; before that the same place in this set said worker_locked.
   "worker_disabled",
+  "worker_deleted",
   "enrolment_token_minted",
   "enrolment_token_spent",
   "user_password_reset",
