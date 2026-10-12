@@ -206,6 +206,7 @@ jobs:
         with:
           name: playwright-artifacts-production-csp
           path: e2e/.artifacts
+          include-hidden-files: true
           retention-days: 7
 
   # The process the app ships beside itself, run for real against the e2e app (BP-711): the worker.
@@ -257,6 +258,7 @@ jobs:
           path: |
             e2e/.artifacts
             ${{ runner.temp }}/mongod.log
+          include-hidden-files: true
           retention-days: 7
 
   # The real licence service and the app together, against a Stripe stand-in (BP-979): each side's own suite stubs the
@@ -315,6 +317,7 @@ jobs:
           path: |
             e2e/.artifacts
             !e2e/.artifacts/licence-smoke/licence-service.log
+          include-hidden-files: true
           retention-days: 7
 
   backup:
@@ -465,6 +468,7 @@ jobs:
         with:
           name: playwright-artifacts-${{ matrix.group }}-${{ matrix.shard }}
           path: e2e/.artifacts
+          include-hidden-files: true
           retention-days: 7
 
   # The one check main's ruleset requires: a required per-job check would wait forever on an e2e
