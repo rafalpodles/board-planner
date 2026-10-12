@@ -138,6 +138,7 @@ export const GROUPS = {
     "mcp-config.spec.ts",
   ],
   people: [
+    "account-deletion-residue.spec.ts",
     "account-self-service.spec.ts",
     "day-zero.spec.ts",
     "bounded-bodies.spec.ts",
