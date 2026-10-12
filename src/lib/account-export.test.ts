@@ -4,7 +4,7 @@ import { memoryDb } from "./memory-db-test-store";
 const accessibleProjectIds = vi.fn();
 vi.mock("@/lib/grants", () => ({ accessibleProjectIds }));
 
-const { accountExport } = await import("./account-export");
+const { accountExport, ACTIVITY_EXPORT_LIMIT } = await import("./account-export");
 
 const JAN = "6a9d0f0b5d781bded2cb975a";
 const OLA = "6a9d0f0b5d781bded2cb975b";
@@ -60,6 +60,28 @@ function database() {
     Project: [
       { _id: OPEN, key: "BP", name: "Open" },
       { _id: CLOSED, key: "SEC", name: "Closed" },
+      { _id: "6a9d0f0b5d781bded2cb9804", key: "LATER", name: "Only an app reaches it" },
+    ],
+    Session: [
+      { user: JAN, tokenHash: "session-hash-never-exported", userAgent: "Firefox", ip: "203.0.113.5", createdAt: "2026-08-01", lastUsedAt: "2026-08-02", expiresAt: "2026-09-01" },
+      { user: OLA, tokenHash: "other", userAgent: "OlasSafari", ip: "198.51.100.9", createdAt: "2026-08-01" },
+    ],
+    OAuthToken: [
+      { user: JAN, accessTokenHash: "access-hash-never-exported", refreshTokenHash: "refresh-hash-never-exported", clientId: "claude", scope: "mcp", allowedProjects: [OPEN], createdAt: "2026-08-03", accessExpiresAt: "2026-08-04", refreshExpiresAt: "2026-09-04" },
+      { user: JAN, accessTokenHash: "second-access", refreshTokenHash: "second-refresh", clientId: "cursor", scope: "mcp", allowedProjects: [], createdAt: "2026-08-05", accessExpiresAt: "2026-08-06", refreshExpiresAt: "2026-09-06" },
+      { user: JAN, accessTokenHash: "third-access", refreshTokenHash: "third-refresh", clientId: "desktop", scope: "mcp", allowedProjects: ["6a9d0f0b5d781bded2cb9804"], createdAt: "2026-08-07", accessExpiresAt: "2026-08-08", refreshExpiresAt: "2026-09-08" },
+      { user: OLA, accessTokenHash: "other-access", refreshTokenHash: "other-refresh", clientId: "olas-client", scope: "mcp", allowedProjects: [] },
+    ],
+    ActivityLog: [
+      { user: JAN, task: "t1", action: "updated", field: "title", oldValue: "Old", newValue: "Mine", createdAt: "2026-04-03" },
+      { user: JAN, task: "t3", action: "updated", field: "description", oldValue: "others' text", newValue: "my text", createdAt: "2026-04-04" },
+      { user: OLA, task: "t1", action: "updated", field: "title", oldValue: "Mine", newValue: "Olas retitle", createdAt: "2026-04-05" },
+      { user: JAN, task: "gone", action: "updated", field: "title", oldValue: "Deleted task's old", newValue: "Deleted task's new", createdAt: "2026-04-06" },
+    ],
+    Agent: [
+      { _id: "a1", scope: "user", owner: JAN, name: "Jan's refactorer", description: "mine", composition: { analysis: ["scan"], implementation: [{ key: "write", params: { n: 1 } }] }, createdAt: "2026-09-01" },
+      { _id: "a2", scope: "user", owner: OLA, name: "Olas agent", description: "", composition: {} },
+      { _id: "a3", scope: "global", owner: null, name: "Default", description: "", composition: {} },
     ],
   });
 }
@@ -81,14 +103,14 @@ describe("a person's own export", () => {
 
   it("holds nobody else's: not another person's comments, messages, tokens, providers or tasks", async () => {
     const text = JSON.stringify(await accountExport(database().db, ME));
-    for (const theirs of ["olas comment", "olas question", "olas-token", "gh-other", "Olas secret plan", "for ola", "ola@example.com", "Ola Nowak"]) {
+    for (const theirs of ["olas comment", "olas question", "olas-token", "gh-other", "Olas secret plan", "for ola", "ola@example.com", "Ola Nowak", "OlasSafari", "198.51.100.9", "olas-client", "Olas retitle", "Olas agent", "other-access"]) {
       expect(text).not.toContain(theirs);
     }
   });
 
   it("never carries a password hash, a token hash, a provider's subject or a webhook address", async () => {
     const text = JSON.stringify(await accountExport(database().db, ME));
-    for (const secret of ["bcrypt-hash-never-exported", "never-exported", "g-secret-subject", "hooks.slack.com", "SECRET"]) {
+    for (const secret of ["bcrypt-hash-never-exported", "never-exported", "g-secret-subject", "hooks.slack.com", "SECRET", "access-hash", "refresh-hash", "second-access", "second-refresh", "third-access", "third-refresh"]) {
       expect(text).not.toContain(secret);
     }
   });
@@ -105,6 +127,83 @@ describe("a person's own export", () => {
     const text = JSON.stringify(await accountExport(database().db, ME));
     expect(text).toContain("what I asked");
     expect(text).not.toContain("a summary of the closed board");
+  });
+
+  it("lists their sessions, connected apps, task changes and personal agents, and nobody's global or other personal agents", async () => {
+    const data = await accountExport(database().db, ME);
+
+    expect(data.sessions).toEqual([
+      { userAgent: "Firefox", ip: "203.0.113.5", signedInAt: "2026-08-01", lastUsedAt: "2026-08-02", expiresAt: "2026-09-01" },
+    ]);
+    expect(data.connectedApps).toEqual([
+      { client: "claude", scope: "mcp", boards: ["BP"], grantedAt: "2026-08-03", accessExpiresAt: "2026-08-04" },
+      { client: "cursor", scope: "mcp", boards: [], grantedAt: "2026-08-05", accessExpiresAt: "2026-08-06" },
+      { client: "desktop", scope: "mcp", boards: ["LATER"], grantedAt: "2026-08-07", accessExpiresAt: "2026-08-08" },
+    ]);
+    expect(data.personalAgents).toEqual([
+      {
+        name: "Jan's refactorer",
+        description: "mine",
+        createdAt: "2026-09-01",
+        steps: {
+          analysis: [{ key: "scan" }],
+          implementation: [{ key: "write", params: { n: 1 } }],
+          verification: [],
+          delivery: [],
+        },
+      },
+    ]);
+    expect(JSON.stringify(data.personalAgents)).not.toContain("Default");
+  });
+
+  it("shows what they changed on a board they reach, and only that they changed it on one they no longer reach", async () => {
+    const data = await accountExport(database().db, ME);
+
+    expect(data.activity).toEqual([
+      { task: "BP-7", action: "updated", field: "title", createdAt: "2026-04-03", from: "Old", to: "Mine" },
+      { task: "SEC-2", action: "updated", field: "description", createdAt: "2026-04-04" },
+      { task: "gone", action: "updated", field: "title", createdAt: "2026-04-06" },
+    ]);
+    expect(JSON.stringify(data.activity)).not.toContain("others' text");
+  });
+
+  it("never shows a change on a task that no longer exists, even to a person who reaches every board", async () => {
+    accessibleProjectIds.mockResolvedValue(null);
+    const data = await accountExport(database().db, ME);
+    expect(data.activity.at(-1)).toEqual({ task: "gone", action: "updated", field: "title", createdAt: "2026-04-06" });
+    expect(JSON.stringify(data.activity)).not.toContain("Deleted task's");
+  });
+
+  it("names the board of a change when that board appears nowhere else in the export", async () => {
+    const { db, store } = database();
+    const ELSEWHERE = "6a9d0f0b5d781bded2cb9803";
+    store.Project.push({ _id: ELSEWHERE, key: "ELSE", name: "Else" });
+    store.Task.push({ _id: "t9", createdBy: OLA, project: ELSEWHERE, taskNumber: 4, title: "x" });
+    store.ActivityLog.push({ user: JAN, task: "t9", action: "updated", field: "title", oldValue: "a", newValue: "b", createdAt: "2026-04-07" });
+    accessibleProjectIds.mockResolvedValue([OPEN, ELSEWHERE]);
+    const data = await accountExport(db, ME);
+    expect(data.activity.at(-1)).toMatchObject({ task: "ELSE-4", from: "a", to: "b" });
+  });
+
+  it("stops at a bound and says so, keeping the most recent changes in order", async () => {
+    const { db, store, calls } = database();
+    const pad = (n: number) => `2027-${String(n).padStart(6, "0")}`;
+    store.ActivityLog = Array.from({ length: ACTIVITY_EXPORT_LIMIT + 5 }, (_, i) => ({
+      user: JAN, task: "t1", action: "updated", field: "title", oldValue: String(i), newValue: String(i + 1), createdAt: pad(i),
+    }));
+    const data = await accountExport(db, ME);
+
+    expect(data.activity).toHaveLength(ACTIVITY_EXPORT_LIMIT);
+    expect((data as { activityTruncated?: boolean }).activityTruncated).toBe(true);
+    expect(data.activity[0]).toMatchObject({ from: "5" });
+    expect(data.activity.at(-1)).toMatchObject({ to: String(ACTIVITY_EXPORT_LIMIT + 5) });
+    // The database is told to stop too: the slice above would hide a query that reads every row
+    const asked = calls.find((c) => c.model === "ActivityLog" && c.op === "find");
+    expect(asked?.options).toMatchObject({ limit: ACTIVITY_EXPORT_LIMIT + 1 });
+  });
+
+  it("does not flag a history that fits", async () => {
+    expect((await accountExport(database().db, ME) as { activityTruncated?: boolean }).activityTruncated).toBeUndefined();
   });
 
   it("shows everything they created when they reach every board", async () => {

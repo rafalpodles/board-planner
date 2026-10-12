@@ -186,6 +186,11 @@ async function chat(request: Request, params: Promise<Record<string, string>>, u
       const sendEvent = (event: string, data: unknown) =>
         send(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
+      // Headers leave with the first byte written, so without this the client would learn that its
+      // turn holds the lock only when the first action, the answer or a heartbeat arrives. A Stop
+      // pressed before that is waiting on it (BP-1029).
+      send(": accepted\n\n");
+
       const heartbeat = setInterval(() => send(": ping\n\n"), HEARTBEAT_MS);
 
       (async () => {
