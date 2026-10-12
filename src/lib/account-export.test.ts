@@ -61,6 +61,24 @@ function database() {
       { _id: OPEN, key: "BP", name: "Open" },
       { _id: CLOSED, key: "SEC", name: "Closed" },
     ],
+    Session: [
+      { user: JAN, tokenHash: "session-hash-never-exported", userAgent: "Firefox", ip: "203.0.113.5", createdAt: "2026-08-01", lastUsedAt: "2026-08-02", expiresAt: "2026-09-01" },
+      { user: OLA, tokenHash: "other", userAgent: "OlasSafari", ip: "198.51.100.9", createdAt: "2026-08-01" },
+    ],
+    OAuthConsent: [
+      { user: JAN, ticketHash: "ticket-hash-never-exported", clientId: "claude", redirectUri: "https://claude.example/cb", codeChallenge: "challenge-never-exported", scope: "mcp", createdAt: "2026-08-03", expiresAt: "2026-08-03" },
+      { user: OLA, ticketHash: "other-ticket", clientId: "olas-client", scope: "mcp" },
+    ],
+    ActivityLog: [
+      { user: JAN, task: "t1", action: "updated", field: "title", oldValue: "Old", newValue: "Mine", createdAt: "2026-04-03" },
+      { user: JAN, task: "t3", action: "updated", field: "description", oldValue: "others' text", newValue: "my text", createdAt: "2026-04-04" },
+      { user: OLA, task: "t1", action: "updated", field: "title", oldValue: "Mine", newValue: "Olas retitle", createdAt: "2026-04-05" },
+    ],
+    Agent: [
+      { _id: "a1", scope: "user", owner: JAN, name: "Jan's refactorer", description: "mine", composition: { analysis: ["scan"], implementation: [{ key: "write", params: { n: 1 } }] }, createdAt: "2026-09-01" },
+      { _id: "a2", scope: "user", owner: OLA, name: "Olas agent", description: "", composition: {} },
+      { _id: "a3", scope: "global", owner: null, name: "Default", description: "", composition: {} },
+    ],
   });
 }
 
@@ -81,14 +99,14 @@ describe("a person's own export", () => {
 
   it("holds nobody else's: not another person's comments, messages, tokens, providers or tasks", async () => {
     const text = JSON.stringify(await accountExport(database().db, ME));
-    for (const theirs of ["olas comment", "olas question", "olas-token", "gh-other", "Olas secret plan", "for ola", "ola@example.com", "Ola Nowak"]) {
+    for (const theirs of ["olas comment", "olas question", "olas-token", "gh-other", "Olas secret plan", "for ola", "ola@example.com", "Ola Nowak", "OlasSafari", "198.51.100.9", "olas-client", "Olas retitle", "Olas agent"]) {
       expect(text).not.toContain(theirs);
     }
   });
 
   it("never carries a password hash, a token hash, a provider's subject or a webhook address", async () => {
     const text = JSON.stringify(await accountExport(database().db, ME));
-    for (const secret of ["bcrypt-hash-never-exported", "never-exported", "g-secret-subject", "hooks.slack.com", "SECRET"]) {
+    for (const secret of ["bcrypt-hash-never-exported", "never-exported", "g-secret-subject", "hooks.slack.com", "SECRET", "claude.example", "challenge"]) {
       expect(text).not.toContain(secret);
     }
   });
@@ -105,6 +123,39 @@ describe("a person's own export", () => {
     const text = JSON.stringify(await accountExport(database().db, ME));
     expect(text).toContain("what I asked");
     expect(text).not.toContain("a summary of the closed board");
+  });
+
+  it("lists their sessions, consents, task changes and personal agents, and nobody's global or other personal agents", async () => {
+    const data = await accountExport(database().db, ME);
+
+    expect(data.sessions).toEqual([
+      { userAgent: "Firefox", ip: "203.0.113.5", signedInAt: "2026-08-01", lastUsedAt: "2026-08-02", expiresAt: "2026-09-01" },
+    ]);
+    expect(data.consents).toEqual([{ client: "claude", scope: "mcp", grantedAt: "2026-08-03", expiresAt: "2026-08-03" }]);
+    expect(data.personalAgents).toEqual([
+      {
+        name: "Jan's refactorer",
+        description: "mine",
+        createdAt: "2026-09-01",
+        steps: {
+          analysis: [{ key: "scan" }],
+          implementation: [{ key: "write", params: { n: 1 } }],
+          verification: [],
+          delivery: [],
+        },
+      },
+    ]);
+    expect(JSON.stringify(data.personalAgents)).not.toContain("Default");
+  });
+
+  it("shows what they changed on a board they reach, and only that they changed it on one they no longer reach", async () => {
+    const data = await accountExport(database().db, ME);
+
+    expect(data.activity).toEqual([
+      { task: "BP-7", action: "updated", field: "title", createdAt: "2026-04-03", from: "Old", to: "Mine" },
+      { task: "SEC-2", action: "updated", field: "description", createdAt: "2026-04-04" },
+    ]);
+    expect(JSON.stringify(data.activity)).not.toContain("others' text");
   });
 
   it("shows everything they created when they reach every board", async () => {
