@@ -100,6 +100,24 @@ async function deleteConversations(db: ScopedDb, userId: Id) {
   await db.PmMessage.deleteMany({ triggeredBy: userId });
 }
 
+// An occurrence copies its predecessor's agent with no row of its own, so one that somebody else then
+// cleared is reachable only through the series it belongs to
+async function withTheirRecurrenceChain(db: ScopedDb, start: Types.ObjectId[]): Promise<Types.ObjectId[]> {
+  const found = new Map<string, Types.ObjectId>(start.map((id) => [String(id), id]));
+  for (let round = 0; round < 50; round += 1) {
+    const ids = [...found.values()];
+    if (ids.length === 0) break;
+    const [children, parents] = await Promise.all([
+      db.Task.distinct("_id", { recurringParentId: { $in: ids } }),
+      db.Task.distinct("recurringParentId", { _id: { $in: ids } }),
+    ]);
+    const before = found.size;
+    for (const id of [...children, ...parents] as Types.ObjectId[]) if (id) found.set(String(id), id);
+    if (found.size === before) break;
+  }
+  return [...found.values()];
+}
+
 // A personal agent runs only on its owner's own tasks, so with the owner gone it has no one to run for,
 // and its name and prompts are what they wrote. History stores the name as it was when the change was
 // made (BP-730), so a renamed agent is in it under several. Only the owner can point a task at a
@@ -121,7 +139,7 @@ async function removePersonalAgentsOf(db: ScopedDb, userId: Id, quiet: { timesta
   const staying = everyAgent.filter((a) => !going.has(String(a._id)));
   const kept = ["", DELETED_AGENT, ...staying.map((a) => a.name as string), ...staying.map((a) => String(a._id))];
 
-  const tasks = [...changed, ...carrying];
+  const tasks = await withTheirRecurrenceChain(db, [...changed, ...carrying]);
   if (tasks.length > 0) {
     // Not a custom field that happens to be called "agent"
     const rows = { field: "agent", customField: { $ne: true }, task: { $in: tasks } };

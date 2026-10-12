@@ -357,6 +357,53 @@ describe("what a person authored for the machines", () => {
     expect(rows("ActivityLog").map((r) => r.oldValue)).toEqual([DELETED_AGENT, "Jan's refactorer"]);
   });
 
+  it("follows a recurring series: an occurrence somebody else cleared holds the name too, an unrelated task does not", async () => {
+    const { db, rows } = memoryDb({
+      Agent: [{ _id: "g1", scope: "user", owner: JAN, name: "Jan's refactorer" }],
+      Task: [
+        { _id: "t1", agent: null, recurringParentId: null, watchers: [] },
+        { _id: "t2", agent: null, recurringParentId: "t1", watchers: [] },
+        { _id: "t3", agent: null, recurringParentId: "t2", watchers: [] },
+        { _id: "t9", agent: null, recurringParentId: null, watchers: [] },
+      ],
+      ActivityLog: [
+        { _id: "h1", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "Jan's refactorer" },
+        { _id: "h2", task: "t2", user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+        { _id: "h3", task: "t3", user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+        { _id: "h9", task: "t9", user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+      ],
+    });
+    await eraseAccountTraces(db, USER);
+    expect(rows("ActivityLog").map((r) => [r._id, r.oldValue])).toEqual([
+      ["h1", ""],
+      ["h2", DELETED_AGENT],
+      ["h3", DELETED_AGENT],
+      ["h9", "Jan's refactorer"],
+    ]);
+  });
+
+  it("walks a series back to the occurrences before the one the person changed", async () => {
+    const { db, rows } = memoryDb({
+      Agent: [{ _id: "g1", scope: "user", owner: JAN, name: "Jan's refactorer" }],
+      Task: [
+        { _id: "t1", agent: null, recurringParentId: null, watchers: [] },
+        { _id: "t2", agent: null, recurringParentId: "t1", watchers: [] },
+        { _id: "t3", agent: null, recurringParentId: "t2", watchers: [] },
+      ],
+      ActivityLog: [
+        { _id: "h1", task: "t1", user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+        { _id: "h2", task: "t2", user: OLA, field: "agent", oldValue: "Jan's refactorer", newValue: "" },
+        { _id: "h3", task: "t3", user: JAN, field: "agent", oldValue: "", newValue: "Jan's refactorer" },
+      ],
+    });
+    await eraseAccountTraces(db, USER);
+    expect(rows("ActivityLog").map((r) => [r._id, r.oldValue, r.newValue])).toEqual([
+      ["h1", DELETED_AGENT, ""],
+      ["h2", DELETED_AGENT, ""],
+      ["h3", "", DELETED_AGENT],
+    ]);
+  });
+
   it("leaves history alone when the person had no personal agent", async () => {
     const { db, rows } = memoryDb({
       ActivityLog: [{ _id: "h1", task: "t1", user: JAN, field: "agent", oldValue: "", newValue: "Default" }],
