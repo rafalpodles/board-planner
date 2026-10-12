@@ -1355,8 +1355,8 @@ describe("TaskDetail that cannot be read", () => {
   }
 
   it.each([
-    [403, "You do not have access to this board."],
-    [404, "There is no task here — the link may be stale."],
+    [403, "We couldn’t find this page. The link may have changed, or this page may not be available to you."],
+    [404, "We couldn’t find this page. The link may have changed, or this page may not be available to you."],
   ])("names a %i instead of spinning, and offers no retry", async (status, text) => {
     failTaskWith(status);
     renderDetail();
@@ -1369,7 +1369,7 @@ describe("TaskDetail that cannot be read", () => {
     failTaskWith(403);
     const onClose = vi.fn();
     renderDetail({ onClose });
-    await screen.findByText("You do not have access to this board.");
+    await screen.findByText("We couldn’t find this page. The link may have changed, or this page may not be available to you.");
 
     await act(async () => screen.getByRole("button", { name: "Close" }).click());
 
@@ -1380,7 +1380,7 @@ describe("TaskDetail that cannot be read", () => {
     failTaskWith(400);
     renderDetail();
 
-    expect(await screen.findByText("There is no task here — the link may be stale.")).toBeTruthy();
+    expect(await screen.findByText("We couldn’t find this page. The link may have changed, or this page may not be available to you.")).toBeTruthy();
   });
 
   it("says an outage once, on the page, rather than again in a toast", async () => {
@@ -1422,7 +1422,7 @@ describe("TaskDetail when a save is refused", () => {
       title.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    expect(await screen.findByText("You do not have access to this board.", {}, { timeout: 3000 })).toBeTruthy();
+    expect(await screen.findByText("We couldn’t find this page. The link may have changed, or this page may not be available to you.", {}, { timeout: 3000 })).toBeTruthy();
     expect(screen.queryByLabelText("Task title")).toBeNull();
   });
 });
@@ -1436,7 +1436,7 @@ describe("TaskDetail when a status change is refused", () => {
     await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
     await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
 
-    expect(await screen.findByText("You do not have access to this board.")).toBeTruthy();
+    expect(await screen.findByText("We couldn’t find this page. The link may have changed, or this page may not be available to you.")).toBeTruthy();
   });
 });
 
@@ -1518,7 +1518,7 @@ describe("TaskDetail, the browser tab's title", () => {
     await waitFor(() => expect(document.title).toBe(`TP-6 Renamed on the page — ${APP_NAME}`));
   });
 
-  it("claims nothing for a task that could not be read", async () => {
+  it("uses the neutral missing-page title for a task that could not be read", async () => {
     api.get.mockImplementation((url: string) => {
       if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
       if (url.startsWith("/api/agent")) return Promise.resolve([]);
@@ -1527,8 +1527,8 @@ describe("TaskDetail, the browser tab's title", () => {
       return Promise.resolve(project);
     });
     renderDetail();
-    await screen.findByText("There is no task here — the link may be stale.");
-    expect(document.title).toBe(APP_NAME);
+    await screen.findByText("We couldn’t find this page. The link may have changed, or this page may not be available to you.");
+    expect(document.title).toBe(`Page not found — ${APP_NAME}`);
   });
 
   it("gives the tab back to the board beneath it when it closes", async () => {

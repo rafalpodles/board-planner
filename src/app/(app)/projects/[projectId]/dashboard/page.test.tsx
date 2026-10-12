@@ -178,13 +178,15 @@ describe("Dashboard charts with partial data", () => {
 });
 
 describe("Dashboard that cannot be read", () => {
-  it("names a refusal and offers no Try again", async () => {
-    api.get.mockRejectedValue(Object.assign(new Error("Forbidden"), { status: 403 }));
+  it.each([403, 404])("gives a %s refusal the lost card and project recovery", async (status) => {
+    api.get.mockRejectedValue(Object.assign(new Error("Unavailable"), { status }));
     render(<DashboardPage />);
 
     const error = await screen.findByTestId("dashboard-error");
-    expect(error.textContent).toContain("You do not have access to this board.");
+    expect(error.textContent).toContain("We couldn’t find this page. The link may have changed, or this page may not be available to you.");
     expect(within(error).queryByRole("button")).toBeNull();
+    expect(within(error).getByRole("heading", { name: "This one slipped off the board." })).toBeTruthy();
+    expect(within(error).getByRole("link", { name: "Back to projects" }).getAttribute("href")).toBe("/projects");
   });
 
   it("keeps Try again for an outage", async () => {

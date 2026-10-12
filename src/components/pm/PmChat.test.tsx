@@ -205,7 +205,7 @@ describe("a board the reader cannot open", () => {
     api.get.mockRejectedValue(Object.assign(new Error("Forbidden"), { status: 403 }));
     render(<PmChat projectId="p1" />);
 
-    expect(await screen.findByText("You do not have access to this board.")).toBeTruthy();
+    expect(await screen.findByText("We couldn’t find this page. The link may have changed, or this page may not be available to you.")).toBeTruthy();
     expect(screen.queryByText(/not configured on the server/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });

@@ -44,7 +44,8 @@ import { useEditorTriggers } from "@/hooks/use-editor-triggers";
 import { useOpenTask } from "@/hooks/use-open-task";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { Button } from "@/components/ui/Button";
-import { boardRefusal } from "@/lib/board-load-failure";
+import { boardRefusal, MISSING_PAGE_MESSAGE } from "@/lib/board-load-failure";
+import { NotFoundExperience } from "@/components/not-found/NotFoundExperience";
 import { withAiMark } from "@/lib/pm/username";
 
 interface TaskDetailProps {
@@ -60,7 +61,7 @@ interface TaskDetailProps {
 function taskRefusal(err: unknown, reading: boolean): string | null {
   const status = (err as { status?: number } | null)?.status;
   if (!reading) return status === 403 ? boardRefusal(err) : null;
-  if (status === 404 || status === 400) return "There is no task here — the link may be stale.";
+  if (status === 404 || status === 400) return MISSING_PAGE_MESSAGE;
   return boardRefusal(err);
 }
 
@@ -192,7 +193,14 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
     </div>
   );
 
-  if (refusal) return failed(refusal);
+  if (refusal) return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="flex justify-end px-4 pt-3">
+        <Button size="sm" variant="secondary" onClick={onClose}>Close</Button>
+      </div>
+      <NotFoundExperience />
+    </div>
+  );
 
   if (!loading && (!task || !project)) {
     return failed("Failed to load this task.", async () => {

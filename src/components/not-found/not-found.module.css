@@ -1,0 +1,57 @@
+.experience {
+  --nf-accent: var(--color-primary);
+  --nf-tint: color-mix(in srgb, var(--nf-accent) 8%, var(--color-bg));
+  display: flex;
+  flex: 1;
+  min-height: 580px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 40px 24px;
+  color: var(--color-text);
+}
+.standalone { min-height: 100dvh; position: relative; }
+.brand { display: flex; align-items: center; gap: 10px; position: absolute; top: 32px; left: 36px; font-size: 15px; font-weight: 650; }
+.composition { width: min(100%, 650px); display: flex; flex-direction: column; align-items: center; }
+.text { text-align: center; width: min(100%, 470px); }
+.eyebrow { font-size: 10px; font-weight: 650; letter-spacing: .16em; color: var(--color-text-muted); margin: 0 0 14px; }
+.text h1 { font-size: clamp(26px, 3vw, 36px); line-height: 1.15; letter-spacing: -.045em; font-weight: 650; margin: 0 auto 16px; text-wrap: balance; }
+.description { font-size: 14px; line-height: 1.8; color: var(--color-text-muted); margin: 0 auto; max-width: 405px; text-wrap: pretty; }
+.actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px; margin-top: 26px; }
+.action { display: inline-flex; justify-content: center; align-items: center; gap: 26px; min-height: 44px; padding: 11px 20px; border-radius: 9px; background: var(--color-primary-solid); color: white; font-size: 13px; font-weight: 550; transition: background 160ms ease, transform 160ms cubic-bezier(.23,1,.32,1); }
+.action:hover { background: var(--color-primary-solid-hover); }
+.action:active { transform: scale(.97); }
+.action span { font-size: 19px; line-height: 1; }
+.note { font-size: 11px; color: var(--color-text-muted); margin-top: 20px; }
+.cardArt { position: relative; width: min(100%, 480px); height: 282px; margin-bottom: 28px; }
+.boardBase { position: absolute; display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; width: 100%; top: 22px; padding: 17px; background: var(--nf-tint); border: 1px solid color-mix(in srgb,var(--color-border) 55%,transparent); border-radius: 13px; transform: perspective(900px) rotateX(8deg) rotateY(-8deg) rotateZ(-5deg); }
+.artColumn { min-width: 0; }
+.columnLabel { display: flex; align-items: center; gap: 6px; font-size: 8px; letter-spacing: .1em; color: var(--color-text-muted); white-space: nowrap; margin-bottom: 13px; }
+.columnLabel i { width: 5px; height: 5px; border-radius: 50%; background: var(--color-text-muted); }
+.artColumn:nth-child(2) .columnLabel i { background: var(--color-warning); }
+.artColumn:nth-child(3) .columnLabel i { background: var(--color-success); }
+.ghostCard { height: 57px; border: 1px solid color-mix(in srgb,var(--color-border) 60%,transparent); background: color-mix(in srgb,var(--color-bg-card) 85%,transparent); border-radius: 6px; padding: 13px; margin-bottom: 8px; }
+.ghostCard span { display: block; width: 75%; height: 4px; background: color-mix(in srgb,var(--color-text-muted) 22%,transparent); margin-bottom: 7px; border-radius: 3px; }
+.ghostCard span + span { width: 48%; }
+.emptySlot { height: 57px; border: 1px dashed color-mix(in srgb,var(--nf-accent) 55%,transparent); border-radius: 6px; color: var(--nf-accent); display: grid; place-items: center; font-size: 16px; }
+.looseCard { position: absolute; right: 48px; top: 40px; width: 167px; padding: 15px 17px; background: var(--color-bg-card); border: 1px solid var(--nf-accent); border-radius: 11px; transform: rotate(9deg); box-shadow: 0 16px 38px -16px color-mix(in srgb,var(--color-text) 24%,transparent); }
+.cardMeta { display: flex; justify-content: space-between; color: var(--color-text-muted); font-size: 9px; letter-spacing: .06em; }
+.cardNumber { color: var(--nf-accent); font-size: 66px; font-weight: 650; letter-spacing: -.075em; line-height: 1.25; }
+.cardCaption { font-size: 10px; color: var(--color-text-muted); }
+.cardFooter { border-top: 1px solid var(--color-border); display: flex; align-items: center; justify-content: space-between; margin-top: 16px; padding-top: 12px; }
+.missingChip { color: var(--nf-accent); background: var(--nf-tint); padding: 4px 7px; border-radius: 4px; font-size: 9px; }
+.cardFooter i { font-size: 9px; font-style: normal; border: 1px dashed var(--color-border); width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; color: var(--color-text-muted); }
+.artAnnotation { position: absolute; bottom: 4px; left: 40px; font-size: 11px; color: var(--color-text-muted); transform: rotate(-5deg); }
+.paused .looseCard { transform: rotate(4deg); }
+@media(max-width: 540px) {
+  .experience { padding: 26px 18px; min-height: 530px; }
+  .standalone { min-height: 100dvh; padding-top: 95px; }
+  .brand { top: 24px; left: 24px; }
+  .cardArt { height: 246px; margin-bottom: 20px; }
+  .boardBase { gap: 7px; padding: 10px; }
+  .columnLabel { font-size: 6px; gap: 3px; }
+  .ghostCard { padding: 9px; height: 51px; }
+  .looseCard { right: 18px; width: 146px; top: 25px; padding: 13px; }
+  .cardNumber { font-size: 60px; }
+  .artAnnotation { left: 12px; bottom: 0; font-size: 10px; }
+}

@@ -600,10 +600,9 @@ test.describe("who may read a dashboard", () => {
      * what the reader was left with once it expired was a spinner that never stopped.
      */
     await expect(page.getByTestId("dashboard-error")).toContainText(
-      "You do not have access to this board"
+      "We couldn’t find this page. The link may have changed, or this page may not be available to you."
     );
-    // The heading is chrome and now renders above the banner, deliberately, so the reader can see
-    // which page refused them. The charts are the thing that must not be there.
+    // The neutral recovery replaces dashboard content; charts must not remain visible.
     await expect(page.getByRole("heading", { name: "Status Breakdown" })).toHaveCount(0);
     // Recorded, not counted on screen: a toast is gone in three seconds and a retrying count of
     // zero waits it out (BP-712)

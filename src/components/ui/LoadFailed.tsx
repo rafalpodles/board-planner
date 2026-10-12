@@ -2,6 +2,7 @@
 
 import { boardRefusal } from "@/lib/board-load-failure";
 import { Button } from "@/components/ui/Button";
+import { NotFoundExperience } from "@/components/not-found/NotFoundExperience";
 
 /**
  * A read that never answered supports no claim about the data. The toast fades after three
@@ -56,6 +57,7 @@ export function LoadFailed({
 
 export function BoardLoadFailed({ reason, onRetry }: { reason: unknown; onRetry: () => void }) {
   const refusal = boardRefusal(reason);
+  if (refusal) return <NotFoundExperience />;
   return (
     <LoadFailed
       className="py-16"

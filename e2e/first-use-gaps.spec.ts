@@ -71,7 +71,7 @@ test("a board with no grant says so on every screen of it, and offers no Retry",
   for (const path of ["", "/sprints", "/settings", "/pm", `/tasks/${SIBLING_TASK_NUMBER}`]) {
     await test.step(`/projects/${PROJECT_KEY}${path}`, async () => {
       await page.goto(`/projects/${PROJECT_KEY}${path}`);
-      const alert = page.getByRole("alert").filter({ hasText: "You do not have access to this board" });
+      const alert = page.getByRole("alert").filter({ hasText: "We couldn’t find this page. The link may have changed, or this page may not be available to you." });
       await expect(alert).toBeVisible();
       // Reading the board again returns the same refusal, so a Retry beside it is a lie
       await expect(alert.getByRole("button", { name: "Retry" })).toHaveCount(0);
@@ -85,16 +85,16 @@ test("the dashboard of a board with no grant says so, and offers no Try again", 
   await page.goto(`/projects/${PROJECT_KEY}/dashboard`);
 
   const error = page.getByTestId("dashboard-error");
-  await expect(error).toContainText("You do not have access to this board.");
+  await expect(error).toContainText("We couldn’t find this page. The link may have changed, or this page may not be available to you.");
   await expect(error.getByRole("button", { name: "Try again" })).toHaveCount(0);
 });
 
 // As an admin: to anybody without a grant a missing board and a refused one answer the same
-test("a board that does not exist gets a different sentence from a refused one", async ({ page }) => {
+test("a board that does not exist gets the same neutral sentence as a refused one", async ({ page }) => {
   await signIn(page);
   await page.goto("/projects/NOSUCHKEY/settings");
   // Filtered: Next keeps an empty route announcer with the same role on every page
-  const alert = page.getByRole("alert").filter({ hasText: "There is no board here" });
+  const alert = page.getByRole("alert").filter({ hasText: "We couldn’t find this page. The link may have changed, or this page may not be available to you." });
   await expect(alert).toBeVisible();
   await expect(alert).not.toContainText("do not have access");
 });

@@ -70,11 +70,11 @@ test("on screen, another organisation's board looks like a board that does not e
   await signIn(page, "admin");
 
   await page.goto("/projects/NOPE");
-  await expect(page.getByText("There is no board here")).toBeVisible();
+  await expect(page.getByText("We couldn’t find this page. The link may have changed, or this page may not be available to you.")).toBeVisible();
   const missing = (await page.locator("main").innerText()).replaceAll("NOPE", "?");
 
   await page.goto("/projects/FAR");
-  await expect(page.getByText("There is no board here")).toBeVisible();
+  await expect(page.getByText("We couldn’t find this page. The link may have changed, or this page may not be available to you.")).toBeVisible();
   const foreign = (await page.locator("main").innerText()).replaceAll("FAR", "?");
 
   expect(foreign).toBe(missing);

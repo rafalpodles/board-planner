@@ -93,6 +93,14 @@ const RECIPES: Record<string, Recipe> = {
     handled: { status: 400, body: /icon must be empty or one of the supported project icons/ },
   },
   "GET /api/projects/[projectId]/audit": { send: get, handled: { status: 200, body: JSON_ARRAY } },
+  "GET /api/projects/[projectId]/group-roles": {
+    send: get,
+    handled: { status: 200, body: /"map":\[\]/ },
+  },
+  "PUT /api/projects/[projectId]/group-roles": {
+    send: withBody("put", {}),
+    handled: { status: 400, body: /map must be a list of groups and roles/ },
+  },
   "DELETE /api/projects/[projectId]/categories": {
     send: withBody("delete", {}),
     handled: { status: 400, body: /name is required/ },

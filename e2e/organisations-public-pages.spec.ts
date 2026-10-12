@@ -32,8 +32,8 @@ test.describe("BP-921: public pages on a host that serves no organisation", () =
     test(`${path} on an address with no organisation says so and points at the sign-in by e-mail`, async ({ page }) => {
       await page.goto(`${originOf("nosuch")}${path}`);
       const screen = page.getByTestId("no-organisation-here");
-      await expect(screen.getByRole("heading")).toHaveText(`There is no organisation at nosuch.${ORGANISATION_DOMAIN}:${ORGANISATIONS_PORT}`);
-      await expect(screen.getByRole("link", { name: "Sign in with your e-mail address" })).toHaveAttribute("href", `${SIGN_IN}/?switch`);
+      await expect(screen.getByRole("heading")).toHaveText("Right tool. Wrong address.");
+      await expect(screen.getByRole("link", { name: "Find my organisation" })).toHaveAttribute("href", `${SIGN_IN}/?switch`);
       await expect(page.getByLabel("Password")).toHaveCount(0);
     });
   }
@@ -47,12 +47,23 @@ test.describe("BP-921: public pages on a host that serves no organisation", () =
     await page.screenshot({ path: "e2e/.artifacts/bp921-no-organisation-phone.png" });
   });
 
+  test("an unknown route on an unknown organisation has branded recovery and keeps its 404", async ({ page }) => {
+    const response = await page.goto(`${originOf("nosuch")}/not-a-route-bp262`);
+    expect(response?.status()).toBe(404);
+    const screen = page.getByTestId("no-organisation-here");
+    await expect(screen.getByRole("heading", { name: "Right tool. Wrong address." })).toBeVisible();
+    await expect(screen.getByRole("link", { name: "Find my organisation" })).toHaveAttribute("href", `${SIGN_IN}/?switch`);
+    await expect(page.locator("aside")).toHaveCount(0);
+  });
+
   test("a suspended organisation's public pages say it is suspended, and so do its public endpoints", async ({ page, request }) => {
     expect((await suspend(request)).status()).toBe(200);
 
-    for (const path of ["/login", "/forgot", "/invite?token=x"]) {
+    for (const path of ["/login", "/forgot", "/invite?token=x", "/not-a-route-bp262"]) {
       await page.goto(`${originOf(GLOBEX)}${path}`);
       await expect(page.getByRole("heading", { name: "This organisation is suspended" })).toBeFocused();
+      await expect(page.getByRole("status")).toContainText("ORGANISATION / ON PAUSE");
+      await expect(page.getByRole("status")).not.toContainText("404");
     }
     const instance = await request.get(`${ORGANISATIONS_API}/api/auth/instance`, { headers: asOrganisation(GLOBEX) });
     expect(instance.status()).toBe(503);

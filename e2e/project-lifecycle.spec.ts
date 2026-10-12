@@ -211,7 +211,7 @@ test.describe("deleting a board", () => {
     await expect(sidebarLink(page, PROJECT_NAME)).toBeVisible();
 
     await page.goto(`/projects/${NEW_KEY}`);
-    await expect(page.getByText("There is no board here — the link may be stale.")).toBeVisible();
+    await expect(page.getByText("We couldn’t find this page. The link may have changed, or this page may not be available to you.")).toBeVisible();
   });
 
   test("a member without owner rights is never offered the section it lives in", async ({
@@ -267,7 +267,7 @@ test.describe("who can use this board", () => {
     try {
       // Before: an account in good standing, with no grant on this board
       await outsider.page.goto(`/projects/${PROJECT_KEY}`);
-      await expect(outsider.page.getByText("You do not have access to this board.")).toBeVisible();
+      await expect(outsider.page.getByText("We couldn’t find this page. The link may have changed, or this page may not be available to you.")).toBeVisible();
 
       await openSettings(admin.page, PROJECT_KEY);
       await addPerson(admin.page, OUTSIDER_FULL_NAME);
@@ -275,7 +275,7 @@ test.describe("who can use this board", () => {
 
       // After: the same address, the same person, a different answer
       await outsider.page.reload();
-      await expect(outsider.page.getByText("You do not have access to this board.")).toHaveCount(0);
+      await expect(outsider.page.getByText("We couldn’t find this page. The link may have changed, or this page may not be available to you.")).toHaveCount(0);
       await expect(
         outsider.page.getByRole("heading", { name: new RegExp(PROJECT_NAME) })
       ).toBeVisible();
@@ -351,7 +351,7 @@ test.describe("who can use this board", () => {
       expect((await revoked).status()).toBe(200);
 
       await outsider.page.reload();
-      await expect(outsider.page.getByText("You do not have access to this board.")).toBeVisible();
+      await expect(outsider.page.getByText("We couldn’t find this page. The link may have changed, or this page may not be available to you.")).toBeVisible();
     } finally {
       await outsider.context.close();
       await admin.context.close();

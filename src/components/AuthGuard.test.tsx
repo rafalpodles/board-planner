@@ -109,7 +109,7 @@ describe("AuthGuard", () => {
     auth.suspended = true;
     auth.logout.mockResolvedValue(null);
     const assign = vi.fn();
-    vi.stubGlobal("location", { host: "acme.board-planner.com", assign });
+    vi.stubGlobal("location", { host: "acme.board-planner.com", href: "https://acme.board-planner.com/projects", assign });
 
     renderGuard();
 
@@ -127,7 +127,7 @@ describe("AuthGuard", () => {
     auth.suspended = true;
     auth.logout.mockResolvedValue("https://login.board-planner.com");
     const assign = vi.fn();
-    vi.stubGlobal("location", { host: "acme.board-planner.com", assign });
+    vi.stubGlobal("location", { host: "acme.board-planner.com", href: "https://acme.board-planner.com/projects", assign });
 
     renderGuard();
     await act(async () => {
