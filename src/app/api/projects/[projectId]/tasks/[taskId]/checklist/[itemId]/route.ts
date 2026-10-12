@@ -16,7 +16,13 @@ const plainRows = (checklist: unknown): Row[] =>
     done: !!row.done,
   }));
 
-async function missing(db: Parameters<Parameters<typeof withProjectAccess>[0]>[1]["db"], projectId: string, taskId: string) {
+async function missing(db: Parameters<Parameters<typeof withProjectAccess>[0]>[1]["db"], projectId: string, taskId: string, itemId: string) {
+  const row = await db.Task.findOne({ _id: taskId }).lean();
+  console.error(
+    `[BP-1042 diag] 404 item=${itemId} task=${taskId} project=${projectId} dbOrg=${String(db.organisation)} ` +
+      `found=${!!row} rowProject=${String(row?.project)} rowOrg=${String((row as { organisation?: unknown } | null)?.organisation)} ` +
+      `ids=${JSON.stringify(((row?.checklist ?? []) as { _id: unknown; done?: unknown }[]).map((c) => [String(c._id), typeof c._id, c.done]))}`
+  );
   return (await db.Task.exists({ _id: taskId, project: projectId }))
     ? NextResponse.json({ error: "Criterion not found" }, { status: 404 })
     : NextResponse.json({ error: "Task not found" }, { status: 404 });
@@ -55,7 +61,7 @@ export const PATCH = withProjectAccess(async (request, { params, user, db }) => 
     { $set: change },
     { arrayFilters: [{ "c._id": itemId }], returnDocument: "before" }
   );
-  if (!before) return missing(db, projectId, taskId);
+  if (!before) return missing(db, projectId, taskId, itemId);
 
   const rows = plainRows(before.checklist);
   const old = rows.find((row) => row._id === itemId)!;
@@ -85,7 +91,7 @@ export const DELETE = withProjectAccess(async (_request, { params, user, db }) =
     { $pull: { checklist: { _id: itemId } } },
     { returnDocument: "before" }
   );
-  if (!before) return missing(db, projectId, taskId);
+  if (!before) return missing(db, projectId, taskId, itemId);
 
   const rows = plainRows(before.checklist);
   const old = rows.find((row) => row._id === itemId)!;
