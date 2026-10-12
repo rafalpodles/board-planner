@@ -6,7 +6,8 @@ import { withOrganisation } from "@/lib/organisation-field";
 // clears it, so the only trace was prose in a comment. This is the durable half.
 //
 // The agent is stored by name as well as by reference, because an agent can be renamed or deleted
-// and a record of what ran must not change when it is.
+// and a record of what ran must not change when it is. A deleted account's personal agents are the
+// exception: their names are what the person wrote, so deleting the account rewrites them.
 const agentRunSchema = new Schema<IAgentRun>(
   {
     project: { type: Schema.Types.ObjectId, ref: "Project", required: true },

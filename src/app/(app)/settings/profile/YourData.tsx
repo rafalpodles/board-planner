@@ -66,8 +66,9 @@ export function YourData({ asksPassword }: { asksPassword: boolean }) {
         Your data
       </h3>
       <p className="text-sm text-text-muted mb-4">
-        Download what this account holds about you: your details, your comments, the tasks you created and your
-        conversations with the PM agent.
+        Download what this account holds about you: your details, your comments, the tasks you created, the changes
+        you made to tasks, your conversations with the PM agent, your personal agents, your sign-in sessions and the
+        apps you connected.
       </p>
       <Button variant="secondary" onClick={() => void download()} disabled={downloading} aria-busy={downloading}>
         {downloading ? "Preparing…" : "Download my data"}
@@ -80,7 +81,8 @@ export function YourData({ asksPassword }: { asksPassword: boolean }) {
 
       <p className="text-sm text-text-muted mt-6 mb-4">
         Deleting your account cannot be undone. Comments and history you wrote stay on the boards they belong to,
-        under &ldquo;Deleted user&rdquo;; your notifications, PM conversations and sign-in credentials are removed.
+        under &ldquo;Deleted user&rdquo;; your notifications, PM conversations, personal agents and sign-in
+        credentials are removed.
       </p>
       <Button variant="danger" onClick={() => setOpen(true)}>
         Delete my account
