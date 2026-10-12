@@ -22,10 +22,9 @@ import { signIn as arriveSignedIn, signInThroughForm } from "./session";
  * Give this run its own database and port block; the fixture empties whatever it is pointed at:
  *   E2E_PORT=4050 E2E_MONGODB_URI=mongodb://localhost:27017/bp388_e2e npx playwright test …
  *
- * One product note the assertions below deliberately do not freeze: the sidebar's project list is
- * fetched once by its provider and never refetched, so creating, renaming or deleting a board
- * leaves the rail beside it stale until a reload. Every sidebar assertion here therefore reloads
- * first. Asserting the stale state as correct would cement it.
+ * BP-1035: the sidebar's project list is fetched again after a board is created, renamed or
+ * deleted, so those three assertions look at the rail without reloading first. The reloads that
+ * remain are for the pages that are not the subject of the assertion.
  *
  * Every destructive test operates on a board it created itself. The seeded TP board is what the
  * rest of the file stands on, and deleting it would surface as a product bug three tests later.
@@ -92,9 +91,6 @@ test.describe("creating a board", () => {
     await expect(page).toHaveURL(new RegExp(`/projects/${NEW_KEY}$`));
     await expect(page.getByRole("heading", { name: new RegExp(NEW_NAME) })).toBeVisible();
 
-    // Only after a reload: the sidebar's project list is fetched once and never asked again, so a
-    // board created a second ago is not in the rail beside it yet. See the note at the foot.
-    await page.reload();
     await expect(sidebarLink(page, NEW_NAME)).toBeVisible();
   });
 
@@ -141,11 +137,6 @@ test.describe("renaming a board", () => {
     await page.getByRole("button", { name: "Save changes" }).click();
     expect((await saved).status()).toBe(200);
 
-    // Not asserted here: the sidebar still says the old name at this point. replaceProject only
-    // touches this page's own state, and the projects provider behind the sidebar is never asked
-    // to refetch — so the rename is stored but the rail beside it goes stale until a reload.
-    // Filed rather than frozen into an expectation.
-    await page.reload();
     await expect(sidebarLink(page, NEW_NAME)).toBeVisible();
     await expect(sidebarLink(page, PROJECT_NAME)).toHaveCount(0);
   });
@@ -214,9 +205,6 @@ test.describe("deleting a board", () => {
 
     await expect(page).toHaveURL(/\/projects$/);
 
-    // Same stale rail as on create: the deleted board is still listed until the list is fetched
-    // again, so this is asserted after a reload rather than immediately
-    await page.reload();
     await expect(sidebarLink(page, NEW_NAME)).toHaveCount(0);
     // The seeded board is untouched, so the absence above is this board being gone rather than
     // the sidebar failing to render

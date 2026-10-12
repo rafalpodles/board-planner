@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import type { AuthState } from "@/hooks/use-auth";
 import type { ApiUser } from "@/types";
 
 const { api, nav, auth, projectsState } = vi.hoisted(() => ({
   api: { post: vi.fn() },
-  projectsState: { projects: [] as { key: string }[] },
+  projectsState: { projects: [] as { key: string }[], reload: vi.fn() },
   nav: { replace: vi.fn(), back: vi.fn(), push: vi.fn() },
   // Annotated, so a field added to AuthState fails here instead of reaching the component as
   // undefined with the suite green
@@ -162,6 +162,37 @@ describe("a key another board holds", () => {
     fireEvent.submit(keyField().closest("form")!);
 
     expect(await screen.findByText("That key is already used by another board")).toBeTruthy();
+    expect(nav.push).not.toHaveBeenCalled();
+  });
+});
+
+// BP-1035: the sidebar reads its list once, so a board made here was missing from it until a reload
+describe("after creating a project", () => {
+  it("re-reads the project list before it opens the board", async () => {
+    const order: string[] = [];
+    api.post.mockResolvedValue({ key: "ORB" });
+    projectsState.reload.mockImplementation(async () => {
+      order.push("reload");
+    });
+    nav.push.mockImplementation(() => order.push("push"));
+    render(<NewProjectPage />);
+
+    fireEvent.change(screen.getByLabelText("Project Name"), { target: { value: "Orbit" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Create Project" }).closest("form")!);
+
+    await waitFor(() => expect(nav.push).toHaveBeenCalledWith("/projects/ORB"));
+    expect(order).toEqual(["reload", "push"]);
+  });
+
+  it("leaves the list alone when the create is refused", async () => {
+    api.post.mockRejectedValue(new Error("Key taken"));
+    render(<NewProjectPage />);
+
+    fireEvent.change(screen.getByLabelText("Project Name"), { target: { value: "Orbit" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Create Project" }).closest("form")!);
+
+    expect(await screen.findByText("Key taken")).toBeTruthy();
+    expect(projectsState.reload).not.toHaveBeenCalled();
     expect(nav.push).not.toHaveBeenCalled();
   });
 });

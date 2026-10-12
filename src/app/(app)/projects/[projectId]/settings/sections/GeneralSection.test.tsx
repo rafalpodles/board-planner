@@ -7,13 +7,15 @@ import { SettingsProvider } from "@/components/settings/settings-context";
 import { ApiProject, ApiProjectMember } from "@/types";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 
-const { api, toast, routerReplace } = vi.hoisted(() => ({
+const { api, toast, routerReplace, reloadProjects } = vi.hoisted(() => ({
   api: { get: vi.fn(), put: vi.fn(), del: vi.fn() },
   toast: vi.fn(),
   routerReplace: vi.fn(),
+  reloadProjects: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
+vi.mock("@/hooks/use-projects", () => ({ useProjects: () => ({ reload: reloadProjects }) }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: routerReplace }) }));
 // Its own reads are its own test's business; here they would be counted as the member list's
@@ -71,6 +73,8 @@ beforeEach(() => {
   register.mockReset();
   replaceProject.mockReset();
   routerReplace.mockReset();
+  reloadProjects.mockReset();
+  reloadProjects.mockResolvedValue(undefined);
   api.get.mockReset();
   api.put.mockReset();
   api.del.mockReset();
@@ -414,6 +418,7 @@ describe("GeneralSection member access", () => {
       await save();
 
       expect(routerReplace).toHaveBeenCalledWith("/projects");
+      expect(reloadProjects).toHaveBeenCalledTimes(1);
     });
 
     // An instance admin keeps the board whatever their own grant says
@@ -744,5 +749,61 @@ describe("GeneralSection members read", () => {
     expect(screen.getByLabelText("Access for alice")).toHaveProperty("value", "owner");
     expect(screen.getByLabelText("Access for bob")).toHaveProperty("value", "member");
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+// BP-1035: the sidebar's list is read once, so every write that changes it has to ask for it again
+describe("GeneralSection and the sidebar's project list", () => {
+  const identityGroup = () =>
+    register.mock.calls.map(([group]) => group).filter((g) => g.id === "general-identity").at(-1);
+
+  it("re-reads it after the name or icon is saved", async () => {
+    api.put.mockResolvedValue({ name: "Renamed", description: "", icon: "" });
+    renderSection();
+    await screen.findByLabelText("Access for alice");
+
+    await act(async () => {
+      await identityGroup().save();
+    });
+
+    expect(reloadProjects).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-read it when that save is refused", async () => {
+    api.put.mockRejectedValue(new Error("nope"));
+    renderSection();
+    await screen.findByLabelText("Access for alice");
+
+    await act(async () => {
+      await identityGroup().save();
+    });
+
+    expect(reloadProjects).not.toHaveBeenCalled();
+  });
+
+  it("re-reads it before it leaves a deleted board, so the row is gone when the list shows", async () => {
+    const order: string[] = [];
+    reloadProjects.mockImplementation(async () => {
+      order.push("reload");
+    });
+    routerReplace.mockImplementation(() => order.push("replace"));
+    renderSection();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete project..." }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete project" }));
+
+    await waitFor(() => expect(routerReplace).toHaveBeenCalledWith("/projects"));
+    expect(order).toEqual(["reload", "replace"]);
+  });
+
+  it("leaves it alone when the delete fails", async () => {
+    api.del.mockRejectedValue(new Error("nope"));
+    renderSection();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete project..." }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete project" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Failed to delete project", "error"));
+    expect(reloadProjects).not.toHaveBeenCalled();
   });
 });
