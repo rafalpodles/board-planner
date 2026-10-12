@@ -5,10 +5,9 @@ import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
 import { organisationUploads } from "@/lib/upload-ownership";
 import { workerDisplayName } from "@/lib/worker-user";
+import { DELETED_AGENT } from "@/types";
 
 type Id = Types.ObjectId | string;
-
-const REMOVED_AGENT_NAME = "Deleted agent";
 
 export interface ErasedAccount {
   _id: Types.ObjectId | string;
@@ -82,13 +81,14 @@ async function scrubBoardAccessAudit(db: ScopedDb, user: ErasedAccount, label: s
 async function releaseMachinesOf(db: ScopedDb, userId: Id) {
   const workers = await db.Worker.find({ owner: userId }).select("_id name identity").lean();
   for (const worker of workers) {
-    // The credential too: once the owner is gone, revoking "this owner's machines" no longer finds it
-    const unmatchable = await bcrypt.hash(randomBytes(32).toString("hex"), 10);
-    await db.Worker.updateOne({ _id: worker._id }, { $set: { owner: null, enabled: false, credentialHash: unmatchable } });
-    // The machine's account is named after its owner and machine; the owner is the part that goes
+    // The machine's account is named after its owner and machine; the owner is the part that goes.
+    // Before the machine is released, which is what finds it again if this stops half way
     if (worker.identity) {
       await db.User.updateOne({ _id: worker.identity }, { $set: { fullName: workerDisplayName(worker.name, "") } });
     }
+    // The credential too: once the owner is gone, revoking "this owner's machines" no longer finds it
+    const unmatchable = await bcrypt.hash(randomBytes(32).toString("hex"), 10);
+    await db.Worker.updateOne({ _id: worker._id }, { $set: { owner: null, enabled: false, credentialHash: unmatchable } });
   }
 }
 
@@ -101,20 +101,30 @@ async function deleteConversations(db: ScopedDb, userId: Id) {
 }
 
 // A personal agent runs only on its owner's own tasks, so with the owner gone it has no one to run for,
-// and its name and prompts are what they wrote. The runs it made keep their place in the history.
+// and its name and prompts are what they wrote. History stores the name, not the id (BP-730), and only
+// the owner can point a task at a personal agent, so the rows to rewrite are on the tasks they did.
+// The agent goes last: a retry after a stop half way still finds the names to rewrite.
 async function removePersonalAgentsOf(db: ScopedDb, userId: Id, quiet: { timestamps: false }) {
-  const agents = await db.Agent.find({ scope: "user", owner: userId }).select("_id").lean();
+  const agents = await db.Agent.find({ scope: "user", owner: userId }).select("_id name").lean();
   if (agents.length === 0) return;
   const ids = agents.map((a) => a._id);
+  const said = [...agents.map((a) => a.name as string), ...ids.map(String)];
+
+  const tasks = await db.ActivityLog.distinct("task", { field: "agent", user: userId, newValue: { $in: said } });
+  if (tasks.length > 0) {
+    await db.ActivityLog.updateMany({ field: "agent", task: { $in: tasks }, oldValue: { $in: said } }, { $set: { oldValue: DELETED_AGENT } });
+    await db.ActivityLog.updateMany({ field: "agent", task: { $in: tasks }, newValue: { $in: said } }, { $set: { newValue: DELETED_AGENT } });
+  }
   await db.Task.updateMany({ agent: { $in: ids } }, { $set: { agent: null } }, quiet);
-  await db.AgentRun.updateMany({ agent: { $in: ids } }, { $set: { agent: null, agentName: REMOVED_AGENT_NAME } }, quiet);
+  await db.AgentRun.updateMany({ agent: { $in: ids } }, { $set: { agent: null, agentName: DELETED_AGENT } }, quiet);
   await db.Agent.deleteMany({ _id: { $in: ids } });
 }
 
 /**
  * What still points at a user id after the User row is gone, keyed by the id alone: what is addressed to
- * them, what they said to the PM agent, what they own. Run for an account being deleted and, by the
- * clean-up script, for ids an earlier deletion left behind. Safe to run again.
+ * them, what they said to the PM agent, what they authored. Not their machines, which go last, nor what
+ * names them by username or address, which an id cannot find. Run for an account being deleted and, by
+ * the clean-up script, for ids an earlier deletion left behind. Safe to run again.
  */
 export async function eraseReferencesTo(db: ScopedDb, userId: Id): Promise<void> {
   await connectDB();
@@ -135,7 +145,6 @@ export async function eraseReferencesTo(db: ScopedDb, userId: Id): Promise<void>
   await removePersonalAgentsOf(db, userId, quiet);
   // Blocks are the organisation's catalogue and who may edit one is the role, never this field
   await db.AgentBlock.updateMany({ createdBy: userId }, { $set: { createdBy: null } }, quiet);
-  await releaseMachinesOf(db, userId);
 }
 
 /**
@@ -156,10 +165,12 @@ export async function eraseAccountTraces(db: ScopedDb, user: ErasedAccount): Pro
 
   await scrubInstanceAudit(db, user, label);
   await scrubBoardAccessAudit(db, user, label);
+  // Last: the one step that cannot be undone for an account that stays, if an earlier one fails
+  await releaseMachinesOf(db, user._id);
   return label;
 }
 
-const ORPHAN_SOURCES = [
+export const ORPHAN_SOURCES = [
   ["Task", "assignee"],
   ["Task", "assignedBy"],
   ["Task", "pmAssignedFor"],
@@ -212,6 +223,7 @@ export async function eraseOrphanReferences(db: ScopedDb, orphans: OrphanReferen
     // Asked again, one at a time, so an account that appeared since the scan is never treated as gone
     if (await db.User.findById(id).select("_id").lean()) continue;
     await eraseReferencesTo(db, id);
+    await releaseMachinesOf(db, id);
     erased += 1;
   }
   return erased;

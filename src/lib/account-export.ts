@@ -5,19 +5,23 @@ import { accessibleProjectIds, type IdentifiedSubject } from "@/lib/grants";
 
 type Id = Types.ObjectId | string;
 
+// One row is written per saved edit, with the whole text, so a heavy editor's history is unbounded
+export const ACTIVITY_EXPORT_LIMIT = 20_000;
+
 /**
  * What the account holds about one person (GDPR arts. 15 and 20), as JSON. Board content belongs to
  * the organisation, so it is here only where the person wrote it: their comments, the tasks they
  * created, the changes they made to tasks, their conversations with the PM agent and the personal
- * agents they composed, besides what the account holds about their own use of it: sessions and
- * consents. Never a password hash, a token's hash or a webhook address — a download is not a way to
- * carry a credential out.
+ * agents they composed. A change is shown with its old and new value only on a board they still reach,
+ * because the old value may be somebody else's text. Besides those, what the account holds about their
+ * own use of it: sessions and the apps they connected. Never a password hash, a token's hash or a
+ * webhook address — a download is not a way to carry a credential out.
  */
 export async function accountExport(db: ScopedDb, user: IdentifiedSubject) {
   const userId = user._id as Id;
   const reach = await accessibleProjectIds(db, user);
   const mayRead = (project: unknown) => reach === null || reach.includes(String(project));
-  const [record, grants, identities, apiTokens, tasks, comments, pmMessages, notifications, sessions, consents, activity, agents] =
+  const [record, grants, identities, apiTokens, tasks, comments, pmMessages, notifications, sessions, connections, activity, agents] =
     await Promise.all([
     db.User.findById(userId).lean(),
     db.Grant.find({ subject: userId }).lean(),
@@ -28,12 +32,22 @@ export async function accountExport(db: ScopedDb, user: IdentifiedSubject) {
     db.PmMessage.find({ triggeredBy: userId }).select("project role content createdAt").sort({ createdAt: 1 }).lean(),
     db.Notification.find({ recipient: userId }).select("type title body createdAt").sort({ createdAt: 1 }).lean(),
     db.Session.find({ user: userId }).select("userAgent ip createdAt lastUsedAt expiresAt").sort({ createdAt: 1 }).lean(),
-    db.OAuthConsent.find({ user: userId }).select("clientId scope createdAt expiresAt").sort({ createdAt: 1 }).lean(),
-    db.ActivityLog.find({ user: userId }).select("task action field oldValue newValue createdAt").sort({ createdAt: 1 }).lean(),
+    db.OAuthToken.find({ user: userId }).select("clientId scope allowedProjects createdAt accessExpiresAt").sort({ createdAt: 1 }).lean(),
+    db.ActivityLog.find({ user: userId })
+      .select("task action field oldValue newValue createdAt")
+      .sort({ createdAt: -1 })
+      .limit(ACTIVITY_EXPORT_LIMIT + 1)
+      .lean(),
     db.Agent.find({ scope: "user", owner: userId }).select("name description composition createdAt").sort({ createdAt: 1 }).lean(),
   ]);
 
-  const referencedTaskIds = [...comments.map((c) => c.task), ...activity.map((a) => a.task)] as Types.ObjectId[];
+  const activityTruncated = activity.length > ACTIVITY_EXPORT_LIMIT;
+  const changes = activity.slice(0, ACTIVITY_EXPORT_LIMIT).reverse();
+  const taskIdsOnce = new Map<string, Types.ObjectId>();
+  for (const ref of [...comments.map((c) => c.task), ...changes.map((a) => a.task)]) {
+    taskIdsOnce.set(String(ref), ref as Types.ObjectId);
+  }
+  const referencedTaskIds = [...taskIdsOnce.values()];
   const referencedTasks = referencedTaskIds.length
     ? await db.Task.find({ _id: { $in: referencedTaskIds } }).select("project taskNumber").lean()
     : [];
@@ -42,6 +56,7 @@ export async function accountExport(db: ScopedDb, user: IdentifiedSubject) {
     ...tasks.map((t) => t.project),
     ...referencedTasks.map((t) => t.project),
     ...pmMessages.map((m) => m.project),
+    ...connections.flatMap((c) => c.allowedProjects ?? []),
   ] as Types.ObjectId[];
   const projects = projectIds.length
     ? await db.Project.find({ _id: { $in: projectIds } }).select("key name").lean()
@@ -103,7 +118,8 @@ export async function accountExport(db: ScopedDb, user: IdentifiedSubject) {
       })),
     notifications: notifications.map((n) => ({ type: n.type, title: n.title, body: n.body, createdAt: n.createdAt })),
     // What was changed is shown only on a board they still reach, for the reason the tasks above are
-    activity: activity.map((a) => {
+    ...(activityTruncated ? { activityTruncated: true } : {}),
+    activity: changes.map((a) => {
       const entry = {
         task: referencedTaskKey.get(String(a.task)) ?? String(a.task),
         action: a.action,
@@ -121,7 +137,14 @@ export async function accountExport(db: ScopedDb, user: IdentifiedSubject) {
       lastUsedAt: x.lastUsedAt,
       expiresAt: x.expiresAt,
     })),
-    consents: consents.map((x) => ({ client: x.clientId, scope: x.scope, grantedAt: x.createdAt, expiresAt: x.expiresAt })),
+    // Empty `boards` means every board the person reaches
+    connectedApps: connections.map((x) => ({
+      client: x.clientId,
+      scope: x.scope,
+      boards: (x.allowedProjects ?? []).map((p) => keyOf.get(String(p)) ?? String(p)),
+      grantedAt: x.createdAt,
+      accessExpiresAt: x.accessExpiresAt,
+    })),
     personalAgents: agents.map((x) => ({
       name: x.name,
       description: x.description,

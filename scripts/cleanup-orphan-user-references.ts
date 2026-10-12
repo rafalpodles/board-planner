@@ -1,8 +1,15 @@
 /**
- * BP-1036: run, for every user id that something still names and no account answers to, the
- * erasure a deletion runs today. Accounts an administrator deleted before BP-946 left their ids
- * behind on tasks (assignee, assigned by, PM-assigned for, watchers), in notifications and PM
- * conversations, and on personal agents and blocks.
+ * BP-1036: for every user id that something still names and no account answers to, erase what a
+ * deletion erases by id today: notifications, PM conversations, consents, accepted invitations,
+ * assignee / assigned-by / PM-assigned / watcher references on tasks, personal agents and the
+ * blocks they authored, machines.
+ *
+ * What an id cannot find stays: a username in history or the audit logs, and an invitation sent to
+ * an address, since both were written under a name the deleted account no longer gives us.
+ *
+ * Only the default organisation, as cleanup-orphan-grants.ts: on an instance with other
+ * organisations, run it against each. Run the dry run first. A user row with no organisation is
+ * invisible to it, which would list that person's references as orphans; boot warns about such rows.
  *
  * Usage:
  *   MONGODB_URI=... npx tsx scripts/cleanup-orphan-user-references.ts            # reports, writes nothing
@@ -26,6 +33,8 @@ const APPLY = process.argv.includes("--apply");
 async function main() {
   const db = scopedToDefaultOrganisation();
   const { uri, source } = resolveUri();
+  // The erasure connects through connectDB, which reads this variable and nothing else
+  process.env.MONGODB_URI = uri;
   await mongoose.connect(uri, { autoIndex: false, ...(dbName() ? { dbName: dbName() } : {}) });
   console.log(`Connected via ${source} to database "${mongoose.connection.name}"${APPLY ? "" : " (dry run)"}`);
 

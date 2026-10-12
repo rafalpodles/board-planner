@@ -44,7 +44,7 @@ function project(row: Row, fields: string[] | null): Row {
 /**
  * A scoped database held in memory, whose filters really select: a fake that returns its seed
  * whatever it is asked cannot tell a query on the right person from one on everybody. Understands
- * equality, $or, $in, $ne and $regex, distinct, and $set / $pull in updates.
+ * equality, $or, $in, $ne and $regex, sort and limit on strings, distinct, and $set / $pull in updates.
  */
 export function memoryDb(seed: Record<string, Row[]> = {}) {
   const store: Record<string, Row[]> = Object.fromEntries(Object.entries(seed).map(([name, rows]) => [name, rows.map((r) => ({ ...r }))]));
@@ -62,13 +62,34 @@ export function memoryDb(seed: Record<string, Row[]> = {}) {
     find: (filter: Filter = {}) => {
       calls.push({ model: name, op: "find", filter });
       let fields: string[] | null = null;
+      let max = Infinity;
+      let order: [string, number][] = [];
       const chain = {
         select: (list: string) => {
           fields = list.split(/\s+/).filter(Boolean);
           return chain;
         },
-        sort: () => chain,
-        lean: async () => rowsOf(name).filter((row) => matches(row, filter)).map((row) => project(row, fields)),
+        sort: (spec: Record<string, number> = {}) => {
+          order = Object.entries(spec);
+          return chain;
+        },
+        limit: (n: number) => {
+          max = n;
+          return chain;
+        },
+        lean: async () =>
+          rowsOf(name)
+            .filter((row) => matches(row, filter))
+            .sort((a, b) => {
+              for (const [key, direction] of order) {
+                const x = String(a[key] ?? "");
+                const y = String(b[key] ?? "");
+                if (x !== y) return (x < y ? -1 : 1) * direction;
+              }
+              return 0;
+            })
+            .slice(0, max)
+            .map((row) => project(row, fields)),
       };
       return chain;
     },

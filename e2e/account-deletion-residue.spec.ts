@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
 import mongoose from "mongoose";
@@ -9,6 +10,7 @@ import {
   HELD_TASK_NUMBER,
   MEMBER_ID,
   MEMBER_PASSWORD,
+  MEMBER_SESSION_TOKEN,
   PROJECT_ID,
   PROJECT_KEY,
   WORKER_CREDENTIAL,
@@ -108,13 +110,27 @@ async function seedWhatTheMemberAuthored() {
     createdAt: now,
     updatedAt: now,
   });
-  await handle.collection("activitylogs").insertOne({
-    task: AGENT_TASK_ID,
+  await handle.collection("activitylogs").insertMany([
+    {
+      task: AGENT_TASK_ID,
+      user: MEMBER_ID,
+      action: "updated",
+      field: "title",
+      oldValue: "Before",
+      newValue: "Run by the member's agent",
+      createdAt: now,
+    },
+    { task: AGENT_TASK_ID, user: MEMBER_ID, action: "updated", field: "agent", oldValue: "", newValue: AGENT_NAME, createdAt: now },
+  ]);
+  await handle.collection("oauthtokens").insertOne({
+    accessTokenHash: "e2e-access-hash-never-exported",
+    refreshTokenHash: "e2e-refresh-hash-never-exported",
+    clientId: "e2e-connected-app",
     user: MEMBER_ID,
-    action: "updated",
-    field: "title",
-    oldValue: "Before",
-    newValue: "Run by the member's agent",
+    scope: "mcp",
+    allowedProjects: [PROJECT_ID],
+    accessExpiresAt: new Date(now.getTime() + 3600_000),
+    refreshExpiresAt: new Date(now.getTime() + 86_400_000),
     createdAt: now,
   });
 }
@@ -189,25 +205,33 @@ test("the export holds the person's sessions, changes and agents; deleting remov
   const raw = readFileSync((await download.path())!, "utf8");
   const exported = JSON.parse(raw);
 
-  expect(exported.personalAgents).toEqual([expect.objectContaining({ name: AGENT_NAME, description: "Runs on my own tasks" })]);
-  expect(exported.activity).toEqual([
+  expect.soft(exported.personalAgents).toEqual([expect.objectContaining({ name: AGENT_NAME, description: "Runs on my own tasks" })]);
+  expect.soft(exported.activity).toEqual([
     expect.objectContaining({ task: `${PROJECT_KEY}-${MEMBERS_AGENT_TASK_NUMBER}`, field: "title", from: "Before" }),
+    expect.objectContaining({ task: `${PROJECT_KEY}-${MEMBERS_AGENT_TASK_NUMBER}`, field: "agent", to: AGENT_NAME }),
   ]);
-  expect(exported.sessions.length).toBeGreaterThan(0);
-  expect(Array.isArray(exported.consents)).toBe(true);
+  expect.soft(exported.sessions.length).toBeGreaterThan(0);
+  expect.soft(exported.connectedApps).toEqual([
+    expect.objectContaining({ client: "e2e-connected-app", scope: "mcp", boards: [PROJECT_KEY] }),
+  ]);
   expect(raw).not.toContain("An administrator's own agent");
-  expect(raw).not.toMatch(/tokenHash|"hash"/);
+  expect(raw).not.toContain("hash-never-exported");
+  expect(raw).not.toContain(MEMBER_SESSION_TOKEN);
+  expect(raw).not.toContain(createHash("sha256").update(MEMBER_SESSION_TOKEN).digest("hex"));
 
   await deleteOwnAccount(page);
 
   const handle = await db();
-  expect(await handle.collection("agents").countDocuments({ _id: AGENT_ID })).toBe(0);
-  expect(await handle.collection("agents").countDocuments({ _id: OTHERS_AGENT_ID })).toBe(1);
-  expect(await handle.collection("tasks").findOne({ _id: AGENT_TASK_ID })).toMatchObject({ agent: null, assignee: null });
+  expect.soft(await handle.collection("agents").countDocuments({ _id: AGENT_ID })).toBe(0);
+  expect.soft(await handle.collection("agents").countDocuments({ _id: OTHERS_AGENT_ID })).toBe(1);
+  expect.soft(await handle.collection("tasks").findOne({ _id: AGENT_TASK_ID })).toMatchObject({ agent: null, assignee: null });
   const run = await handle.collection("agentruns").findOne({ task: AGENT_TASK_ID });
-  expect(run).toMatchObject({ agent: null, agentName: "Deleted agent" });
-  expect(JSON.stringify(run)).not.toContain(AGENT_NAME);
-  expect(await handle.collection("agentblocks").findOne({ _id: BLOCK_ID })).toMatchObject({ createdBy: null });
+  expect.soft(run).toMatchObject({ agent: null, agentName: "a deleted agent" });
+  expect.soft(JSON.stringify(run)).not.toContain(AGENT_NAME);
+  expect.soft(await handle.collection("agentblocks").findOne({ _id: BLOCK_ID })).toMatchObject({ createdBy: null });
+  const history = await handle.collection("activitylogs").find({ task: AGENT_TASK_ID, field: "agent" }).toArray();
+  expect.soft(JSON.stringify(history)).not.toContain(AGENT_NAME);
+  expect.soft(history.map((row) => row.newValue)).toEqual(["a deleted agent"]);
 
   await signIn(page, "admin");
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${HELD_TASK_NUMBER}`);
@@ -220,6 +244,6 @@ test("the control: while the account exists the panel names the person who answe
   await signIn(page, "admin");
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${HELD_TASK_NUMBER}`);
   await expect(page.getByLabel("Task title")).toHaveValue(/Held by a live worker run/);
-  await expect(page.getByTestId("decision-decided-by")).toContainText(/Declined by (?!Deleted user)\S+/);
+  await expect(page.getByTestId("decision-decided-by")).toContainText("Declined by E2E Member");
   expect(await (await db()).collection("agents").countDocuments({ _id: AGENT_ID })).toBe(1);
 });
