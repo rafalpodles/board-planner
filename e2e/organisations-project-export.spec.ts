@@ -178,6 +178,7 @@ test.describe("exporting one project (BP-1011)", () => {
     await signInWithToken(page.context(), ACME, OWNER.session);
     await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}/settings?section=general`);
     const card = page.getByRole("button", { name: "Download the project export" });
+    await expect(page.getByText("Loading who can use this board")).toHaveCount(0);
     await card.scrollIntoViewIfNeeded();
     await expect(card).toBeVisible();
     await page.screenshot({ path: "e2e/.artifacts/bp1011-project-export-desktop.png" });
