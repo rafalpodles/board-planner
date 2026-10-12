@@ -10,6 +10,7 @@ const compare = vi.fn();
 const userCount = vi.fn();
 const refuseSetupCode = vi.fn();
 const signedInRecently = vi.fn();
+const ssoEnforced = vi.fn(async () => false);
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 let clientIp: string | null = "203.0.113.9";
@@ -29,7 +30,7 @@ vi.mock("@/lib/oidc/providers", () => ({
   providerFor: async (_db: unknown, id: string) => (id === "oidc" ? { id: "oidc", label: "Acme" } : null),
   // Google and GitHub as the environment sets them up, whichever of them this organisation is offered
   setUpButNotOffered: (id: string) => id === "google",
-  ssoEnforced: async () => false,
+  ssoEnforced: (...args: unknown[]) => (ssoEnforced as (...a: unknown[]) => Promise<boolean>)(...args),
 }));
 vi.mock("@/lib/oidc/flow", () => ({ beginFlow, FLOW_COOKIE: "bp_oidc", FLOW_TTL_MS: 600_000 }));
 vi.mock("@/lib/invitations", () => ({ findInvitationByToken }));
@@ -61,6 +62,7 @@ const withPassword = (password?: string) =>
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  ssoEnforced.mockResolvedValue(false);
   await resetRateLimits();
   clientIp = "203.0.113.9";
   beginFlow.mockResolvedValue({ url: "https://id.example.com/authorize?x", binder: "cpo_b" });
@@ -281,6 +283,54 @@ describe("linking with password sign-in off (BP-830)", () => {
 
     signedInRecently.mockResolvedValue(false);
     expect((await start({ intent: "link" })).status).toBe(403);
+  });
+});
+
+// BP-951, BP-1031. A requirement of single sign-on closes the password path, so a password is no
+// proof for adding a provider: the sign-in made minutes ago is, as for an account with no password.
+describe("linking while the organisation requires single sign-on (BP-951)", () => {
+  it("asks the account that has a password for a recent sign-in, not for the password", async () => {
+    ssoEnforced.mockResolvedValue(true);
+
+    const res = await start({ intent: "link" });
+
+    expect(res.status).toBe(200);
+    expect(compare).not.toHaveBeenCalled();
+    expect(signedInRecently).toHaveBeenCalled();
+    expect(beginFlow).toHaveBeenCalledWith(
+      scopedToDefaultOrganisation(),
+      expect.objectContaining({ intent: "link", userId: "u1" })
+    );
+  });
+
+  it("refuses it when that sign-in is not recent, with the words that ask for one", async () => {
+    ssoEnforced.mockResolvedValue(true);
+    signedInRecently.mockResolvedValue(false);
+
+    const res = await start({ intent: "link" });
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "sign in again" });
+    expect(beginFlow).not.toHaveBeenCalled();
+  });
+
+  it("does not take a password typed anyway as the proof", async () => {
+    ssoEnforced.mockResolvedValue(true);
+    signedInRecently.mockResolvedValue(false);
+
+    const res = await start({ intent: "link", currentPassword: "right" });
+
+    expect(res.status).toBe(403);
+    expect(compare).not.toHaveBeenCalled();
+    expect(beginFlow).not.toHaveBeenCalled();
+  });
+
+  // The control: without the requirement the very same request asks for the password
+  it("is the password step again when the requirement is off", async () => {
+    const res = await start({ intent: "link" });
+
+    expect(res.status).toBe(400);
+    expect(signedInRecently).not.toHaveBeenCalled();
   });
 });
 

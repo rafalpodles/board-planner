@@ -12,8 +12,15 @@ const oauthConsentDeleteOne = vi.fn();
 // A permanently empty board list cannot exercise the line that narrows a grant, which is the
 // privilege-limiting line of the whole feature (BP-383 review).
 let projects: { _id: string; name: string; key: string }[] = [];
+const ssoEnforced = vi.hoisted(() => vi.fn(async () => false));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+// Everything else about providers is the real thing; only whether the organisation requires its
+// single sign-on is decided here, since that is a stored setting this suite has no store for
+vi.mock("@/lib/oidc/providers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/oidc/providers")>()),
+  ssoEnforced,
+}));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
@@ -89,6 +96,7 @@ async function signedIn(username: string): Promise<Response> {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  ssoEnforced.mockResolvedValue(false);
   await resetRateLimits();
   projects = [];
   oauthConsentDeleteOne.mockResolvedValue({ deletedCount: 1 });
@@ -739,5 +747,52 @@ describe("with password sign-in off (BP-830)", () => {
     expect(html).not.toContain("Signed in");
     expect(html).toContain('action="/login"');
     expect(verifyCredentials).not.toHaveBeenCalled();
+  });
+});
+
+// BP-951, BP-1031. An organisation that requires single sign-on has closed the password path, and the
+// authorize page is a second place a password could be typed and verified. Both halves are pinned: the
+// form it serves, and the POST that must not verify what it is sent.
+describe("with the organisation requiring single sign-on (BP-951)", () => {
+  beforeEach(() => {
+    ssoEnforced.mockResolvedValue(true);
+    resolveSession.mockResolvedValue(null);
+    userFindOne.mockResolvedValue(USER);
+  });
+
+  it("offers only the way back to the sign-in page, and no password field", async () => {
+    const html = await (await GET(authorizeGet())).text();
+
+    expect(html).not.toContain('type="password"');
+    expect(html).not.toContain("Invalid username or password");
+    expect(html).toContain("Sign in to continue");
+    expect(html).toContain('action="/login"');
+    expect(html).toMatch(/name="next" value="\/oauth\/authorize\?/);
+  });
+
+  it("verifies no password posted to it, and starts no session", async () => {
+    verifyCredentials.mockResolvedValue(USER);
+
+    const response = await POST(login("victim", "correct horse"));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(verifyCredentials).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
+    expect(html).toContain("Sign in to continue");
+    expect(html).not.toContain('type="password"');
+  });
+
+  // The control for the two above: the same requests, with the requirement off, are the password flow
+  it("is the password flow again when the requirement is off", async () => {
+    ssoEnforced.mockResolvedValue(false);
+    verifyCredentials.mockResolvedValue(USER);
+
+    const form = await (await GET(authorizeGet())).text();
+    const response = await POST(login("victim", "correct horse"));
+
+    expect(form).toContain('type="password"');
+    expect(verifyCredentials).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(303);
   });
 });
