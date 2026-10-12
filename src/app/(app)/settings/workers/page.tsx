@@ -595,6 +595,19 @@ export default function AdminWorkersPage() {
                           >
                             {worker.enabled ? "On" : "Off"}
                           </StateChip>
+                          <CommandIcon
+                            label="Delete"
+                            danger
+                            title={
+                              worker.stale
+                                ? "Delete this worker"
+                                : "Seen in the last five minutes — switch it off and stop it first"
+                            }
+                            disabled={savingId === worker._id || !worker.stale}
+                            onClick={() => setDeleting(worker)}
+                          >
+                            <path d="M9 3h6l1 2h4v2H4V5h4zM6 9h12l-1 11a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2z" />
+                          </CommandIcon>
                         </div>
                         <div className="flex items-center gap-0.5">
                           <CommandIcon
@@ -619,19 +632,6 @@ export default function AdminWorkersPage() {
                             onClick={() => sendCommand(worker, "stop")}
                           >
                             <rect x="6" y="6" width="12" height="12" rx="2" />
-                          </CommandIcon>
-                          <CommandIcon
-                            label="Delete"
-                            danger
-                            title={
-                              worker.stale
-                                ? "Delete this worker"
-                                : "Seen in the last five minutes — switch it off and stop it first"
-                            }
-                            disabled={savingId === worker._id || !worker.stale}
-                            onClick={() => setDeleting(worker)}
-                          >
-                            <path d="M9 3h6l1 2h4v2H4V5h4zM6 9h12l-1 11a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2z" />
                           </CommandIcon>
                         </div>
                       </div>
