@@ -43,7 +43,7 @@ export function BuildVersion() {
 
   return (
     <>
-      <dt className="text-text-muted">Version</dt>
+      <dt className="self-center text-text-muted">Version</dt>
       <dd className="min-w-0" data-testid="build-version">
         {failed ? (
           <span className="text-danger">Could not be read.</span>
