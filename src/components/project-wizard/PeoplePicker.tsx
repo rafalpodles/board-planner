@@ -115,7 +115,7 @@ export function PeoplePicker({ chosen, you, onAdd, onRelation, onRemove }: Peopl
             id={`${listId}-list`}
             role="listbox"
             aria-label="People"
-            className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-border bg-bg-card shadow-lg"
+            className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-border bg-bg-card shadow-lg"
           >
             {failed ? (
               <p className="px-3 py-2 text-sm text-danger">Could not search. Try again.</p>

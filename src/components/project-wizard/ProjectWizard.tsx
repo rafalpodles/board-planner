@@ -70,7 +70,10 @@ export function ProjectWizard() {
       arrived.current = true;
       return;
     }
-    heading.current?.focus();
+    // Scrolled to the top by hand: the browser would bring only the heading into view, and on a
+    // phone the step counter above it would be left behind
+    heading.current?.focus({ preventScroll: true });
+    document.getElementById("main-content")?.scrollTo({ top: 0 });
   }, [step]);
 
   const onName = (name: string) =>
