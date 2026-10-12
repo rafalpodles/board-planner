@@ -612,6 +612,8 @@ describe("the custom columns", () => {
     type(screen.getByLabelText("New column name"), "One too many");
 
     expect(button("Add column").disabled).toBe(true);
+    fireEvent.keyDown(screen.getByLabelText("New column name"), { key: "Enter" });
+    expect(names()).toHaveLength(12);
   });
 });
 
@@ -671,7 +673,10 @@ describe("the people search", () => {
     type(search, "an");
     fireEvent.click(await screen.findByRole("option"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove anna" }));
+    // Pressed the way a person presses it: the button has the focus, and it is about to go away
+    const remove = screen.getByRole("button", { name: "Remove anna" });
+    remove.focus();
+    fireEvent.click(remove);
 
     expect(screen.queryByLabelText("Access for anna")).toBeNull();
     expect(document.activeElement).toBe(search);
