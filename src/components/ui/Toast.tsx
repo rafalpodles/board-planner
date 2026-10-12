@@ -251,6 +251,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={{ toast, dismiss: removeToast }}>
       {children}
+      {/* The region is always mounted and the tray comes into it, because a live region that
+          arrives with its content is often not announced and one that is already there reports what
+          is added. It is the tray itself, not a hidden copy of its text: a second copy of every
+          message would sit in the page for a test, or a person searching it, to find twice. It has
+          no role, so it never joins a query for the one `alert` or `status` on the page, and no
+          box of its own, as everything in it is fixed. Politely, for success and failure alike. */}
+      <div aria-live="polite">
       {toasts.length > 0 && (
         <div
           ref={trayRef}
@@ -297,6 +304,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           ))}
         </div>
       )}
+      </div>
     </ToastContext.Provider>
   );
 }

@@ -16,6 +16,26 @@ function renderModal(over: Partial<React.ComponentProps<typeof Modal>> = {}) {
   );
 }
 
+describe("what a dialog is about", () => {
+  it("is described by the element it points at, when it points at one", () => {
+    render(
+      <Modal open onClose={() => {}} title="Remove member" describedBy="why">
+        <p id="why">They will lose access to every task.</p>
+      </Modal>
+    );
+
+    expect(
+      screen.getByRole("dialog", { name: "Remove member", description: "They will lose access to every task." })
+    ).toBeTruthy();
+  });
+
+  it("has no description to read when it points at nothing", () => {
+    renderModal();
+
+    expect(screen.getByRole("dialog").getAttribute("aria-describedby")).toBeNull();
+  });
+});
+
 function press(key: string, init: KeyboardEventInit = {}) {
   const event = new KeyboardEvent("keydown", {
     key,

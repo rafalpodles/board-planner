@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { ToastProvider, useToast } from "@/components/ui/Toast";
 import { registerLayer } from "@/lib/focus-trap";
 import { Modal } from "@/components/ui/Modal";
@@ -535,5 +535,74 @@ describe("a toast with an action", () => {
     act(() => dismissById(id));
 
     expect(screen.getAllByTestId("toast").map((t) => t.textContent)).toEqual(["Saved"]);
+  });
+});
+
+// BP-1033. A live region that arrives with its content is often not announced, so the region is there
+// before the first toast and the tray is added to it. The region is the tray's own container: no
+// second copy of the text exists for a query to find twice.
+describe("what a screen reader hears", () => {
+  afterEach(() => cleanup());
+
+  function Raiser() {
+    const { toast } = useToast();
+    return (
+      <>
+        <button onClick={() => toast("Saved", "success")}>save</button>
+        <button onClick={() => toast("Could not save", "error")}>fail</button>
+      </>
+    );
+  }
+  const region = () => document.querySelector<HTMLElement>('[aria-live="polite"]')!;
+
+  it("is there, and empty, before any toast is raised", () => {
+    render(
+      <ToastProvider>
+        <Raiser />
+      </ToastProvider>
+    );
+
+    expect(region()).toBeTruthy();
+    expect(region().textContent).toBe("");
+  });
+
+  it("holds each toast's own element, so what is announced is what is shown", () => {
+    render(
+      <ToastProvider>
+        <Raiser />
+      </ToastProvider>
+    );
+
+    act(() => screen.getByText("save").click());
+    act(() => screen.getByText("fail").click());
+
+    const toasts = within(region()).getAllByTestId("toast");
+    expect(toasts.map((t) => t.textContent)).toEqual(["Saved", "Could not save"]);
+  });
+
+  it("puts each message on the page once", () => {
+    render(
+      <ToastProvider>
+        <Raiser />
+      </ToastProvider>
+    );
+
+    act(() => screen.getByText("save").click());
+
+    expect(screen.getAllByText("Saved")).toHaveLength(1);
+  });
+
+  // Not `status` or `alert`: a permanent one of those would join every query that wants the one on
+  // the page
+  it("takes no role, so it is never mistaken for a message about the page", () => {
+    render(
+      <ToastProvider>
+        <Raiser />
+      </ToastProvider>
+    );
+    act(() => screen.getByText("save").click());
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

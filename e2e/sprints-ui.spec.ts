@@ -358,6 +358,49 @@ test.describe("creating and editing a sprint from the form", () => {
   });
 });
 
+// BP-1028. Three native date fields in a phone's dialog were about a hundred pixels each, and a
+// date that reads "/12/2030" is a date nobody can check. The width a date needs is what it gets on
+// a desktop, so that is the measure, not a number written down here.
+test.describe("the sprint form at phone width", () => {
+  test("shows each date at least as wide as it is on a desktop, stacked inside the dialog", async ({
+    page,
+  }) => {
+    await signIn(page);
+    await openSprints(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.getByRole("button", { name: "New Sprint" }).click();
+    const form = page.getByRole("dialog", { name: "New Sprint" });
+    await expect(form).toBeVisible();
+
+    const boxes = async () => {
+      const start = (await form.getByLabel("Start Date").boundingBox())!;
+      const end = (await form.getByLabel("End Date").boundingBox())!;
+      const duration = (await form.getByLabel("Duration").boundingBox())!;
+      const dialog = (await form.boundingBox())!;
+      return { start, end, duration, dialog };
+    };
+    const desktop = await boxes();
+    // The control for the rule below: on a desktop the two dates share a row
+    expect(Math.abs(desktop.start.y - desktop.end.y)).toBeLessThan(2);
+    // And the three controls of that row are one height: the dates are the same field as the
+    // dialog's others, not a bare input a third shorter than the select beside it
+    expect(Math.abs(desktop.start.height - desktop.duration.height)).toBeLessThan(1);
+    expect(Math.abs(desktop.end.height - desktop.duration.height)).toBeLessThan(1);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(async () => {
+      const phone = await boxes();
+      expect(phone.start.width).toBeGreaterThanOrEqual(desktop.start.width);
+      expect(phone.end.width).toBeGreaterThanOrEqual(desktop.end.width);
+      for (const box of [phone.start, phone.end]) {
+        expect(box.x).toBeGreaterThanOrEqual(phone.dialog.x);
+        expect(box.x + box.width).toBeLessThanOrEqual(phone.dialog.x + phone.dialog.width + 1);
+      }
+      expect(phone.end.y).toBeGreaterThan(phone.start.y);
+    }).toPass({ timeout: 5_000 });
+  });
+});
+
 test.describe("closing a sprint from the header", () => {
   test("the dialog counts what is unfinished, and Move to Backlog leaves the finished task behind", async ({
     page,

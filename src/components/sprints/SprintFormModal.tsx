@@ -97,15 +97,16 @@ export function SprintFormModal({
           placeholder="Sprint 1"
           required
         />
-        <div className="grid grid-cols-3 gap-4">
+        {/* One column below sm: three native date fields do not fit a phone's dialog, and a date that
+            reads "/12/2030" is a date nobody can check */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
-            <label className="block text-sm font-medium mb-1">Start Date</label>
-            <input
+            <Input
+              label="Start Date"
               type="date"
               value={startDate}
               onChange={(e) => handleStartDateChange(e.target.value)}
               required
-              className="focus-ring w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm"
             />
           </div>
           <div>
@@ -118,14 +119,13 @@ export function SprintFormModal({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">End Date</label>
-            <input
+            <Input
+              label="End Date"
               type="date"
               value={endDate}
               min={startDate || undefined}
               onChange={(e) => setEndDate(e.target.value)}
               required
-              className="focus-ring w-full bg-bg-input border border-border rounded px-3 py-1.5 text-sm"
             />
           </div>
         </div>
