@@ -120,6 +120,10 @@ async function seedExportWork(upload: (projectId: mongoose.Types.ObjectId, name:
     await db.collection("projectauditlogs").insertOne({ ...base, project: MOON, user: OWNER._id, action: "settings_updated", detail: "moonbase settings" });
 
     const firstTask = (await db.collection("tasks").findOne({ project: ACME.projectId, taskNumber: 1001 }))!;
+    // More than two pages of the export's 500 rows, so the paging by _id runs against the real database
+    await db.collection("comments").insertMany(
+      Array.from({ length: 1100 }, (_, n) => ({ ...base, task: firstTask._id, author: ACME.adminId, body: `acme bulk ${n}`, reactions: [] }))
+    );
     for (const [project, label, task] of [
       [ACME.projectId, "rocket", firstTask._id],
       [MOON, "moonbase", moonTask],
