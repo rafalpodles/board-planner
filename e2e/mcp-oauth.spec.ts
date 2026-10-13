@@ -81,6 +81,15 @@ test.beforeEach(async () => {
 });
 
 test.describe("MCP OAuth handshake", () => {
+  // BP-1030: with no client address every caller shared one bucket, so a couple of hundred
+  // registrations from anybody closed MCP onboarding for everybody after them
+  test("with no client address a flood of registrations does not close registration", async ({ request }) => {
+    test.setTimeout(120_000);
+    const register = () => request.post("/oauth/register", { data: { client_name: "Flood", redirect_uris: ["https://example.com/cb"] } });
+
+    for (let i = 0; i < 210; i++) expect((await register()).status(), `registration ${i}`).toBe(201);
+  });
+
   test("an unauthenticated call is refused and points at the discovery documents", async ({
     request,
     baseURL,

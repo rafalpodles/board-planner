@@ -231,3 +231,17 @@ test("with no client address one account's reset is held, and nobody else's", as
 
   for (let i = 0; i < 210; i++) expect((await ask(`nobody-${i}`)).status(), `other name ${i}`).toBe(200);
 });
+
+// BP-1030: with no client address every caller shared one bucket, so a few hundred made-up links
+// from anybody refused the real one. The link is random: what bounds the path is reading it first.
+test("with no client address a flood of made-up links does not refuse the real one", async ({ request }) => {
+  test.setTimeout(120_000);
+  const real = await plantLink();
+  const spend = (token: string) =>
+    request.post("/api/auth/reset", { headers: SAME_ORIGIN, data: { token, newPassword: "a-fresh-password-1" } });
+
+  for (let i = 0; i < 410; i++) expect((await spend(`cpr_made-up-${i}`)).status(), `made-up link ${i}`).toBe(400);
+
+  const spent = await spend(real);
+  expect(spent.status(), await spent.text()).toBe(200);
+});

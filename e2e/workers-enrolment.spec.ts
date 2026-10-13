@@ -661,3 +661,17 @@ test("a self-hosted instance connects a person's second machine, and neither one
   await expect(rows.getByTestId("my-machine-state")).toHaveText(["Running, no checkouts yet", "Running, no checkouts yet"]);
   await expect(page.getByTestId("my-machine-held")).toHaveCount(0);
 });
+
+// BP-1030: with no client address every caller shared one bucket, so a couple of hundred asks from
+// anybody refused every machine after them. Nothing costly runs per ask, and the pending cap drops
+// the oldest row rather than refusing the newest.
+test("with no client address a flood of enrolments does not refuse the next machine", async ({ request }) => {
+  test.setTimeout(120_000);
+  const ask = (name: string) =>
+    request.post("/api/workers/enrolment/device", { headers: { ...SAME_ORIGIN, "x-cp-protocol": PROTOCOL }, data: { name } });
+
+  for (let i = 0; i < 210; i++) expect((await ask(`Flood ${i}`)).status(), `ask ${i}`).toBe(201);
+
+  const last = await machineAsksToEnrol(request);
+  expect(last.userCode).toBeTruthy();
+});
