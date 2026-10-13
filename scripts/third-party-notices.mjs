@@ -61,9 +61,10 @@ export function collectNotices(root) {
   const lgpl = [];
 
   for (const [key, entry] of Object.entries(lock.packages ?? {})) {
-    // "" is the project itself; a package of another platform's build is in the lockfile and not installed
+    // "" is the project itself
     if (!key || entry.dev || entry.link) continue;
     const dir = join(root, key);
+    // The lockfile names every platform's build of an optional package; npm installs the one that fits
     if (!existsSync(join(dir, "package.json"))) continue;
 
     const { name, version, license, licenses, repository } = readManifest(dir);

@@ -43,7 +43,7 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 describe("collectNotices", () => {
   // Next compiles most server dependencies into its own chunks, so the shipped node_modules holds
   // 27 of the application's ~100 production packages (BP-944)
-  it("lists every production package in the lockfile, installed or not under the standalone output", () => {
+  it("reads a lockfile package's licence from its installed directory", () => {
     pkg("left-pad", { name: "left-pad", version: "1.0.0" }, { LICENSE: "MIT (c) Left Pad" });
 
     const { byText, without } = collectNotices(root);

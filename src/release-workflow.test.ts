@@ -185,5 +185,8 @@ describe("the release workflow", () => {
     expect(sbomJob).toContain(artifact);
     expect(publishJob).toContain(`${artifact}\n          path: release-assets`);
     expect(publishJob).toContain("sha256sum board-planner-sbom-*.cdx.json >> SHA256SUMS");
+    expect(publishJob.indexOf("sha256sum board-planner-sbom")).toBeLessThan(
+      publishJob.indexOf("name: Attach and publish")
+    );
   });
 });
