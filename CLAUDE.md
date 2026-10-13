@@ -337,7 +337,8 @@ TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the
                           # So with no address are the reset and e-mail-confirmation links (spent
                           # before they are hashed for), device enrolment (sha256; the pending cap
                           # drops the oldest) and OAuth client registration (rows nobody approved
-                          # are capped and expire, src/lib/oauth-clients.ts); platform sign-in keeps
+                          # are capped at 1000 and expire; none is evicted under 15 minutes old,
+                          # past that registration answers 429; src/lib/oauth-clients.ts); platform sign-in keeps
                           # a shared bucket because it mails whoever is typed (BP-1030). With hops
                           # above 0 a request that yields no address is logged once a quiet period
 COOKIE_ALLOW_INSECURE=    # 1: plain session cookie (no Secure, no __Host-) for plain HTTP. auto:
