@@ -1,52 +1,43 @@
 #!/usr/bin/env node
-// Writes the licence notices of the npm packages in a node_modules tree to stdout.
+// Writes the licence notices of a project's production npm dependencies to stdout.
 //
-//   node scripts/third-party-notices.mjs <shipped node_modules> [<full node_modules>]
+//   node scripts/third-party-notices.mjs [<project root>]
 //
-// Next's standalone output copies the code a server needs and none of the licence files beside it,
-// so the packages are listed from the shipped tree and their licence text is read from the full one
-// it was traced from (BP-944).
+// The packages come from package-lock.json (everything not marked dev), their licence texts from
+// the installed node_modules. Next compiles most server dependencies into its own chunks and the
+// standalone output keeps neither those nor the licence files of the rest, so the shipped
+// node_modules cannot be the list (BP-944).
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const LICENCE_FILE = /^(licen[cs]e|copying|notice)([-._].*)?$/i;
+const CODE_FILE = /\.(m?js|cjs|ts|json)$/i;
 const MAX_LICENCE_BYTES = 200_000;
 const MAX_DEPTH = 6;
 
-function packagesIn(nodeModules, found = []) {
-  if (!existsSync(nodeModules)) return found;
-  for (const entry of readdirSync(nodeModules, { withFileTypes: true })) {
-    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-    const dir = join(nodeModules, entry.name);
-    if (entry.name.startsWith("@")) {
-      packagesIn(dir, found);
-      continue;
-    }
-    const manifest = join(dir, "package.json");
-    if (existsSync(manifest)) {
-      let parsed;
-      try {
-        parsed = JSON.parse(readFileSync(manifest, "utf8"));
-      } catch (error) {
-        throw new Error(`${manifest}: ${error.message}`);
-      }
-      const { name, version, license, licenses, repository } = parsed;
-      found.push({ name, version, declared: license ?? licenses, repository, dir });
-    }
-    packagesIn(join(dir, "node_modules"), found);
+function readManifest(dir) {
+  const manifest = join(dir, "package.json");
+  try {
+    return JSON.parse(readFileSync(manifest, "utf8"));
+  } catch (error) {
+    throw new Error(`${manifest}: ${error.message}`);
   }
-  return found;
 }
 
 function licenceFilesIn(dir, base = dir, depth = 0, found = []) {
-  if (!existsSync(dir) || depth > MAX_DEPTH) return found;
+  if (depth > MAX_DEPTH) return found;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (entry.name !== "node_modules") licenceFilesIn(path, base, depth + 1, found);
-    } else if (entry.isFile() && LICENCE_FILE.test(entry.name) && statSync(path).size <= MAX_LICENCE_BYTES) {
-      found.push({ path, within: dir === base ? "" : dir.slice(base.length + 1) });
+    } else if (
+      entry.isFile() &&
+      LICENCE_FILE.test(entry.name) &&
+      !CODE_FILE.test(entry.name) &&
+      statSync(path).size <= MAX_LICENCE_BYTES
+    ) {
+      found.push({ path, within: relative(base, dir) });
     }
   }
   return found;
@@ -60,43 +51,51 @@ function repositoryUrl(repository) {
 function declaredName(declared) {
   if (!declared) return "no licence";
   if (typeof declared === "string") return declared;
-  return [declared].flat().map((entry) => entry.type ?? String(entry)).join(" OR ");
+  return [declared].flat().map((entry) => entry?.type ?? String(entry)).join(" OR ");
 }
 
-export function collectNotices(shippedModules, fullModules = shippedModules) {
+export function collectNotices(root) {
+  const lock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8"));
   const byText = new Map();
   const without = [];
   const lgpl = [];
 
-  for (const pkg of packagesIn(shippedModules)) {
-    const inFull = join(fullModules, relative(shippedModules, pkg.dir));
-    const sourceDir = existsSync(inFull) ? inFull : pkg.dir;
-    if (/LGPL/i.test(declaredName(pkg.declared))) {
-      lgpl.push(`${pkg.name}@${pkg.version} — source: ${repositoryUrl(pkg.repository)}`);
-    }
-    const files = licenceFilesIn(sourceDir);
+  for (const [key, entry] of Object.entries(lock.packages ?? {})) {
+    // "" is the project itself; a package of another platform's build is in the lockfile and not installed
+    if (!key || entry.dev || entry.link) continue;
+    const dir = join(root, key);
+    if (!existsSync(join(dir, "package.json"))) continue;
+
+    const { name, version, license, licenses, repository } = readManifest(dir);
+    const declared = license ?? licenses;
+    const label = `${name}@${version}`;
+    if (/LGPL/i.test(declaredName(declared))) lgpl.push(`${label} — source: ${repositoryUrl(repository)}`);
+
+    const files = licenceFilesIn(dir);
     if (files.length === 0) {
-      without.push(`${pkg.name}@${pkg.version} (declares ${declaredName(pkg.declared)})`);
+      without.push(`${label} (declares ${declaredName(declared)})`);
       continue;
     }
     for (const file of files) {
       const text = readFileSync(file.path, "utf8").replace(/\r\n/g, "\n").trim();
       if (!text) continue;
-      const label = `${pkg.name}@${pkg.version}${file.within ? `/${file.within}` : ""}`;
+      const where = file.within ? `${label}/${file.within}` : label;
       if (!byText.has(text)) byText.set(text, new Set());
-      byText.get(text).add(label);
+      byText.get(text).add(where);
     }
   }
   return { byText, without, lgpl };
 }
 
 export function render({ byText, without, lgpl }) {
+  const rule = "================================================================================";
   const out = [
     "THIRD-PARTY NOTICES",
     "",
-    "Board Planner is licensed under the GNU Affero General Public License v3.0 (see LICENSE). The",
-    "npm packages below are included in this image, each under its own licence. This file is written",
-    "at build time from the packages in the image; the base image (node:alpine) carries its own",
+    "Board Planner is licensed under the GNU Affero General Public License v3.0 (see LICENSE). It is",
+    "built from the npm packages below, each under its own licence: most are compiled into the",
+    "application's own files, some are loaded from node_modules at run time. This file is written at",
+    "build time from the project's package-lock.json; the base image (node:alpine) carries its own",
     "licence information.",
     "",
   ];
@@ -104,37 +103,37 @@ export function render({ byText, without, lgpl }) {
     .map(([text, labels]) => ({ text, labels: [...labels].sort() }))
     .sort((a, b) => a.labels[0].localeCompare(b.labels[0]));
   for (const { text, labels } of groups) {
-    out.push("================================================================================", "");
-    out.push(...labels.map((label) => `  ${label}`), "", text, "");
+    out.push(rule, "", ...labels.map((label) => `  ${label}`), "", text, "");
   }
   if (lgpl.length > 0) {
-    out.push("================================================================================", "");
-    out.push("Packages under the GNU Lesser General Public License:", "");
+    out.push(rule, "", "Packages under the GNU Lesser General Public License:", "");
     out.push(...lgpl.sort().map((line) => `  ${line}`), "");
     out.push(
-      "The source of each is at the repository named above. Each sits in its own directory of this",
-      "image, apart from the application, so a modified version can be put in its place. A package's",
-      "README.md may list the libraries bundled in it and the licence of each (the @img/sharp-libvips",
-      "packages do). The licence texts are at https://www.gnu.org/licenses/ (lgpl-3.0.txt, lgpl-2.1.txt).",
+      "The repository named is the package's own (for @img/sharp-libvips, the scripts that build the",
+      "libraries it carries); the upstream source of each bundled library is at the version in the",
+      "package's versions.json. Each package sits in its own directory of this image, apart from the",
+      "application, so a modified version can be put in its place. A package's README.md may list the",
+      "libraries bundled in it and the licence of each (the @img/sharp-libvips packages do). The",
+      "licence texts are at https://www.gnu.org/licenses/ (lgpl-3.0.txt, lgpl-2.1.txt).",
       ""
     );
   }
   if (without.length > 0) {
-    out.push("================================================================================", "");
-    out.push("Packages that ship no licence file of their own:", "", ...without.sort().map((line) => `  ${line}`), "");
+    out.push(rule, "", "Packages that ship no licence file of their own:", "");
+    out.push(...without.sort().map((line) => `  ${line}`), "");
   }
   return out.join("\n");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [shipped, full] = process.argv.slice(2);
-  if (!shipped) {
-    console.error("usage: third-party-notices.mjs <shipped node_modules> [<full node_modules>]");
+  const root = process.argv[2] ?? ".";
+  if (!existsSync(join(root, "package-lock.json"))) {
+    console.error(`no package-lock.json in ${root}`);
     process.exit(2);
   }
-  const notices = collectNotices(shipped, full ?? shipped);
+  const notices = collectNotices(root);
   if (notices.byText.size === 0) {
-    console.error(`no licence files found for the packages in ${shipped}`);
+    console.error(`no licence files found for the packages in ${root}`);
     process.exit(1);
   }
   for (const line of notices.without) console.error(`no licence file: ${line}`);

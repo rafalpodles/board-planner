@@ -16,8 +16,9 @@ ENV BUILD_STANDALONE=1
 # The build reads the variable but never opens a connection
 ENV MONGODB_URI=mongodb://127.0.0.1:1/build-does-not-connect
 RUN npm run build
-# The standalone output carries the code of what the server needs and none of the licence files beside it
-RUN node scripts/third-party-notices.mjs .next/standalone/node_modules node_modules > THIRD-PARTY-NOTICES.txt
+# Next compiles most dependencies into its own chunks and keeps no licence files, so the notices are
+# written from the lockfile and the installed packages, not from the standalone output
+RUN node scripts/third-party-notices.mjs . > THIRD-PARTY-NOTICES.txt
 
 FROM node:26-alpine AS runner
 WORKDIR /app

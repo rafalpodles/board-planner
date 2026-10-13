@@ -180,10 +180,10 @@ describe("the release workflow", () => {
 
     const artifact = "name: release-sbom-${{ needs.resolve.outputs.version }}";
 
-    expect(sbomJob).toContain("npm sbom");
-    expect(sbomJob).toContain("--omit=dev");
+    expect(sbomJob).toContain("npm sbom --package-lock-only --omit=dev");
     expect(sbomJob).not.toMatch(/\n    if:/);
     expect(sbomJob).toContain(artifact);
     expect(publishJob).toContain(`${artifact}\n          path: release-assets`);
+    expect(publishJob).toContain("sha256sum board-planner-sbom-*.cdx.json >> SHA256SUMS");
   });
 });
