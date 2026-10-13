@@ -76,6 +76,21 @@ describe("the e2e shards", () => {
   it("keeps each shard's artifacts apart", () => {
     expect(workflow).toContain("name: playwright-artifacts-${{ matrix.group }}-${{ matrix.shard }}");
   });
+
+  // BP-1042: the second pass re-runs what `.last-run.json` lists, which is already this shard's
+  // tests. `--shard` on top would take a third of those and leave the rest unrun, green.
+  it("runs the failed tests of a shard again without cutting them into shards a second time", () => {
+    const secondPass = workflow.split("\n").filter((line) => line.includes("--last-failed"));
+    expect(secondPass).toHaveLength(1);
+    expect(secondPass[0]).toContain("npx playwright test --project=${{ matrix.group }}");
+    expect(secondPass[0]).not.toContain("--shard");
+  });
+
+  it("only runs the second pass after a failed first one, and keeps the first pass's traces", () => {
+    expect(workflow).toContain("if ! npx playwright test --project=${{ matrix.group }} --shard=");
+    expect(workflow).toContain("cp -R e2e/.artifacts e2e/.artifacts-first-pass");
+    expect(workflow).toMatch(/path: \|\n\s+e2e\/\.artifacts\n\s+e2e\/\.artifacts-first-pass/);
+  });
 });
 
 describe("every end-to-end spec belongs to exactly one group", () => {
