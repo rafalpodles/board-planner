@@ -82,7 +82,7 @@ function warnAddressMissing(hops: number, count: number, notAnAddress: boolean):
   console.warn(
     `${TRUSTED_PROXY_HOPS_VAR}=${hops} but a request carried ${count} X-Forwarded-For ${count === 1 ? "entry" : "entries"}` +
       (notAnAddress ? ", and the one that counts is not an IP address" : ", fewer than that") +
-      `, so it has no per-address throttle key and routes that throttle by address did not count it. ` +
+      `, so it has no per-address throttle key and is not counted per caller. ` +
       `Check how many proxies append to the header and that each writes the address alone (no port); a request that went round the proxy looks the same.`
   );
 }

@@ -477,14 +477,16 @@ describe("POST /oauth/authorize consent phase", () => {
     );
   });
 
-  it("still hands the code over when marking the client fails", async () => {
-    oauthClientUpdateOne.mockRejectedValue(new Error("write failed"));
-    vi.spyOn(console, "error").mockImplementation(() => {});
+  // A client left unapproved is one the TTL or a flood removes later, taking every token with it
+  it("marks the client before the code exists, and mints nothing when it cannot", async () => {
+    await POST(consent({ access: "all" }));
+    expect(oauthClientUpdateOne.mock.invocationCallOrder[0]).toBeLessThan(oauthCodeCreate.mock.invocationCallOrder[0]);
 
-    const response = await POST(consent({ access: "all" }));
+    oauthCodeCreate.mockClear();
+    oauthClientUpdateOne.mockRejectedValueOnce(new Error("write failed"));
+    await POST(consent({ access: "all" })).catch(() => undefined);
 
-    expect(response.status).toBe(200);
-    expect(oauthCodeCreate).toHaveBeenCalledTimes(1);
+    expect(oauthCodeCreate).not.toHaveBeenCalled();
   });
 
   it("carries the request's nonce on the script that navigates back to the client", async () => {

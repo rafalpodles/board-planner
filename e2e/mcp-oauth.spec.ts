@@ -85,21 +85,25 @@ test.beforeEach(async () => {
 test.describe("MCP OAuth handshake", () => {
   // BP-1030: with no client address every caller shared one bucket, so a couple of hundred
   // registrations from anybody closed MCP onboarding for everybody after them. What bounds the
-  // collection now is the clients nobody has approved, oldest first.
-  test("with no client address a flood of registrations neither closes registration nor grows without bound", async ({ request }) => {
+  // collection now is the clients nobody has approved: a thousand, none dropped while it is young
+  // enough to be mid-approval, and a refusal rather than an eviction once they are all that young.
+  test("with no client address unapproved registrations stop at the ceiling and nothing is evicted", async ({ request }) => {
     test.setTimeout(180_000);
     const register = () => request.post("/oauth/register", { data: { client_name: "Flood", redirect_uris: ["https://example.com/cb"] } });
 
     const first = await register();
     expect(first.status()).toBe(201);
     const firstId = (await first.json()).client_id;
-    for (let i = 0; i < 1010; i++) expect((await register()).status(), `registration ${i}`).toBe(201);
+    for (let i = 0; i < 999; i++) expect((await register()).status(), `registration ${i}`).toBe(201);
+
+    const refused = await register();
+    expect(refused.status()).toBe(429);
 
     await mongoose.connect(E2E_MONGODB_URI);
     try {
       const clients = mongoose.connection.db!.collection("oauthclients");
-      expect(await clients.countDocuments({ expiresAt: { $gt: new Date(0) } })).toBeLessThanOrEqual(1000);
-      expect(await clients.countDocuments({ clientId: firstId })).toBe(0);
+      expect(await clients.countDocuments({ expiresAt: { $gt: new Date(0) } })).toBe(1000);
+      expect(await clients.countDocuments({ clientId: firstId })).toBe(1);
     } finally {
       await mongoose.disconnect();
     }

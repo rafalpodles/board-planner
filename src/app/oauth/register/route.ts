@@ -65,7 +65,12 @@ export async function POST(req: Request) {
   const clientName =
     typeof body?.client_name === "string" ? body.client_name.slice(0, MAX_CLIENT_NAME) : "";
 
-  await makeRoomForClient(db);
+  if (!(await makeRoomForClient(db))) {
+    return NextResponse.json(
+      { error: "invalid_request", error_description: "Too many client registrations are waiting to be approved. Try again in a few minutes." },
+      { status: 429, headers: CORS }
+    );
+  }
   await db.OAuthClient.create({ clientId, clientName, redirectUris, expiresAt: unusedClientExpiry() });
 
   return NextResponse.json(

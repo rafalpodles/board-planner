@@ -625,6 +625,11 @@ async function handleConsent(db: ScopedDb, req: Request, form: FormData): Promis
     return errorPage("This authorization was already completed. Start it again.");
   }
 
+  // Before the code exists, and not swallowed: a client left unapproved is one the TTL or a flood
+  // removes later, and every token issued to it would die with it (BP-1030). Nothing is granted
+  // yet, so failing here costs the person one more click.
+  await markClientUsed(db, consent.clientId);
+
   const code = randomToken("cpac_");
   await db.OAuthCode.create({
     codeHash: sha256(code),
@@ -636,9 +641,6 @@ async function handleConsent(db: ScopedDb, req: Request, form: FormData): Promis
     allowedProjects,
     expiresAt: new Date(Date.now() + AUTH_CODE_TTL_SECONDS * 1000),
   });
-  // A person approved this client: it is no longer one a flood may evict or the TTL reap (BP-1030).
-  // The grant stands either way, so a failure here is logged and not the person's.
-  await markClientUsed(db, consent.clientId).catch((error) => console.error("Could not mark an OAuth client as approved:", error));
 
   // The grant outlives this browser window, so it is worth a line in an inbox the account holder
   // reads even when the authorization happened somewhere they were not looking.

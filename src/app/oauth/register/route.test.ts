@@ -9,7 +9,9 @@ vi.mock("@/models/rateLimit", async () => {
 });
 
 const countDocuments = vi.fn();
-vi.mock("@/models/oauthClient", () => ({ OAuthClient: { create, countDocuments } }));
+const find = vi.fn();
+const deleteMany = vi.fn();
+vi.mock("@/models/oauthClient", () => ({ OAuthClient: { create, countDocuments, find, deleteMany } }));
 // Partial: `isValidRedirectUri` is the rule these tests are about, so it stays real.
 vi.mock("@/lib/oauth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/oauth")>()),
@@ -56,6 +58,18 @@ describe("POST /oauth/register", () => {
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ expiresAt: expect.any(Date) }));
     expect(create.mock.calls[0][0].expiresAt.getTime()).toBeGreaterThan(Date.now() + 29 * 24 * 60 * 60 * 1000);
+  });
+
+  // BP-1030. Past the ceiling with nothing old enough to drop, registration is refused rather than
+  // evicting a client somebody may be approving right now
+  it("refuses when a thousand clients are waiting and none is old enough to drop", async () => {
+    countDocuments.mockResolvedValue(1000);
+    find.mockReturnValue({ sort: () => ({ limit: () => ({ select: () => ({ lean: () => Promise.resolve([]) }) }) }) });
+
+    const res = await POST(request({ redirect_uris: ["https://claude.ai/api/mcp/callback"] }));
+
+    expect(res.status).toBe(429);
+    expect(create).not.toHaveBeenCalled();
   });
 
   // RFC 8252 permits http only for loopback, which is what a local MCP client needs

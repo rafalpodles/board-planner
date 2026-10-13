@@ -14,6 +14,8 @@ const oauthClientSchema = new Schema<IOAuthClient>(
 );
 
 oauthClientSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+// What a registration counts and evicts by, so it is an index walk and not a scan of every organisation
+oauthClientSchema.index({ organisation: 1, expiresAt: 1 });
 
 withOrganisation(oauthClientSchema);
 
