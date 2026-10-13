@@ -83,6 +83,7 @@ describe("POST /api/projects/:projectId/tasks/:taskId/checklist", () => {
 
     expect(logActivity).toHaveBeenCalledWith(
       expect.anything(),
+      PROJECT_ID,
       TASK_ID,
       ME,
       "criterion_added",

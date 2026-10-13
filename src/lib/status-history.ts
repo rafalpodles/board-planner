@@ -106,6 +106,7 @@ export interface TaskStatusHistory {
   taskId: string;
   taskNumber: number;
   status: string;
+  archived: boolean;
   history: StatusHistory;
 }
 
@@ -124,7 +125,7 @@ export async function projectStatusHistories(db: ScopedDb, projectId: string): P
     db.ActivityLog.find(statusChangeFilter(projectId), "task oldValue newValue createdAt")
       .sort(STATUS_CHANGE_SORT)
       .lean(),
-    db.Task.find({ project: projectId }, "taskNumber status createdAt").lean(),
+    db.Task.find({ project: projectId }, "taskNumber status createdAt archivedAt").lean(),
   ]);
 
   const byTask = new Map<string, StatusRow[]>();
@@ -139,6 +140,7 @@ export async function projectStatusHistories(db: ScopedDb, projectId: string): P
     taskId: String(task._id),
     taskNumber: task.taskNumber,
     status: task.status,
+    archived: task.archivedAt != null,
     history: statusHistory(byTask.get(String(task._id)) ?? [], roleOf, {
       createdAt: task.createdAt,
       status: task.status,

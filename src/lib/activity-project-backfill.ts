@@ -1,5 +1,4 @@
-import mongoose from "mongoose";
-import "@/models/all";
+import type { Db, ObjectId } from "mongodb";
 
 export interface ActivityProjectBackfill {
   rowsMissing: number;
@@ -17,13 +16,11 @@ const BATCH = 500;
  * stays as it is and is counted.
  */
 export async function backfillActivityProjects(
-  connection: mongoose.Connection,
+  db: Db,
   { apply }: { apply: boolean }
 ): Promise<ActivityProjectBackfill> {
-  const db = connection.db;
-  if (!db) throw new Error("No database handle");
-  const logs = db.collection(mongoose.model("ActivityLog").collection.name);
-  const tasks = db.collection(mongoose.model("Task").collection.name);
+  const logs = db.collection("activitylogs");
+  const tasks = db.collection("tasks");
 
   const missing = { project: null };
   const result: ActivityProjectBackfill = {
@@ -34,12 +31,12 @@ export async function backfillActivityProjects(
     orphanedRows: 0,
   };
 
-  const taskIds = logs.aggregate<{ _id: mongoose.Types.ObjectId }>(
+  const taskIds = logs.aggregate<{ _id: ObjectId }>(
     [{ $match: missing }, { $group: { _id: "$task" } }],
     { allowDiskUse: true }
   );
 
-  let batch: mongoose.Types.ObjectId[] = [];
+  let batch: ObjectId[] = [];
   const flush = async () => {
     if (batch.length === 0) return;
     const ids = batch;
@@ -47,7 +44,7 @@ export async function backfillActivityProjects(
     result.tasks += ids.length;
 
     const owners = await tasks.find({ _id: { $in: ids } }, { projection: { project: 1 } }).toArray();
-    const byProject = new Map<string, { project: unknown; ids: mongoose.Types.ObjectId[] }>();
+    const byProject = new Map<string, { project: unknown; ids: ObjectId[] }>();
     for (const { _id, project } of owners) {
       if (!project) continue;
       const key = String(project);

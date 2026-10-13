@@ -27,7 +27,7 @@ async function main() {
     throw new Error(`No collections in "${db.databaseName}" — wrong database? Set MONGODB_DB.`);
   }
 
-  const report = await backfillActivityProjects(mongoose.connection, { apply });
+  const report = await backfillActivityProjects(db, { apply });
   console.log(JSON.stringify(report, null, 2));
   console.log(
     apply

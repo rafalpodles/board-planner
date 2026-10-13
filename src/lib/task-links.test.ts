@@ -198,6 +198,7 @@ function task(id: string, taskNumber: number, extra: Partial<Doc> = {}): Doc {
  * `oldValue` for `link_removed`, so a write into the wrong slot is a row naming no other end.
  */
 type LoggedRow = {
+  projectId: string;
   taskId: string;
   action: string;
   field: string;
@@ -537,6 +538,21 @@ describe("a child with more than one parent", () => {
 
     expect(logActivities).toHaveBeenCalledTimes(1);
     expect((logActivities.mock.calls[0][1] as unknown[]).length).toBe(4);
+  });
+
+  // BP-876: how long a task took is read per project, so each row names the one it happened in
+  it("writes every history row under the project the link was made in", async () => {
+    store = [
+      task("old", 9, { relations: [{ task: "child", type: "parent_of" }] }),
+      task("new", 10),
+      task("child", 11),
+    ];
+
+    await addTaskLink(db, P, "new", "child", "parent_of", ACTOR);
+
+    const written = logActivities.mock.calls.flatMap((c) => c[1] as LoggedRow[]);
+    expect(written.length).toBeGreaterThan(0);
+    expect(written.map((row) => row.projectId)).toEqual(written.map(() => P));
   });
 });
 

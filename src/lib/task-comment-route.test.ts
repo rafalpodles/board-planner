@@ -20,9 +20,10 @@ vi.mock("@/lib/middleware", async () => {
   };
 });
 
-const { PUT } = await import("./task-comment-route");
+const { PUT, DELETE } = await import("./task-comment-route");
+const { logActivity } = await import("@/lib/activity");
 
-let comment: { author: { toString(): string }; body: string; save: typeof save };
+let comment: { author: { toString(): string }; body: string; save: typeof save; deleteOne?: () => Promise<void> };
 
 function edit(body: string) {
   return PUT(
@@ -59,5 +60,25 @@ describe("PUT a comment", () => {
 
     expect(res.status).not.toBe(400);
     expect(save).toHaveBeenCalled();
+  });
+});
+
+// BP-876: how long a task took is read per project, so each row has to name the one it happened in
+describe("the history a comment write leaves", () => {
+  it("records an edit under the project the comment is in", async () => {
+    await edit("an edit");
+
+    expect(logActivity).toHaveBeenCalledWith(expect.anything(), "p1", "t1", "author1", "comment_edited");
+  });
+
+  it("records a removal under the project the comment is in", async () => {
+    comment.deleteOne = vi.fn().mockResolvedValue(undefined);
+
+    const res = await DELETE(new Request("https://app.example.com/x", { method: "DELETE" }), {
+      params: Promise.resolve({ projectId: "p1", taskId: "t1", commentId: "c1" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(logActivity).toHaveBeenCalledWith(expect.anything(), "p1", "t1", "author1", "comment_deleted");
   });
 });

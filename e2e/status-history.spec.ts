@@ -90,7 +90,7 @@ test("a dry run says what it would fill and writes nothing", async () => {
   await seedLegacyRows();
   const before = await everyRow();
 
-  const report = await backfillActivityProjects(mongoose.connection, { apply: false });
+  const report = await backfillActivityProjects(mongoose.connection.db!, { apply: false });
 
   expect(report).toEqual({ rowsMissing: 4, rowsFilled: 3, tasks: 3, orphanedTasks: 1, orphanedRows: 1 });
   expect(await everyRow()).toBe(before);
@@ -99,7 +99,7 @@ test("a dry run says what it would fill and writes nothing", async () => {
 test("an apply gives each row its task's project, leaves the rows of a deleted task, and a rerun fills nothing", async () => {
   await seedLegacyRows();
 
-  const first = await backfillActivityProjects(mongoose.connection, { apply: true });
+  const first = await backfillActivityProjects(mongoose.connection.db!, { apply: true });
   expect(first).toEqual({ rowsMissing: 4, rowsFilled: 3, tasks: 3, orphanedTasks: 1, orphanedRows: 1 });
 
   const projectOf = async (task: mongoose.Types.ObjectId) =>
@@ -110,7 +110,7 @@ test("an apply gives each row its task's project, leaves the rows of a deleted t
   expect(await projectOf(T_GONE)).toEqual([null]);
 
   const after = await everyRow();
-  const second = await backfillActivityProjects(mongoose.connection, { apply: true });
+  const second = await backfillActivityProjects(mongoose.connection.db!, { apply: true });
   expect(second).toMatchObject({ rowsFilled: 0, tasks: 1, orphanedRows: 1 });
   expect(await everyRow()).toBe(after);
 });
@@ -118,7 +118,7 @@ test("an apply gives each row its task's project, leaves the rows of a deleted t
 test("a row that already names a project keeps it, beside a row of the same task that did not", async () => {
   await col("activitylogs").insertMany([legacy(T2, "doing", day(3)), legacy(T2, "done", day(5), P1)]);
 
-  await backfillActivityProjects(mongoose.connection, { apply: true });
+  await backfillActivityProjects(mongoose.connection.db!, { apply: true });
 
   const rows = await col("activitylogs").find({ task: T2 }).sort({ createdAt: 1 }).toArray();
   expect(rows.map((row) => String(row.project))).toEqual([String(P2), String(P1)]);
@@ -135,7 +135,7 @@ test("logActivity writes the project it is given on the row", async () => {
 test("the project-wide read is served by the {project, action, createdAt} index, in order, with no sort stage", async () => {
   await mongoose.model("ActivityLog").createIndexes();
   await seedLegacyRows();
-  await backfillActivityProjects(mongoose.connection, { apply: true });
+  await backfillActivityProjects(mongoose.connection.db!, { apply: true });
 
   const plan = await col("activitylogs")
     .find({ ...statusChangeFilter(P1), ...org })
