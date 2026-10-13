@@ -106,7 +106,7 @@ beforeEach(() => {
 
 /** Every action a round wrote a row for. Asserting this rather than one action keeps the old
  *  guarantee that nothing ELSE was logged either. */
-const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call[3]).sort();
+const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call[4]).sort();
 
 describe("POST .../github/sync", () => {
   it("still finds pull requests opened under a key the project has since left", async () => {
@@ -174,6 +174,7 @@ describe("POST .../github/sync", () => {
     expect(body.autoTransitioned).toBe(1);
     expect(logActivity).toHaveBeenCalledWith(
       scopedToDefaultOrganisation(),
+      "p1",
       "t1",
       "u1",
       "status_changed",
@@ -244,6 +245,7 @@ describe("POST .../github/sync", () => {
     expect(body.autoTransitioned).toBe(0);
     expect(logActivity).not.toHaveBeenCalledWith(
       scopedToDefaultOrganisation(),
+      "p1",
       "t1",
       "u1",
       "status_changed",

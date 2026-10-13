@@ -24,6 +24,7 @@ beforeEach(() => {
  */
 describe("logActivities", () => {
   const row = (taskId: string, newValue: string) => ({
+    projectId: "p1",
     taskId,
     userId: "u1",
     action: "link_added" as const,
@@ -45,18 +46,18 @@ describe("logActivities", () => {
   // Mongoose mints those while casting, in array order.
   it("maps each row the way logActivity maps its arguments", async () => {
     await logActivities(db, [
-      { taskId: "a", userId: "u1", action: "link_removed", field: "parent_of", oldValue: "BP-9" },
+      { projectId: "p1", taskId: "a", userId: "u1", action: "link_removed", field: "parent_of", oldValue: "BP-9" },
     ]);
 
     expect(insertMany.mock.calls[0][0]).toEqual([
-      { task: "a", user: "u1", action: "link_removed", field: "parent_of", oldValue: "BP-9", newValue: "", organisation: DEFAULT_ORGANISATION_ID },
+      { project: "p1", task: "a", user: "u1", action: "link_removed", field: "parent_of", oldValue: "BP-9", newValue: "", organisation: DEFAULT_ORGANISATION_ID },
     ]);
   });
 
   it("marks a project's field and its type, and only that", async () => {
     await logActivities(db, [
-      { taskId: "a", userId: "u1", action: "updated", field: "Notes", oldValue: "x", newValue: "y", customField: true, fieldType: "text" },
-      { taskId: "a", userId: "u1", action: "updated", field: "title", oldValue: "x", newValue: "y" },
+      { projectId: "p1", taskId: "a", userId: "u1", action: "updated", field: "Notes", oldValue: "x", newValue: "y", customField: true, fieldType: "text" },
+      { projectId: "p1", taskId: "a", userId: "u1", action: "updated", field: "title", oldValue: "x", newValue: "y" },
     ]);
 
     const [custom, builtIn] = insertMany.mock.calls[0][0];
@@ -105,9 +106,10 @@ describe("logActivities", () => {
 
 describe("logActivity", () => {
   it("normalises the three optional fields to empty strings", async () => {
-    await logActivity(db, "a", "u1", "created");
+    await logActivity(db, "p1", "a", "u1", "created");
 
     expect(create).toHaveBeenCalledWith({
+      project: "p1",
       task: "a",
       user: "u1",
       action: "created",
@@ -120,7 +122,7 @@ describe("logActivity", () => {
 
   // Null is a sync writing about what GitHub said, which no person authored (BP-628)
   it("keeps a null author rather than dropping the row", async () => {
-    await logActivity(db, "a", null, "pr_linked", "linkedPRs", "", "https://example/pull/1");
+    await logActivity(db, "p1", "a", null, "pr_linked", "linkedPRs", "", "https://example/pull/1");
 
     expect(create.mock.calls[0][0]).toMatchObject({ user: null, newValue: "https://example/pull/1" });
   });
@@ -128,7 +130,7 @@ describe("logActivity", () => {
   it("does not propagate a failed write", async () => {
     create.mockRejectedValue(new Error("no"));
 
-    await expect(logActivity(db, "a", "u1", "created")).resolves.toBeUndefined();
+    await expect(logActivity(db, "p1", "a", "u1", "created")).resolves.toBeUndefined();
   });
 });
 

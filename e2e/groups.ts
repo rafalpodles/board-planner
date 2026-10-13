@@ -148,6 +148,7 @@ export const GROUPS = {
     "licence.spec.ts",
     "export-refusal.spec.ts",
     "organisation-migration.spec.ts",
+    "status-history.spec.ts",
     "organisation-secrets-reseal.spec.ts",
     "organisation-uploads.spec.ts",
     "db-scope.spec.ts",

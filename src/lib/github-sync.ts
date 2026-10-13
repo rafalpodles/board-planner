@@ -343,7 +343,7 @@ export async function syncGithubPullRequests(
       );
       await writeProviderLinks(db, task._id, "github", prDocs, seenList);
       // After the write, so a row never claims a change the write then failed to make
-      await recordLinkChanges(db, task._id, actor, added, removed);
+      await recordLinkChanges(db, project._id, task._id, actor, added, removed);
       unlinked += removed.length;
       if (removed.length > 0) unlinkedTasks++;
       written++;
@@ -372,6 +372,7 @@ export async function syncGithubPullRequests(
         autoTransitioned++;
         await logActivity(
           db,
+          project._id,
           String(task._id),
           actor,
           "status_changed",
@@ -407,7 +408,7 @@ export async function syncGithubPullRequests(
       const removed = removedLinks(task.linkedPRs, "github", seen, new Set());
       if (removed.length === 0) continue;
       await writeProviderLinks(db, task._id, "github", [], seenList);
-      await recordLinkChanges(db, task._id, actor, [], removed);
+      await recordLinkChanges(db, project._id, task._id, actor, [], removed);
       unlinked += removed.length;
       unlinkedTasks++;
       written++;

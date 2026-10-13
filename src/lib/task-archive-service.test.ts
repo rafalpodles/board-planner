@@ -44,7 +44,7 @@ describe("archiveTask", () => {
     expect(filter).toMatchObject({ _id: TASK, project: "p1", archivedAt: null, organisation: DEFAULT_ORGANISATION_ID });
     expect(update.$set).toMatchObject({ archivedBy: ACTOR, archivedAt: expect.any(Date) });
     expect(update).not.toHaveProperty("$unset");
-    expect(activityCreate).toHaveBeenCalledWith(expect.objectContaining({ task: TASK, user: ACTOR, action: "archived" }));
+    expect(activityCreate).toHaveBeenCalledWith(expect.objectContaining({ project: "p1", task: TASK, user: ACTOR, action: "archived" }));
   });
 
   it("refuses a task a run holds with the 409 the other writers give, naming the worker and the verb", async () => {
@@ -161,7 +161,7 @@ describe("unarchiveTask", () => {
     const [filter, update] = taskFindOneAndUpdate.mock.calls[0];
     expect(filter).toMatchObject({ _id: TASK, project: "p1", archivedAt: { $ne: null } });
     expect(update.$set).toEqual({ archivedAt: null, archivedBy: null });
-    expect(activityCreate).toHaveBeenCalledWith(expect.objectContaining({ task: TASK, user: ACTOR, action: "unarchived" }));
+    expect(activityCreate).toHaveBeenCalledWith(expect.objectContaining({ project: "p1", task: TASK, user: ACTOR, action: "unarchived" }));
   });
 
   it("answers a task that was never archived as it is, without a row", async () => {

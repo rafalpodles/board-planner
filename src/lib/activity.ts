@@ -20,6 +20,7 @@ import { currentGeneratedBy } from "@/lib/ai-generated";
 export async function logActivities(
   db: ScopedDb,
   rows: {
+    projectId: Types.ObjectId | string;
     taskId: Types.ObjectId | string;
     userId: Types.ObjectId | string | null;
     action: ActivityAction;
@@ -35,6 +36,7 @@ export async function logActivities(
   try {
     await db.ActivityLog.insertMany(
       rows.map((row) => ({
+        project: row.projectId,
         task: row.taskId,
         user: row.userId,
         action: row.action,
@@ -59,6 +61,7 @@ export async function logActivities(
 
 export async function logActivity(
   db: ScopedDb,
+  projectId: Types.ObjectId | string,
   taskId: Types.ObjectId | string,
   // Null is a sync writing about what GitHub said, which no person authored (BP-628)
   userId: Types.ObjectId | string | null,
@@ -70,6 +73,7 @@ export async function logActivity(
   const generatedBy = currentGeneratedBy();
   try {
     await db.ActivityLog.create({
+      project: projectId,
       task: taskId,
       user: userId,
       action,

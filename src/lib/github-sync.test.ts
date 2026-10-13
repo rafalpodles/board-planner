@@ -50,11 +50,11 @@ const db = scopedToDefaultOrganisation();
 /** The history rows of one action. A link change writes rows too now, so "nothing was logged" has
  *  to name which nothing it means (BP-628). */
 const rowsOf = (action: string) =>
-  logActivity.mock.calls.filter((call: unknown[]) => call[3] === action);
+  logActivity.mock.calls.filter((call: unknown[]) => call[4] === action);
 
 /** Every action a round wrote a row for. Asserting this rather than one action keeps the old
  *  guarantee that nothing ELSE was logged either. */
-const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call[3]).sort();
+const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call[4]).sort();
 
 const project = (over: Record<string, unknown> = {}) => ({
   _id: "p1",
@@ -134,6 +134,7 @@ describe("who asked, and what that earns", () => {
     expect(result).toMatchObject({ ok: true, autoTransitioned: 1 });
     expect(logActivity).toHaveBeenCalledWith(
       db,
+      "p1",
       "t1",
       "u1",
       "status_changed",
@@ -163,7 +164,7 @@ describe("who asked, and what that earns", () => {
     // The link row is written all the same, with no actor: the absence that stops a column change
     // being attributed is not a reason to leave the link change untraceable (BP-628, BP-632)
     expect(rowsOf("pr_linked")).toEqual([
-      [db, "t1", null, "pr_linked", "linkedPRs", "", "https://github.com/o/r/pull/1"],
+      [db, "p1", "t1", null, "pr_linked", "linkedPRs", "", "https://github.com/o/r/pull/1"],
     ]);
     // The status write is the one that must not happen; the link write still must
     expect(taskUpdateOne).toHaveBeenCalledTimes(1);
@@ -915,7 +916,7 @@ describe("what a link change leaves behind", () => {
     await githubSyncTick();
 
     expect(rowsOf("pr_unlinked")).toEqual([
-      [db, "t8", null, "pr_unlinked", "linkedPRs", prUrl(1), ""],
+      [db, "p1", "t8", null, "pr_unlinked", "linkedPRs", prUrl(1), ""],
     ]);
   });
 

@@ -33,6 +33,6 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
       : NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  await logActivity(db, taskId, user._id, "criterion_added", String(item._id), "", item.text);
+  await logActivity(db, projectId, taskId, user._id, "criterion_added", String(item._id), "", item.text);
   return NextResponse.json({ item, checklist: updated.checklist }, { status: 201 });
 });

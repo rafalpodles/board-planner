@@ -701,7 +701,7 @@ export async function createTask(
 
   const populated = await db.Task.findById(task._id).populate(taskPopulateFields);
 
-  await logActivity(db, String(task._id), actorId, "created");
+  await logActivity(db, project._id, String(task._id), actorId, "created");
 
   const eventPayload = {
     project: { key: project.key, name: project.name },
@@ -872,7 +872,7 @@ export async function changeStatus(
   }
 
   if (oldTask.status !== status) {
-    await logActivity(db, taskId, actorId, "status_changed", "status", oldTask.status, status);
+    await logActivity(db, projectId, taskId, actorId, "status_changed", "status", oldTask.status, status);
     await announceStatusChange(db, {
       projectId,
       taskId,
@@ -1298,7 +1298,7 @@ export async function updateTask(
     const newVal = refId(task[field as keyof typeof task]);
     if (oldVal !== newVal) {
       const action = field === "status" ? "status_changed" as const : "updated" as const;
-      activities.push(logActivity(db, taskId, actorId, action, field, oldVal, newVal));
+      activities.push(logActivity(db, projectId, taskId, actorId, action, field, oldVal, newVal));
     }
   }
 
@@ -1307,7 +1307,7 @@ export async function updateTask(
   if (refId(oldTask.agent) !== refId(task.agent)) {
     activities.push(
       storedAgentName(db, oldTask.agent).then((before) =>
-        logActivity(db, taskId, actorId, "updated", "agent", before, populatedAgentName(task.agent))
+        logActivity(db, projectId, taskId, actorId, "updated", "agent", before, populatedAgentName(task.agent))
       )
     );
   }
@@ -1317,10 +1317,11 @@ export async function updateTask(
     // A whole list rewritten over MCP would otherwise push the rest of the task's history out of view
     activities.push(
       changes.length > CRITERION_ROWS_PER_WRITE
-        ? logActivity(db, taskId, actorId, "updated", "checklist", "", String(changes.length))
+        ? logActivity(db, projectId, taskId, actorId, "updated", "checklist", "", String(changes.length))
         : logActivities(
             db,
             changes.map((change) => ({
+              projectId,
               taskId,
               userId: actorId,
               action: change.action,
@@ -1339,6 +1340,7 @@ export async function updateTask(
       db,
       customFieldActivityChanges(oldTask.customFieldValues, task.customFieldValues, fieldDefs).map(
         (change) => ({
+          projectId,
           taskId,
           userId: actorId,
           action: "updated" as const,
@@ -1360,7 +1362,7 @@ export async function updateTask(
       ? (task.assignee as { username: string }).username
       : "";
     if (oldAssignee !== newAssignee) {
-      activities.push(logActivity(db, taskId, actorId, "updated", "assignee", oldAssignee, newAssignee));
+      activities.push(logActivity(db, projectId, taskId, actorId, "updated", "assignee", oldAssignee, newAssignee));
     }
   }
 
@@ -1467,7 +1469,7 @@ export async function addComment(
   });
 
   await Promise.all([
-    logActivity(db, taskId, actor.id, "comment_added"),
+    logActivity(db, projectId, taskId, actor.id, "comment_added"),
     // Auto-watch task on comment
     db.Task.findByIdAndUpdate(taskId, { $addToSet: { watchers: actor.id } }),
   ]);
@@ -1617,6 +1619,7 @@ async function createNextRecurrence(
 
   await logActivity(
     db,
+    project._id,
     String(oldTask._id),
     userId,
     "updated",

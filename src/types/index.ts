@@ -1646,6 +1646,7 @@ export type LinkDirection =
 export interface IActivityLog {
   _id: Types.ObjectId;
   task: Types.ObjectId;
+  project: Types.ObjectId;
   // Null for a row a scheduler tick wrote: there is no person to name, and naming one would be
   // the invention the auto-transition refuses to make.
   user: Types.ObjectId | IUser | null;

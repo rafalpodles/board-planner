@@ -83,12 +83,12 @@ describe("PATCH …/checklist/:itemId", () => {
   // Each of these used to record a row nobody made: a tick as an edit to "undefined", a reword as an untick
   it("records a tick as a tick only, and a reword of a ticked row as a reword only", async () => {
     await request("PATCH", { done: true });
-    expect(logActivity.mock.calls.map((c) => c[3])).toEqual(["criterion_checked"]);
-    expect(logActivity).toHaveBeenCalledWith(expect.anything(), TASK_ID, ME, "criterion_checked", A, "", "first");
+    expect(logActivity.mock.calls.map((c) => c[4])).toEqual(["criterion_checked"]);
+    expect(logActivity).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, TASK_ID, ME, "criterion_checked", A, "", "first");
 
     logActivity.mockClear();
     const res = await request("PATCH", { text: "second, reworded" }, { taskId: TASK_ID, itemId: B });
-    expect(logActivity.mock.calls.map((c) => c[3])).toEqual(["criterion_edited"]);
+    expect(logActivity.mock.calls.map((c) => c[4])).toEqual(["criterion_edited"]);
     expect((await res.json()).checklist[1]).toEqual({ _id: B, text: "second, reworded", done: true });
   });
 
@@ -98,7 +98,7 @@ describe("PATCH …/checklist/:itemId", () => {
     expect(res.status).toBe(200);
     expect(filter()).toMatchObject({ "checklist._id": A });
     expect(options().arrayFilters).toEqual([{ "c._id": A }]);
-    expect(logActivity).toHaveBeenCalledWith(expect.anything(), TASK_ID, ME, "criterion_checked", A, "", "first");
+    expect(logActivity).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, TASK_ID, ME, "criterion_checked", A, "", "first");
   });
 
   it("sets only what it was given", async () => {
@@ -110,12 +110,12 @@ describe("PATCH …/checklist/:itemId", () => {
   it("records a tick, an untick and a rewording as the whole-list write does", async () => {
     await request("PATCH", { done: true, text: "first, reworded" });
 
-    expect(logActivity).toHaveBeenCalledWith(expect.anything(), TASK_ID, ME, "criterion_edited", A, "first", "first, reworded");
-    expect(logActivity).toHaveBeenCalledWith(expect.anything(), TASK_ID, ME, "criterion_checked", A, "", "first, reworded");
+    expect(logActivity).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, TASK_ID, ME, "criterion_edited", A, "first", "first, reworded");
+    expect(logActivity).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, TASK_ID, ME, "criterion_checked", A, "", "first, reworded");
 
     logActivity.mockClear();
     await request("PATCH", { done: false }, { taskId: TASK_ID, itemId: B });
-    expect(logActivity).toHaveBeenCalledWith(expect.anything(), TASK_ID, ME, "criterion_unchecked", B, "", "second");
+    expect(logActivity).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, TASK_ID, ME, "criterion_unchecked", B, "", "second");
   });
 
   it("records nothing for a write that changed nothing", async () => {
@@ -163,13 +163,13 @@ describe("DELETE …/checklist/:itemId", () => {
 
     expect(res.status).toBe(200);
     expect(change()).toEqual({ $pull: { checklist: { _id: B } } });
-    expect(logActivity).toHaveBeenCalledWith(expect.anything(), TASK_ID, ME, "criterion_removed", B, "second", "");
+    expect(logActivity).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, TASK_ID, ME, "criterion_removed", B, "second", "");
   });
 
   it("records the removal with the text that was removed", async () => {
     await request("DELETE");
 
-    expect(logActivity).toHaveBeenCalledWith(expect.anything(), TASK_ID, ME, "criterion_removed", A, "first", "");
+    expect(logActivity).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, TASK_ID, ME, "criterion_removed", A, "first", "");
   });
 
   it("answers 404 for a criterion that is not there", async () => {

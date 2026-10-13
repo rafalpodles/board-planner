@@ -40,6 +40,7 @@
     "src/lib/middleware.ts": "resolves a task key to an id, and a worker's run to its task",
     "src/lib/pm/triggers.ts": "by id",
     "src/lib/pr-links.ts": "writes the links of one task by id, archived or not",
+    "src/lib/status-history.ts": "a finished task is a fact whether or not it was archived afterwards; each entry carries `archived` and the metrics decide what to count",
     "src/lib/task-archive-service.ts": "the archive and restore writers read the task they act on",
     "src/lib/task-comment-route.ts": "by id",
     "src/lib/task-decisions.ts":"a refused change waits on a person whether or not its task was archived since",

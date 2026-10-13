@@ -568,6 +568,18 @@ export async function storedActivity(
   }));
 }
 
+/** The project each of a task's rows of one action names, as strings, newest first. */
+export async function activityProjects(taskId: mongoose.Types.ObjectId, action: string): Promise<string[]> {
+  const db = (await connect()).db!;
+  const rows = await db
+    .collection("activitylogs")
+    .find({ task: taskId, action })
+    .sort({ createdAt: -1, _id: -1 })
+    .toArray();
+  await mongoose.disconnect();
+  return rows.map((r) => String(r.project ?? ""));
+}
+
 /** Renames a field, or one of its options, after history has already been written about it. */
 export async function renameField(
   fieldId: mongoose.Types.ObjectId,
