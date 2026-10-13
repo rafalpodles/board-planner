@@ -25,6 +25,9 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 # The standalone server.js reads this instead of --keepAliveTimeout; above a proxy's 60 s idle limit (BP-814)
 ENV KEEP_ALIVE_TIMEOUT=65000
+# Read at request time by /api/version; empty when the image is built by hand
+ARG GIT_SHA=
+ENV GIT_SHA=$GIT_SHA
 
 RUN addgroup -S nodejs && adduser -S -G nodejs nextjs
 
