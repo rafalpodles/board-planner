@@ -400,7 +400,7 @@ address would give it a fresh bucket for every request. The throttles key an IPv
 64 bits; IPv4 is unchanged, and an IPv4 client written as an IPv4-mapped address or with the
 well-known NAT64 prefix (`64:ff9b::/96`) counts as that IPv4 host. A NAT64 with a prefix of its own
 cannot be told from any other IPv6 network, so everyone behind it shares one bucket. The address
-shown in a session or the audit log stays the full one. A host that is handed a /56 or a /48 still
+stored with a session and written to the audit log stays the full one. A host that is handed a /56 or a /48 still
 spreads over 256 or 65,536 buckets.
 
 </details>
