@@ -30,6 +30,20 @@ const nextConfig: NextConfig = {
     ];
   },
 
+  // Turbopack's dev server loses a route with three dynamic segments for the life of the process (BP-1042)
+  async rewrites() {
+    return [
+      {
+        source: "/api/projects/:projectId/tasks/:taskId/checklist/:itemId",
+        destination: "/api/task-leaf/checklist-item/:projectId/:taskId/:itemId",
+      },
+      {
+        source: "/api/projects/:projectId/tasks/:taskId/comments/:commentId",
+        destination: "/api/task-leaf/comment/:projectId/:taskId/:commentId",
+      },
+    ];
+  },
+
   async headers() {
     return [
       {

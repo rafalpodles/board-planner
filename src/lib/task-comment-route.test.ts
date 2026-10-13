@@ -20,7 +20,7 @@ vi.mock("@/lib/middleware", async () => {
   };
 });
 
-const { PUT } = await import("./route");
+const { PUT } = await import("./task-comment-route");
 
 let comment: { author: { toString(): string }; body: string; save: typeof save };
 
