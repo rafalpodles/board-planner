@@ -1317,7 +1317,7 @@ test.describe("the lease sweep leaves a task no run is holding", () => {
   test("a finished run's task, dragged back by hand, is not swept on the poll after it", async () => {
     const handed = await addTask();
     await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), WORKER, "run-1", String(OWNER), IDENTITY);
-    await changeStatus(scopedToDefaultOrganisation(), String(PROJECT_ID), String(handed), "in_review", String(OWNER));
+    await changeStatus(scopedToDefaultOrganisation(), String(PROJECT_ID), String(handed), "in_review", IDENTITY, { workerId: WORKER });
     const handle = await db();
     await handle.collection("tasks").updateOne({ _id: handed }, { $set: { "execution.startedAt": STALE() } });
     await handle.collection("tasks").updateOne({ _id: handed }, { $set: { status: ACTIVE } });
