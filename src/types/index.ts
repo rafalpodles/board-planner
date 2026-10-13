@@ -352,6 +352,7 @@ export interface IOAuthClient {
   clientId: string;
   clientName: string;
   redirectUris: string[];
+  expiresAt?: Date;
   createdAt: Date;
 }
 
@@ -740,7 +741,6 @@ export interface ApiWorkerPreflight extends Omit<WorkerPreflight, "reportedAt"> 
 export interface IDeviceEnrolment {
   _id: Types.ObjectId;
   deviceCodeHash: string;
-  deviceCodePrefix: string;
   userCode: string;
   machineName: string;
   machineHost: string;

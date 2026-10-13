@@ -1,5 +1,6 @@
 import { test, expect, type Page, type TestInfo } from "@playwright/test";
 import mongoose from "mongoose";
+import { SAME_ORIGIN } from "./api";
 import { E2E_MONGODB_URI, MEMBER_ID, MEMBER_PASSWORD, seed } from "./seed";
 import { signIn } from "./session";
 import { confirmLinkIn, mailFor } from "./mailbox";
@@ -131,4 +132,17 @@ test("cancelling a pending change keeps the address and spends the link", async 
   await expect(inbox.getByText(/This link is not valid/)).toBeVisible();
   expect(await storedEmail()).toBe(old);
   await inbox.close();
+});
+
+// BP-1030: with no client address every caller shared one bucket, so a few hundred made-up links
+// from anybody refused the next person confirming theirs
+test("with no client address a flood of made-up links is answered as one made-up link is", async ({ request }) => {
+  test.setTimeout(120_000);
+  const confirm = (token: string) => request.post("/api/auth/confirm-email", { headers: SAME_ORIGIN, data: { token } });
+
+  for (let i = 0; i < 410; i++) {
+    const response = await confirm(`cpe_made-up-${i}`);
+    expect(response.status(), `made-up link ${i}`).toBe(400);
+    expect((await response.json()).error).toMatch(/not valid/);
+  }
 });

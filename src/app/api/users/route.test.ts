@@ -58,7 +58,6 @@ vi.mock("@/lib/auth", () => ({
 const isRateLimited = vi.fn();
 const recordFailedAttempt = vi.fn();
 vi.mock("@/lib/rate-limit", () => ({
-  anonymousMultiplier: (_ip: unknown, n: number) => n,
   isRateLimited: (...a: unknown[]) => isRateLimited(...a),
   recordFailedAttempt: (...a: unknown[]) => recordFailedAttempt(...a),
   sourceKey: (ip: string, scope: string) => `${scope}:${ip}`,

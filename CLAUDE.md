@@ -333,7 +333,16 @@ TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the
                           # per ten minutes past four of them; an empty header is not (BP-774).
                           # Provider sign-in (oidc start/callback/signup) and invitation use are not
                           # throttled at all while it is 0, their secret being a random cookie or
-                          # token: one shared bucket would let anybody stop everybody (BP-840)
+                          # token: one shared bucket would let anybody stop everybody (BP-840).
+                          # So with no address are the reset and e-mail-confirmation links (spent
+                          # before they are hashed for), device enrolment (sha256; the pending cap
+                          # drops the oldest) and OAuth client registration (rows nobody approved
+                          # are capped at 1000 and expire; none is evicted under 15 minutes old,
+                          # past that registration answers 429, from any address, until some are
+                          # older (BP-1046: an IPv6 /64 rotates keys); src/lib/oauth-clients.ts);
+                          # platform sign-in keeps
+                          # a shared bucket because it mails whoever is typed (BP-1030). With hops
+                          # above 0 a request that yields no address is logged once a quiet period
 COOKIE_ALLOW_INSECURE=    # 1: plain session cookie (no Secure, no __Host-) for plain HTTP. auto:
                           # the same only while PUBLIC_ORIGIN and every APP_ORIGIN are http:// and
                           # the sign-in's Origin is not https — what docker-compose.yml passes.

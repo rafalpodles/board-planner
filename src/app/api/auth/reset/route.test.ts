@@ -9,12 +9,14 @@ const logInstanceAudit = vi.fn();
 const userFindOne = vi.fn();
 const userUpdateOne = vi.fn();
 const hash = vi.fn();
+const CLAIMED_AT = new Date("2026-10-13T06:00:00Z");
+let clientIp: string | null = "203.0.113.9";
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
   MIN_PASSWORD_LENGTH: 8,
   PASSWORD_COST_FACTOR: 10,
-  getClientIp: () => "203.0.113.9",
+  getClientIp: () => clientIp,
 }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
@@ -51,8 +53,9 @@ function accountIs(user: unknown) {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  clientIp = "203.0.113.9";
   await resetRateLimits();
-  consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
+  consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com", claimedAt: CLAIMED_AT });
   accountIs({ _id: "u1", username: "owner", kind: "human", email: "owner@example.com" });
   hash.mockResolvedValue("new-hash");
   userUpdateOne.mockResolvedValue({});
@@ -121,6 +124,53 @@ describe("POST /api/auth/reset", () => {
     );
   });
 
+  it("throttles one source guessing links", async () => {
+    consumeResetToken.mockResolvedValue({ ok: false, reason: "unknown" });
+    for (let i = 0; i < 20; i++) expect((await POST(post())).status).toBe(400);
+
+    expect((await POST(post())).status).toBe(429);
+  });
+
+  // BP-1030. The link is 32 random bytes, so with no client address the work done for a caller
+  // holding a made-up one is what is bounded, not a bucket every such caller shares. 450 is past
+  // the 400 that bucket held.
+  it("does not let a caller with no address guessing links refuse the next one", async () => {
+    clientIp = null;
+    consumeResetToken.mockResolvedValue({ ok: false, reason: "unknown" });
+    for (let i = 0; i < 450; i++) await POST(post());
+    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com", claimedAt: CLAIMED_AT });
+
+    expect((await POST(post())).status).toBe(200);
+  });
+
+  // BP-1030. With nothing counting callers, the work done for a link has to be bounded by the link:
+  // hashing before the claim let every request carrying one live link run its own hash.
+  it("hashes only for a link it has spent, so a link costs one hash and a made-up one none", async () => {
+    consumeResetToken.mockResolvedValue({ ok: false, reason: "used" });
+
+    const refused = await POST(post());
+
+    expect(refused.status).toBe(400);
+    expect(hash).not.toHaveBeenCalled();
+
+    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com", claimedAt: CLAIMED_AT });
+    await POST(post());
+
+    expect(hash).toHaveBeenCalledTimes(1);
+    expect(consumeResetToken.mock.invocationCallOrder.at(-1)!).toBeLessThan(hash.mock.invocationCallOrder[0]);
+  });
+
+  it("gives the link back when the hash throws, changing nothing", async () => {
+    hash.mockRejectedValue(new Error("bcrypt failed"));
+    releaseResetToken.mockResolvedValue(undefined);
+
+    await expect(POST(post())).rejects.toThrow("bcrypt failed");
+
+    expect(releaseResetToken).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpr_good", CLAIMED_AT);
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+    expect(userUpdateOne).not.toHaveBeenCalled();
+  });
+
   // BP-842. Whoever reads the old mailbox is not who the account belongs to now
   it("refuses a link mailed to an address the account no longer has, setting nothing", async () => {
     accountIs({ _id: "u1", username: "owner", kind: "human", email: "moved@example.com" });
@@ -141,7 +191,7 @@ describe("POST /api/auth/reset", () => {
   });
 
   it("proves no address for a link issued before it recorded where it was sent", async () => {
-    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: null });
+    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: null, claimedAt: CLAIMED_AT });
 
     expect((await POST(post())).status).toBe(200);
     expect(userUpdateOne).toHaveBeenCalledTimes(1);

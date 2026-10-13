@@ -5,13 +5,7 @@ import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { scopedForRequest } from "@/lib/db-scope";
 import { getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
-import {
-  anonymousMultiplier,
-  clearAccountAttempts,
-  isRateLimited,
-  recordFailedAttempt,
-  sourceKey,
-} from "@/lib/rate-limit";
+import { clearAccountAttempts, sourceRefused } from "@/lib/rate-limit";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { notifyPasswordChanged } from "@/lib/security-mail";
 import {
@@ -38,22 +32,22 @@ export async function POST(request: Request) {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
-  // Ahead of the body for the same reason it is ahead of bcrypt: the read is work too (BP-322).
-  // Guessing 32 random bytes is not the worry; unmetered work is. Two indexed reads and a bcrypt
-  // per anonymous request is a bill anybody can run up.
+  // Ahead of the body: the read is work too (BP-322). Guessing 32 random bytes is not the worry;
+  // unmetered work is.
   //
   // The cost of counting here is that a request refused later for its own reasons — a password
   // under the minimum, a body that is not JSON — spends a slot too. That is the intended trade:
   // the alternative leaves the cheapest way to spend the server's time the one way that is free.
+  //
+  // With no client address nobody is counted (BP-1030): the link is spent before anything is
+  // hashed, so a made-up one costs a body and two reads, and a real one a single hash.
   const clientIp = getClientIp(request);
-  const throttleKey = sourceKey(clientIp ?? "-", "password-reset-use");
-  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ATTEMPTS_PER_SOURCE))) {
+  if (await sourceRefused(clientIp, "password-reset-use", ATTEMPTS_PER_SOURCE)) {
     return NextResponse.json(
       { error: "Too many attempts. Try again in 15 minutes." },
       { status: 429 }
     );
   }
-  await recordFailedAttempt(throttleKey);
 
   const read = await readJsonBody<{ token?: unknown; newPassword?: unknown }>(request);
   if (!read.ok) return read.response;
@@ -73,10 +67,6 @@ export async function POST(request: Request) {
   }
 
   await connectDB();
-
-  // Hashed before the token is spent, for the same reason the length is checked first: bcrypt
-  // throwing after the claim would leave the person with a dead link and their old password
-  const hashed = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
 
   const outcome = await consumeResetToken(db, token);
   if (!outcome.ok) {
@@ -102,6 +92,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "This account is deactivated. Ask an administrator." }, { status: 403 });
   }
 
+  // Only the request that won the claim gets here, so a live link costs one hash however many
+  // requests carry it. A hash that throws gives the link back: nothing has changed yet.
+  let hashed: string;
+  try {
+    hashed = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
+  } catch (err) {
+    await releaseResetToken(db, token, outcome.claimedAt).catch(() => {});
+    throw err;
+  }
+
   // Every session, including whoever is signed in on the old password — which is the case somebody
   // resetting a password they believe was stolen is trying to end
   // Providers go with every other credential, an intruder's included; the account's own can be
@@ -113,7 +113,7 @@ export async function POST(request: Request) {
   } catch (err) {
     // The claim is one-shot, so a write that fails here would otherwise leave somebody signed out
     // of everything, holding a dead link, with their old password still in force and no way back
-    await releaseResetToken(db, token).catch(() => {});
+    await releaseResetToken(db, token, outcome.claimedAt).catch(() => {});
     throw err;
   }
   // The link reached the address it was mailed to, which is the proof a provider links by — and

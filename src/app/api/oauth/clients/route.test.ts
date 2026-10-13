@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
 const findOne = vi.fn();
+const find = vi.fn();
+const aggregate = vi.fn();
 const clientDeleteOne = vi.fn();
 const tokenDeleteMany = vi.fn();
 const codeDeleteMany = vi.fn();
@@ -9,10 +11,10 @@ const consentDeleteMany = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/oauthClient", () => ({
-  OAuthClient: { findOne, deleteOne: clientDeleteOne, find: vi.fn() },
+  OAuthClient: { findOne, deleteOne: clientDeleteOne, find },
 }));
 vi.mock("@/models/oauthToken", () => ({
-  OAuthToken: { deleteMany: tokenDeleteMany, aggregate: vi.fn() },
+  OAuthToken: { deleteMany: tokenDeleteMany, aggregate },
 }));
 vi.mock("@/models/oauthCode", () => ({ OAuthCode: { deleteMany: codeDeleteMany } }));
 vi.mock("@/models/oauthConsent", () => ({ OAuthConsent: { deleteMany: consentDeleteMany } }));
@@ -26,7 +28,7 @@ vi.mock("@/lib/middleware", async () => {
   };
 });
 
-const { DELETE } = await import("./route");
+const { DELETE, GET } = await import("./route");
 
 const VALID_ID = "507f1f77bcf86cd799439011";
 
@@ -43,6 +45,21 @@ const ctx = () => ({ params: Promise.resolve({}) });
 beforeEach(() => {
   vi.clearAllMocks();
   findOne.mockResolvedValue({ _id: VALID_ID, clientId: "client-abc" });
+});
+
+// BP-1030. A flood of anonymous registrations must not bury the clients somebody approved
+describe("GET /api/oauth/clients", () => {
+  it("lists only clients a person approved", async () => {
+    find.mockReturnValue({
+      select: () => ({ sort: () => ({ lean: () => Promise.resolve([{ _id: VALID_ID, clientId: "client-abc", clientName: "Claude", redirectUris: [], createdAt: new Date() }]) }) }),
+    });
+    aggregate.mockResolvedValue([{ _id: "client-abc", n: 2 }]);
+
+    const response = await GET(new Request("https://app.example.com/api/oauth/clients"), ctx());
+
+    expect(find).toHaveBeenCalledWith({ expiresAt: null, organisation: DEFAULT_ORGANISATION_ID });
+    expect(await response.json()).toEqual([expect.objectContaining({ clientId: "client-abc", tokenCount: 2 })]);
+  });
 });
 
 describe("DELETE /api/oauth/clients", () => {

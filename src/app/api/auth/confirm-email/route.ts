@@ -8,7 +8,7 @@ import { revokePendingInvitationsFor } from "@/lib/invitations";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { invalidateResetTokens } from "@/lib/password-reset";
-import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { sourceRefused } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
 import { notifyAddressChanged } from "@/lib/security-mail";
 import { provenanceRefusal } from "@/lib/session";
@@ -29,12 +29,9 @@ export async function POST(request: Request) {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
-  const clientIp = getClientIp(request);
-  const throttleKey = sourceKey(clientIp ?? "-", "email-confirm-use");
-  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ATTEMPTS_PER_SOURCE))) {
+  if (await sourceRefused(getClientIp(request), "email-confirm-use", ATTEMPTS_PER_SOURCE)) {
     return NextResponse.json({ error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
   }
-  await recordFailedAttempt(throttleKey);
 
   const read = await readJsonBody<{ token?: unknown }>(request);
   if (!read.ok) return read.response;

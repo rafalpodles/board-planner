@@ -5,12 +5,8 @@ import { connectDB } from "@/lib/db";
 import { scopedForRequest } from "@/lib/db-scope";
 import { isValidRedirectUri, newClientId } from "@/lib/oauth";
 import { getClientIp } from "@/lib/auth";
-import {
-  anonymousMultiplier,
-  isRateLimited,
-  recordFailedAttempt,
-  sourceKey,
-} from "@/lib/rate-limit";
+import { makeRoomForClient, unusedClientExpiry } from "@/lib/oauth-clients";
+import { sourceRefused } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,20 +30,15 @@ export async function POST(req: Request) {
   if (!db) return hostNotFound();
   await connectDB();
 
-  // Unauthenticated and public by design, so the only bound on how far the client
-  // collection can be grown is the caller's address
-  const clientIp = getClientIp(req);
-  const throttleKey = sourceKey(clientIp ?? "-", "oauth_register");
-  // With no address every caller shares this key, so the per-address figure would let one of them
-  // hold registration closed for the whole instance
-  const ceiling = anonymousMultiplier(clientIp, REGISTRATIONS_PER_WINDOW);
-  if (await isRateLimited(throttleKey, ceiling)) {
+  // Unauthenticated and public by design. With an address the caller is held to a budget. With none
+  // (TRUSTED_PROXY_HOPS unset) a bucket shared by every caller would let one of them close MCP
+  // onboarding for the whole instance, so what is bounded is the rows nobody has approved (BP-1030).
+  if (await sourceRefused(getClientIp(req), "oauth_register", REGISTRATIONS_PER_WINDOW)) {
     return NextResponse.json(
       { error: "invalid_request", error_description: "Too many client registrations from this address. Try again later." },
       { status: 429, headers: CORS }
     );
   }
-  await recordFailedAttempt(throttleKey);
 
   const read = await readJsonBody<Record<string, unknown> | null>(req);
   if (!read.ok) return read.response;
@@ -74,7 +65,13 @@ export async function POST(req: Request) {
   const clientName =
     typeof body?.client_name === "string" ? body.client_name.slice(0, MAX_CLIENT_NAME) : "";
 
-  await db.OAuthClient.create({ clientId, clientName, redirectUris });
+  if (!(await makeRoomForClient(db))) {
+    return NextResponse.json(
+      { error: "invalid_request", error_description: "Too many client registrations are waiting to be approved. Try again in a few minutes." },
+      { status: 429, headers: { ...CORS, "Retry-After": "900" } }
+    );
+  }
+  await db.OAuthClient.create({ clientId, clientName, redirectUris, expiresAt: unusedClientExpiry() });
 
   return NextResponse.json(
     {

@@ -350,8 +350,9 @@ the header is not read at all, and anonymous callers share one bucket at a raise
 not guessed; see below. `1` is a single nginx or Caddy in front and nothing else.
 
 Getting the number wrong has consequences in both directions. Set it **too high** and the header is
-refused as not matching what you described — every caller then shares the anonymous bucket, which is
-bounded but shared. Set it **too low** and the address counted is one your proxy chain writes rather
+refused as not matching what you described — the sign-in then shares one bucket, which is bounded but
+shared, while the routes whose link is random (password reset, e-mail confirmation), client
+registration and machine enrolment count nobody, and the app says so in its log once every ten minutes. Set it **too low** and the address counted is one your proxy chain writes rather
 than the client's, so every request on earth may land in the same bucket — and because that bucket
 looks to the app like a genuine address, it is metered at the *tight* per-address ceilings rather
 than the raised anonymous ones.

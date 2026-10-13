@@ -6,7 +6,7 @@ import { renderEmail } from "@/lib/email-template";
 import { sha256 } from "@/lib/oauth";
 import { CODE_TTL_MS, startSignIn } from "@/lib/platform-sign-in";
 import { signInCookie, signInRoute } from "@/lib/platform-sign-in-route";
-import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { isRateLimited, recordFailedAttempt, sourceRefused } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
 import { provenanceRefusal } from "@/lib/session";
 
@@ -21,10 +21,12 @@ export const POST = signInRoute(async (request) => {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
-  const clientIp = getClientIp(request);
-  const perSource = sourceKey(clientIp ?? "-", "platform-sign-in");
-  if (await isRateLimited(perSource, anonymousMultiplier(clientIp, CODES_PER_SOURCE))) return tooMany();
-  await recordFailedAttempt(perSource);
+  // Mail goes to whoever is typed, so with no address callers share one bucket (20 times the
+  // per-address figure) rather than being uncounted: the platform host has an address on any
+  // correct deployment, and what lands here is somebody who went round the proxy (BP-1030)
+  if (await sourceRefused(getClientIp(request), "platform-sign-in", CODES_PER_SOURCE, CODES_PER_SOURCE * 20)) {
+    return tooMany();
+  }
 
   const read = await readJsonBody<{ email?: unknown }>(request);
   if (!read.ok) return read.response;

@@ -364,3 +364,68 @@ describe("a forwarded request with no proxy configured", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 });
+
+// BP-1030. Routes whose secret is random count nobody when there is no address, so a proxy that
+// leaves no usable one (`ip:port`, hops set too high, a request round the proxy) must not be silent
+describe("a request that yields no address with the hops set", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  async function fresh(hops: string) {
+    vi.resetModules();
+    process.env.TRUSTED_PROXY_HOPS = hops;
+    return (await import("./client-ip")).getClientIp;
+  }
+
+  const forwarded = (value?: string) =>
+    new Request("https://app.example.com/api/auth/login", { headers: value === undefined ? {} : { "x-forwarded-for": value } });
+
+  it("says so when the entry that counts is not an address, naming the count and never the entry", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh("1");
+
+    expect(getIp(forwarded("203.0.113.7:51234"))).toBeNull();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("TRUSTED_PROXY_HOPS=1");
+    expect(warn.mock.calls[0][0]).toContain("is not an IP address");
+    expect(warn.mock.calls[0][0]).not.toContain("51234");
+  });
+
+  it("says so when the header carries fewer entries than the hops", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh("2");
+
+    expect(getIp(forwarded("203.0.113.9"))).toBeNull();
+
+    expect(warn.mock.calls[0][0]).toContain("fewer than that");
+  });
+
+  it("says it once a quiet period, not once a request", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh("1");
+
+    for (let i = 0; i < 5; i++) getIp(forwarded());
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(10 * 60 * 1000 + 1);
+    getIp(forwarded());
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("says nothing when an address was found", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh("1");
+
+    expect(getIp(forwarded("10.0.0.1, 203.0.113.9"))).toBe("203.0.113.9");
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+});

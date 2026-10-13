@@ -283,6 +283,17 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
 
   // Still not something a machine can do for itself: a credential readable off the worker's disk
   // must not be able to enrol a second one.
+  // BP-1030. The pending cap drops the oldest row, so a row can be gone by the time it is approved
+  it("says so when the request is no longer waiting, rather than reporting an approval nothing will deliver", async () => {
+    deviceEnrolmentUpdateOne.mockResolvedValue({ matchedCount: 0 });
+
+    grants(true);
+    const response = await POST(request({ projectId: PROJECT_ID }), ctx());
+
+    expect(response.status).toBe(410);
+    expect((await response.json()).error).toMatch(/no longer waiting/);
+  });
+
   it("refuses a machine credential", async () => {
     getAuthUser.mockResolvedValue({ ...MEMBER, viaMachineCredential: true });
 

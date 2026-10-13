@@ -1,6 +1,6 @@
 import crypto from "crypto";
-import bcrypt from "bcryptjs";
 import { connectDB } from "./db";
+import { sha256 } from "./oauth";
 import { projectRepositoryUrl } from "./repository";
 import { IDeviceEnrolment } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
@@ -16,14 +16,6 @@ const USER_CODE_LENGTH = 8;
 export const DEVICE_ENROLMENT_TTL_MS = 15 * 60 * 1000;
 // What the app waits between polls. Short enough to feel immediate, long enough not to hammer.
 export const DEVICE_POLL_INTERVAL_MS = 2_000;
-
-// Same shape the cp_/cpe_ credential paths use: an indexed, non-secret prefix narrows the
-// candidates so exactly one bcrypt compare runs per poll. 8 hex of 64 leaves 224 bits of secret.
-const DEVICE_PREFIX_LENGTH = DEVICE_PREFIX.length + 8;
-
-export function devicePrefixOf(deviceCode: string): string {
-  return deviceCode.slice(0, DEVICE_PREFIX_LENGTH);
-}
 
 export function formatUserCode(raw: string): string {
   return `${raw.slice(0, 4)}-${raw.slice(4)}`;
@@ -63,10 +55,10 @@ export interface StartedEnrolment {
  * TRUSTED_PROXY_HOPS — which is the default (BP-318).
  *
  * So the ceiling drops the oldest pending row instead of refusing the newest. A pending row is
- * worth nothing until a signed-in person approves it, the rate limit above still bounds how fast
- * rows can be made, and an operator who asks to enrol always gets a code. What a flood can still
- * do is age somebody's row out before they finish typing it; at this size and that rate limit
- * that takes minutes, where refusing took one request.
+ * worth nothing until a signed-in person approves it, the route's per-address limit bounds how fast
+ * rows can be made where there is an address, and an operator who asks to enrol always gets a
+ * code. What a flood can still do is age somebody's row out before they finish typing it: minutes
+ * with an address, seconds without one, where refusing took one request.
  */
 export const MAX_PENDING_ENROLMENTS = 100;
 
@@ -100,8 +92,7 @@ export async function startDeviceEnrolment(
     const userCode = randomUserCode();
     try {
       await db.DeviceEnrolment.create({
-        deviceCodeHash: await bcrypt.hash(deviceCode, 10),
-        deviceCodePrefix: devicePrefixOf(deviceCode),
+        deviceCodeHash: sha256(deviceCode),
         userCode,
         machineName: input.machineName,
         machineHost: input.machineHost,
@@ -144,9 +135,10 @@ export type PollResult =
       projectKey: string;
     };
 
-// The app's half. Matching is a bcrypt compare over the candidates sharing a user code, so a
-// device code that was never issued cannot be told from one that was — and an approved row hands
-// its credential over exactly once, then forgets it.
+// The app's half. A device code that was never issued cannot be told from one that was — and an
+// approved row hands its credential over exactly once, then forgets it. The code is 256 random bits,
+// so a plain hash is all it needs and no bcrypt is left to run up (BP-1030); what an anonymous
+// caller can still do is cheap and bounded by the pending cap.
 export async function pollDeviceEnrolment(
   db: ScopedDb,
   deviceCode: string,
@@ -157,42 +149,38 @@ export async function pollDeviceEnrolment(
     return { state: "expired" };
   }
 
-  // Narrowed by the indexed prefix rather than a 200-row window: the old shape ran up to 200
-  // bcrypt compares per unauthenticated request, and sustained flooding pushed an approved
-  // enrolment out of the window so its poll answered "expired" forever (BP-305)
-  const candidates = await db.DeviceEnrolment.find({
-    deviceCodePrefix: devicePrefixOf(deviceCode),
+  // By the hash itself, which is unique and indexed: the old shape compared one bcrypt hash per
+  // candidate, and sustained flooding pushed an approved enrolment out of its window so its poll
+  // answered "expired" forever (BP-305)
+  const candidate = await db.DeviceEnrolment.findOne({
+    deviceCodeHash: sha256(deviceCode),
     status: { $in: ["pending", "approved"] },
-  }).limit(20);
+  });
+  if (!candidate) return { state: "expired" };
 
-  for (const candidate of candidates) {
-    if (!(await bcrypt.compare(deviceCode, candidate.deviceCodeHash))) continue;
-    if (candidate.expiresAt.getTime() <= now.getTime()) return { state: "expired" };
-    if (candidate.status === "pending") return { state: "pending" };
+  if (candidate.expiresAt.getTime() <= now.getTime()) return { state: "expired" };
+  if (candidate.status === "pending") return { state: "pending" };
 
-    // Single-use: the credential is cleared in the same conditional update that hands it back, so
-    // two polls racing cannot both come away holding it.
-    const claimed = await db.DeviceEnrolment.findOneAndUpdate(
-      { _id: candidate._id, credential: { $ne: "" } },
-      { $set: { credential: "", deliveredAt: now } },
-      { returnDocument: "before" }
-    );
-    if (!claimed?.credential) return { state: "expired" };
+  // Single-use: the credential is cleared in the same conditional update that hands it back, so
+  // two polls racing cannot both come away holding it.
+  const claimed = await db.DeviceEnrolment.findOneAndUpdate(
+    { _id: candidate._id, credential: { $ne: "" } },
+    { $set: { credential: "", deliveredAt: now } },
+    { returnDocument: "before" }
+  );
+  if (!claimed?.credential) return { state: "expired" };
 
-    const project = claimed.project
-      ? await db.Project.findById(claimed.project).select("key repositoryUrl githubRepo gitlabRepo gitlabHost").lean()
-      : null;
+  const project = claimed.project
+    ? await db.Project.findById(claimed.project).select("key repositoryUrl githubRepo gitlabRepo gitlabHost").lean()
+    : null;
 
-    return {
-      state: "approved",
-      workerId: String(claimed.worker ?? ""),
-      credential: claimed.credential,
-      repositoryUrl: project ? projectRepositoryUrl(project) : "",
-      projectKey: project?.key ?? "",
-    };
-  }
-
-  return { state: "expired" };
+  return {
+    state: "approved",
+    workerId: String(claimed.worker ?? ""),
+    credential: claimed.credential,
+    repositoryUrl: project ? projectRepositoryUrl(project) : "",
+    projectKey: project?.key ?? "",
+  };
 }
 
 export async function denyDeviceEnrolment(db: ScopedDb, userCode: string): Promise<boolean> {

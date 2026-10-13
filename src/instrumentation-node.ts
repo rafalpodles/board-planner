@@ -10,7 +10,7 @@ export async function bootNode(): Promise<void> {
   const hops = trustedProxyHops();
   console.log(
     hops === 0
-      ? "TRUSTED_PROXY_HOPS=0 — X-Forwarded-For is ignored and anonymous callers share one throttle bucket"
+      ? "TRUSTED_PROXY_HOPS=0 — X-Forwarded-For is ignored, so sign-in attempts share one throttle bucket and other anonymous routes are not counted per caller"
       : `TRUSTED_PROXY_HOPS=${hops} — the client address is taken ${hops} entries from the right of X-Forwarded-For`
   );
 

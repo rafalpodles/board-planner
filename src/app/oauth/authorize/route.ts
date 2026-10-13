@@ -20,6 +20,7 @@ import {
 } from "@/lib/rate-limit";
 import { accessibleProjectIds } from "@/lib/grants";
 import { notifyCredentialCreated } from "@/lib/security-mail";
+import { markClientUsed } from "@/lib/oauth-clients";
 import {
   randomToken,
   readFormBody,
@@ -623,6 +624,11 @@ async function handleConsent(db: ScopedDb, req: Request, form: FormData): Promis
   if (claimed?.deletedCount !== 1) {
     return errorPage("This authorization was already completed. Start it again.");
   }
+
+  // Before the code exists, and not swallowed: a client left unapproved is one the TTL or a flood
+  // removes later, and every token issued to it would die with it (BP-1030). Nothing is granted
+  // yet, so failing here costs the person one more click.
+  if (!(await markClientUsed(db, consent.clientId))) return errorPage("Client is no longer valid.");
 
   const code = randomToken("cpac_");
   await db.OAuthCode.create({
