@@ -11,12 +11,7 @@ import {
 } from "@/lib/device-enrolment";
 import { getClientIp } from "@/lib/auth";
 import { originFor } from "@/lib/organisation-host";
-import {
-  anonymousMultiplier,
-  isRateLimited,
-  recordFailedAttempt,
-  sourceKey,
-} from "@/lib/rate-limit";
+import { sourceRefused } from "@/lib/rate-limit";
 import { scopedForRequest } from "@/lib/db-scope";
 
 const ENROLMENTS_PER_WINDOW = 10;
@@ -45,17 +40,14 @@ export async function POST(request: Request) {
     );
   }
 
-  // Unauthenticated and costing a bcrypt.hash per call, so the address is the only bound there is
-  const clientIp = getClientIp(request);
-  const throttleKey = sourceKey(clientIp ?? "-", "device_enrolment");
-  // Shared key when there is no address, so the per-address figure would be a lever one caller
-  // could hold down against every machine trying to enrol
-  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ENROLMENTS_PER_WINDOW))) {
+  // Unauthenticated, and every call writes a row that may push somebody's out of the pending cap,
+  // so the address is what a flood is held to. With no address there is nobody to count and a
+  // bucket shared by all would let one caller stop every machine enrolling; nothing costly runs
+  // per call (BP-1030), and the cap drops the oldest row instead of refusing the newest.
+  // Counted before the body is understood, so malformed or oversized requests spend it too.
+  if (await sourceRefused(getClientIp(request), "device_enrolment", ENROLMENTS_PER_WINDOW)) {
     return NextResponse.json({ error: "too many enrolment attempts, try again later" }, { status: 429 });
   }
-  // Counted here rather than after the body is understood, so a flood of malformed or oversized
-  // requests still spends the budget it is costing — the forgot route counts on the same rule.
-  await recordFailedAttempt(throttleKey);
 
   const read = await readJsonBody(request);
   if (!read.ok) return read.response;

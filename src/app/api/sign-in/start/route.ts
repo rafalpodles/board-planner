@@ -6,7 +6,7 @@ import { renderEmail } from "@/lib/email-template";
 import { sha256 } from "@/lib/oauth";
 import { CODE_TTL_MS, startSignIn } from "@/lib/platform-sign-in";
 import { signInCookie, signInRoute } from "@/lib/platform-sign-in-route";
-import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { isRateLimited, recordFailedAttempt, sourceRefused } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
 import { provenanceRefusal } from "@/lib/session";
 
@@ -21,10 +21,8 @@ export const POST = signInRoute(async (request) => {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
-  const clientIp = getClientIp(request);
-  const perSource = sourceKey(clientIp ?? "-", "platform-sign-in");
-  if (await isRateLimited(perSource, anonymousMultiplier(clientIp, CODES_PER_SOURCE))) return tooMany();
-  await recordFailedAttempt(perSource);
+  // With no address the codes sent are bounded per e-mail address below, as forgot's links are per account
+  if (await sourceRefused(getClientIp(request), "platform-sign-in", CODES_PER_SOURCE)) return tooMany();
 
   const read = await readJsonBody<{ email?: unknown }>(request);
   if (!read.ok) return read.response;

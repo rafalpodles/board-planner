@@ -9,12 +9,14 @@ const logInstanceAudit = vi.fn();
 const userFindOne = vi.fn();
 const userUpdateOne = vi.fn();
 const hash = vi.fn();
+const findResetToken = vi.fn();
+let clientIp: string | null = "203.0.113.9";
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
   MIN_PASSWORD_LENGTH: 8,
   PASSWORD_COST_FACTOR: 10,
-  getClientIp: () => "203.0.113.9",
+  getClientIp: () => clientIp,
 }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
@@ -22,6 +24,7 @@ vi.mock("@/models/rateLimit", async () => {
 });
 vi.mock("@/lib/password-reset", () => ({
   consumeResetToken,
+  findResetToken,
   invalidateResetTokens,
   releaseResetToken,
 }));
@@ -51,7 +54,9 @@ function accountIs(user: unknown) {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  clientIp = "203.0.113.9";
   await resetRateLimits();
+  findResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
   consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
   accountIs({ _id: "u1", username: "owner", kind: "human", email: "owner@example.com" });
   hash.mockResolvedValue("new-hash");
@@ -119,6 +124,35 @@ describe("POST /api/auth/reset", () => {
       scopedToDefaultOrganisation(),
       expect.objectContaining({ action: "user_password_reset_by_email", target: "owner" })
     );
+  });
+
+  it("throttles one source guessing links", async () => {
+    findResetToken.mockResolvedValue({ ok: false, reason: "unknown" });
+    for (let i = 0; i < 20; i++) expect((await POST(post())).status).toBe(400);
+
+    expect((await POST(post())).status).toBe(429);
+  });
+
+  // BP-1030. The link is 32 random bytes, so with no client address the work done for a caller
+  // holding a made-up one is what is bounded, not a bucket every such caller shares. 25 is past the
+  // 20 that bucket held.
+  it("does not let a caller with no address guessing links refuse the next one", async () => {
+    clientIp = null;
+    findResetToken.mockResolvedValue({ ok: false, reason: "unknown" });
+    for (let i = 0; i < 25; i++) await POST(post());
+    findResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
+
+    expect((await POST(post())).status).toBe(200);
+  });
+
+  it("reads the link before hashing a password for it, so a made-up one costs a read", async () => {
+    findResetToken.mockResolvedValue({ ok: false, reason: "unknown" });
+
+    const res = await POST(post());
+
+    expect(res.status).toBe(400);
+    expect(hash).not.toHaveBeenCalled();
+    expect(consumeResetToken).not.toHaveBeenCalled();
   });
 
   // BP-842. Whoever reads the old mailbox is not who the account belongs to now

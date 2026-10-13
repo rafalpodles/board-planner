@@ -120,32 +120,16 @@ describe("POST /oauth/register", () => {
     expect(res.status).toBe(201);
   });
 
-  // With no proxy configured every caller shares one key, so the per-address figure would be a
-  // lever: ten requests per quarter hour, from anywhere, would close registration for the whole
-  // instance — and with it the documented MCP onboarding (BP-318 review)
+  // With no proxy configured there is no address, and a bucket every caller shared would let one of
+  // them close registration for the whole instance — and with it the documented MCP onboarding
+  // (BP-318 review). A bigger shared bucket only moved the lever: 400 is past the 200 it held (BP-1030)
   it("does not let one anonymous caller close registration for everybody", async () => {
     delete process.env.TRUSTED_PROXY_HOPS;
     const body = { redirect_uris: ["https://example.com/cb"] };
 
-    for (let i = 0; i < 11; i++) await POST(request(body, "203.0.113.7"));
+    for (let i = 0; i < 400; i++) await POST(request(body, "203.0.113.7"));
 
     expect((await POST(request(body, "198.51.100.4"))).status).toBe(201);
-  });
-
-  it("still bounds the anonymous path rather than leaving it open", async () => {
-    delete process.env.TRUSTED_PROXY_HOPS;
-    const body = { redirect_uris: ["https://example.com/cb"] };
-
-    let refusedAt = -1;
-    for (let i = 0; i < 400; i++) {
-      if ((await POST(request(body, "203.0.113.7"))).status === 429) {
-        refusedAt = i;
-        break;
-      }
-    }
-
-    expect(refusedAt).toBeGreaterThan(11);
-    expect(refusedAt).toBeLessThan(400);
   });
 
   // A rejected registration still costs the collection nothing, but it must still count:

@@ -10,11 +10,12 @@ const notifyAddressChanged = vi.fn();
 const userFindOne = vi.fn();
 const userUpdateOne = vi.fn();
 const userExists = vi.fn();
+let clientIp: string | null = "203.0.113.9";
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 const revokePendingInvitationsFor = vi.fn();
 vi.mock("@/lib/invitations", () => ({ revokePendingInvitationsFor }));
-vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.9" }));
+vi.mock("@/lib/auth", () => ({ getClientIp: () => clientIp }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
@@ -45,6 +46,7 @@ function post(body: unknown = { token: "cpe_good" }) {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  clientIp = "203.0.113.9";
   await resetRateLimits();
   consumeEmailChange.mockResolvedValue({ ok: true, userId: "u1", email: "new@example.com", claimedAt: CLAIMED, ofCurrentAddress: false });
   userFindOne.mockReturnValue({
@@ -156,6 +158,17 @@ describe("POST /api/auth/confirm-email", () => {
 
     expect(response.status).toBe(429);
     expect(consumeEmailChange).toHaveBeenCalledTimes(20);
+  });
+
+  // BP-1030. The link is random and the first thing read, so nothing here is worth a bucket every
+  // caller with no address would share. 25 is past the 20 that bucket held.
+  it("does not let a caller with no address guessing links refuse the next one", async () => {
+    clientIp = null;
+    consumeEmailChange.mockResolvedValue({ ok: false, reason: "unknown" });
+    for (let i = 0; i < 25; i++) await POST(post());
+    consumeEmailChange.mockResolvedValue({ ok: true, userId: "u1", email: "new@example.com", claimedAt: CLAIMED, ofCurrentAddress: false });
+
+    expect((await POST(post())).status).toBe(200);
   });
 
   it("answers 409 when the index refuses the address, and gives the link back", async () => {

@@ -252,16 +252,17 @@ export function targetKey(organisation: Types.ObjectId, identifier: string, scop
 }
 
 /**
- * A per-address ceiling collapses into a per-*instance* ceiling when there is no address, and the
- * two want very different numbers. At the per-address figure, one anonymous caller sending ten
- * requests per quarter hour permanently denies OAuth client registration — and with it the
- * documented MCP onboarding — to everybody (BP-318 review).
- *
- * So a caller with no identity gets its own, much larger budget. It still bounds the work; it is
- * just not a lever an idle attacker can hold down.
+ * The per-address budget of a route nothing else tells callers apart on. True once the caller is
+ * past it. With no client address there is nobody to count: one bucket for every caller would let
+ * a single one of them refuse all the others, so the route is bounded by what it does instead
+ * (BP-840, BP-847, BP-1030).
  */
-export function anonymousMultiplier(clientIp: string | null, perAddress: number): number {
-  return clientIp ? perAddress : perAddress * 20;
+export async function sourceRefused(clientIp: string | null, scope: string, limit: number): Promise<boolean> {
+  if (!clientIp) return false;
+  const key = sourceKey(clientIp, scope);
+  if (await isRateLimited(key, limit)) return true;
+  await recordFailedAttempt(key);
+  return false;
 }
 
 /**

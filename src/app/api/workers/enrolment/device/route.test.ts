@@ -8,9 +8,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 
 const startDeviceEnrolment = vi.fn();
+let clientIp: string | null = "203.0.113.9";
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ getClientIp: () => "203.0.113.9" }));
+vi.mock("@/lib/auth", () => ({ getClientIp: () => clientIp }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
@@ -40,6 +41,7 @@ const oversized = (headers?: Record<string, string>) =>
 beforeEach(async () => {
   vi.clearAllMocks();
   process.env.PUBLIC_ORIGIN = "https://board.example.org";
+  clientIp = "203.0.113.9";
   await resetRateLimits();
   startDeviceEnrolment.mockResolvedValue({
     deviceCode: "cpd_abc",
@@ -81,6 +83,15 @@ describe("POST /api/workers/enrolment/device", () => {
     const response = await POST(oversized({ "content-type": "application/json" }));
 
     expect(response.status).toBe(409);
+  });
+
+  // BP-1030. With no client address every caller looked like one, so a bucket they all shared let
+  // any of them refuse the next machine to enrol. 250 is past what that bucket held (200).
+  it("does not let a flood from a caller with no address refuse the next one", async () => {
+    clientIp = null;
+    for (let i = 0; i < 250; i++) await POST(post({ name: "MacBook" }));
+
+    expect((await POST(post({ name: "MacBook" }))).status).toBe(201);
   });
 
   it("charges the budget for a request it refused, not only for one it understood", async () => {

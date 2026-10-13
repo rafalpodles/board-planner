@@ -31,7 +31,7 @@ const {
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 
-const bcrypt = (await import("bcryptjs")).default;
+const { sha256 } = await import("@/lib/oauth");
 
 function candidates(rows: unknown[]) {
   find.mockReturnValue({ limit: () => Promise.resolve(rows) });
@@ -76,7 +76,7 @@ describe("starting an enrolment", () => {
     const stored = create.mock.calls[0][0];
 
     expect(stored.deviceCodeHash).not.toBe(started.deviceCode);
-    expect(await bcrypt.compare(started.deviceCode, stored.deviceCodeHash)).toBe(true);
+    expect(stored.deviceCodeHash).toBe(sha256(started.deviceCode));
   });
 
   it("starts pending, so nothing is granted before a person approves", async () => {
@@ -189,7 +189,7 @@ describe("polling for the credential", () => {
       deviceCode,
       doc: {
         _id: "e1",
-        deviceCodeHash: await bcrypt.hash(deviceCode, 10),
+        deviceCodeHash: sha256(deviceCode),
         status: "approved",
         credential: "cpw_secret",
         worker: "w1",

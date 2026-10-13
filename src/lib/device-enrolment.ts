@@ -1,6 +1,6 @@
 import crypto from "crypto";
-import bcrypt from "bcryptjs";
 import { connectDB } from "./db";
+import { sha256 } from "./oauth";
 import { projectRepositoryUrl } from "./repository";
 import { IDeviceEnrolment } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
@@ -18,11 +18,17 @@ export const DEVICE_ENROLMENT_TTL_MS = 15 * 60 * 1000;
 export const DEVICE_POLL_INTERVAL_MS = 2_000;
 
 // Same shape the cp_/cpe_ credential paths use: an indexed, non-secret prefix narrows the
-// candidates so exactly one bcrypt compare runs per poll. 8 hex of 64 leaves 224 bits of secret.
+// candidates to the one whose hash is compared. 8 hex of 64 leaves 224 bits of secret.
 const DEVICE_PREFIX_LENGTH = DEVICE_PREFIX.length + 8;
 
 export function devicePrefixOf(deviceCode: string): string {
   return deviceCode.slice(0, DEVICE_PREFIX_LENGTH);
+}
+
+function sameHash(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
 export function formatUserCode(raw: string): string {
@@ -100,7 +106,7 @@ export async function startDeviceEnrolment(
     const userCode = randomUserCode();
     try {
       await db.DeviceEnrolment.create({
-        deviceCodeHash: await bcrypt.hash(deviceCode, 10),
+        deviceCodeHash: sha256(deviceCode),
         deviceCodePrefix: devicePrefixOf(deviceCode),
         userCode,
         machineName: input.machineName,
@@ -144,9 +150,10 @@ export type PollResult =
       projectKey: string;
     };
 
-// The app's half. Matching is a bcrypt compare over the candidates sharing a user code, so a
-// device code that was never issued cannot be told from one that was — and an approved row hands
-// its credential over exactly once, then forgets it.
+// The app's half. Matching is a hash compare over the candidates sharing a prefix, so a device code
+// that was never issued cannot be told from one that was — and an approved row hands its credential
+// over exactly once, then forgets it. The code is 256 random bits, so a plain hash is all it needs,
+// and neither starting an enrolment nor polling one is work an anonymous caller can run up (BP-1030).
 export async function pollDeviceEnrolment(
   db: ScopedDb,
   deviceCode: string,
@@ -158,7 +165,7 @@ export async function pollDeviceEnrolment(
   }
 
   // Narrowed by the indexed prefix rather than a 200-row window: the old shape ran up to 200
-  // bcrypt compares per unauthenticated request, and sustained flooding pushed an approved
+  // compares per unauthenticated request, and sustained flooding pushed an approved
   // enrolment out of the window so its poll answered "expired" forever (BP-305)
   const candidates = await db.DeviceEnrolment.find({
     deviceCodePrefix: devicePrefixOf(deviceCode),
@@ -166,7 +173,7 @@ export async function pollDeviceEnrolment(
   }).limit(20);
 
   for (const candidate of candidates) {
-    if (!(await bcrypt.compare(deviceCode, candidate.deviceCodeHash))) continue;
+    if (!sameHash(sha256(deviceCode), candidate.deviceCodeHash)) continue;
     if (candidate.expiresAt.getTime() <= now.getTime()) return { state: "expired" };
     if (candidate.status === "pending") return { state: "pending" };
 

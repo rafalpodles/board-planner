@@ -5,12 +5,7 @@ import { connectDB } from "@/lib/db";
 import { scopedForRequest } from "@/lib/db-scope";
 import { isValidRedirectUri, newClientId } from "@/lib/oauth";
 import { getClientIp } from "@/lib/auth";
-import {
-  anonymousMultiplier,
-  isRateLimited,
-  recordFailedAttempt,
-  sourceKey,
-} from "@/lib/rate-limit";
+import { sourceRefused } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,20 +29,16 @@ export async function POST(req: Request) {
   if (!db) return hostNotFound();
   await connectDB();
 
-  // Unauthenticated and public by design, so the only bound on how far the client
-  // collection can be grown is the caller's address
-  const clientIp = getClientIp(req);
-  const throttleKey = sourceKey(clientIp ?? "-", "oauth_register");
-  // With no address every caller shares this key, so the per-address figure would let one of them
-  // hold registration closed for the whole instance
-  const ceiling = anonymousMultiplier(clientIp, REGISTRATIONS_PER_WINDOW);
-  if (await isRateLimited(throttleKey, ceiling)) {
+  // Unauthenticated and public by design, so the caller's address is the only bound on how far the
+  // client collection can be grown. With no address (TRUSTED_PROXY_HOPS unset) there is none: the
+  // row is one insert, and a bucket shared by every caller would let one of them close MCP
+  // onboarding for the whole instance.
+  if (await sourceRefused(getClientIp(req), "oauth_register", REGISTRATIONS_PER_WINDOW)) {
     return NextResponse.json(
       { error: "invalid_request", error_description: "Too many client registrations from this address. Try again later." },
       { status: 429, headers: CORS }
     );
   }
-  await recordFailedAttempt(throttleKey);
 
   const read = await readJsonBody<Record<string, unknown> | null>(req);
   if (!read.ok) return read.response;

@@ -5,17 +5,12 @@ import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { scopedForRequest } from "@/lib/db-scope";
 import { getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
-import {
-  anonymousMultiplier,
-  clearAccountAttempts,
-  isRateLimited,
-  recordFailedAttempt,
-  sourceKey,
-} from "@/lib/rate-limit";
+import { clearAccountAttempts, sourceRefused } from "@/lib/rate-limit";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { notifyPasswordChanged } from "@/lib/security-mail";
 import {
   consumeResetToken,
+  findResetToken,
   invalidateResetTokens,
   releaseResetToken,
 } from "@/lib/password-reset";
@@ -45,15 +40,16 @@ export async function POST(request: Request) {
   // The cost of counting here is that a request refused later for its own reasons — a password
   // under the minimum, a body that is not JSON — spends a slot too. That is the intended trade:
   // the alternative leaves the cheapest way to spend the server's time the one way that is free.
+  //
+  // With no client address there is no count (BP-1030): the link is read before the hash below, so
+  // what an unthrottled caller with a made-up one costs is a body and one read.
   const clientIp = getClientIp(request);
-  const throttleKey = sourceKey(clientIp ?? "-", "password-reset-use");
-  if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ATTEMPTS_PER_SOURCE))) {
+  if (await sourceRefused(clientIp, "password-reset-use", ATTEMPTS_PER_SOURCE)) {
     return NextResponse.json(
       { error: "Too many attempts. Try again in 15 minutes." },
       { status: 429 }
     );
   }
-  await recordFailedAttempt(throttleKey);
 
   const read = await readJsonBody<{ token?: unknown; newPassword?: unknown }>(request);
   if (!read.ok) return read.response;
@@ -73,6 +69,11 @@ export async function POST(request: Request) {
   }
 
   await connectDB();
+
+  const found = await findResetToken(db, token);
+  if (!found.ok) {
+    return NextResponse.json({ error: REFUSALS[found.reason] }, { status: 400 });
+  }
 
   // Hashed before the token is spent, for the same reason the length is checked first: bcrypt
   // throwing after the claim would leave the person with a dead link and their old password
