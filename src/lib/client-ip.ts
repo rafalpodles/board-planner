@@ -1,3 +1,5 @@
+import { ipv6Groups, v4FromGroups } from "./private-address";
+
 /**
  * Who the throttle counts against.
  *
@@ -120,6 +122,32 @@ export function getClientIp(request: Request): string | null {
   // Without the zone: it is validated away but was being returned, so up to 40 characters of
   // anything travelled into the throttle key and the session's ip column
   return candidate.split("%")[0];
+}
+
+/**
+ * What a throttle counts a client as. One host on an IPv6 /64 owns 2^64 addresses, so keyed by the
+ * address it would get a fresh bucket per request; a /64 is the subnet a LAN or a VM is handed
+ * (BP-1046). A host given a /56 or /48 still spreads over 256 or 65,536 keys.
+ *
+ * IPv4 and anything that is not an IPv6 literal (a user id, an organisation id, `-`) come back as
+ * they are, since they go through the same key builders. The session's `ip` column and the audit
+ * rows keep the address `getClientIp` returned.
+ */
+export function throttleAddress(value: string): string {
+  const groups = ipv6Groups(value.toLowerCase());
+  if (!groups) return value;
+
+  const [g0, g1, g2, g3, g4, g5, g6, g7] = groups;
+  const upperHalfIsZero = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0;
+  const mapped = upperHalfIsZero && g4 === 0 && g5 === 0xffff;
+  const nat64 = g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0;
+  // An IPv4 client in a v6 costume is one v4 host; collapsed to a /64 every one of them would share
+  // `::/64` or `64:ff9b::/64`
+  if (mapped || nat64) return v4FromGroups(g6, g7);
+  // ::/64 is no site's subnet (loopback, the unspecified address, the deprecated v4-compatible form)
+  if (upperHalfIsZero) return groups.map((g) => g.toString(16)).join(":");
+
+  return `${[g0, g1, g2, g3].map((g) => g.toString(16)).join(":")}::/64`;
 }
 
 /**

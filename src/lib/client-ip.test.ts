@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { getClientIp, trustedProxyHops, isIpAddress } from "./client-ip";
+import { getClientIp, trustedProxyHops, isIpAddress, throttleAddress } from "./client-ip";
 
 const ORIGINAL = { ...process.env };
 
@@ -427,5 +427,56 @@ describe("a request that yields no address with the hops set", () => {
     expect(getIp(forwarded("10.0.0.1, 203.0.113.9"))).toBe("203.0.113.9");
 
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+// BP-1046: a host on an IPv6 /64 owns 2^64 addresses, so a throttle keyed by the address gave it a
+// fresh bucket per request.
+describe("throttleAddress", () => {
+  it("counts every address in one /64 as the same client", () => {
+    expect(throttleAddress("2001:db8:1:2:aaaa:bbbb:cccc:dddd")).toBe(throttleAddress("2001:db8:1:2::1"));
+  });
+
+  it("keeps clients in different /64s apart", () => {
+    expect(throttleAddress("2001:db8:1:2::1")).not.toBe(throttleAddress("2001:db8:1:3::1"));
+  });
+
+  it("is the same whatever the spelling: case, leading zeros, compression", () => {
+    const spellings = ["2001:DB8:0:0:0:0:0:1", "2001:0db8::1", "2001:db8:0000:0000::1"];
+    expect(new Set(spellings.map(throttleAddress)).size).toBe(1);
+  });
+
+  it("leaves an IPv4 address as it is", () => {
+    expect(throttleAddress("203.0.113.9")).toBe("203.0.113.9");
+  });
+
+  // ::/64 is everybody's prefix: collapsing the mapped form there would put every IPv4 client of a
+  // dual-stack proxy into one bucket
+  it("reads an IPv4-mapped address as the IPv4 host it is", () => {
+    expect(throttleAddress("::ffff:203.0.113.9")).toBe("203.0.113.9");
+    expect(throttleAddress("::ffff:203.0.113.10")).not.toBe(throttleAddress("::ffff:203.0.113.9"));
+  });
+
+  // A stateless NAT64 in front of an IPv6-only app presents every IPv4 client as 64:ff9b::a.b.c.d
+  it("reads a NAT64 address as the IPv4 host it carries", () => {
+    expect(throttleAddress("64:ff9b::cb00:7109")).toBe("203.0.113.9");
+    expect(throttleAddress("64:ff9b::cb00:710a")).not.toBe(throttleAddress("64:ff9b::cb00:7109"));
+  });
+
+  it("does not collapse the addresses inside ::/64 into one prefix", () => {
+    expect(throttleAddress("::1")).not.toBe(throttleAddress("::2"));
+  });
+
+  it("passes through anything that is not an IPv6 literal, since ids and placeholders use the same key builders", () => {
+    for (const value of ["-", "user:6a70afff45d39cd9bc8bb5ff", "6a70afff45d39cd9bc8bb5ff", "not:an:address"]) {
+      expect(throttleAddress(value)).toBe(value);
+    }
+  });
+
+  it("is not what getClientIp returns: the session and the audit rows keep the full address", () => {
+    process.env.TRUSTED_PROXY_HOPS = "1";
+    const full = "2001:db8:1:2:aaaa:bbbb:cccc:dddd";
+
+    expect(getClientIp(request({ "x-forwarded-for": full }))).toBe(full);
   });
 });

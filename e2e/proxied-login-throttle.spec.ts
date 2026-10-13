@@ -139,3 +139,23 @@ test("a spray across usernames from one address is bucketed by source, independe
   const elsewhere = await loginAt(request, "198.51.100.31", "e2e-spray-tripping", WRONG_PASSWORD);
   expect(elsewhere.status(), await elsewhere.text()).toBe(401);
 });
+
+// BP-1046. A host on an IPv6 /64 owns 2^64 addresses; keyed by the address it got a fresh source
+// bucket with every request.
+test("a spray from many addresses in one IPv6 /64 is one source, and another /64 is not caught by it", async ({
+  request,
+}) => {
+  const inside = (n: number) => `2001:db8:46:1:${(n + 1).toString(16)}::${(n + 7).toString(16)}`;
+  await burnAttempts(
+    request,
+    SHARED_SOURCE_ATTEMPTS,
+    inside,
+    (n) => ({ username: `e2e-v6-${n}`, password: WRONG_PASSWORD })
+  );
+
+  const tripping = await loginAt(request, inside(SHARED_SOURCE_ATTEMPTS), "e2e-v6-tripping", WRONG_PASSWORD);
+  expect(tripping.status(), await tripping.text()).toBe(429);
+
+  const otherPrefix = await loginAt(request, "2001:db8:46:2::7", "e2e-v6-tripping", WRONG_PASSWORD);
+  expect(otherPrefix.status(), await otherPrefix.text()).toBe(401);
+});

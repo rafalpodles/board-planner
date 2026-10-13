@@ -5,7 +5,10 @@ const sendEmail = vi.fn();
 let clientIp: string | null = "203.0.113.9";
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/client-ip", () => ({ getClientIp: () => clientIp }));
+vi.mock("@/lib/client-ip", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/client-ip")>()),
+  getClientIp: () => clientIp,
+}));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };

@@ -339,7 +339,8 @@ TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the
                           # drops the oldest) and OAuth client registration (rows nobody approved
                           # are capped at 1000 and expire; none is evicted under 15 minutes old,
                           # past that registration answers 429, from any address, until some are
-                          # older (BP-1046: an IPv6 /64 rotates keys); src/lib/oauth-clients.ts);
+                          # older (BP-1046: an IPv6 client counts as its /64, so only a host with a /56 or /48 still
+                          # rotates, over 256 or 65,536 keys); src/lib/oauth-clients.ts);
                           # platform sign-in keeps
                           # a shared bucket because it mails whoever is typed (BP-1030). With hops
                           # above 0 a request that yields no address is logged once a quiet period
