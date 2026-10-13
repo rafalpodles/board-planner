@@ -395,6 +395,12 @@ Then the reliable path is to stop the exposure: block the source, or read the co
 deployment or a local run behind the same chain. A header carrying no address at all is never reported
 and costs none of the four.
 
+**An IPv6 caller is counted by its /64.** One host on a /64 owns 2^64 addresses, so counting by
+address would give it a fresh bucket for every request. The throttles key an IPv6 client by the first
+64 bits; IPv4 is unchanged, and an IPv4 client written as an IPv4-mapped or NAT64 address counts as
+that IPv4 host. The address shown in a session or the audit log stays the full one. A host that is
+handed a /56 or a /48 still spreads over 256 or 65,536 buckets.
+
 </details>
 
 <details>
