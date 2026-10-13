@@ -31,3 +31,17 @@ describe("what the worker and the menu bar app ship", () => {
     expect(readFileSync(join(root, "worker/pack.sh"), "utf8")).toContain('cp "$ROOT/../LICENSE"');
   });
 });
+
+// The notices tell a reader of the image that the LGPL and the GPL it incorporates are in its
+// licenses directory; sharp-libvips is LGPL-3.0-or-later and needs both (BP-944)
+describe("the licence texts the notices point at", () => {
+  it("has the GNU LGPL v3 and GPL v3 in the repository", () => {
+    expect(readFileSync(join(root, "licenses/LGPL-3.0.txt"), "utf8")).toMatch(/^\s*GNU LESSER GENERAL PUBLIC LICENSE\s+Version 3/);
+    expect(readFileSync(join(root, "licenses/GPL-3.0.txt"), "utf8")).toMatch(/^\s*GNU GENERAL PUBLIC LICENSE\s+Version 3/);
+  });
+
+  it("puts them in the image", () => {
+    expect(readFileSync(join(root, "Dockerfile"), "utf8")).toContain("COPY --from=builder /app/licenses ./licenses");
+    expect(readFileSync(join(root, ".dockerignore"), "utf8")).not.toMatch(/^licenses\b/m);
+  });
+});

@@ -36,6 +36,7 @@ RUN addgroup -S nodejs && adduser -S -G nodejs nextjs
 
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/LICENSE /app/THIRD-PARTY-NOTICES.txt ./
+COPY --from=builder /app/licenses ./licenses
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
