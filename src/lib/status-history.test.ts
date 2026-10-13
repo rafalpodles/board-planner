@@ -124,14 +124,22 @@ describe("statusHistory — the definitions", () => {
     expect(history).toMatchObject({ startedAt: CREATED, finishedAt: day(4) });
   });
 
-  it("reads rows in time order whatever order it is given, and breaks a tie on the row id", () => {
-    const first = move("todo", "doing", day(2));
+  it("reads rows in time order, not in id order or the order it is given", () => {
+    const later = move("doing", "done", day(5));
+    const earlier = move("todo", "doing", day(2));
+
+    const history = statusHistory([later, earlier], roleOf, { createdAt: CREATED, status: "done" });
+
+    expect(history).toMatchObject({ startedAt: day(2), finishedAt: day(5), reopened: 0 });
+  });
+
+  it("breaks a tie in time on the row id", () => {
     const tieA = move("doing", "done", day(5));
     const tieB = move("done", "doing", day(5));
 
-    const history = statusHistory([tieB, first, tieA], roleOf, { createdAt: CREATED, status: "doing" });
+    const history = statusHistory([tieB, tieA], roleOf, { createdAt: CREATED, status: "doing" });
 
-    expect(history).toMatchObject({ startedAt: day(2), finishedAt: null, reopened: 1 });
+    expect(history).toMatchObject({ finishedAt: null, reopened: 1, endedIn: "active" });
   });
 
   // "No history" is not "zero days": a task nothing was written about says nothing

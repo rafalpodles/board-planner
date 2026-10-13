@@ -1173,6 +1173,19 @@ describe("clearing the phase on every exit from the active column", () => {
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
   });
 
+  // BP-876: how long a task took is read per project, so the row has to say which one it belongs to
+  it("records a move on the board under the project it happened in", async () => {
+    await changeStatus(db, "p1", "t1", "checking", "actor");
+
+    expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "actor", "status_changed", "status", "doing", "checking");
+  });
+
+  it("records a move through the edit form under the project it happened in", async () => {
+    await updateTask(db, "p1", "t1", { status: "checking" }, "actor");
+
+    expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "actor", "status_changed", "status", "doing", "checking");
+  });
+
   // The phase belongs to the run, not to the card: renaming a task the worker is running must not
   // blank the badge
   it("leaves it alone when the edit touches no status", async () => {
@@ -1949,6 +1962,17 @@ describe("a status change announces the same things whichever path made it", () 
       project: { key: "TP", name: "A board" },
       task: { taskKey: "TP-8", title: "Announced to the room", status: "doing" },
     });
+  });
+
+  it("records the creation under the project the task was made in", async () => {
+    setup();
+    projectFindOneAndUpdate.mockResolvedValue({ _id: "p1", key: "TP", name: "A board", taskCounter: 8 });
+    taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new", taskNumber: 8 }));
+    taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
+
+    await createTask(db, "p1", "actor", { title: "Made here", status: "doing" });
+
+    expect(logActivity).toHaveBeenCalledWith(db, "p1", "new", "actor", "created");
   });
 
   it("dispatches a webhook from the board path", async () => {
@@ -4512,6 +4536,13 @@ describe("a comment mentioning a watcher", () => {
 
   const notificationsByType = (): Record<string, Record<string, unknown>> =>
     Object.fromEntries(createNotificationsMock.mock.calls.map(([, n]) => [n.type, n]));
+
+  it("records the comment under the project it was made in", async () => {
+    setup([], []);
+    await addComment(db, "p1", "t1", "a plain comment", { id: "actor", username: "owner" });
+
+    expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "actor", "comment_added");
+  });
 
   it("writes to a mentioned watcher once, as a mention", async () => {
     setup([MENTIONED_WATCHER], [MENTIONED_WATCHER]);
