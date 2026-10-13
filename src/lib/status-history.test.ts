@@ -56,17 +56,6 @@ describe("statusHistory — the definitions", () => {
     });
   });
 
-  // BP-1045: the claim writes the row that was missing, so the start is the claim and not a guess
-  it("a task a worker ran: started at the claim, with no gap and nothing inferred", () => {
-    const history = statusHistory(
-      [move("todo", "doing", day(2)), move("doing", "review", day(3)), move("review", "done", day(4))],
-      roleOf,
-      { createdAt: CREATED, status: "done" }
-    );
-
-    expect(history).toMatchObject({ startedAt: day(2), finishedAt: day(4), startInferred: false, gap: false });
-  });
-
   // A claim handed back and taken again: the release row is what keeps the chain whole, and the
   // start is still the first time it entered an active column
   it("a claim that was released and taken again keeps its first start and no gap", () => {

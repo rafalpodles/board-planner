@@ -174,7 +174,7 @@ describe("snapshotFor and whose machine is asking", () => {
     expect(await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER)).not.toBeNull();
   });
 
-  // The task moves back a column with no comment and no activity row, and the route's own line
+  // The task moves back a column with no comment, and the route's own line
   // says the agent resolved to nothing runnable — which is untrue here and sends a reader hunting
   // through a perfectly good agent. This is the line that says what really happened.
   it("names the agent, whose it is, and whose machine asked", async () => {

@@ -321,6 +321,20 @@ describe("POST /tasks/claim", () => {
       });
     });
 
+    // BP-1045: the row the release writes is authored by the machine, like its claim
+    it("hands the machine's own user over as the author of the release row", async () => {
+      verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], identity: "u-worker", owner: "u-owner" });
+
+      await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+      expect(releaseTask).toHaveBeenCalledWith(
+        scopedToDefaultOrganisation(),
+        OID,
+        "t1",
+        expect.objectContaining({ refund: false, actorId: "u-worker" })
+      );
+    });
+
     // Naming the holder, or worker A could park worker B's task in escalation mid-run
     it("names itself as the holder it is releasing on behalf of", async () => {
       await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
@@ -328,8 +342,8 @@ describe("POST /tasks/claim", () => {
       expect(releaseTask.mock.calls[0][3].workerId).toBe(OID);
     });
 
-    // The task moves back a column with no comment, no activity row and no run left to attach an
-    // error to, so this is the only record that it happened at all
+    // The task moves back a column with a History row and no comment, and no run left to attach an
+    // error to, so this is the only record of why
     it("logs the task and the agent that could not be resolved", async () => {
       claimNextTask.mockResolvedValue(hydrated({ _id: "t1", taskNumber: 1, agent: "a-empty" }));
       const logged = vi.spyOn(console, "error").mockImplementation(() => {});

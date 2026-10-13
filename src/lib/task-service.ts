@@ -67,6 +67,9 @@ const SUPERSEDABLE_DECISIONS = supersedableStates();
 // cannot become a payload
 export const MAX_PHASE_LENGTH = 120;
 
+// Expired runs one poll will move, each costing a couple of round trips on the request answering a worker
+const EXPIRY_BATCH = 50;
+
 const PHASE_FIELDS = ["execution.phase", "execution.phaseAt", "execution.phaseSeq"];
 // A run's identity has to die with the run. recordTaskPhase matches on runId, so a runId left
 // behind on a released task lets that worker replay its own old run onto a task it no longer holds
@@ -1667,14 +1670,19 @@ export async function releaseExpiredTasks(db: ScopedDb, projectId: string, now =
   // an update many hands no document back. The filter is repeated on each, so a task claimed,
   // released or moved since the read matches nothing and writes nothing — which is also what keeps
   // two workers polling at once from recording the same expiry twice (BP-1045).
-  const candidates = await db.Task.find(expired, "_id").lean();
+  // At most one batch per poll: after an outage hundreds can be expired together, and each is two
+  // round trips on the request that is answering a worker. What is left goes on the next poll.
+  const candidates = await db.Task.find(expired, "_id", { limit: EXPIRY_BATCH }).lean();
 
   const actors = new Map<string, string | null>();
   const actorOf = async (workerId: unknown): Promise<string | null> => {
     const key = workerId ? String(workerId) : "";
     if (!key) return null;
     if (!actors.has(key)) {
-      const identity = await db.User.findOne({ username: workerUsername(key) }, "_id").lean();
+      // A lookup that fails costs the row its author, not the move or the announcement
+      const identity = await db.User.findOne({ username: workerUsername(key) }, "_id")
+        .lean()
+        .catch(() => null);
       actors.set(key, identity ? String(identity._id) : null);
     }
     return actors.get(key) ?? null;
@@ -1687,46 +1695,48 @@ export async function releaseExpiredTasks(db: ScopedDb, projectId: string, now =
   // there is nobody left on the task to tell
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const abandoned: any[] = [];
-  for (const { _id } of candidates) {
-    const before = await Task.findOneAndUpdate(
-      { ...expired, _id, organisation: db.organisation },
-      [
-        {
-          $set: {
-            status: { $cond: [{ $gte: ["$execution.attempts", MAX_EXECUTION_ATTEMPTS] }, exhausted, approved] },
-            ...CLEAR_WORKER_ASSIGNEE,
+  try {
+    for (const { _id } of candidates) {
+      const before = await Task.findOneAndUpdate(
+        { ...expired, _id, organisation: db.organisation },
+        [
+          {
+            $set: {
+              status: { $cond: [{ $gte: ["$execution.attempts", MAX_EXECUTION_ATTEMPTS] }, exhausted, approved] },
+              ...CLEAR_WORKER_ASSIGNEE,
+            },
           },
-        },
-        { $unset: RUN_FIELDS },
-      ],
-      // lean: the document is only read, and `before` is what it looked like when the lease ran out
-      { returnDocument: "before", updatePipeline: true, lean: true }
-    );
-    if (!before) continue;
-    moved++;
+          { $unset: RUN_FIELDS },
+        ],
+        // lean: the document is only read, and `before` is what it looked like when the lease ran out
+        { returnDocument: "before", updatePipeline: true, lean: true }
+      );
+      if (!before) continue;
+      moved++;
 
-    const spent = (before.execution?.attempts ?? 0) >= MAX_EXECUTION_ATTEMPTS;
-    if (spent) abandoned.push(before);
-    // The machine whose lease ran out is the actor, as it is in the announcement below: it is what
-    // happened, and a row with nobody on it would read as a deleted account
-    await logActivity(
-      db,
-      projectId,
-      String(_id),
-      await actorOf(before.execution?.workerId),
-      "status_changed",
-      "status",
-      before.status,
-      spent ? exhausted : approved
-    );
-  }
-
-  // Only what this call actually moved: two workers polling at once both read the list, and the
-  // one whose update matched nothing must not announce the other's work a second time.
-  if (abandoned.length > 0) {
-    announceAbandonedRuns(db, projectId, project, abandoned, exhausted, columns).catch((err) =>
-      console.error("Failed to announce an abandoned run:", err)
-    );
+      const spent = (before.execution?.attempts ?? 0) >= MAX_EXECUTION_ATTEMPTS;
+      if (spent) abandoned.push(before);
+      // The machine whose lease ran out is the actor, as it is in the announcement below: it is what
+      // happened, and a row with nobody on it would read as a deleted account
+      await logActivity(
+        db,
+        projectId,
+        String(_id),
+        await actorOf(before.execution?.workerId),
+        "status_changed",
+        "status",
+        before.status,
+        spent ? exhausted : approved
+      );
+    }
+  } finally {
+    // Only what this call actually moved: two workers polling at once both read the list, and the
+    // one whose update matched nothing must not announce the other's work a second time.
+    if (abandoned.length > 0) {
+      announceAbandonedRuns(db, projectId, project, abandoned, exhausted, columns).catch((err) =>
+        console.error("Failed to announce an abandoned run:", err)
+      );
+    }
   }
 
   return moved;
@@ -1734,8 +1744,8 @@ export async function releaseExpiredTasks(db: ScopedDb, projectId: string, now =
 
 /**
  * A run reaching its attempt limit is the one thing on a board that happens with nobody watching:
- * the lease expires on a machine that is already gone, so the move has no actor and went through
- * updateMany, which fires no webhook and no notification.
+ * the lease expires on a machine that is already gone, so the move has no one to act on it: it
+ * leaves a History row and nothing else, which fires no webhook and no notification.
  */
 async function announceAbandonedRuns(
   db: ScopedDb,

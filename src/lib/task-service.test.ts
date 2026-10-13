@@ -731,14 +731,16 @@ describe("releaseTask", () => {
 
       await releaseTask(db, "p1", "t1", { actorId: "person" });
 
+      expect(logActivity).toHaveBeenCalledTimes(1);
       expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "person", "status_changed", "status", "doing", "ready");
     });
 
-    it("names the escalation column when the attempt is spent and there are none left", async () => {
+    it("writes the row from a release that spends the attempt, as whoever released", async () => {
       findOneAndUpdate.mockResolvedValue(released("review"));
 
       await releaseTask(db, "p1", "t1", { refund: false, actorId: "machine-user" });
 
+      expect(logActivity).toHaveBeenCalledTimes(1);
       expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "machine-user", "status_changed", "status", "doing", "review");
     });
 
@@ -1037,6 +1039,25 @@ describe("releaseExpiredTasks", () => {
     expect(JSON.stringify(findOneAndUpdate.mock.calls[0][1])).not.toContain("$inc");
   });
 
+  // `after` would hand back a task whose status is already the destination and whose assignee the
+  // move has cleared: the row would read approved → approved and the announcement would find nobody
+  it("asks for the task as it was, not as the move left it", async () => {
+    expired(expiredTask());
+
+    await releaseExpiredTasks(db, "p1", now);
+
+    expect(findOneAndUpdate.mock.calls[0][2]).toMatchObject({ returnDocument: "before", updatePipeline: true });
+  });
+
+  // After an outage hundreds can expire together; one poll moves a batch and the next takes the rest
+  it("reads a bounded batch of candidates", async () => {
+    expired(expiredTask());
+
+    await releaseExpiredTasks(db, "p1", now);
+
+    expect(find.mock.calls[0][2]).toEqual({ limit: 50 });
+  });
+
   it("counts what it moved, and not what another poll got to first", async () => {
     expired(expiredTask({ _id: "t1" }), expiredTask({ _id: "t2" }));
     find.mockReturnValue({ lean: () => Promise.resolve([{ _id: "t1" }, { _id: "t2" }, { _id: "t3" }]) });
@@ -1060,6 +1081,27 @@ describe("releaseExpiredTasks", () => {
     await releaseExpiredTasks(db, "p1", now);
 
     expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "worker-user-1", "status_changed", "status", "doing", "ready");
+    // The row's column is computed here and the move's in the update: both have to say "ready"
+    expect(JSON.stringify(setStage(findOneAndUpdate.mock.calls[0][1]).status)).toBe(
+      JSON.stringify({ $cond: [{ $gte: ["$execution.attempts", MAX_EXECUTION_ATTEMPTS] }, "ready", "ready"] })
+    );
+  });
+
+  // A board may have more than one active column; the row names the one the task was in
+  it("names the active column the task was actually in", async () => {
+    projectFindOne.mockReturnValue({
+      lean: () =>
+        Promise.resolve({
+          ...board,
+          columns: [...board.columns, { id: "pairing", role: "active", order: 4 }],
+        }),
+    });
+    expired(expiredTask({ status: "pairing" }));
+
+    await releaseExpiredTasks(db, "p1", now);
+
+    expect(find.mock.calls[0][0].status).toEqual({ $in: ["doing", "pairing"] });
+    expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "worker-user-1", "status_changed", "status", "pairing", "ready");
   });
 
   it("does nothing on a board with no active column", async () => {
@@ -1186,6 +1228,24 @@ describe("releaseExpiredTasks", () => {
       await releaseExpiredTasks(db, "p1", now);
 
       expect(createNotificationsMock).not.toHaveBeenCalled();
+    });
+
+    // The sweep stops at the failure, but what it had already moved is still told to somebody:
+    // nothing would read those tasks again, so the announcement is the only chance
+    it("still announces what it moved when a later update fails", async () => {
+      find.mockReturnValue({ lean: () => Promise.resolve([{ _id: "t1" }, { _id: "t2" }]) });
+      collectRecipientsMock.mockReturnValue([WATCHER]);
+      // The first update succeeds, the second throws
+      findOneAndUpdate.mockReset();
+      findOneAndUpdate
+        .mockResolvedValueOnce(
+          expiredTask({ _id: "t1", watchers: [WATCHER], execution: { workerId: "w1", attempts: MAX_EXECUTION_ATTEMPTS } })
+        )
+        .mockRejectedValueOnce(new Error("lost the connection"));
+
+      await expect(releaseExpiredTasks(db, "p1", now)).rejects.toThrow("lost the connection");
+
+      await vi.waitFor(() => expect(createNotificationsMock).toHaveBeenCalledTimes(1));
     });
 
     // Nothing awaits the announcement — the poll has already been answered — so a rejection

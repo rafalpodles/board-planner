@@ -119,8 +119,8 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
       workerId: String(worker._id),
       actorId: identityOf(worker),
     }).catch(() => {});
-    // Logged, because nothing else records it: the task moves back a column with no comment, no
-    // activity row and no run to attach an error to.
+    // Logged, because nothing else says why: the task moves back a column with a History row and
+    // no comment, and no run to attach an error to.
     console.error(
       `Claim released: ${projectId}/${String(task._id)} names agent ${String(task.agent)}, which resolves to nothing runnable`
     );
