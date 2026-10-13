@@ -32,15 +32,14 @@ export async function POST(request: Request) {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
-  // Ahead of the body for the same reason it is ahead of bcrypt: the read is work too (BP-322).
-  // Guessing 32 random bytes is not the worry; unmetered work is. Two indexed reads and a bcrypt
-  // per anonymous request is a bill anybody can run up.
+  // Ahead of the body: the read is work too (BP-322). Guessing 32 random bytes is not the worry;
+  // unmetered work is.
   //
   // The cost of counting here is that a request refused later for its own reasons — a password
   // under the minimum, a body that is not JSON — spends a slot too. That is the intended trade:
   // the alternative leaves the cheapest way to spend the server's time the one way that is free.
   //
-  // With no client address there is no count (BP-1030): the link is spent before anything is
+  // With no client address nobody is counted (BP-1030): the link is spent before anything is
   // hashed, so a made-up one costs a body and two reads, and a real one a single hash.
   const clientIp = getClientIp(request);
   if (await sourceRefused(clientIp, "password-reset-use", ATTEMPTS_PER_SOURCE)) {
@@ -99,7 +98,7 @@ export async function POST(request: Request) {
   try {
     hashed = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
   } catch (err) {
-    await releaseResetToken(db, token).catch(() => {});
+    await releaseResetToken(db, token, outcome.claimedAt).catch(() => {});
     throw err;
   }
 
@@ -114,7 +113,7 @@ export async function POST(request: Request) {
   } catch (err) {
     // The claim is one-shot, so a write that fails here would otherwise leave somebody signed out
     // of everything, holding a dead link, with their old password still in force and no way back
-    await releaseResetToken(db, token).catch(() => {});
+    await releaseResetToken(db, token, outcome.claimedAt).catch(() => {});
     throw err;
   }
   // The link reached the address it was mailed to, which is the proof a provider links by — and

@@ -5,6 +5,7 @@ import { connectDB } from "@/lib/db";
 import { scopedForRequest } from "@/lib/db-scope";
 import { isValidRedirectUri, newClientId } from "@/lib/oauth";
 import { getClientIp } from "@/lib/auth";
+import { makeRoomForClient, unusedClientExpiry } from "@/lib/oauth-clients";
 import { sourceRefused } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -29,10 +30,9 @@ export async function POST(req: Request) {
   if (!db) return hostNotFound();
   await connectDB();
 
-  // Unauthenticated and public by design, so the caller's address is the only bound on how far the
-  // client collection can be grown. With no address (TRUSTED_PROXY_HOPS unset) there is none: the
-  // row is one insert, and a bucket shared by every caller would let one of them close MCP
-  // onboarding for the whole instance.
+  // Unauthenticated and public by design. With an address the caller is held to a budget. With none
+  // (TRUSTED_PROXY_HOPS unset) a bucket shared by every caller would let one of them close MCP
+  // onboarding for the whole instance, so what is bounded is the rows nobody has approved (BP-1030).
   if (await sourceRefused(getClientIp(req), "oauth_register", REGISTRATIONS_PER_WINDOW)) {
     return NextResponse.json(
       { error: "invalid_request", error_description: "Too many client registrations from this address. Try again later." },
@@ -65,7 +65,8 @@ export async function POST(req: Request) {
   const clientName =
     typeof body?.client_name === "string" ? body.client_name.slice(0, MAX_CLIENT_NAME) : "";
 
-  await db.OAuthClient.create({ clientId, clientName, redirectUris });
+  await makeRoomForClient(db);
+  await db.OAuthClient.create({ clientId, clientName, redirectUris, expiresAt: unusedClientExpiry() });
 
   return NextResponse.json(
     {

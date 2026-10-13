@@ -7,9 +7,13 @@ const oauthClientSchema = new Schema<IOAuthClient>(
     clientId: { type: String, required: true, unique: true, index: true },
     clientName: { type: String, default: "" },
     redirectUris: { type: [String], default: [] },
+    // Set at registration and cleared when a person approves the client; the TTL reaps one nobody did
+    expiresAt: { type: Date },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
+
+oauthClientSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 withOrganisation(oauthClientSchema);
 

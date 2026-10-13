@@ -9,6 +9,7 @@ const logInstanceAudit = vi.fn();
 const userFindOne = vi.fn();
 const userUpdateOne = vi.fn();
 const hash = vi.fn();
+const CLAIMED_AT = new Date("2026-10-13T06:00:00Z");
 let clientIp: string | null = "203.0.113.9";
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -54,7 +55,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   clientIp = "203.0.113.9";
   await resetRateLimits();
-  consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
+  consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com", claimedAt: CLAIMED_AT });
   accountIs({ _id: "u1", username: "owner", kind: "human", email: "owner@example.com" });
   hash.mockResolvedValue("new-hash");
   userUpdateOne.mockResolvedValue({});
@@ -137,7 +138,7 @@ describe("POST /api/auth/reset", () => {
     clientIp = null;
     consumeResetToken.mockResolvedValue({ ok: false, reason: "unknown" });
     for (let i = 0; i < 450; i++) await POST(post());
-    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
+    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com", claimedAt: CLAIMED_AT });
 
     expect((await POST(post())).status).toBe(200);
   });
@@ -152,7 +153,7 @@ describe("POST /api/auth/reset", () => {
     expect(refused.status).toBe(400);
     expect(hash).not.toHaveBeenCalled();
 
-    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
+    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com", claimedAt: CLAIMED_AT });
     await POST(post());
 
     expect(hash).toHaveBeenCalledTimes(1);
@@ -165,7 +166,7 @@ describe("POST /api/auth/reset", () => {
 
     await expect(POST(post())).rejects.toThrow("bcrypt failed");
 
-    expect(releaseResetToken).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpr_good");
+    expect(releaseResetToken).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpr_good", CLAIMED_AT);
     expect(revokeUserCredentials).not.toHaveBeenCalled();
     expect(userUpdateOne).not.toHaveBeenCalled();
   });
@@ -190,7 +191,7 @@ describe("POST /api/auth/reset", () => {
   });
 
   it("proves no address for a link issued before it recorded where it was sent", async () => {
-    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: null });
+    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: null, claimedAt: CLAIMED_AT });
 
     expect((await POST(post())).status).toBe(200);
     expect(userUpdateOne).toHaveBeenCalledTimes(1);

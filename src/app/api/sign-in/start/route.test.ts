@@ -55,14 +55,15 @@ describe("POST /api/sign-in/start", () => {
     expect((await POST(post("another@example.com"))).status).toBe(429);
   });
 
-  // BP-1030. With no client address every caller shared one bucket, so any of them could refuse the
-  // next person a code. 450 is past the 400 that bucket held; what bounds the path is each e-mail
-  // address, below.
-  it("does not let a caller with no address refuse the next one", async () => {
+  // BP-1030. Mail goes to whoever is typed, so without an address callers keep sharing one bucket
+  // rather than being uncounted: 20 times the per-address figure, which is 400. Spraying addresses
+  // past it is refused, and nothing is sent for the refused ones.
+  it("keeps a shared bucket for callers with no address, because it sends mail to anybody", async () => {
     clientIp = null;
-    for (let i = 0; i < 450; i++) await POST(post(`p${i}@example.com`));
+    for (let i = 0; i < 400; i++) expect((await POST(post(`p${i}@example.com`))).status).toBe(200);
 
-    expect((await POST(post("another@example.com"))).status).toBe(200);
+    expect((await POST(post("another@example.com"))).status).toBe(429);
+    expect(sendEmail).toHaveBeenCalledTimes(400);
   });
 
   it("still holds one e-mail address to a few codes when there is no client address", async () => {

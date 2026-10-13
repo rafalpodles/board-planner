@@ -8,7 +8,8 @@ vi.mock("@/models/rateLimit", async () => {
   return { RateLimit: inMemoryRateLimitModel() };
 });
 
-vi.mock("@/models/oauthClient", () => ({ OAuthClient: { create } }));
+const countDocuments = vi.fn();
+vi.mock("@/models/oauthClient", () => ({ OAuthClient: { create, countDocuments } }));
 // Partial: `isValidRedirectUri` is the rule these tests are about, so it stays real.
 vi.mock("@/lib/oauth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/oauth")>()),
@@ -32,6 +33,7 @@ beforeEach(async () => {
   // X-Forwarded-For counts only where the operator says a proxy writes it (BP-318)
   process.env.TRUSTED_PROXY_HOPS = "1";
   create.mockResolvedValue({});
+  countDocuments.mockResolvedValue(0);
 });
 
 afterEach(() => {
@@ -46,6 +48,14 @@ describe("POST /oauth/register", () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ redirectUris: ["https://claude.ai/api/mcp/callback"] })
     );
+  });
+
+  // BP-1030. Unused until a person approves it: the TTL reaps it and a flood evicts oldest first
+  it("registers a client that expires unless somebody approves it", async () => {
+    await POST(request({ redirect_uris: ["https://claude.ai/api/mcp/callback"] }));
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ expiresAt: expect.any(Date) }));
+    expect(create.mock.calls[0][0].expiresAt.getTime()).toBeGreaterThan(Date.now() + 29 * 24 * 60 * 60 * 1000);
   });
 
   // RFC 8252 permits http only for loopback, which is what a local MCP client needs

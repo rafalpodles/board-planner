@@ -252,15 +252,24 @@ export function targetKey(organisation: Types.ObjectId, identifier: string, scop
 }
 
 /**
- * The per-address budget of a route nothing else tells callers apart on. True once the caller is
- * past it. With no client address there is nobody to count: one bucket for every caller would let
- * a single one of them refuse all the others, so the route is bounded by what it does instead
- * (BP-840, BP-847, BP-1030).
+ * The per-address budget of a route. True once the caller is past it.
+ *
+ * With no client address there is nobody to count, and one bucket for every caller would let a
+ * single one of them refuse all the others. So by default nobody is counted and the route has to
+ * be bounded by what it does (BP-840, BP-847, BP-1030) — fit only where the work is cheap and
+ * leaves nothing behind. A route that sends mail to arbitrary people passes `sharedLimit`: callers
+ * with no address then share one bucket of that size, because refusing some people beats an open
+ * relay.
  */
-export async function sourceRefused(clientIp: string | null, scope: string, limit: number): Promise<boolean> {
-  if (!clientIp) return false;
-  const key = sourceKey(clientIp, scope);
-  if (await isRateLimited(key, limit)) return true;
+export async function sourceRefused(
+  clientIp: string | null,
+  scope: string,
+  limit: number,
+  sharedLimit?: number
+): Promise<boolean> {
+  if (!clientIp && sharedLimit === undefined) return false;
+  const key = sourceKey(clientIp ?? "-", scope);
+  if (await isRateLimited(key, clientIp ? limit : sharedLimit!)) return true;
   await recordFailedAttempt(key);
   return false;
 }

@@ -30,7 +30,7 @@ export async function issueResetToken(db: ScopedDb, userId: Types.ObjectId | str
 }
 
 export type ResetTokenOutcome =
-  | { ok: true; userId: Types.ObjectId; sentTo: string | null }
+  | { ok: true; userId: Types.ObjectId; sentTo: string | null; claimedAt: Date }
   | { ok: false; reason: "unknown" | "expired" | "used" };
 
 /**
@@ -49,7 +49,7 @@ export async function consumeResetToken(db: ScopedDb, token: string): Promise<Re
     { returnDocument: "after" }
   );
 
-  if (claimed) return { ok: true, userId: claimed.user as Types.ObjectId, sentTo: claimed.sentTo ?? null };
+  if (claimed) return { ok: true, userId: claimed.user as Types.ObjectId, sentTo: claimed.sentTo ?? null, claimedAt: now };
 
   // Nothing was claimed. Naming which of the three it was costs nothing — the token is 32 random
   // bytes, so an attacker learns only that they guessed one that once existed, while the person
@@ -61,11 +61,13 @@ export async function consumeResetToken(db: ScopedDb, token: string): Promise<Re
 
 /**
  * Puts a claimed token back, for the one caller that spent it and then could not finish. Without
- * this a failed write costs somebody their only link as well as every session they had.
+ * this a failed write costs somebody their only link as well as every session they had. Only the
+ * claim it was handed: a link spent again since is somebody else's, and giving that one back would
+ * leave two live.
  */
-export async function releaseResetToken(db: ScopedDb, token: string): Promise<void> {
+export async function releaseResetToken(db: ScopedDb, token: string, claimedAt: Date): Promise<void> {
   await connectDB();
-  await db.PasswordResetToken.updateOne({ tokenHash: sha256(token) }, { $set: { usedAt: null } });
+  await db.PasswordResetToken.updateOne({ tokenHash: sha256(token), usedAt: claimedAt }, { $set: { usedAt: null } });
 }
 
 /**

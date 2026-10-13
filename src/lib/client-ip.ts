@@ -14,9 +14,9 @@
  * There is no socket address to fall back to — a Web `Request` in a route handler does not carry
  * one — so an unconfigured deployment gets null and callers take their anonymous path. For the
  * sign-in that path is a shared bucket with a raised threshold, which is a worse throttle than a
- * per-address one and a far better one than none; a route whose secret is random or whose work is
- * one insert counts no one instead, because a bucket everybody shares lets one caller refuse the
- * rest (BP-840, BP-847, BP-1030).
+ * per-address one and a far better one than none; a route whose secret is random, or whose rows are
+ * bounded some other way, counts no one instead, because a bucket everybody shares lets one caller
+ * refuse the rest (BP-840, BP-847, BP-1030).
  */
 export const TRUSTED_PROXY_HOPS_VAR = "TRUSTED_PROXY_HOPS";
 
@@ -69,6 +69,24 @@ function warnHeaderIgnored(count: number): void {
   );
 }
 
+// With hops above 0 a request that yields no address is not throttled per address on the routes that
+// count nobody without one (BP-1030), and nothing else says so. One line per quiet period, never the
+// entries: a proxy that writes `ip:port`, hops set above what is really in front, or a request that
+// went round the proxy all look the same from here.
+let lastMissingAt = 0;
+
+function warnAddressMissing(hops: number, count: number, notAnAddress: boolean): void {
+  const now = Date.now();
+  if (lastMissingAt !== 0 && now - lastMissingAt < QUIET_MS) return;
+  lastMissingAt = now;
+  console.warn(
+    `${TRUSTED_PROXY_HOPS_VAR}=${hops} but a request carried ${count} X-Forwarded-For ${count === 1 ? "entry" : "entries"}` +
+      (notAnAddress ? ", and the one that counts is not an IP address" : ", fewer than that") +
+      `, so it has no per-address throttle key and routes that throttle by address did not count it. ` +
+      `Check how many proxies append to the header and that each writes the address alone (no port); a request that went round the proxy looks the same.`
+  );
+}
+
 const forwardedEntries = (header: string): string[] =>
   header
     .split(",")
@@ -89,10 +107,16 @@ export function getClientIp(request: Request): string | null {
   // Fewer entries than the operator described means the request did not come through the proxies
   // they configured, so nothing in it is the address they promised. Counting the leftmost entry
   // here would be counting the caller's own choice again.
-  if (entries.length < hops) return null;
+  if (entries.length < hops) {
+    warnAddressMissing(hops, entries.length, false);
+    return null;
+  }
 
   const candidate = entries[entries.length - hops];
-  if (!isIpAddress(candidate)) return null;
+  if (!isIpAddress(candidate)) {
+    warnAddressMissing(hops, entries.length, true);
+    return null;
+  }
   // Without the zone: it is validated away but was being returned, so up to 40 characters of
   // anything travelled into the throttle key and the session's ip column
   return candidate.split("%")[0];

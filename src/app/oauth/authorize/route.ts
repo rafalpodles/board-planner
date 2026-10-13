@@ -20,6 +20,7 @@ import {
 } from "@/lib/rate-limit";
 import { accessibleProjectIds } from "@/lib/grants";
 import { notifyCredentialCreated } from "@/lib/security-mail";
+import { markClientUsed } from "@/lib/oauth-clients";
 import {
   randomToken,
   readFormBody,
@@ -635,6 +636,9 @@ async function handleConsent(db: ScopedDb, req: Request, form: FormData): Promis
     allowedProjects,
     expiresAt: new Date(Date.now() + AUTH_CODE_TTL_SECONDS * 1000),
   });
+  // A person approved this client: it is no longer one a flood may evict or the TTL reap (BP-1030).
+  // The grant stands either way, so a failure here is logged and not the person's.
+  await markClientUsed(db, consent.clientId).catch((error) => console.error("Could not mark an OAuth client as approved:", error));
 
   // The grant outlives this browser window, so it is worth a line in an inbox the account holder
   // reads even when the authorization happened somewhere they were not looking.

@@ -137,8 +137,8 @@ export type PollResult =
 
 // The app's half. A device code that was never issued cannot be told from one that was — and an
 // approved row hands its credential over exactly once, then forgets it. The code is 256 random bits,
-// so a plain hash is all it needs, and neither starting an enrolment nor polling one is work an
-// anonymous caller can run up (BP-1030).
+// so a plain hash is all it needs and no bcrypt is left to run up (BP-1030); what an anonymous
+// caller can still do is cheap and bounded by the pending cap.
 export async function pollDeviceEnrolment(
   db: ScopedDb,
   deviceCode: string,

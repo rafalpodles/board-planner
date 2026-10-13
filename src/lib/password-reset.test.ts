@@ -5,13 +5,14 @@ const create = vi.fn();
 const deleteMany = vi.fn();
 const findOneAndUpdate = vi.fn();
 const findOne = vi.fn();
+const updateOne = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/passwordResetToken", () => ({
-  PasswordResetToken: { create, deleteMany, findOneAndUpdate, findOne },
+  PasswordResetToken: { create, deleteMany, findOneAndUpdate, findOne, updateOne },
 }));
 
-const { issueResetToken, consumeResetToken, invalidateResetTokens, RESET_TOKEN_PREFIX } =
+const { issueResetToken, consumeResetToken, releaseResetToken, invalidateResetTokens, RESET_TOKEN_PREFIX } =
   await import("./password-reset");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
@@ -75,7 +76,7 @@ describe("spending a link", () => {
 
     const outcome = await consumeResetToken(scopedToDefaultOrganisation(), "cpr_abc");
 
-    expect(outcome).toEqual({ ok: true, userId: "u1", sentTo: "ada@example.com" });
+    expect(outcome).toEqual({ ok: true, userId: "u1", sentTo: "ada@example.com", claimedAt: expect.any(Date) });
     const [filter, update] = findOneAndUpdate.mock.calls[0];
     // Single-use lives in this filter. A read followed by a write would let two requests arriving
     // together both be told they won, and the second would overwrite the first person's password.
@@ -102,6 +103,22 @@ describe("spending a link", () => {
     findOne.mockReturnValue({ lean: () => Promise.resolve(existing) });
 
     expect(await consumeResetToken(scopedToDefaultOrganisation(), "cpr_abc")).toEqual({ ok: false, reason });
+  });
+});
+
+describe("giving a spent link back", () => {
+  // BP-1030. A link spent again since is somebody else's: an unconditional release would put it
+  // back live next to the newer one
+  it("puts back only the claim it was handed", async () => {
+    const claimedAt = new Date("2026-10-13T06:00:00Z");
+    updateOne.mockResolvedValue({});
+
+    await releaseResetToken(scopedToDefaultOrganisation(), "cpr_abc", claimedAt);
+
+    expect(updateOne).toHaveBeenCalledWith(
+      { tokenHash: sha256("cpr_abc"), usedAt: claimedAt, organisation: DEFAULT_ORGANISATION_ID },
+      { $set: { usedAt: null } }
+    );
   });
 });
 

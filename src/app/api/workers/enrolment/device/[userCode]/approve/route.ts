@@ -128,7 +128,7 @@ export const POST = withAuth(async (request, { params, user, db }) => {
     detail: `Enrolled for ${key} on ${enrolment.machineHost}`,
   });
 
-  await db.DeviceEnrolment.updateOne(
+  const approved = await db.DeviceEnrolment.updateOne(
     { _id: enrolment._id, status: "pending" },
     {
       $set: {
@@ -140,6 +140,14 @@ export const POST = withAuth(async (request, { params, user, db }) => {
       },
     }
   );
+  // Evicted by the pending cap, denied or expired while the machine was being registered: nothing
+  // will ever hand that credential over, so the person is told rather than shown "approved"
+  if (approved.matchedCount === 0) {
+    return NextResponse.json(
+      { error: "This request is no longer waiting. Start the enrolment again on the machine." },
+      { status: 410 }
+    );
+  }
 
   return NextResponse.json({
     state: "approved",

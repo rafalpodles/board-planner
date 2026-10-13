@@ -7,7 +7,9 @@ import { withAdmin } from "@/lib/middleware";
 export const GET = withAdmin(async (_request, { db }) => {
   await connectDB();
 
-  const clients = await db.OAuthClient.find()
+  // Not the ones nobody approved: they have no token, a flood of anonymous registrations would
+  // bury every real one, and the TTL reaps them (BP-1030)
+  const clients = await db.OAuthClient.find({ expiresAt: null })
     .select("clientId clientName redirectUris createdAt")
     .sort({ createdAt: -1 })
     .lean();

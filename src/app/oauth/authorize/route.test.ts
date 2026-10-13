@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const verifyCredentials = vi.fn();
 const oauthClientFindOne = vi.fn();
+const oauthClientUpdateOne = vi.fn();
 const oauthConsentCreate = vi.fn();
 const oauthConsentFindOne = vi.fn();
 const oauthCodeCreate = vi.fn();
@@ -28,7 +29,7 @@ vi.mock("@/models/rateLimit", async () => {
 
 vi.mock("@/lib/auth", () => ({ verifyCredentials, getClientIp: () => "203.0.113.7" }));
 vi.mock("@/lib/grants", () => ({ accessibleProjectIds: vi.fn().mockResolvedValue(null) }));
-vi.mock("@/models/oauthClient", () => ({ OAuthClient: { findOne: oauthClientFindOne } }));
+vi.mock("@/models/oauthClient", () => ({ OAuthClient: { findOne: oauthClientFindOne, updateOne: oauthClientUpdateOne } }));
 vi.mock("@/models/oauthCode", () => ({ OAuthCode: { create: oauthCodeCreate } }));
 vi.mock("@/models/oauthConsent", () => ({
   OAuthConsent: {
@@ -462,6 +463,27 @@ describe("POST /oauth/authorize consent phase", () => {
     expect(body).toMatch(
       /<a id="return" href="https:\/\/client\.example\/callback\?code=cpac_[^"]+&amp;state=s"/
     );
+    expect(oauthCodeCreate).toHaveBeenCalledTimes(1);
+  });
+
+  // BP-1030. Until a person approves it a registered client is one the TTL reaps and a flood may
+  // evict; approving is what makes it a connection
+  it("takes the client out of the reaping once a person has approved it", async () => {
+    await POST(consent({ access: "all" }));
+
+    expect(oauthClientUpdateOne).toHaveBeenCalledWith(
+      expect.objectContaining({ clientId: "c1" }),
+      { $unset: { expiresAt: 1 } }
+    );
+  });
+
+  it("still hands the code over when marking the client fails", async () => {
+    oauthClientUpdateOne.mockRejectedValue(new Error("write failed"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await POST(consent({ access: "all" }));
+
+    expect(response.status).toBe(200);
     expect(oauthCodeCreate).toHaveBeenCalledTimes(1);
   });
 

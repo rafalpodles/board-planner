@@ -352,6 +352,7 @@ export interface IOAuthClient {
   clientId: string;
   clientName: string;
   redirectUris: string[];
+  expiresAt?: Date;
   createdAt: Date;
 }
 
