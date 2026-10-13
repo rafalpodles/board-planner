@@ -1272,3 +1272,59 @@ test.describe("a run leaves its moves in the task's History", () => {
     await expect(panel.getByText("E2E Admin changed status from To Do to In Progress", { exact: true })).toBeVisible();
   });
 });
+
+// BP-1047. `execution.startedAt` is written by a claim and never cleared, so it outlives the run.
+// A task a person drags into an active column by hand carries the one its last run left, and the
+// sweep used to take it for an expired lease: back to the queue, assignment cleared, and a row
+// authored by the machine whose id was still on it. Against a real MongoDB, because the filter is
+// what is under test.
+test.describe("the lease sweep leaves a task no run is holding", () => {
+  const STALE = () => new Date(Date.now() - 3 * 60 * 60 * 1000);
+
+  async function historyRows(taskId: mongoose.Types.ObjectId) {
+    const handle = await db();
+    return handle.collection("activitylogs").countDocuments({ task: taskId, action: "status_changed" });
+  }
+
+  test("a task a person put in the active column by hand stays there", async () => {
+    const byHand = await addTask({
+      status: ACTIVE,
+      execution: { workerId: WORKER, startedAt: STALE(), attempts: 1 },
+    });
+
+    const moved = await releaseExpiredTasks(scopedToDefaultOrganisation(), String(PROJECT_ID));
+
+    expect(moved).toBe(0);
+    const after = await read(byHand);
+    expect(after.status).toBe(ACTIVE);
+    expect(after.assignee).toBe(String(OWNER));
+    expect(await historyRows(byHand)).toBe(0);
+  });
+
+  test("a task a run is holding is still swept once its lease has run out", async () => {
+    const held = await addTask({
+      status: ACTIVE,
+      execution: { workerId: WORKER, runId: "run-1", startedAt: STALE(), attempts: 1 },
+    });
+
+    const moved = await releaseExpiredTasks(scopedToDefaultOrganisation(), String(PROJECT_ID));
+
+    expect(moved).toBe(1);
+    expect((await read(held)).status).toBe(APPROVED);
+    expect(await historyRows(held)).toBe(1);
+  });
+
+  test("a finished run's task, dragged back by hand, is not swept on the poll after it", async () => {
+    const handed = await addTask();
+    await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), WORKER, "run-1", String(OWNER), IDENTITY);
+    await changeStatus(scopedToDefaultOrganisation(), String(PROJECT_ID), String(handed), "in_review", String(OWNER));
+    const handle = await db();
+    await handle.collection("tasks").updateOne({ _id: handed }, { $set: { "execution.startedAt": STALE() } });
+    await handle.collection("tasks").updateOne({ _id: handed }, { $set: { status: ACTIVE } });
+
+    const moved = await releaseExpiredTasks(scopedToDefaultOrganisation(), String(PROJECT_ID));
+
+    expect(moved).toBe(0);
+    expect((await read(handed)).status).toBe(ACTIVE);
+  });
+});
