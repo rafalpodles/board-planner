@@ -49,7 +49,7 @@ export async function archiveTask(
     ).populate(taskPopulateFields);
 
     if (archived) {
-      await logActivity(db, taskId, actorId, "archived");
+      await logActivity(db, projectId, taskId, actorId, "archived");
       return { ok: true, data: archived as ITask };
     }
   }
@@ -72,7 +72,7 @@ export async function unarchiveTask(
   ).populate(taskPopulateFields);
 
   if (restored) {
-    await logActivity(db, taskId, actorId, "unarchived");
+    await logActivity(db, projectId, taskId, actorId, "unarchived");
     return { ok: true, data: restored as ITask };
   }
 

@@ -331,6 +331,7 @@ test("a row the scheduled sync wrote names the sync, not Unknown", async ({ page
 
   await logActivity(
     scopedToDefaultOrganisation(),
+    PROJECT_ID,
     String(task!._id),
     null,
     "pr_unlinked",

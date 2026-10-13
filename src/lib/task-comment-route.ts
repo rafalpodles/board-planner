@@ -45,7 +45,7 @@ export const PUT = withProjectAccess(async (request, { params, user, db }) => {
     select: "username fullName",
   });
 
-  await logActivity(db, taskId, user._id, "comment_edited");
+  await logActivity(db, projectId, taskId, user._id, "comment_edited");
 
   return NextResponse.json(populated);
 });
@@ -113,7 +113,7 @@ export const DELETE = withProjectAccess(async (_request, { params, user, db }) =
 
   await comment.deleteOne();
 
-  await logActivity(db, taskId, user._id, "comment_deleted");
+  await logActivity(db, projectId, taskId, user._id, "comment_deleted");
 
   return NextResponse.json({ message: "Comment deleted" });
 });

@@ -136,16 +136,17 @@ export function addedLinks<T extends { url: string }>(
  */
 export async function recordLinkChanges(
   db: ScopedDb,
+  projectId: mongoose.Types.ObjectId | string,
   taskId: mongoose.Types.ObjectId | string,
   actor: string | null,
   added: { url: string }[],
   removed: { url: string }[]
 ): Promise<void> {
   for (const link of removed) {
-    await logActivity(db, taskId, actor, "pr_unlinked", "linkedPRs", link.url, "");
+    await logActivity(db, projectId, taskId, actor, "pr_unlinked", "linkedPRs", link.url, "");
   }
   for (const link of added) {
-    await logActivity(db, taskId, actor, "pr_linked", "linkedPRs", "", link.url);
+    await logActivity(db, projectId, taskId, actor, "pr_linked", "linkedPRs", "", link.url);
   }
 }
 

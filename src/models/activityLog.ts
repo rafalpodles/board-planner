@@ -30,6 +30,11 @@ const activityLogSchema = new Schema<IActivityLog>(
       ref: "Task",
       required: true,
     },
+    project: {
+      type: Schema.Types.ObjectId,
+      ref: "Project",
+      required: true,
+    },
     // Optional, and only for the two `pr_*` actions: a scheduled sync has nobody to name, and a
     // borrowed name would be a history row that cannot be asked about (BP-628).
     user: {
@@ -69,6 +74,7 @@ const activityLogSchema = new Schema<IActivityLog>(
 
 activityLogSchema.index({ task: 1, createdAt: -1 });
 activityLogSchema.index({ task: 1, createdAt: -1, _id: -1 });
+activityLogSchema.index({ project: 1, action: 1, createdAt: 1 });
 // An account export reads what one person did, across every task
 activityLogSchema.index({ user: 1, createdAt: -1 });
 

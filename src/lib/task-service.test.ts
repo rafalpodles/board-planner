@@ -1849,7 +1849,7 @@ describe("updateTask writing project fields to the history", () => {
 
     expect(result.ok).toBe(true);
     expect(fieldEntries()).toEqual([
-      { taskId: "t1", userId: "actor", action: "updated", field: "Difficulty", oldValue: "M", newValue: "L", customField: true, fieldType: "dropdown" },
+      { projectId: "p1", taskId: "t1", userId: "actor", action: "updated", field: "Difficulty", oldValue: "M", newValue: "L", customField: true, fieldType: "dropdown" },
     ]);
   });
 
@@ -4277,6 +4277,7 @@ describe("what a change of hands does to the agent already on the task", () => {
 
     expect(vi.mocked(logActivity).mock.calls).toContainEqual([
       db,
+      "p1",
       "t1",
       HOLDER,
       "updated",
@@ -4305,7 +4306,7 @@ describe("what a change of hands does to the agent already on the task", () => {
 
     await write({ title: "renamed" }, HOLDER);
 
-    expect(vi.mocked(logActivity).mock.calls.map((c) => c[4])).not.toContain("agent");
+    expect(vi.mocked(logActivity).mock.calls.map((c) => c[5])).not.toContain("agent");
   });
 });
 
@@ -5334,14 +5335,14 @@ describe("updateTask writing a description change to the history", () => {
   }
 
   const descriptionRows = () =>
-    (logActivity as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[4] === "description");
+    (logActivity as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[5] === "description");
 
   it("records what the description said before and what it says now", async () => {
     setup("the old words", "the new words");
 
     await updateTask(db, "p1", "t1", { description: "the new words" }, "actor");
 
-    expect(descriptionRows()).toEqual([[db, "t1", "actor", "updated", "description", "the old words", "the new words"]]);
+    expect(descriptionRows()).toEqual([[db, "p1", "t1", "actor", "updated", "description", "the old words", "the new words"]]);
   });
 
   it("records nothing about a description the update left alone", async () => {
@@ -5380,14 +5381,14 @@ describe("updateTask writing an agent change to the history", () => {
     findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve({ ...stored, agent: after }) });
   }
 
-  const agentRows = () => vi.mocked(logActivity).mock.calls.filter((call) => call[4] === "agent");
+  const agentRows = () => vi.mocked(logActivity).mock.calls.filter((call) => call[5] === "agent");
 
   it("names both agents rather than their ids", async () => {
     setup(DEFAULT, { _id: MERGES, name: "Merges its own work" });
 
     await updateTask(db, "p1", "t1", { agent: MERGES }, "actor");
 
-    expect(agentRows()).toEqual([[db, "t1", "actor", "updated", "agent", "Default", "Merges its own work"]]);
+    expect(agentRows()).toEqual([[db, "p1", "t1", "actor", "updated", "agent", "Default", "Merges its own work"]]);
   });
 
   it("leaves the side with no agent empty", async () => {
@@ -5395,7 +5396,7 @@ describe("updateTask writing an agent change to the history", () => {
 
     await updateTask(db, "p1", "t1", { agent: MERGES }, "actor");
 
-    expect(agentRows()).toEqual([[db, "t1", "actor", "updated", "agent", "", "Merges its own work"]]);
+    expect(agentRows()).toEqual([[db, "p1", "t1", "actor", "updated", "agent", "", "Merges its own work"]]);
   });
 
   it("keeps the id of an agent it cannot find, for the read side to resolve", async () => {
@@ -5404,7 +5405,7 @@ describe("updateTask writing an agent change to the history", () => {
 
     await updateTask(db, "p1", "t1", { agent: "" }, "actor");
 
-    expect(agentRows()).toEqual([[db, "t1", "actor", "updated", "agent", GONE, ""]]);
+    expect(agentRows()).toEqual([[db, "p1", "t1", "actor", "updated", "agent", GONE, ""]]);
   });
 });
 
@@ -5434,7 +5435,7 @@ describe("updateTask writing acceptance criteria changes to the history", () => 
     await updateTask(db, "p1", "t1", { checklist: [] }, "actor");
 
     const row = (action: string, field: string, oldValue: string, newValue: string) =>
-      ({ taskId: "t1", userId: "actor", action, field, oldValue, newValue });
+      ({ projectId: "p1", taskId: "t1", userId: "actor", action, field, oldValue, newValue });
     expect(criterionRows()).toEqual([
       row("criterion_removed", "c", "Old", ""),
       row("criterion_checked", "a", "", "Loads"),
@@ -5478,7 +5479,7 @@ describe("updateTask rewriting many criteria at once", () => {
 
     await updateTask(db, "p1", "t1", { acceptanceCriteria: "- rewritten" }, "actor");
 
-    expect(logActivity).toHaveBeenCalledWith(db, "t1", "actor", "updated", "checklist", "", String(CRITERION_ROWS_PER_WRITE * 2));
+    expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "actor", "updated", "checklist", "", String(CRITERION_ROWS_PER_WRITE * 2));
     expect(vi.mocked(logActivities).mock.calls.flatMap(([, rows]) => rows).filter((row) => row.action.startsWith("criterion_"))).toEqual([]);
   });
 
@@ -5516,8 +5517,8 @@ describe("updateTask when the agent's name cannot be read", () => {
     const result = await updateTask(db, "p1", "t1", { agent: "" }, "actor");
 
     expect(result.ok).toBe(true);
-    expect(vi.mocked(logActivity).mock.calls.filter((c) => c[4] === "agent")).toEqual([
-      [db, "t1", "actor", "updated", "agent", "6ab0f94eadb2609f98d84da1", ""],
+    expect(vi.mocked(logActivity).mock.calls.filter((c) => c[5] === "agent")).toEqual([
+      [db, "p1", "t1", "actor", "updated", "agent", "6ab0f94eadb2609f98d84da1", ""],
     ]);
   });
 });
@@ -5537,8 +5538,8 @@ describe("updateTask writing a project field's change", () => {
     await updateTask(db, "p1", "t1", { customFieldValues: { f1: "b" } }, "actor");
 
     expect(logActivities).toHaveBeenCalledWith(db, [
-      expect.objectContaining({ field: "description", oldValue: "a", newValue: "b", customField: true }),
+      expect.objectContaining({ projectId: "p1", field: "description", oldValue: "a", newValue: "b", customField: true }),
     ]);
-    expect(logActivity).not.toHaveBeenCalledWith(db, "t1", "actor", "updated", "description", "a", "b");
+    expect(logActivity).not.toHaveBeenCalledWith(db, "p1", "t1", "actor", "updated", "description", "a", "b");
   });
 });

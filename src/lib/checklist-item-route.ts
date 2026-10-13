@@ -64,9 +64,9 @@ export const PATCH = withProjectAccess(async (request, { params, user, db }) => 
     ...(change["checklist.$[c].text"] !== undefined ? { text: change["checklist.$[c].text"] as string } : {}),
     ...(change["checklist.$[c].done"] !== undefined ? { done: change["checklist.$[c].done"] as boolean } : {}),
   };
-  if (next.text !== old.text) await logActivity(db, taskId, user._id, "criterion_edited", itemId, old.text, next.text);
+  if (next.text !== old.text) await logActivity(db, projectId, taskId, user._id, "criterion_edited", itemId, old.text, next.text);
   if (next.done !== old.done) {
-    await logActivity(db, taskId, user._id, next.done ? "criterion_checked" : "criterion_unchecked", itemId, "", next.text);
+    await logActivity(db, projectId, taskId, user._id, next.done ? "criterion_checked" : "criterion_unchecked", itemId, "", next.text);
   }
 
   return NextResponse.json({ checklist: rows.map((row) => (row._id === itemId ? next : row)) });
@@ -89,6 +89,6 @@ export const DELETE = withProjectAccess(async (_request, { params, user, db }) =
 
   const rows = plainRows(before.checklist);
   const old = rows.find((row) => row._id === itemId)!;
-  await logActivity(db, taskId, user._id, "criterion_removed", itemId, old.text, "");
+  await logActivity(db, projectId, taskId, user._id, "criterion_removed", itemId, old.text, "");
   return NextResponse.json({ checklist: rows.filter((row) => row._id !== itemId) });
 });

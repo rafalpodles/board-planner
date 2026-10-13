@@ -456,6 +456,7 @@ async function announce(
   await logActivities(
     db,
     rows.map((row) => ({
+      projectId,
       taskId: idOf(row.subject),
       userId: actorId,
       action: row.fact.action === "added" ? ("link_added" as const) : ("link_removed" as const),
