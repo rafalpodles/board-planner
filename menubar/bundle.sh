@@ -69,6 +69,9 @@ rm -rf "$APP/Contents/Resources/worker/__fixtures__"
 # Without it node decides ESM vs CommonJS by sniffing, which older releases do not do. The version
 # is what the running worker reports to the server.
 printf '{ "type": "module", "version": "%s" }\n' "$VERSION" > "$APP/Contents/Resources/worker/package.json"
+# The licence travels with the binary, as it does in the worker tarball. Nothing else ships here:
+# the worker has no runtime dependencies and the menu bar no packages (BP-944)
+cp "$ROOT/../LICENSE" "$APP/Contents/Resources/LICENSE"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

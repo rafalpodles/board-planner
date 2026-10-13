@@ -165,8 +165,27 @@ describe("the release workflow", () => {
   it("decides latest in the publish job, after the build it depends on", () => {
     const publishJob = WORKFLOW.slice(WORKFLOW.indexOf("\n  publish:\n"), WORKFLOW.indexOf("\n  image:\n"));
 
-    expect(publishJob).toContain("needs: [resolve, build]");
+    expect(publishJob).toContain("needs: [resolve, build, sbom]");
     expect(publishJob.indexOf("name: Is this the newest release")).toBeLessThan(
+      publishJob.indexOf("name: Attach and publish")
+    );
+  });
+
+  // The policy at board-planner.com/legal/security promises a software bill of materials for each
+  // release (BP-944). The job has no `if`, so a dry run produces one too and a broken step shows
+  // up before a tag does
+  it("attaches an SBOM to every release, from a job a dry run runs as well", () => {
+    const sbomJob = WORKFLOW.slice(WORKFLOW.indexOf("\n  sbom:\n"), WORKFLOW.indexOf("\n  publish:\n"));
+    const publishJob = WORKFLOW.slice(WORKFLOW.indexOf("\n  publish:\n"), WORKFLOW.indexOf("\n  image:\n"));
+
+    const artifact = "name: release-sbom-${{ needs.resolve.outputs.version }}";
+
+    expect(sbomJob).toContain("npm sbom --package-lock-only --omit=dev");
+    expect(sbomJob).not.toMatch(/\n    if:/);
+    expect(sbomJob).toContain(artifact);
+    expect(publishJob).toContain(`${artifact}\n          path: release-assets`);
+    expect(publishJob).toContain("sha256sum board-planner-sbom-*.cdx.json >> SHA256SUMS");
+    expect(publishJob.indexOf("sha256sum board-planner-sbom")).toBeLessThan(
       publishJob.indexOf("name: Attach and publish")
     );
   });

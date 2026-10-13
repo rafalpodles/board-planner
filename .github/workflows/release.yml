@@ -1,7 +1,7 @@
 name: Release
 
 # A tag vX.Y.Z builds the menubar app (worker inside), signs it with the Developer ID, notarises
-# and staples it, packs the worker on its own, and attaches both to the GitHub release.
+# and staples it, packs the worker on its own, and attaches both, with an SBOM, to the GitHub release.
 # The tag arrives either pushed by hand or from release-please.yml, which calls this workflow because
 # a tag created with GITHUB_TOKEN triggers no workflow of its own.
 # Run by hand it is a dry run: the same build, kept as a short-lived workflow artifact (downloadable
@@ -228,6 +228,8 @@ jobs:
       - name: Package
         run: |
           test -f menubar/.build/CPMenubar.app/Contents/Resources/worker/main.js
+          test -f menubar/.build/CPMenubar.app/Contents/Resources/LICENSE
+          tar -tzf "$OUT/board-planner-worker-$VERSION.tar.gz" | grep -qx worker/LICENSE
           if [ "$SIGNED" = "true" ]; then
             REAPER="$RUNNER_TEMP/tarball-cp-reap"
             tar -xzf "$OUT/board-planner-worker-$VERSION.tar.gz" -O worker/dist/bin/cp-reap > "$REAPER"
@@ -256,9 +258,44 @@ jobs:
           if [ -n "${RELEASE_KEYCHAIN:-}" ]; then security delete-keychain "$RELEASE_KEYCHAIN" || true; fi
           rm -f "$RUNNER_TEMP"/AuthKey_*.p8 "$RUNNER_TEMP"/developer-id.p12
 
+  # The production npm dependency closure in package-lock.json, as CycloneDX, with every platform's
+  # build of the optional packages: the image's musl ones are in it. Nothing is installed or run. It
+  # does not list the Node runtime or Alpine's packages. The worker and the menu bar app carry no
+  # third-party code, which scripts/shipped-dependencies.test.ts keeps true (BP-944)
+  sbom:
+    name: Software bill of materials
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.tag && format('refs/tags/{0}', needs.resolve.outputs.tag) || '' }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+
+      - name: Generate the SBOM
+        run: |
+          mkdir sbom
+          npm sbom --package-lock-only --omit=dev --sbom-format cyclonedx --sbom-type application > "sbom/board-planner-sbom-$VERSION.cdx.json"
+          jq -e '.bomFormat == "CycloneDX" and (.components | length) > 0' "sbom/board-planner-sbom-$VERSION.cdx.json"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-sbom-${{ needs.resolve.outputs.version }}
+          path: sbom/board-planner-sbom-*.cdx.json
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
+
   publish:
     name: Attach to the GitHub release
-    needs: [resolve, build]
+    needs: [resolve, build, sbom]
     if: needs.resolve.outputs.release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -302,6 +339,15 @@ jobs:
         with:
           name: ${{ needs.build.outputs.artifact }}
           path: release-assets
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-sbom-${{ needs.resolve.outputs.version }}
+          path: release-assets
+
+      # SHA256SUMS comes from the build job and lists its two files
+      - name: Add the SBOM to SHA256SUMS
+        run: (cd release-assets && sha256sum board-planner-sbom-*.cdx.json >> SHA256SUMS)
 
       # release-please has already created the release, as a draft with its changelog; a hand-pushed
       # tag has none yet. Either way it is published, and made `latest` when it is the newest
