@@ -56,6 +56,24 @@ describe("statusHistory — the definitions", () => {
     });
   });
 
+  // A claim handed back and taken again: the release row is what keeps the chain whole, and the
+  // start is still the first time it entered an active column
+  it("a claim that was released and taken again keeps its first start and no gap", () => {
+    const history = statusHistory(
+      [
+        move("todo", "doing", day(2)),
+        move("doing", "todo", day(2)),
+        move("todo", "doing", day(3)),
+        move("doing", "review", day(4)),
+        move("review", "done", day(5)),
+      ],
+      roleOf,
+      { createdAt: CREATED, status: "done" }
+    );
+
+    expect(history).toMatchObject({ startedAt: day(2), finishedAt: day(5), startInferred: false, gap: false });
+  });
+
   it("a reopened task has no finish until it is done again, and keeps its first start", () => {
     const rows = [
       move("todo", "doing", day(2)),

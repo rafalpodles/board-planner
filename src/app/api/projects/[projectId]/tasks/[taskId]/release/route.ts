@@ -26,6 +26,7 @@ export const POST = withProjectAccessOrWorker(async (request, { params, user, wo
 
   const task = await releaseTask(db, projectId, taskId, {
     refund,
+    actorId: String(user._id),
     ...(workerId ? { workerId } : {}),
   });
   if (!task) {

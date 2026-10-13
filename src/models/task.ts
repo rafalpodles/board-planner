@@ -167,6 +167,10 @@ const taskSchema = new Schema<ITask>(
       assignedByRun: { type: Boolean },
       startedAt: { type: Date, default: null },
       lastError: { type: String, default: "" },
+      // The column a claim or a release moved the task out of, written by that same update from the
+      // status it had, so the activity row can name it without a second read (BP-1045). Left behind
+      // until the next such move; nothing else reads it.
+      statusBefore: { type: String },
       // No defaults: the phase trio is written by a live run and unset when it ends, so a task
       // that is not running carries no phase fields at all
       phase: { type: String },

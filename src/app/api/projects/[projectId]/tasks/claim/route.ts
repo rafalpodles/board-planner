@@ -17,6 +17,12 @@ function ownerIdOf(owner: unknown): string | null {
   return String(ref._id ?? owner);
 }
 
+// The machine's own user, the one its status changes and comments are authored by. Null for a
+// machine that has none yet, whose row then reads as a deleted account rather than as nobody.
+function identityOf(worker: { identity?: unknown }): string | null {
+  return worker.identity ? String(worker.identity) : null;
+}
+
 export const POST = withWorker(async (request, { params, worker, db }) => {
   const { projectId: identifier } = await params;
   await connectDB();
@@ -68,7 +74,7 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
 
   let task: Awaited<ReturnType<typeof claimNextTask>>;
   try {
-    task = await claimNextTask(db, projectId, String(worker._id), runId, machineOwnerId);
+    task = await claimNextTask(db, projectId, String(worker._id), runId, machineOwnerId, identityOf(worker));
   } catch (error) {
     // 409 with the reason, never 204: 204 is what an empty queue answers, and a board with no
     // column to claim into read as an idle machine for as long as nobody happened to look at the
@@ -111,9 +117,10 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
     await releaseTask(db, projectId, String(task._id), {
       refund: false,
       workerId: String(worker._id),
+      actorId: identityOf(worker),
     }).catch(() => {});
-    // Logged, because nothing else records it: the task moves back a column with no comment, no
-    // activity row and no run to attach an error to.
+    // Logged, because nothing else says why: the task moves back a column with a History row and
+    // no comment, and no run to attach an error to.
     console.error(
       `Claim released: ${projectId}/${String(task._id)} names agent ${String(task.agent)}, which resolves to nothing runnable`
     );

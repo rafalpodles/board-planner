@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import mongoose from "mongoose";
-import { changeStatus, claimNextTask, releaseTask, updateTask } from "@/lib/task-service";
+import { changeStatus, claimNextTask, releaseExpiredTasks, releaseTask, updateTask } from "@/lib/task-service";
 import { scopedToDefaultOrganisation } from "@/lib/db-scope";
 // Statically, though nothing here calls it: `agentUsableOnProject` reaches this model through a
 // dynamic import, and under Playwright's loader that resolves the model but not the `@/types` it
@@ -1172,5 +1172,103 @@ test.describe("a run identity is text, whatever it looks like", () => {
     const after = await read(armed);
     expect(after.execution.runId).toBe("$execution.workerId");
     expect(after.execution.workerId).toBe(WORKER);
+  });
+});
+
+// BP-1045. A claim, a release and a lease expiry moved a task between columns and wrote no row, so
+// the status history of every task a worker ran had a hole exactly where it started. Against a real
+// MongoDB, because the old value comes out of the update itself and "once per transition" is what
+// two overlapping callers do to it.
+test.describe("a run leaves its moves in the task's History", () => {
+  async function rows(taskId: mongoose.Types.ObjectId) {
+    const handle = await db();
+    const found = await handle.collection("activitylogs").find({ task: taskId, action: "status_changed" }).sort({ _id: 1 }).toArray();
+    return found.map((row) => ({ from: row.oldValue as string, to: row.newValue as string, user: row.user ? String(row.user) : null }));
+  }
+
+  test("a claim names the column it took the task from, as the machine", async () => {
+    const handed = await addTask();
+
+    await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), WORKER, "run-1", String(OWNER), IDENTITY);
+
+    expect(await rows(handed)).toEqual([{ from: APPROVED, to: ACTIVE, user: IDENTITY }]);
+  });
+
+  test("a release is the next row, and a claim after it the one after that", async () => {
+    const handed = await addTask();
+    await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), WORKER, "run-1", String(OWNER), IDENTITY);
+
+    await releaseTask(scopedToDefaultOrganisation(), String(PROJECT_ID), String(handed), { workerId: WORKER, actorId: IDENTITY });
+    await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), WORKER, "run-2", String(OWNER), IDENTITY);
+
+    expect((await rows(handed)).map((row) => `${row.from}>${row.to}`)).toEqual([
+      `${APPROVED}>${ACTIVE}`,
+      `${ACTIVE}>${APPROVED}`,
+      `${APPROVED}>${ACTIVE}`,
+    ]);
+  });
+
+  // Two requests releasing the same run: the update matches the one that finds it still held
+  test("two overlapping releases leave one row", async () => {
+    const handed = await addTask();
+    await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), WORKER, "run-1", String(OWNER), IDENTITY);
+
+    await Promise.all([
+      releaseTask(scopedToDefaultOrganisation(), String(PROJECT_ID), String(handed), { actorId: String(OWNER) }),
+      releaseTask(scopedToDefaultOrganisation(), String(PROJECT_ID), String(handed), { actorId: String(OWNER) }),
+    ]);
+
+    expect((await rows(handed)).filter((row) => row.to === APPROVED)).toHaveLength(1);
+  });
+
+  test("a lease that ran out leaves one row however many polls notice it", async () => {
+    const handed = await addTask();
+    await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), WORKER, "run-1", String(OWNER), IDENTITY);
+    const handle = await db();
+    await handle.collection("tasks").updateOne(
+      { _id: handed },
+      { $set: { "execution.startedAt": new Date(Date.now() - 3 * 60 * 60 * 1000) } }
+    );
+
+    const moved = await Promise.all([
+      releaseExpiredTasks(scopedToDefaultOrganisation(), String(PROJECT_ID)),
+      releaseExpiredTasks(scopedToDefaultOrganisation(), String(PROJECT_ID)),
+      releaseExpiredTasks(scopedToDefaultOrganisation(), String(PROJECT_ID)),
+    ]);
+
+    expect(moved.reduce((a, b) => a + b, 0)).toBe(1);
+    expect((await read(handed)).status).toBe(APPROVED);
+    expect((await rows(handed)).filter((row) => row.from === ACTIVE && row.to === APPROVED)).toHaveLength(1);
+  });
+
+  test("History shows the claim", async ({ page }) => {
+    // The task page resolves its agent, so this one has to exist where the others only name it
+    await (await db()).collection("agents").updateOne(
+      { _id: AGENT_ID },
+      {
+        $set: {
+          name: "Run agent",
+          description: "",
+          scope: "project",
+          owner: null,
+          project: PROJECT_ID,
+          composition: { analysis: [], implementation: [{ key: "write-the-change" }], verification: [], delivery: [] },
+          builtIn: false,
+        },
+      },
+      { upsert: true }
+    );
+    const handed = await addTask();
+    // An id the task page can resolve to a machine name; the other tests' label is not one
+    const machine = new mongoose.Types.ObjectId().toHexString();
+    await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), machine, "run-1", String(OWNER), String(ADMIN_ID));
+    const number = (await (await db()).collection("tasks").findOne({ _id: handed }))?.taskNumber;
+
+    await arriveSignedIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/${number}`);
+    await page.getByRole("tab", { name: /^History/ }).click();
+
+    const panel = page.locator("#task-panel-history");
+    await expect(panel.getByText("E2E Admin changed status from To Do to In Progress", { exact: true })).toBeVisible();
   });
 });

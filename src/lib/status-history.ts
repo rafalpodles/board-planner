@@ -53,8 +53,9 @@ interface Entry {
  * have passed through an active one; the column on the far side is entered at an unknown time.
  * A reader that wants durations leaves out a task with `gap` or `startInferred`.
  *
- * What the rows cannot show: a move out and back with nothing written in between (a claim that was
- * released, a lease that expired) leaves a chain that holds together, and so no gap.
+ * What the rows cannot show: a move out and back with nothing written in between leaves a chain
+ * that holds together, and so no gap. A worker's claim, release and lease expiry write their own
+ * rows since BP-1045; a task a worker ran before that has the hole where it entered its column.
  */
 export function statusHistory(
   rows: StatusRow[],
