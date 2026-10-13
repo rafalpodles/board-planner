@@ -97,6 +97,19 @@ describe("collectNotices", () => {
     expect(without).toEqual(["bare@0.0.1 (declares MIT)", "undeclared@0.0.2 (declares no licence)"]);
   });
 
+  it("lists an LGPL package with where its source is, whether or not it ships a licence file", () => {
+    pkg(shipped, "@img/libvips", {
+      name: "@img/libvips",
+      version: "1.3.4",
+      license: "LGPL-3.0-or-later",
+      repository: { url: "git+https://github.com/lovell/sharp-libvips.git" },
+    });
+
+    const { lgpl } = collectNotices(shipped);
+
+    expect(lgpl).toEqual(["@img/libvips@1.3.4 — source: https://github.com/lovell/sharp-libvips"]);
+  });
+
   it("does not read the dot directories npm keeps in node_modules", () => {
     pkg(shipped, ".bin", { name: ".bin", version: "0.0.0" }, { LICENSE: "not a package" });
     pkg(shipped, "real", { name: "real", version: "1.0.0" }, { LICENSE: "real licence" });
@@ -119,5 +132,15 @@ describe("render", () => {
     expect(out).toContain("  a@1.0.0\n  b@2.0.0");
     expect(out).toContain("Packages that ship no licence file of their own:");
     expect(out).toContain("c@3.0.0 (declares ISC)");
+    expect(out).not.toContain("Lesser General Public License");
+  });
+
+  it("says what the LGPL asks to be said", () => {
+    pkg(shipped, "lib", { name: "lib", version: "1.0.0", license: "LGPL-3.0-or-later" });
+
+    const out = render(collectNotices(shipped));
+
+    expect(out).toContain("Packages under the GNU Lesser General Public License");
+    expect(out).toContain("a modified version of it");
   });
 });

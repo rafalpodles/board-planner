@@ -25,8 +25,8 @@ function packagesIn(nodeModules, found = []) {
     }
     const manifest = join(dir, "package.json");
     if (existsSync(manifest)) {
-      const { name, version, license, licenses } = JSON.parse(readFileSync(manifest, "utf8"));
-      found.push({ name, version, declared: license ?? licenses, dir });
+      const { name, version, license, licenses, repository } = JSON.parse(readFileSync(manifest, "utf8"));
+      found.push({ name, version, declared: license ?? licenses, repository, dir });
     }
     packagesIn(join(dir, "node_modules"), found);
   }
@@ -46,6 +46,11 @@ function licenceFilesIn(dir, base = dir, depth = 0, found = []) {
   return found;
 }
 
+function repositoryUrl(repository) {
+  const url = typeof repository === "string" ? repository : repository?.url;
+  return url ? url.replace(/^git\+/, "").replace(/\.git$/, "") : "see the package's repository";
+}
+
 function declaredName(declared) {
   if (!declared) return "no licence";
   if (typeof declared === "string") return declared;
@@ -55,10 +60,14 @@ function declaredName(declared) {
 export function collectNotices(shippedModules, fullModules = shippedModules) {
   const byText = new Map();
   const without = [];
+  const lgpl = [];
 
   for (const pkg of packagesIn(shippedModules)) {
     const relative = pkg.dir.slice(shippedModules.length + 1);
     const sourceDir = existsSync(join(fullModules, relative)) ? join(fullModules, relative) : pkg.dir;
+    if (/LGPL/i.test(declaredName(pkg.declared))) {
+      lgpl.push(`${pkg.name}@${pkg.version} — source: ${repositoryUrl(pkg.repository)}`);
+    }
     const files = licenceFilesIn(sourceDir);
     if (files.length === 0) {
       without.push(`${pkg.name}@${pkg.version} (declares ${declaredName(pkg.declared)})`);
@@ -72,10 +81,10 @@ export function collectNotices(shippedModules, fullModules = shippedModules) {
       byText.get(text).add(label);
     }
   }
-  return { byText, without };
+  return { byText, without, lgpl };
 }
 
-export function render({ byText, without }) {
+export function render({ byText, without, lgpl }) {
   const out = [
     "THIRD-PARTY NOTICES",
     "",
@@ -91,6 +100,18 @@ export function render({ byText, without }) {
   for (const { text, labels } of groups) {
     out.push("================================================================================", "");
     out.push(...labels.map((label) => `  ${label}`), "", text, "");
+  }
+  if (lgpl.length > 0) {
+    out.push("================================================================================", "");
+    out.push("Packages under the GNU Lesser General Public License (version 3 or later):", "");
+    out.push(...lgpl.sort().map((line) => `  ${line}`), "");
+    out.push(
+      "Each is a shared library that the application loads at run time, so a modified version of it",
+      "can be put in its place in this image. The package's README.md lists the libraries bundled in",
+      "it and the licence of each, and its versions.json their versions. The licence is at",
+      "https://www.gnu.org/licenses/lgpl-3.0.txt.",
+      ""
+    );
   }
   if (without.length > 0) {
     out.push("================================================================================", "");
