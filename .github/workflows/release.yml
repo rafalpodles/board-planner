@@ -228,6 +228,8 @@ jobs:
       - name: Package
         run: |
           test -f menubar/.build/CPMenubar.app/Contents/Resources/worker/main.js
+          test -f menubar/.build/CPMenubar.app/Contents/Resources/LICENSE
+          tar -tzf "$OUT/board-planner-worker-$VERSION.tar.gz" | grep -qx worker/LICENSE
           if [ "$SIGNED" = "true" ]; then
             REAPER="$RUNNER_TEMP/tarball-cp-reap"
             tar -xzf "$OUT/board-planner-worker-$VERSION.tar.gz" -O worker/dist/bin/cp-reap > "$REAPER"
@@ -256,8 +258,10 @@ jobs:
           if [ -n "${RELEASE_KEYCHAIN:-}" ]; then security delete-keychain "$RELEASE_KEYCHAIN" || true; fi
           rm -f "$RUNNER_TEMP"/AuthKey_*.p8 "$RUNNER_TEMP"/developer-id.p12
 
-  # The npm packages the Docker image runs on, as CycloneDX. The worker and the menu bar app carry
-  # no third-party code, which scripts/shipped-dependencies.test.ts keeps true (BP-944)
+  # The production npm dependency tree as `npm ci` installs it on this runner, as CycloneDX. The
+  # image runs a subset of it on musl, so its platform-specific packages (sharp's) are the runner's,
+  # not the image's. The worker and the menu bar app carry no third-party code, which
+  # scripts/shipped-dependencies.test.ts keeps true (BP-944)
   sbom:
     name: Software bill of materials
     needs: resolve

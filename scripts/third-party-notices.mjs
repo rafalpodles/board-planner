@@ -7,7 +7,7 @@
 // so the packages are listed from the shipped tree and their licence text is read from the full one
 // it was traced from (BP-944).
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const LICENCE_FILE = /^(licen[cs]e|copying|notice)([-._].*)?$/i;
@@ -25,7 +25,13 @@ function packagesIn(nodeModules, found = []) {
     }
     const manifest = join(dir, "package.json");
     if (existsSync(manifest)) {
-      const { name, version, license, licenses, repository } = JSON.parse(readFileSync(manifest, "utf8"));
+      let parsed;
+      try {
+        parsed = JSON.parse(readFileSync(manifest, "utf8"));
+      } catch (error) {
+        throw new Error(`${manifest}: ${error.message}`);
+      }
+      const { name, version, license, licenses, repository } = parsed;
       found.push({ name, version, declared: license ?? licenses, repository, dir });
     }
     packagesIn(join(dir, "node_modules"), found);
@@ -39,7 +45,7 @@ function licenceFilesIn(dir, base = dir, depth = 0, found = []) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (entry.name !== "node_modules") licenceFilesIn(path, base, depth + 1, found);
-    } else if (LICENCE_FILE.test(entry.name) && statSync(path).size <= MAX_LICENCE_BYTES) {
+    } else if (entry.isFile() && LICENCE_FILE.test(entry.name) && statSync(path).size <= MAX_LICENCE_BYTES) {
       found.push({ path, within: dir === base ? "" : dir.slice(base.length + 1) });
     }
   }
@@ -63,8 +69,8 @@ export function collectNotices(shippedModules, fullModules = shippedModules) {
   const lgpl = [];
 
   for (const pkg of packagesIn(shippedModules)) {
-    const relative = pkg.dir.slice(shippedModules.length + 1);
-    const sourceDir = existsSync(join(fullModules, relative)) ? join(fullModules, relative) : pkg.dir;
+    const inFull = join(fullModules, relative(shippedModules, pkg.dir));
+    const sourceDir = existsSync(inFull) ? inFull : pkg.dir;
     if (/LGPL/i.test(declaredName(pkg.declared))) {
       lgpl.push(`${pkg.name}@${pkg.version} — source: ${repositoryUrl(pkg.repository)}`);
     }
@@ -103,13 +109,13 @@ export function render({ byText, without, lgpl }) {
   }
   if (lgpl.length > 0) {
     out.push("================================================================================", "");
-    out.push("Packages under the GNU Lesser General Public License (version 3 or later):", "");
+    out.push("Packages under the GNU Lesser General Public License:", "");
     out.push(...lgpl.sort().map((line) => `  ${line}`), "");
     out.push(
-      "Each is a shared library that the application loads at run time, so a modified version of it",
-      "can be put in its place in this image. The package's README.md lists the libraries bundled in",
-      "it and the licence of each, and its versions.json their versions. The licence is at",
-      "https://www.gnu.org/licenses/lgpl-3.0.txt.",
+      "The source of each is at the repository named above. Each sits in its own directory of this",
+      "image, apart from the application, so a modified version can be put in its place. A package's",
+      "README.md may list the libraries bundled in it and the licence of each (the @img/sharp-libvips",
+      "packages do). The licence texts are at https://www.gnu.org/licenses/ (lgpl-3.0.txt, lgpl-2.1.txt).",
       ""
     );
   }

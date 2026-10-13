@@ -178,9 +178,12 @@ describe("the release workflow", () => {
     const sbomJob = WORKFLOW.slice(WORKFLOW.indexOf("\n  sbom:\n"), WORKFLOW.indexOf("\n  publish:\n"));
     const publishJob = WORKFLOW.slice(WORKFLOW.indexOf("\n  publish:\n"), WORKFLOW.indexOf("\n  image:\n"));
 
+    const artifact = "name: release-sbom-${{ needs.resolve.outputs.version }}";
+
     expect(sbomJob).toContain("npm sbom");
     expect(sbomJob).toContain("--omit=dev");
     expect(sbomJob).not.toMatch(/\n    if:/);
-    expect(publishJob).toContain("name: release-sbom-${{ needs.resolve.outputs.version }}");
+    expect(sbomJob).toContain(artifact);
+    expect(publishJob).toContain(`${artifact}\n          path: release-assets`);
   });
 });
