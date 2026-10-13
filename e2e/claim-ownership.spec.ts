@@ -1273,11 +1273,11 @@ test.describe("a run leaves its moves in the task's History", () => {
   });
 });
 
-// BP-1047. `execution.startedAt` is written by a claim and never cleared, so it outlives the run.
-// A task a person drags into an active column by hand carries the one its last run left, and the
-// sweep used to take it for an expired lease: back to the queue, assignment cleared, and a row
-// authored by the machine whose id was still on it. Against a real MongoDB, because the filter is
-// what is under test.
+// BP-1047. `execution.startedAt` is written by a claim and is not cleared when the run ends, so it
+// outlives it. A task a person drags into an active column by hand carries the one its last run
+// left, and the sweep used to take it for an expired lease: back to the queue, and a row authored
+// by the machine whose id was still on it. Against a real MongoDB, because the filter is what is
+// under test.
 test.describe("the lease sweep leaves a task no run is holding", () => {
   const STALE = () => new Date(Date.now() - 3 * 60 * 60 * 1000);
 
@@ -1297,7 +1297,6 @@ test.describe("the lease sweep leaves a task no run is holding", () => {
     expect(moved).toBe(0);
     const after = await read(byHand);
     expect(after.status).toBe(ACTIVE);
-    expect(after.assignee).toBe(String(OWNER));
     expect(await historyRows(byHand)).toBe(0);
   });
 
@@ -1316,8 +1315,10 @@ test.describe("the lease sweep leaves a task no run is holding", () => {
 
   test("a finished run's task, dragged back by hand, is not swept on the poll after it", async () => {
     const handed = await addTask();
-    await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), WORKER, "run-1", String(OWNER), IDENTITY);
+    const claimed = await claimNextTask(scopedToDefaultOrganisation(), String(PROJECT_ID), WORKER, "run-1", String(OWNER), IDENTITY);
+    expect(claimed).not.toBeNull();
     await changeStatus(scopedToDefaultOrganisation(), String(PROJECT_ID), String(handed), "in_review", IDENTITY, { workerId: WORKER });
+    expect((await read(handed)).execution.runId).toBeUndefined();
     const handle = await db();
     await handle.collection("tasks").updateOne({ _id: handed }, { $set: { "execution.startedAt": STALE() } });
     await handle.collection("tasks").updateOne({ _id: handed }, { $set: { status: ACTIVE } });

@@ -979,7 +979,7 @@ describe("releaseExpiredTasks", () => {
     }
   });
 
-  // startedAt is never cleared, so a task a person put back in an active column by hand still
+  // startedAt is not cleared when a run ends, so a task a person put back in an active column by hand still
   // carries an old one. Only a run still holding the task has a lease to expire (BP-1047)
   it("only touches a task a run is still holding, in both the read and the write", async () => {
     expired(expiredTask());
