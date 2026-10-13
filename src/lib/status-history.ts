@@ -17,6 +17,7 @@ export type StatusHistory =
   | {
       kind: "recorded";
       startedAt: Date | null;
+      startInferred: boolean;
       finishedAt: Date | null;
       reopened: number;
       endedIn: HistoryRole;
@@ -24,9 +25,15 @@ export type StatusHistory =
       gap: boolean;
     };
 
+interface Entry {
+  column: string;
+  at: Date | null;
+}
+
 /**
- * A task's entries are its creation (into the column the first row left, which is the one fact a
- * row's `oldValue` keeps) followed by every recorded change, oldest first.
+ * A task's entries are every recorded change, oldest first, preceded by the column the first row
+ * left. That column is taken to be where the task was created, at `task.createdAt`, because a row
+ * keeps nothing else about it; `startInferred` says a start came from that and not from a row.
  *
  * started  — the first entry into an `active`-role column.
  * finished — the start of the final uninterrupted stay in `done`-role columns. Moving between two
@@ -38,7 +45,11 @@ export type StatusHistory =
  * and does not undo a finish, so a deleted column costs a task its role and not its history.
  * `endedIn` says what role the task's last recorded column had, `unknown` being its own bucket.
  * A task with no rows is `no-history`: nothing is known about it, which is not the same as zero days.
- * `gap` says the last recorded column is not where the task is now, so a row went unwritten.
+ *
+ * `gap` says a transition is missing: a row's `oldValue` is not the column the previous row left
+ * the task in, or the last recorded column is not where the task is now. The column on the far side
+ * of a break is entered at an unknown time, so it can neither give a start or a finish a time nor
+ * be skipped over to find a later one. A reader that wants durations leaves a gap task out.
  */
 export function statusHistory(
   rows: StatusRow[],
@@ -52,24 +63,37 @@ export function statusHistory(
       a.createdAt.getTime() - b.createdAt.getTime() || (String(a._id) < String(b._id) ? -1 : String(a._id) > String(b._id) ? 1 : 0)
   );
 
-  const entries = [
-    ...(ordered[0].oldValue ? [{ column: ordered[0].oldValue, at: task.createdAt }] : []),
-    ...ordered.map((row) => ({ column: row.newValue, at: row.createdAt })),
-  ];
+  const entries: Entry[] = [];
+  let gap = false;
+  if (ordered[0].oldValue) entries.push({ column: ordered[0].oldValue, at: task.createdAt });
+  for (const [index, row] of ordered.entries()) {
+    if (index > 0 && row.oldValue !== ordered[index - 1].newValue) {
+      gap = true;
+      if (row.oldValue) entries.push({ column: row.oldValue, at: null });
+    }
+    entries.push({ column: row.newValue, at: row.createdAt });
+  }
 
   let startedAt: Date | null = null;
+  let startSeen = false;
+  let startInferred = false;
   let finishedAt: Date | null = null;
   let reopened = 0;
   let inDone = false;
   const unknownColumns = new Set<string>();
 
-  for (const { column, at } of entries) {
+  const hasCreationEntry = Boolean(ordered[0].oldValue);
+  for (const [position, { column, at }] of entries.entries()) {
     const role = roleOf(column);
     if (role === "unknown") {
       unknownColumns.add(column);
       continue;
     }
-    if (role === "active" && startedAt === null) startedAt = at;
+    if (role === "active" && !startSeen) {
+      startSeen = true;
+      startedAt = at;
+      startInferred = hasCreationEntry && position === 0;
+    }
     if (role === "done") {
       if (!inDone) finishedAt = at;
       inDone = true;
@@ -83,14 +107,17 @@ export function statusHistory(
   }
 
   const last = entries[entries.length - 1].column;
+  if (task.status !== undefined && task.status !== last) gap = true;
+
   return {
     kind: "recorded",
     startedAt,
+    startInferred,
     finishedAt,
     reopened,
     endedIn: roleOf(last),
     unknownColumns: [...unknownColumns],
-    gap: task.status !== undefined && task.status !== last,
+    gap,
   };
 }
 
@@ -111,8 +138,8 @@ export interface TaskStatusHistory {
 }
 
 /**
- * Every task of a project with what its status rows say, one query for the rows and one for the
- * tasks. The rows come through `{project, action, createdAt}`; a task with none is included, as
+ * Every task of a project with what its status rows say, from one read each of the project, its
+ * rows and its tasks. The rows come through `{project, action, createdAt}`; a task with none is included, as
  * `no-history`, so a caller cannot mistake a missing row for a fast task.
  */
 export async function projectStatusHistories(db: ScopedDb, projectId: string): Promise<TaskStatusHistory[]> {

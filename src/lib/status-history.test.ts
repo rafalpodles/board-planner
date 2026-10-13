@@ -49,6 +49,7 @@ describe("statusHistory — the definitions", () => {
       startedAt: day(2),
       finishedAt: day(5),
       reopened: 0,
+      startInferred: false,
       endedIn: "done",
       unknownColumns: [],
       gap: false,
@@ -118,10 +119,49 @@ describe("statusHistory — the definitions", () => {
     expect(history).toMatchObject({ finishedAt: day(3), reopened: 0, endedIn: "done" });
   });
 
-  it("a task created in an active column started when it was created", () => {
+  it("a task whose first row leaves an active column started when it was created, and says that was inferred", () => {
     const history = statusHistory([move("doing", "done", day(4))], roleOf, { createdAt: CREATED, status: "done" });
 
-    expect(history).toMatchObject({ startedAt: CREATED, finishedAt: day(4) });
+    expect(history).toMatchObject({ startedAt: CREATED, startInferred: true, finishedAt: day(4), gap: false });
+  });
+
+  it("a start that a row recorded is not inferred, even when an earlier column was assumed", () => {
+    const history = statusHistory([move("todo", "doing", day(2))], roleOf, { createdAt: CREATED, status: "doing" });
+
+    expect(history).toMatchObject({ startedAt: day(2), startInferred: false });
+  });
+
+  // A claim moves a task into an active column without writing a row, so the next row leaves a
+  // column the previous one never entered. The time of that entry is unknown, and a later entry
+  // into an active column must not be taken for the first.
+  it("a transition nobody wrote is a gap: its column is entered at an unknown time", () => {
+    const history = statusHistory(
+      [move("planned", "todo", day(2)), move("doing", "review", day(5)), move("review", "doing", day(6))],
+      roleOf,
+      { createdAt: CREATED, status: "doing" }
+    );
+
+    expect(history).toMatchObject({ kind: "recorded", gap: true, startedAt: null, startInferred: false });
+  });
+
+  it("a move into done nobody wrote is a gap, and the later return to done is the finish", () => {
+    const history = statusHistory(
+      [move("todo", "doing", day(2)), move("done", "review", day(6)), move("review", "done", day(8))],
+      roleOf,
+      { createdAt: CREATED, status: "done" }
+    );
+
+    expect(history).toMatchObject({ gap: true, startedAt: day(2), finishedAt: day(8), reopened: 1 });
+  });
+
+  it("a chain that holds together is not a gap", () => {
+    const history = statusHistory(
+      [move("todo", "doing", day(2)), move("doing", "review", day(3)), move("review", "done", day(4))],
+      roleOf,
+      { createdAt: CREATED, status: "done" }
+    );
+
+    expect(history).toMatchObject({ gap: false });
   });
 
   it("reads rows in time order, not in id order or the order it is given", () => {
@@ -156,7 +196,14 @@ describe("statusHistory — the definitions", () => {
 
 describe("projectStatusHistories", () => {
   const db = scopedToDefaultOrganisation();
-  const leanOf = (rows: unknown[]) => ({ sort: () => ({ lean: () => Promise.resolve(rows) }), lean: () => Promise.resolve(rows) });
+  const sortOf = vi.fn();
+  const leanOf = (rows: unknown[]) => ({
+    sort: (order: unknown) => {
+      sortOf(order);
+      return { lean: () => Promise.resolve(rows) };
+    },
+    lean: () => Promise.resolve(rows),
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -184,6 +231,7 @@ describe("projectStatusHistories", () => {
     );
     expect(statusChangeFilter("p1")).toEqual({ project: "p1", action: "status_changed" });
     expect(STATUS_CHANGE_SORT).toEqual({ createdAt: 1 });
+    expect(sortOf).toHaveBeenCalledWith(STATUS_CHANGE_SORT);
   });
 
   it("includes a task with no rows, as no history, beside one that has them", async () => {

@@ -124,6 +124,22 @@ test("a row that already names a project keeps it, beside a row of the same task
   expect(rows.map((row) => String(row.project))).toEqual([String(P2), String(P1)]);
 });
 
+test("a backfill larger than one batch fills every row exactly once", async () => {
+  const many = Array.from({ length: 1100 }, (_, i) => ({ _id: new mongoose.Types.ObjectId(), project: i % 2 ? P1 : P2 }));
+  await col("tasks").insertMany(
+    many.map(({ _id, project }, i) => ({ _id, project, taskNumber: 100 + i, title: "t", status: "done", createdAt: day(1), ...org }))
+  );
+  await col("activitylogs").insertMany(many.map(({ _id }) => legacy(_id, "done", day(3))));
+
+  const report = await backfillActivityProjects(mongoose.connection.db!, { apply: true });
+
+  expect(report).toEqual({ rowsMissing: 1100, rowsFilled: 1100, tasks: 1100, orphanedTasks: 0, orphanedRows: 0 });
+  const wrong = await Promise.all(
+    many.map(async ({ _id, project }) => (await col("activitylogs").findOne({ task: _id }))?.project?.equals(project))
+  );
+  expect(wrong.every(Boolean)).toBe(true);
+});
+
 test("logActivity writes the project it is given on the row", async () => {
   await logActivity(scopedToDefaultOrganisation(), P1, T1, null, "status_changed", "status", "todo", "doing");
 
