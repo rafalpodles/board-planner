@@ -42,6 +42,6 @@ describe("the licence texts the notices point at", () => {
 
   it("puts them in the image", () => {
     expect(readFileSync(join(root, "Dockerfile"), "utf8")).toContain("COPY --from=builder /app/licenses ./licenses");
-    expect(readFileSync(join(root, ".dockerignore"), "utf8")).not.toMatch(/^licenses\b/m);
+    expect(readFileSync(join(root, ".dockerignore"), "utf8")).not.toMatch(/(^|\/)licenses\b/m);
   });
 });

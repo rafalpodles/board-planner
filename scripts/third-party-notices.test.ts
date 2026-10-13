@@ -188,7 +188,7 @@ describe("render", () => {
 
     expect(out).toContain("Packages under the GNU Lesser General Public License");
     expect(out).toContain("a modified version can be put in its place");
-    expect(out).toContain("in the licenses directory of this");
+    expect(out).toContain("is in /app/licenses in this image");
   });
 });
 

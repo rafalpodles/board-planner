@@ -115,8 +115,8 @@ export function render({ byText, without, lgpl }) {
       "of each, and its versions.json their versions: the upstream source is the release of that",
       "version (the @img/sharp-libvips packages do both). Where a package is loaded from node_modules at",
       "run time, a modified version can be put in its place in this image. The text of the GNU LGPL",
-      "version 3 and of the GNU GPL version 3 it incorporates is in the licenses directory of this",
-      "image; other versions are at https://www.gnu.org/licenses/.",
+      "version 3 and of the GNU GPL version 3 it incorporates is in /app/licenses in this image; other",
+      "versions are at https://www.gnu.org/licenses/.",
       ""
     );
   }
