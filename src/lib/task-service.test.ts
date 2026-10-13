@@ -299,6 +299,67 @@ describe("claimNextTask", () => {
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
   });
 
+  // BP-1045. A claim moved a task into its active column and wrote nothing: the status history
+  // read every task a worker ran as having a hole exactly where it started
+  describe("leaving a row in the task's history", () => {
+    const claimed = (status: string, statusBefore: string) => ({
+      _id: "t1",
+      status,
+      execution: { statusBefore, runId: "run-1", workerId: "worker-a" },
+    });
+
+    beforeEach(() => {
+      vi.mocked(logActivity).mockClear();
+    });
+
+    it("names the column the update says it came from, as the machine", async () => {
+      findOneAndUpdate.mockResolvedValue(claimed("doing", "ready"));
+
+      await claimNextTask(db, "p1", "worker-a", "run-1", OWNER, "machine-user");
+
+      expect(logActivity).toHaveBeenCalledTimes(1);
+      expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "machine-user", "status_changed", "status", "ready", "doing");
+    });
+
+    // A board may have two approved columns; the only thing that knows which one the task left is
+    // the status it had when the update read it, so the update has to carry it out
+    it("has the update record the status it is leaving, read before the stage's own write", async () => {
+      findOneAndUpdate.mockResolvedValue(null);
+
+      await claimNextTask(db, "p1", "worker-a", "run-1", OWNER, "machine-user");
+
+      const stage = setStage(findOneAndUpdate.mock.calls[0][1]);
+      expect(stage["execution.statusBefore"]).toBe("$status");
+      expect(stage.status).toBe("doing");
+    });
+
+    // The machine's own user is who the row is written as, never who the claim matches on: a task
+    // assigned to a `worker-<id>` account was once claimable with no assignedBy check at all
+    it("never lets the author reach the filter that decides what is claimed", async () => {
+      findOneAndUpdate.mockResolvedValue(null);
+
+      await claimNextTask(db, "p1", "worker-a", "run-1", OWNER, "machine-user");
+
+      expect(JSON.stringify(findOneAndUpdate.mock.calls[0][0])).not.toContain("machine-user");
+    });
+
+    it("writes nothing when the queue was empty", async () => {
+      findOneAndUpdate.mockResolvedValue(null);
+
+      expect(await claimNextTask(db, "p1", "worker-a", "run-1", OWNER, "machine-user")).toBeNull();
+
+      expect(logActivity).not.toHaveBeenCalled();
+    });
+
+    it("writes the row with nobody as the author when the machine has no identity yet", async () => {
+      findOneAndUpdate.mockResolvedValue(claimed("doing", "ready"));
+
+      await claimNextTask(db, "p1", "worker-a", "run-1", OWNER);
+
+      expect(vi.mocked(logActivity).mock.calls[0][3]).toBeNull();
+    });
+  });
+
   describe("an archived task", () => {
     async function claimFilter(): Promise<Record<string, unknown>> {
       findOneAndUpdate.mockResolvedValue(null);
@@ -656,6 +717,52 @@ describe("releaseTask", () => {
     projectFindOne.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
   });
 
+  // BP-1045. A release moved a task out of its active column and wrote nothing, so a claim that
+  // was handed back left a chain that held together and read as no break at all
+  describe("leaving a row in the task's history", () => {
+    const released = (status: string) => ({ _id: "t1", status, execution: { statusBefore: "doing" } });
+
+    beforeEach(() => {
+      vi.mocked(logActivity).mockClear();
+    });
+
+    it("names the columns on a release that gives the attempt back", async () => {
+      findOneAndUpdate.mockResolvedValue(released("ready"));
+
+      await releaseTask(db, "p1", "t1", { actorId: "person" });
+
+      expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "person", "status_changed", "status", "doing", "ready");
+    });
+
+    it("names the escalation column when the attempt is spent and there are none left", async () => {
+      findOneAndUpdate.mockResolvedValue(released("review"));
+
+      await releaseTask(db, "p1", "t1", { refund: false, actorId: "machine-user" });
+
+      expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "machine-user", "status_changed", "status", "doing", "review");
+    });
+
+    it("has both updates record the status they are leaving", async () => {
+      findOneAndUpdate.mockResolvedValue(null);
+
+      await releaseTask(db, "p1", "t1");
+      await releaseTask(db, "p1", "t1", { refund: false });
+
+      for (const [, update] of findOneAndUpdate.mock.calls) {
+        expect(setStage(update)["execution.statusBefore"]).toBe("$status");
+      }
+    });
+
+    // Once per transition: the update matches only the caller that finds the task still held
+    it("writes nothing when the task was not held, so a second release records nothing", async () => {
+      findOneAndUpdate.mockResolvedValue(null);
+
+      expect(await releaseTask(db, "p1", "t1", { actorId: "person" })).toBeNull();
+
+      expect(logActivity).not.toHaveBeenCalled();
+    });
+  });
+
   it("returns the task to the approved column and gives back the attempt", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
 
@@ -828,67 +935,114 @@ describe("releaseExpiredTasks", () => {
   };
   const now = new Date("2026-07-31T12:00:00.000Z");
 
+  // One task per update since BP-1045: a row has to name the column the task left, and an update
+  // many hands no document back. `before` is what the update returns, the task as it stood.
+  const expiredTask = (overrides: Record<string, unknown> = {}) => ({
+    _id: "t1",
+    taskNumber: 9,
+    title: "Split the worker lease",
+    status: "doing",
+    watchers: [],
+    execution: { workerId: "w1", attempts: 1 },
+    ...overrides,
+  });
+
+  function expired(...tasks: Array<Record<string, unknown>>) {
+    find.mockReturnValue({ lean: () => Promise.resolve(tasks.map((t) => ({ _id: t._id }))) });
+    findOneAndUpdate.mockReset();
+    for (const task of tasks) findOneAndUpdate.mockResolvedValueOnce(task);
+  }
+
   beforeEach(() => {
-    updateMany.mockReset();
+    findOneAndUpdate.mockReset();
     projectFindOne.mockReset();
     find.mockReset();
     createNotificationsMock.mockClear();
+    vi.mocked(logActivity).mockClear();
     collectRecipientsMock.mockReturnValue([]);
     projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
+    userFindOne.mockReturnValue({ lean: async () => ({ _id: "worker-user-1" }) });
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
-    updateMany.mockResolvedValue({ modifiedCount: 0 });
   });
 
   it("only touches tasks whose lease has actually run out", async () => {
+    expired(expiredTask());
+
     await releaseExpiredTasks(db, "p1", now);
 
-    const filter = updateMany.mock.calls[0][0];
-    expect(filter.status).toEqual({ $in: ["doing"] });
-    expect(filter["execution.startedAt"]).toEqual({
-      $lt: new Date(now.getTime() - EXECUTION_LEASE_MS),
-    });
-    expect(filter.project).toBe("p1");
+    for (const filter of [find.mock.calls[0][0], findOneAndUpdate.mock.calls[0][0]]) {
+      expect(filter.status).toEqual({ $in: ["doing"] });
+      expect(filter["execution.startedAt"]).toEqual({ $lt: new Date(now.getTime() - EXECUTION_LEASE_MS) });
+      expect(filter.project).toBe("p1");
+    }
   });
 
-  it("leaves an archived task alone, in both the read and the two writes", async () => {
+  // The read decides who to try; the update decides who is moved. A task claimed or released in
+  // between matches nothing, which is what stops a second poll writing the same row (BP-1045)
+  it("repeats the lease and the task's id in the update, so a task moved since the read is left alone", async () => {
+    expired(expiredTask());
+
+    await releaseExpiredTasks(db, "p1", now);
+
+    expect(findOneAndUpdate.mock.calls[0][0]).toMatchObject({
+      _id: "t1",
+      status: { $in: ["doing"] },
+      archivedAt: null,
+    });
+  });
+
+  it("leaves an archived task alone, in both the read and the write", async () => {
+    expired(expiredTask());
+
     await releaseExpiredTasks(db, "p1", now);
 
     expect(find.mock.calls[0][0]).toMatchObject({ archivedAt: null });
-    expect(updateMany.mock.calls).toHaveLength(2);
-    for (const [filter] of updateMany.mock.calls) expect(filter).toMatchObject({ archivedAt: null });
+    expect(findOneAndUpdate.mock.calls[0][0]).toMatchObject({ archivedAt: null });
   });
 
   it("returns a task with attempts left to the queue", async () => {
+    expired(expiredTask({ execution: { workerId: "w1", attempts: 1 } }));
+
     await releaseExpiredTasks(db, "p1", now);
 
-    const retryable = updateMany.mock.calls.find(
-      ([f]) => f["execution.attempts"]?.$lt === MAX_EXECUTION_ATTEMPTS
-    );
-    expect(setStage(retryable?.[1]).status).toBe("ready");
+    expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "worker-user-1", "status_changed", "status", "doing", "ready");
   });
 
   it("sends an exhausted task to the column humans watch, not back into the loop", async () => {
+    expired(expiredTask({ execution: { workerId: "w1", attempts: MAX_EXECUTION_ATTEMPTS } }));
+
     await releaseExpiredTasks(db, "p1", now);
 
-    const spent = updateMany.mock.calls.find(
-      ([f]) => f["execution.attempts"]?.$gte === MAX_EXECUTION_ATTEMPTS
+    expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "worker-user-1", "status_changed", "status", "doing", "escalated");
+  });
+
+  // The update itself picks the column, from the attempts it reads, so the row and the move cannot
+  // disagree about which branch a task took
+  it("lets the update choose the column from the attempts on the task", async () => {
+    expired(expiredTask());
+
+    await releaseExpiredTasks(db, "p1", now);
+
+    expect(JSON.stringify(setStage(findOneAndUpdate.mock.calls[0][1]).status)).toBe(
+      JSON.stringify({ $cond: [{ $gte: ["$execution.attempts", MAX_EXECUTION_ATTEMPTS] }, "escalated", "ready"] })
     );
-    expect(setStage(spent?.[1]).status).toBe("escalated");
   });
 
   // Refunding would let a task that repeatedly outlives its worker cycle forever
   it("never gives the attempt back", async () => {
+    expired(expiredTask());
+
     await releaseExpiredTasks(db, "p1", now);
 
-    for (const [, update] of updateMany.mock.calls) {
-      expect(JSON.stringify(update)).not.toContain("$inc");
-    }
+    expect(JSON.stringify(findOneAndUpdate.mock.calls[0][1])).not.toContain("$inc");
   });
 
-  it("counts everything it freed", async () => {
-    updateMany.mockResolvedValueOnce({ modifiedCount: 1 }).mockResolvedValueOnce({ modifiedCount: 2 });
+  it("counts what it moved, and not what another poll got to first", async () => {
+    expired(expiredTask({ _id: "t1" }), expiredTask({ _id: "t2" }));
+    find.mockReturnValue({ lean: () => Promise.resolve([{ _id: "t1" }, { _id: "t2" }, { _id: "t3" }]) });
+    findOneAndUpdate.mockResolvedValueOnce(null);
 
-    expect(await releaseExpiredTasks(db, "p1", now)).toBe(3);
+    expect(await releaseExpiredTasks(db, "p1", now)).toBe(2);
   });
 
   it("holds an exhausted task in the queue when the board has no review column", async () => {
@@ -901,13 +1055,11 @@ describe("releaseExpiredTasks", () => {
           ],
         }),
     });
+    expired(expiredTask({ execution: { workerId: "w1", attempts: MAX_EXECUTION_ATTEMPTS } }));
 
     await releaseExpiredTasks(db, "p1", now);
 
-    const spent = updateMany.mock.calls.find(
-      ([f]) => f["execution.attempts"]?.$gte === MAX_EXECUTION_ATTEMPTS
-    );
-    expect(setStage(spent?.[1]).status).toBe("ready");
+    expect(logActivity).toHaveBeenCalledWith(db, "p1", "t1", "worker-user-1", "status_changed", "status", "doing", "ready");
   });
 
   it("does nothing on a board with no active column", async () => {
@@ -916,34 +1068,67 @@ describe("releaseExpiredTasks", () => {
     });
 
     expect(await releaseExpiredTasks(db, "p1", now)).toBe(0);
-    expect(updateMany).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // BP-1045. A task a worker ran has no other trace of leaving its active column
+  describe("leaving a row in the task's history", () => {
+    it("writes one status_changed row per task it moved, naming both columns", async () => {
+      expired(expiredTask({ _id: "t1" }), expiredTask({ _id: "t2", execution: { workerId: "w1", attempts: MAX_EXECUTION_ATTEMPTS } }));
+
+      await releaseExpiredTasks(db, "p1", now);
+
+      const rows = vi.mocked(logActivity).mock.calls.filter((call) => call[4] === "status_changed");
+      expect(rows.map((call) => [call[2], call[6], call[7]])).toEqual([
+        ["t1", "doing", "ready"],
+        ["t2", "doing", "escalated"],
+      ]);
+    });
+
+    it("writes nothing for a task whose update matched nothing", async () => {
+      find.mockReturnValue({ lean: () => Promise.resolve([{ _id: "t1" }]) });
+      findOneAndUpdate.mockResolvedValue(null);
+
+      await releaseExpiredTasks(db, "p1", now);
+
+      expect(logActivity).not.toHaveBeenCalled();
+    });
+
+    // The machine whose lease ran out is the one that stopped answering, as in the announcement
+    it("is authored by the machine whose lease ran out", async () => {
+      expired(expiredTask());
+
+      await releaseExpiredTasks(db, "p1", now);
+
+      expect(userFindOne).toHaveBeenCalledWith({ username: "worker-w1", organisation: DEFAULT_ORGANISATION_ID }, "_id");
+      expect(vi.mocked(logActivity).mock.calls[0][3]).toBe("worker-user-1");
+    });
+
+    it("still writes the row when the machine's identity has gone, with nobody as the author", async () => {
+      userFindOne.mockReturnValue({ lean: async () => null });
+      expired(expiredTask());
+
+      await releaseExpiredTasks(db, "p1", now);
+
+      expect(vi.mocked(logActivity).mock.calls[0][3]).toBeNull();
+    });
   });
 
   // The move has no actor — the worker that held it is gone — so nothing else on this path says
-  // it happened: updateMany fires no webhook and no notification
+  // it happened: nothing here fires a webhook or a notification
   describe("telling somebody the machine gave up", () => {
     const WATCHER = "507f1f77bcf86cd799439051";
 
     function abandoned() {
-      find.mockReturnValue({
-        lean: async () => [
-          {
-            _id: "t9",
-            taskNumber: 9,
-            title: "Split the worker lease",
-            watchers: [WATCHER],
-            execution: { workerId: "w1" },
-          },
-        ],
-      });
+      expired(
+        expiredTask({
+          watchers: [WATCHER],
+          execution: { workerId: "w1", attempts: MAX_EXECUTION_ATTEMPTS },
+        })
+      );
       // The machine that stopped answering owns the notification row
       userFindOne.mockReturnValue({ lean: async () => ({ _id: "worker-user-1" }) });
       collectRecipientsMock.mockReturnValue([WATCHER]);
-      updateMany.mockImplementation(async (filter: Record<string, { $gte?: number }>) =>
-        filter["execution.attempts"]?.$gte === MAX_EXECUTION_ATTEMPTS
-          ? { modifiedCount: 1 }
-          : { modifiedCount: 0 }
-      );
     }
 
     it("names the task, the column it landed in and who it is for", async () => {
@@ -977,7 +1162,8 @@ describe("releaseExpiredTasks", () => {
     // already moved and announced
     it("stays quiet when its own update moved nothing", async () => {
       abandoned();
-      updateMany.mockResolvedValue({ modifiedCount: 0 });
+      findOneAndUpdate.mockReset();
+      findOneAndUpdate.mockResolvedValue(null);
 
       await releaseExpiredTasks(db, "p1", now);
 
@@ -993,6 +1179,15 @@ describe("releaseExpiredTasks", () => {
       expect(createNotificationsMock).not.toHaveBeenCalled();
     });
 
+    it("does not announce a task that still had attempts left", async () => {
+      expired(expiredTask({ watchers: [WATCHER], execution: { workerId: "w1", attempts: 1 } }));
+      collectRecipientsMock.mockReturnValue([WATCHER]);
+
+      await releaseExpiredTasks(db, "p1", now);
+
+      expect(createNotificationsMock).not.toHaveBeenCalled();
+    });
+
     // Nothing awaits the announcement — the poll has already been answered — so a rejection
     // escaping it is an unhandled rejection, which ends the process rather than losing one mail.
     //
@@ -1002,6 +1197,8 @@ describe("releaseExpiredTasks", () => {
     it("logs and survives an announcement that throws", async () => {
       abandoned();
       const reported = vi.spyOn(console, "error").mockImplementation(() => {});
+      // The row's author is read first, the announcement's second
+      userFindOne.mockImplementationOnce(() => ({ lean: async () => ({ _id: "worker-user-1" }) }));
       userFindOne.mockImplementationOnce(() => {
         throw new Error("mongo is having a bad afternoon");
       });
@@ -1232,13 +1429,16 @@ describe("clearing the phase on every exit from the active column", () => {
     expect(stages[stages.length - 1]).toEqual({ $unset: RUN_KEYS });
   });
 
+  // One pipeline serves both outcomes since BP-1045: it picks the column from the attempts itself
   it("clears it when a lease expires, whether or not attempts remain", async () => {
+    find.mockReturnValue({ lean: () => Promise.resolve([{ _id: "t1" }]) });
+    findOneAndUpdate.mockReset();
+    findOneAndUpdate.mockResolvedValue({ _id: "t1", status: "doing", execution: { attempts: 1 } });
+
     await releaseExpiredTasks(db, "p1", new Date("2026-07-31T12:00:00.000Z"));
 
-    expect(updateMany.mock.calls).toHaveLength(2);
-    for (const [, update] of updateMany.mock.calls) {
-      expect(unsetKeys(update)).toEqual(RUN_KEYS);
-    }
+    expect(findOneAndUpdate.mock.calls).toHaveLength(1);
+    expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
   });
 });
 
@@ -1418,28 +1618,31 @@ describe("every way back to the board clears the assignment", () => {
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toEqual(CLEARED_BY);
   });
 
-  it("clears it on both lease-expiry branches, crashed and exhausted alike", async () => {
+  it("clears it on a lease expiry, crashed and exhausted alike", async () => {
+    find.mockReturnValue({ lean: () => Promise.resolve([{ _id: "t1" }]) });
+    findOneAndUpdate.mockReset();
+    findOneAndUpdate.mockResolvedValue({ _id: "t1", status: "doing", execution: { attempts: 1 } });
+
     await releaseExpiredTasks(db, "p1", new Date("2026-07-31T12:00:00.000Z"));
 
-    expect(updateMany.mock.calls).toHaveLength(2);
-    for (const [, update] of updateMany.mock.calls) {
-      expect(setStage(update).assignee).toEqual(CLEARED);
-      expect(setStage(update).assignedBy).toEqual(CLEARED_BY);
-    }
+    expect(findOneAndUpdate.mock.calls).toHaveLength(1);
+    const update = findOneAndUpdate.mock.calls[0][1];
+    expect(setStage(update).assignee).toEqual(CLEARED);
+    expect(setStage(update).assignedBy).toEqual(CLEARED_BY);
   });
 
   // Mongoose validates a pipeline update only when told it is one; the mock accepts it either way,
   // so a missing flag would ship silently and every one of these updates would be rejected live
   it("marks every one of them as a pipeline update", async () => {
     findOneAndUpdate.mockResolvedValue({ _id: "t1" });
+    find.mockReturnValue({ lean: () => Promise.resolve([{ _id: "t1" }]) });
     await releaseTask(db, "p1", "t1");
     await releaseTask(db, "p1", "t1", { refund: false });
     await releaseExpiredTasks(db, "p1", new Date("2026-07-31T12:00:00.000Z"));
 
+    expect(findOneAndUpdate.mock.calls).toHaveLength(3);
     for (const call of findOneAndUpdate.mock.calls) {
-      if (Array.isArray(call[1])) expect(call[2]?.updatePipeline).toBe(true);
-    }
-    for (const call of updateMany.mock.calls) {
+      expect(Array.isArray(call[1])).toBe(true);
       expect(call[2]?.updatePipeline).toBe(true);
     }
   });

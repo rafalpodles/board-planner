@@ -64,20 +64,20 @@ describe("POST .../tasks/:taskId/release", () => {
     const res = await POST(request({}, "worker"), ctx());
 
     expect(res.status).toBe(200);
-    expect(releaseTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", { refund: true, workerId: "w1" });
+    expect(releaseTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", { refund: true, workerId: "w1", actorId: "u1" });
   });
 
   it("keeps the scope on a no-refund release, which is the one that parks a task", async () => {
     await POST(request({ refund: false }, "worker"), ctx());
 
-    expect(releaseTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", { refund: false, workerId: "w1" });
+    expect(releaseTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", { refund: false, workerId: "w1", actorId: "u1" });
   });
 
   it("leaves a person's release broad — that button clears a stuck card", async () => {
     const res = await POST(request({}), ctx());
 
     expect(res.status).toBe(200);
-    expect(releaseTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", { refund: true });
+    expect(releaseTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", { refund: true, actorId: "u1" });
   });
 
   // The worker id is not self-asserted: the middleware verified the credential against it
@@ -100,7 +100,7 @@ describe("POST .../tasks/:taskId/release", () => {
   it("takes the worker id from the middleware, not from the request", async () => {
     await POST(request({ workerId: "someone-else" }, "worker"), ctx());
 
-    expect(releaseTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", { refund: true, workerId: "w1" });
+    expect(releaseTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", { refund: true, workerId: "w1", actorId: "u1" });
   });
 
   // BP-326: the run id is what the release and phase routes authorise on

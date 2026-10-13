@@ -178,7 +178,7 @@ describe("POST /tasks/claim", () => {
       params: Promise.resolve({ projectId: "CP" }),
     });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", null, null);
   });
 
   /**
@@ -192,7 +192,7 @@ describe("POST /tasks/claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER, null);
     expect(snapshotFor).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, undefined, OWNER);
   });
 
@@ -207,7 +207,7 @@ describe("POST /tasks/claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER, null);
     expect(snapshotFor).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, undefined, OWNER);
   });
 
@@ -317,6 +317,7 @@ describe("POST /tasks/claim", () => {
       expect(releaseTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, "t1", {
         refund: false,
         workerId: OID,
+        actorId: null,
       });
     });
 
@@ -468,8 +469,8 @@ describe("POST /tasks/claim", () => {
 // The claim matched on the owner alone since BP-358, so the machine's own identity has no place
 // in it: a task assigned to a `worker-<id>` account used to be claimable with no assignedBy check
 // at all, and anyone able to reach the API can name that account.
-describe("the worker's identity does not travel with the claim", () => {
-  it("passes the owner and nothing else, even when the worker has an identity", async () => {
+describe("the worker's identity does not decide what is claimed", () => {
+  it("claims on the owner, and hands the identity over only as the author of the row", async () => {
     verifyWorkerCredential.mockResolvedValue({
       _id: OID,
       assignments: [],
@@ -480,7 +481,9 @@ describe("the worker's identity does not travel with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner");
+    // The owner is what is claimed on. The identity is the sixth argument, who the History row is
+    // written as, and nothing in the claim's filter reads it (BP-1045)
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", "u-worker");
   });
 });
 
@@ -515,7 +518,7 @@ describe("the worker's owner travels with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner");
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", null);
   });
 
   it("passes the owner set at enrolment", async () => {
@@ -524,6 +527,6 @@ describe("the worker's owner travels with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner");
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", null);
   });
 });

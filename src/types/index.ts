@@ -874,6 +874,8 @@ export interface ITaskExecution {
   // Whether the claim is what assigned the task, which decides whether releasing it may clear the
   // assignee again. Absent on anything claimed before the field existed, where it means true.
   assignedByRun?: boolean;
+  // The column the last claim or release moved the task out of (BP-1045)
+  statusBefore?: string;
   // Absent until the run that holds the task reports one, and unset again the moment it leaves
   // the active column — so "no phase" is a missing field, never a stale one
   phase?: string;
