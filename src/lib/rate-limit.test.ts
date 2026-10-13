@@ -315,7 +315,6 @@ describe("an account's counters belong to its organisation (BP-665)", () => {
   });
 });
 
-
 // BP-1046. The key builders are where an address becomes a throttle key, so a /64 is one caller
 // for the source dimension and for the per-account one alike.
 describe("keys for an IPv6 caller", () => {

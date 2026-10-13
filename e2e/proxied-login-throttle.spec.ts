@@ -140,8 +140,8 @@ test("a spray across usernames from one address is bucketed by source, independe
   expect(elsewhere.status(), await elsewhere.text()).toBe(401);
 });
 
-// BP-1046. One host on an IPv6 /64 owns 2^64 addresses; keyed by the address it had a fresh bucket
-// per request, which is the brute-force control and the registration ceiling both.
+// BP-1046. A host on an IPv6 /64 owns 2^64 addresses; keyed by the address it got a fresh source
+// bucket with every request.
 test("a spray from many addresses in one IPv6 /64 is one source, and another /64 is not caught by it", async ({
   request,
 }) => {

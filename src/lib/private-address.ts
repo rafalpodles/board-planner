@@ -108,7 +108,7 @@ export function ipv6Groups(host: string): number[] | null {
   return groups;
 }
 
-function v4FromGroups(high: number, low: number): string {
+export function v4FromGroups(high: number, low: number): string {
   return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
 }
 

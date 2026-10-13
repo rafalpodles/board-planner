@@ -457,6 +457,12 @@ describe("throttleAddress", () => {
     expect(throttleAddress("::ffff:203.0.113.10")).not.toBe(throttleAddress("::ffff:203.0.113.9"));
   });
 
+  // A stateless NAT64 in front of an IPv6-only app presents every IPv4 client as 64:ff9b::a.b.c.d
+  it("reads a NAT64 address as the IPv4 host it carries", () => {
+    expect(throttleAddress("64:ff9b::cb00:7109")).toBe("203.0.113.9");
+    expect(throttleAddress("64:ff9b::cb00:710a")).not.toBe(throttleAddress("64:ff9b::cb00:7109"));
+  });
+
   it("does not collapse the addresses inside ::/64 into one prefix", () => {
     expect(throttleAddress("::1")).not.toBe(throttleAddress("::2"));
   });
