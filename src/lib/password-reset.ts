@@ -34,25 +34,6 @@ export type ResetTokenOutcome =
   | { ok: false; reason: "unknown" | "expired" | "used" };
 
 /**
- * Reads the token without spending it, so a caller can be refused before anything expensive is
- * done on its behalf. Only a link that is still live gets past it, and the claim in
- * `consumeResetToken` is still what decides who wins.
- */
-export async function findResetToken(db: ScopedDb, token: string): Promise<ResetTokenOutcome> {
-  await connectDB();
-  const existing = await db.PasswordResetToken.findOne({ tokenHash: sha256(token) }).lean();
-  if (existing && !existing.usedAt && existing.expiresAt > new Date()) {
-    return { ok: true, userId: existing.user as Types.ObjectId, sentTo: existing.sentTo ?? null };
-  }
-  return unspendable(existing);
-}
-
-function unspendable(existing: { usedAt?: Date | null } | null): { ok: false; reason: "unknown" | "expired" | "used" } {
-  if (!existing) return { ok: false, reason: "unknown" };
-  return { ok: false, reason: existing.usedAt ? "used" : "expired" };
-}
-
-/**
  * Spends the token, or explains why it cannot be spent. The claim and the marking are one atomic
  * update: `usedAt: null` in the filter is what stops two requests arriving together from both
  * being told they won, which a read-then-write cannot do however carefully it is written.
@@ -73,7 +54,9 @@ export async function consumeResetToken(db: ScopedDb, token: string): Promise<Re
   // Nothing was claimed. Naming which of the three it was costs nothing — the token is 32 random
   // bytes, so an attacker learns only that they guessed one that once existed, while the person
   // who clicked an old link in their inbox learns to ask for a new one instead of hunting a typo.
-  return unspendable(await db.PasswordResetToken.findOne({ tokenHash }).lean());
+  const existing = await db.PasswordResetToken.findOne({ tokenHash }).lean();
+  if (!existing) return { ok: false, reason: "unknown" };
+  return { ok: false, reason: existing.usedAt ? "used" : "expired" };
 }
 
 /**

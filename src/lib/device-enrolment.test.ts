@@ -34,7 +34,7 @@ const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 const { sha256 } = await import("@/lib/oauth");
 
 function candidates(rows: unknown[]) {
-  find.mockReturnValue({ limit: () => Promise.resolve(rows) });
+  findOne.mockResolvedValue(rows[0] ?? null);
 }
 
 // The eviction query: find(live).sort(...).limit(n).select("_id").lean()
@@ -114,19 +114,13 @@ describe("starting an enrolment", () => {
 // per unauthenticated request, with the attacker supplying the rows through the equally
 // unauthenticated start endpoint
 describe("the cost of a poll", () => {
-  it("narrows candidates by the indexed prefix instead of a 200-row window", async () => {
-    await pollDeviceEnrolment(scopedToDefaultOrganisation(), "cpd_" + "a".repeat(64));
+  it("looks the row up by the hash of the code, never loading a window of candidates", async () => {
+    const deviceCode = "cpd_" + "a".repeat(64);
 
-    expect(find).toHaveBeenCalledWith(
-      expect.objectContaining({ deviceCodePrefix: "cpd_aaaaaaaa" })
-    );
-    expect(find.mock.results[0].value.sort).toBeUndefined();
-  });
+    await pollDeviceEnrolment(scopedToDefaultOrganisation(), deviceCode);
 
-  it("stores the prefix so the narrowed lookup can find the row", async () => {
-    const started = await startDeviceEnrolment(scopedToDefaultOrganisation(), { machineName: "MacBook", machineHost: "" });
-
-    expect(create.mock.calls[0][0].deviceCodePrefix).toBe(started.deviceCode.slice(0, 12));
+    expect(findOne).toHaveBeenCalledWith(expect.objectContaining({ deviceCodeHash: sha256(deviceCode) }));
+    expect(find).not.toHaveBeenCalled();
   });
 
   // BP-322: the ceiling counted everybody's rows and refused the caller who hit it, so twenty

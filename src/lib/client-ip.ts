@@ -12,9 +12,11 @@
  * append to this header between the internet and the app; at 0 the header is not read at all.
  *
  * There is no socket address to fall back to — a Web `Request` in a route handler does not carry
- * one — so an unconfigured deployment gets null and callers take their anonymous path. That path
- * is a shared bucket with a raised threshold, which is a worse throttle than a per-address one and
- * a far better one than none.
+ * one — so an unconfigured deployment gets null and callers take their anonymous path. For the
+ * sign-in that path is a shared bucket with a raised threshold, which is a worse throttle than a
+ * per-address one and a far better one than none; a route whose secret is random or whose work is
+ * one insert counts no one instead, because a bucket everybody shares lets one caller refuse the
+ * rest (BP-840, BP-847, BP-1030).
  */
 export const TRUSTED_PROXY_HOPS_VAR = "TRUSTED_PROXY_HOPS";
 

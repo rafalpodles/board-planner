@@ -9,7 +9,6 @@ const logInstanceAudit = vi.fn();
 const userFindOne = vi.fn();
 const userUpdateOne = vi.fn();
 const hash = vi.fn();
-const findResetToken = vi.fn();
 let clientIp: string | null = "203.0.113.9";
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -24,7 +23,6 @@ vi.mock("@/models/rateLimit", async () => {
 });
 vi.mock("@/lib/password-reset", () => ({
   consumeResetToken,
-  findResetToken,
   invalidateResetTokens,
   releaseResetToken,
 }));
@@ -56,7 +54,6 @@ beforeEach(async () => {
   vi.clearAllMocks();
   clientIp = "203.0.113.9";
   await resetRateLimits();
-  findResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
   consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
   accountIs({ _id: "u1", username: "owner", kind: "human", email: "owner@example.com" });
   hash.mockResolvedValue("new-hash");
@@ -127,7 +124,7 @@ describe("POST /api/auth/reset", () => {
   });
 
   it("throttles one source guessing links", async () => {
-    findResetToken.mockResolvedValue({ ok: false, reason: "unknown" });
+    consumeResetToken.mockResolvedValue({ ok: false, reason: "unknown" });
     for (let i = 0; i < 20; i++) expect((await POST(post())).status).toBe(400);
 
     expect((await POST(post())).status).toBe(429);
@@ -138,21 +135,39 @@ describe("POST /api/auth/reset", () => {
   // the 400 that bucket held.
   it("does not let a caller with no address guessing links refuse the next one", async () => {
     clientIp = null;
-    findResetToken.mockResolvedValue({ ok: false, reason: "unknown" });
+    consumeResetToken.mockResolvedValue({ ok: false, reason: "unknown" });
     for (let i = 0; i < 450; i++) await POST(post());
-    findResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
+    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
 
     expect((await POST(post())).status).toBe(200);
   });
 
-  it("reads the link before hashing a password for it, so a made-up one costs a read", async () => {
-    findResetToken.mockResolvedValue({ ok: false, reason: "unknown" });
+  // BP-1030. With nothing counting callers, the work done for a link has to be bounded by the link:
+  // hashing before the claim let every request carrying one live link run its own hash.
+  it("hashes only for a link it has spent, so a link costs one hash and a made-up one none", async () => {
+    consumeResetToken.mockResolvedValue({ ok: false, reason: "used" });
 
-    const res = await POST(post());
+    const refused = await POST(post());
 
-    expect(res.status).toBe(400);
+    expect(refused.status).toBe(400);
     expect(hash).not.toHaveBeenCalled();
-    expect(consumeResetToken).not.toHaveBeenCalled();
+
+    consumeResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
+    await POST(post());
+
+    expect(hash).toHaveBeenCalledTimes(1);
+    expect(consumeResetToken.mock.invocationCallOrder.at(-1)!).toBeLessThan(hash.mock.invocationCallOrder[0]);
+  });
+
+  it("gives the link back when the hash throws, changing nothing", async () => {
+    hash.mockRejectedValue(new Error("bcrypt failed"));
+    releaseResetToken.mockResolvedValue(undefined);
+
+    await expect(POST(post())).rejects.toThrow("bcrypt failed");
+
+    expect(releaseResetToken).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "cpr_good");
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
+    expect(userUpdateOne).not.toHaveBeenCalled();
   });
 
   // BP-842. Whoever reads the old mailbox is not who the account belongs to now

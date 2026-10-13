@@ -10,7 +10,6 @@ import { logInstanceAudit } from "@/lib/instanceAudit";
 import { notifyPasswordChanged } from "@/lib/security-mail";
 import {
   consumeResetToken,
-  findResetToken,
   invalidateResetTokens,
   releaseResetToken,
 } from "@/lib/password-reset";
@@ -41,8 +40,8 @@ export async function POST(request: Request) {
   // under the minimum, a body that is not JSON — spends a slot too. That is the intended trade:
   // the alternative leaves the cheapest way to spend the server's time the one way that is free.
   //
-  // With no client address there is no count (BP-1030): the link is read before the hash below, so
-  // what an unthrottled caller with a made-up one costs is a body and one read.
+  // With no client address there is no count (BP-1030): the link is spent before anything is
+  // hashed, so a made-up one costs a body and two reads, and a real one a single hash.
   const clientIp = getClientIp(request);
   if (await sourceRefused(clientIp, "password-reset-use", ATTEMPTS_PER_SOURCE)) {
     return NextResponse.json(
@@ -70,15 +69,6 @@ export async function POST(request: Request) {
 
   await connectDB();
 
-  const found = await findResetToken(db, token);
-  if (!found.ok) {
-    return NextResponse.json({ error: REFUSALS[found.reason] }, { status: 400 });
-  }
-
-  // Hashed before the token is spent, for the same reason the length is checked first: bcrypt
-  // throwing after the claim would leave the person with a dead link and their old password
-  const hashed = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
-
   const outcome = await consumeResetToken(db, token);
   if (!outcome.ok) {
     return NextResponse.json({ error: REFUSALS[outcome.reason] }, { status: 400 });
@@ -101,6 +91,16 @@ export async function POST(request: Request) {
   // Deactivating spends the account's links, so this is only a link issued in between (BP-832)
   if (user.deactivatedAt) {
     return NextResponse.json({ error: "This account is deactivated. Ask an administrator." }, { status: 403 });
+  }
+
+  // Only the request that won the claim gets here, so a live link costs one hash however many
+  // requests carry it. A hash that throws gives the link back: nothing has changed yet.
+  let hashed: string;
+  try {
+    hashed = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
+  } catch (err) {
+    await releaseResetToken(db, token).catch(() => {});
+    throw err;
   }
 
   // Every session, including whoever is signed in on the old password — which is the case somebody

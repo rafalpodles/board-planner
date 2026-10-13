@@ -21,7 +21,8 @@ export const POST = signInRoute(async (request) => {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
-  // With no address the codes sent are bounded per e-mail address below, as forgot's links are per account
+  // With no address nothing tells callers apart, so what is bounded is each e-mail address below;
+  // the total sent is not, which is the price of not letting one caller refuse everybody (BP-1030)
   if (await sourceRefused(getClientIp(request), "platform-sign-in", CODES_PER_SOURCE)) return tooMany();
 
   const read = await readJsonBody<{ email?: unknown }>(request);

@@ -11,7 +11,7 @@ vi.mock("@/models/passwordResetToken", () => ({
   PasswordResetToken: { create, deleteMany, findOneAndUpdate, findOne },
 }));
 
-const { issueResetToken, consumeResetToken, findResetToken, invalidateResetTokens, RESET_TOKEN_PREFIX } =
+const { issueResetToken, consumeResetToken, invalidateResetTokens, RESET_TOKEN_PREFIX } =
   await import("./password-reset");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
@@ -102,34 +102,6 @@ describe("spending a link", () => {
     findOne.mockReturnValue({ lean: () => Promise.resolve(existing) });
 
     expect(await consumeResetToken(scopedToDefaultOrganisation(), "cpr_abc")).toEqual({ ok: false, reason });
-  });
-});
-
-// BP-1030. Read before anything is hashed for the caller, and never spent by the read
-describe("reading a link without spending it", () => {
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const found = (row: unknown) => findOne.mockReturnValue({ lean: () => Promise.resolve(row) });
-
-  it("answers for a live link by its hash and writes nothing", async () => {
-    found({ user: "u1", sentTo: "ada@example.com", usedAt: null, expiresAt: tomorrow });
-
-    const outcome = await findResetToken(scopedToDefaultOrganisation(), "cpr_abc");
-
-    expect(outcome).toEqual({ ok: true, userId: "u1", sentTo: "ada@example.com" });
-    expect(JSON.stringify(findOne.mock.calls[0][0])).not.toContain("cpr_abc");
-    expect(findOne.mock.calls[0][0].tokenHash).toBe(sha256("cpr_abc"));
-    expect(findOneAndUpdate).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["a token that never existed", null, "unknown"],
-    ["one already spent", { usedAt: new Date(), expiresAt: tomorrow }, "used"],
-    ["one whose hour has passed", { usedAt: null, expiresAt: yesterday }, "expired"],
-  ])("tells %s apart", async (_case, existing, reason) => {
-    found(existing);
-
-    expect(await findResetToken(scopedToDefaultOrganisation(), "cpr_abc")).toEqual({ ok: false, reason });
   });
 });
 

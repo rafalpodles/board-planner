@@ -740,7 +740,6 @@ export interface ApiWorkerPreflight extends Omit<WorkerPreflight, "reportedAt"> 
 export interface IDeviceEnrolment {
   _id: Types.ObjectId;
   deviceCodeHash: string;
-  deviceCodePrefix: string;
   userCode: string;
   machineName: string;
   machineHost: string;
