@@ -134,12 +134,12 @@ describe("POST /api/auth/reset", () => {
   });
 
   // BP-1030. The link is 32 random bytes, so with no client address the work done for a caller
-  // holding a made-up one is what is bounded, not a bucket every such caller shares. 25 is past the
-  // 20 that bucket held.
+  // holding a made-up one is what is bounded, not a bucket every such caller shares. 450 is past
+  // the 400 that bucket held.
   it("does not let a caller with no address guessing links refuse the next one", async () => {
     clientIp = null;
     findResetToken.mockResolvedValue({ ok: false, reason: "unknown" });
-    for (let i = 0; i < 25; i++) await POST(post());
+    for (let i = 0; i < 450; i++) await POST(post());
     findResetToken.mockResolvedValue({ ok: true, userId: "u1", sentTo: "owner@example.com" });
 
     expect((await POST(post())).status).toBe(200);

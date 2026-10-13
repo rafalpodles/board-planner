@@ -161,11 +161,11 @@ describe("POST /api/auth/confirm-email", () => {
   });
 
   // BP-1030. The link is random and the first thing read, so nothing here is worth a bucket every
-  // caller with no address would share. 25 is past the 20 that bucket held.
+  // caller with no address would share. 450 is past the 400 that bucket held.
   it("does not let a caller with no address guessing links refuse the next one", async () => {
     clientIp = null;
     consumeEmailChange.mockResolvedValue({ ok: false, reason: "unknown" });
-    for (let i = 0; i < 25; i++) await POST(post());
+    for (let i = 0; i < 450; i++) await POST(post());
     consumeEmailChange.mockResolvedValue({ ok: true, userId: "u1", email: "new@example.com", claimedAt: CLAIMED, ofCurrentAddress: false });
 
     expect((await POST(post())).status).toBe(200);
