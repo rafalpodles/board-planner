@@ -1,3 +1,5 @@
+import { ipv6Groups } from "./private-address";
+
 /**
  * Who the throttle counts against.
  *
@@ -120,6 +122,29 @@ export function getClientIp(request: Request): string | null {
   // Without the zone: it is validated away but was being returned, so up to 40 characters of
   // anything travelled into the throttle key and the session's ip column
   return candidate.split("%")[0];
+}
+
+/**
+ * What a throttle counts a client as. One host on an IPv6 /64 owns 2^64 addresses, so keyed by the
+ * address it would get a fresh bucket per request; the prefix is the unit a LAN, a VM or a
+ * household is handed (BP-1046). IPv4 is returned as is, and so is anything that is not an IPv6
+ * literal — a user id or an organisation id goes through the same key builders.
+ *
+ * The session's `ip` column and the audit rows keep the address `getClientIp` returned.
+ */
+export function throttleAddress(value: string): string {
+  if (!value.includes(":")) return value;
+  const groups = ipv6Groups(value.toLowerCase());
+  if (!groups) return value;
+
+  const [g0, g1, g2, g3, g4, g5, g6, g7] = groups;
+  const upperHalfIsZero = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0;
+  // An IPv4 client behind a v6 costume is one v4 host, and its /64 is ::/64, which is everybody's
+  if (upperHalfIsZero && g4 === 0 && g5 === 0xffff) return `${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}`;
+  // ::/64 is no site's subnet (loopback, the unspecified address, the deprecated v4-compatible form)
+  if (upperHalfIsZero) return groups.map((g) => g.toString(16)).join(":");
+
+  return `${[g0, g1, g2, g3].map((g) => g.toString(16)).join(":")}::/64`;
 }
 
 /**

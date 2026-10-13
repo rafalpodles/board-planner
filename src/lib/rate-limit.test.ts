@@ -315,3 +315,26 @@ describe("an account's counters belong to its organisation (BP-665)", () => {
   });
 });
 
+
+// BP-1046. The key builders are where an address becomes a throttle key, so a /64 is one caller
+// for the source dimension and for the per-account one alike.
+describe("keys for an IPv6 caller", () => {
+  const INSIDE = ["2001:db8:1:2::1", "2001:db8:1:2:aaaa:bbbb:cccc:dddd"];
+  const ELSEWHERE = "2001:db8:1:3::1";
+
+  it("share one source key inside a /64 and not across them", () => {
+    expect(sourceKey(INSIDE[0], "login")).toBe(sourceKey(INSIDE[1], "login"));
+    expect(sourceKey(INSIDE[0], "login")).not.toBe(sourceKey(ELSEWHERE, "login"));
+  });
+
+  it("share one account key inside a /64 and not across them", () => {
+    const key = (ip: string) => lockoutKey(DEFAULT_ORGANISATION_ID, ip, "admin");
+
+    expect(key(INSIDE[0])).toBe(key(INSIDE[1]));
+    expect(key(INSIDE[0])).not.toBe(key(ELSEWHERE));
+  });
+
+  it("leave an IPv4 key as it was", () => {
+    expect(sourceKey("203.0.113.9", "login")).toBe("login:source:203.0.113.9");
+  });
+});

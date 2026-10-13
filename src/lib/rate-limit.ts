@@ -28,6 +28,7 @@ import type { Types } from "mongoose";
  * deploy, and they grew by one entry for every key anybody asked about — and since the key contains
  * a caller-supplied username, an anonymous caller could grow them without bound (BP-318).
  */
+import { throttleAddress } from "./client-ip";
 import { connectDB } from "./db";
 import { sha256 } from "./oauth";
 import { RateLimit } from "@/models/rateLimit";
@@ -200,7 +201,7 @@ export async function resetRateLimits(): Promise<void> {
  * `_id` rather than a scan of the collection looking for a segment in the middle (BP-353).
  */
 export function lockoutKey(organisation: Types.ObjectId, clientIp: string, username: string, scope = "login"): string {
-  return `${accountPrefix(organisation, username, scope)}${clientIp}`;
+  return `${accountPrefix(organisation, username, scope)}${throttleAddress(clientIp)}`;
 }
 
 /** Everything a given account's counters share, whichever address they were reached from. */
@@ -241,9 +242,12 @@ function accountDigest(organisation: Types.ObjectId, username: string): string {
   return sha256(`${organisation.toHexString()}:${normaliseUsername(username)}`).slice(0, 32);
 }
 
-/** The source dimension: one key per caller, regardless of which account it is guessing at. */
+/**
+ * The source dimension: one key per caller, regardless of which account it is guessing at. An IPv6
+ * caller is one per /64 (`throttleAddress`).
+ */
 export function sourceKey(clientIp: string, scope = "login"): string {
-  return `${scope}:source:${clientIp}`;
+  return `${scope}:source:${throttleAddress(clientIp)}`;
 }
 
 /** The target dimension: one key per account named, for a route with no caller to tell apart. */

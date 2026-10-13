@@ -60,7 +60,7 @@ function isPrivateV4(host: string): boolean | null {
 }
 
 /** Expands an IPv6 literal to its eight 16-bit groups, or null if it is not one. */
-function ipv6Groups(host: string): number[] | null {
+export function ipv6Groups(host: string): number[] | null {
   if (!host.includes(":")) return null;
 
   let text = host;
