@@ -93,10 +93,10 @@ export function render({ byText, without, lgpl }) {
     "THIRD-PARTY NOTICES",
     "",
     "Board Planner is licensed under the GNU Affero General Public License v3.0 (see LICENSE). It is",
-    "built from the npm packages below, each under its own licence: most are compiled into the",
-    "application's own files, some are loaded from node_modules at run time. This file is written at",
-    "build time from the project's package-lock.json; the base image (node:alpine) carries its own",
-    "licence information.",
+    "built from the npm packages below, each under its own licence: some are compiled into the",
+    "application's own files, some are loaded from node_modules at run time and some are used only to",
+    "build it. This file is written at build time from the project's package-lock.json; the base image",
+    "(node:alpine) carries its own licence information.",
     "",
   ];
   const groups = [...byText.entries()]
@@ -110,11 +110,11 @@ export function render({ byText, without, lgpl }) {
     out.push(...lgpl.sort().map((line) => `  ${line}`), "");
     out.push(
       "The repository named is the package's own (for @img/sharp-libvips, the scripts that build the",
-      "libraries it carries); the upstream source of each bundled library is at the version in the",
-      "package's versions.json. Each package sits in its own directory of this image, apart from the",
-      "application, so a modified version can be put in its place. A package's README.md may list the",
-      "libraries bundled in it and the licence of each (the @img/sharp-libvips packages do). The",
-      "licence texts are at https://www.gnu.org/licenses/ (lgpl-3.0.txt, lgpl-2.1.txt).",
+      "libraries it carries). A package's README.md may list the libraries bundled in it and the licence",
+      "of each, and its versions.json their versions: the upstream source is the release of that",
+      "version (the @img/sharp-libvips packages do both). Where a package is loaded from node_modules at",
+      "run time, a modified version can be put in its place in this image. The licence texts are at",
+      "https://www.gnu.org/licenses/ (lgpl-3.0.txt, lgpl-2.1.txt).",
       ""
     );
   }
