@@ -13,7 +13,7 @@ vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
 vi.mock("@/models/task", () => ({ Task: { findOneAndUpdate: taskFindOneAndUpdate, exists: taskExists } }));
 
-const { PATCH, DELETE } = await import("./route");
+const { PATCH, DELETE } = await import("./checklist-item-route");
 
 const PROJECT_ID = "507f1f77bcf86cd799439011";
 const TASK_ID = "507f1f77bcf86cd799439021";

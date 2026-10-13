@@ -206,6 +206,7 @@ jobs:
         with:
           name: playwright-artifacts-production-csp
           path: e2e/.artifacts
+          include-hidden-files: true
           retention-days: 7
 
   # The process the app ships beside itself, run for real against the e2e app (BP-711): the worker.
@@ -257,6 +258,7 @@ jobs:
           path: |
             e2e/.artifacts
             ${{ runner.temp }}/mongod.log
+          include-hidden-files: true
           retention-days: 7
 
   # The real licence service and the app together, against a Stripe stand-in (BP-979): each side's own suite stubs the
@@ -315,6 +317,7 @@ jobs:
           path: |
             e2e/.artifacts
             !e2e/.artifacts/licence-smoke/licence-service.log
+          include-hidden-files: true
           retention-days: 7
 
   backup:
@@ -359,9 +362,19 @@ jobs:
     # this list and that file disagree, and when a spec belongs to no group at all. The matrix
     # always lists all six — plan_e2e decides which of them actually run. That gate is a step-level
     # `if:`, not a job-level one: the `matrix` context (needed to compare against plan_e2e's answer)
-    # is only available to steps, not to a job's own `if:`. An unaffected group's job still runs —
-    # checkout, setup, `npm ci` — it just skips straight past Chromium and the tests themselves,
-    # which is where the time actually goes.
+    # is only available to steps, not to a job's own `if:`. An unaffected group's job still starts,
+    # and its first step says there is nothing to run; every other step is skipped, so it costs the
+    # seconds of a runner starting rather than an install and a browser.
+    #
+    # A group is also cut into shards, because the longest of them set the wall time of the whole
+    # run: `project` alone was 43 minutes of one runner while `task-fields` took six. `shard` is
+    # a second matrix dimension of 1 to 3 and SHARDS below says how many each group really has;
+    # a job whose number is past its group's count has nothing to run and ends after one step.
+    # Playwright's `--shard=n/m` splits a project's spec files between the jobs, each with a
+    # runner, a Mongo and a dev server of its own like the groups, so no spec shares state with
+    # another. The counts were set from the durations of run 38291632092 (project 41 min of tests,
+    # people 30, tasks 26, automation 24, board 21, task-fields 6) to bring every job under about
+    # 18 minutes; move them with the durations.
     #
     # `if: !cancelled()` plus the `!= 'success'` half of the "Whether plan_e2e picked this group"
     # check below both exist for the same failure the plan_e2e job's own internal fallback can't
@@ -369,7 +382,7 @@ jobs:
     # script failing. `needs:` alone would then skip every e2e job — running zero of six groups,
     # the opposite of "ambiguous means run everything." `!= 'success'` short-circuits before
     # `fromJson` ever sees a possibly-empty `outputs.groups`.
-    name: End to end — ${{ matrix.group }}
+    name: End to end — ${{ matrix.group }} (shard ${{ matrix.shard }})
     needs: plan_e2e
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -379,6 +392,7 @@ jobs:
         # e2e-groups-start
         group: [tasks, task-fields, board, project, people, automation]
         # e2e-groups-end
+        shard: [1, 2, 3]
     services:
       mongo:
         image: mongo:7
@@ -390,16 +404,30 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
+      # First, and before the checkout: a job with nothing to run (a group plan_e2e left out, or a
+      # shard past its group's count) should cost the seconds it takes to say so, not a `npm ci`
+      - name: Whether this job has tests to run
+        id: affected
+        env:
+          # How many shards each group is cut into, at most the three the matrix lists (BP-1042)
+          SHARDS: '{"tasks":2,"task-fields":1,"board":2,"project":3,"people":2,"automation":2}'
+          PICKED: ${{ needs.plan_e2e.result != 'success' || contains(fromJson(needs.plan_e2e.outputs.groups), matrix.group) }}
+        run: |
+          shards=$(echo "$SHARDS" | jq -r --arg group "${{ matrix.group }}" '.[$group] // 1')
+          if [ "$PICKED" = "true" ] && [ "${{ matrix.shard }}" -le "$shards" ]; then run=true; else run=false; fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "shards=$shards" >> "$GITHUB_OUTPUT"
+          echo "${{ matrix.group }} shard ${{ matrix.shard }} of $shards: run=$run"
+
       - uses: actions/checkout@v7
+        if: steps.affected.outputs.run == 'true'
       - uses: actions/setup-node@v7
+        if: steps.affected.outputs.run == 'true'
         with:
           node-version: 26
           cache: npm
       - run: npm ci
-
-      - name: Whether plan_e2e picked this group
-        id: affected
-        run: echo "run=${{ needs.plan_e2e.result != 'success' || contains(fromJson(needs.plan_e2e.outputs.groups), matrix.group) }}" >> "$GITHUB_OUTPUT"
+        if: steps.affected.outputs.run == 'true'
 
       # Keyed on the resolved Playwright version: a browser cache from an older one is not
       # merely stale, it fails to launch
@@ -431,15 +459,26 @@ jobs:
           E2E_PASSWORDLESS_SERVER: ${{ matrix.group == 'people' && '1' || '' }}
           # And the one with ORGANISATION_DOMAIN set, where organisations live on subdomains (BP-670)
           E2E_ORGANISATIONS_SERVER: ${{ matrix.group == 'people' && '1' || '' }}
-        run: npx playwright test --project=${{ matrix.group }}
+        # Next's dev server sometimes answers a bare 404 page for routes that exist, and keeps doing so
+        # until the process ends (BP-1042). A per-test retry runs on the same process, so the tests that
+        # failed run once more on a fresh one; a real failure fails again and the job stays red.
+        run: |
+          if ! npx playwright test --project=${{ matrix.group }} --shard=${{ matrix.shard }}/${{ steps.affected.outputs.shards }}; then
+            echo "::warning title=e2e second pass::the first pass of ${{ matrix.group }} shard ${{ matrix.shard }} failed; its failed tests run once more on a fresh dev server (BP-1042)"
+            rm -rf e2e/.artifacts-first-pass && cp -R e2e/.artifacts e2e/.artifacts-first-pass
+            npx playwright test --project=${{ matrix.group }} --last-failed
+          fi
 
       # The trace is the only way to see what the page looked like when a run fails on a machine
       # nobody can open
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: playwright-artifacts-${{ matrix.group }}
-          path: e2e/.artifacts
+          name: playwright-artifacts-${{ matrix.group }}-${{ matrix.shard }}
+          path: |
+            e2e/.artifacts
+            e2e/.artifacts-first-pass
+          include-hidden-files: true
           retention-days: 7
 
   # The one check main's ruleset requires: a required per-job check would wait forever on an e2e
