@@ -68,7 +68,7 @@ export async function POST(req: Request) {
   if (!(await makeRoomForClient(db))) {
     return NextResponse.json(
       { error: "invalid_request", error_description: "Too many client registrations are waiting to be approved. Try again in a few minutes." },
-      { status: 429, headers: CORS }
+      { status: 429, headers: { ...CORS, "Retry-After": "900" } }
     );
   }
   await db.OAuthClient.create({ clientId, clientName, redirectUris, expiresAt: unusedClientExpiry() });

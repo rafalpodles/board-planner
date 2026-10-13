@@ -43,6 +43,8 @@ export async function makeRoomForClient(db: ScopedDb, now = Date.now()): Promise
   return surplus.length >= needed;
 }
 
-export async function markClientUsed(db: ScopedDb, clientId: string): Promise<void> {
-  await db.OAuthClient.updateOne({ clientId }, { $unset: { expiresAt: 1 } });
+/** False when no such client is left: it was evicted or deleted since the person was shown it. */
+export async function markClientUsed(db: ScopedDb, clientId: string): Promise<boolean> {
+  const result = await db.OAuthClient.updateOne({ clientId }, { $unset: { expiresAt: 1 } });
+  return result.matchedCount > 0;
 }

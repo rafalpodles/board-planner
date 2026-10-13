@@ -69,6 +69,7 @@ describe("POST /oauth/register", () => {
     const res = await POST(request({ redirect_uris: ["https://claude.ai/api/mcp/callback"] }));
 
     expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("900");
     expect(create).not.toHaveBeenCalled();
   });
 

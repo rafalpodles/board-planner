@@ -86,14 +86,20 @@ describe("making room for a registration (BP-1030)", () => {
 });
 
 describe("expiry and approval", () => {
+  it("says so when the client is gone, which the person approving was not told", async () => {
+    updateOne.mockResolvedValue({ matchedCount: 0 });
+
+    expect(await markClientUsed(scopedToDefaultOrganisation(), "cpc_gone")).toBe(false);
+  });
+
   it("expires a registration after the TTL", () => {
     expect(unusedClientExpiry(1_000).getTime()).toBe(1_000 + UNUSED_CLIENT_TTL_MS);
   });
 
   it("removes the expiry when a person approves the client", async () => {
-    updateOne.mockResolvedValue({});
+    updateOne.mockResolvedValue({ matchedCount: 1 });
 
-    await markClientUsed(scopedToDefaultOrganisation(), "cpc_x");
+    expect(await markClientUsed(scopedToDefaultOrganisation(), "cpc_x")).toBe(true);
 
     expect(updateOne).toHaveBeenCalledWith(
       { clientId: "cpc_x", organisation: DEFAULT_ORGANISATION_ID },

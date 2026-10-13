@@ -428,6 +428,7 @@ describe("POST /oauth/authorize consent phase", () => {
     resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
     userFindOne.mockResolvedValue(USER);
     oauthCodeCreate.mockResolvedValue({});
+    oauthClientUpdateOne.mockResolvedValue({ matchedCount: 1 });
   });
 
   function consent(fields: Record<string, string>, headers: Record<string, string> = {}) {
@@ -475,6 +476,17 @@ describe("POST /oauth/authorize consent phase", () => {
       expect.objectContaining({ clientId: "c1" }),
       { $unset: { expiresAt: 1 } }
     );
+  });
+
+  // Evicted or deleted since the person was shown the consent screen: a code for it would fail at
+  // the token endpoint later and less clearly
+  it("mints nothing for a client that is gone by the time it is approved", async () => {
+    oauthClientUpdateOne.mockResolvedValueOnce({ matchedCount: 0 });
+
+    const response = await POST(consent({ access: "all" }));
+
+    expect(await response.text()).toContain("Client is no longer valid.");
+    expect(oauthCodeCreate).not.toHaveBeenCalled();
   });
 
   // A client left unapproved is one the TTL or a flood removes later, taking every token with it
