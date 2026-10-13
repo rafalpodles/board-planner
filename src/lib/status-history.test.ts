@@ -144,6 +144,41 @@ describe("statusHistory — the definitions", () => {
     expect(history).toMatchObject({ kind: "recorded", gap: true, startedAt: null, startInferred: false });
   });
 
+  it("a break leaves the start unknown whatever column lies beyond it, since the missing moves may have been active", () => {
+    const afterReview = statusHistory(
+      [move("planned", "todo", day(2)), move("review", "doing", day(6))],
+      roleOf,
+      { createdAt: CREATED, status: "doing" }
+    );
+    expect(afterReview).toMatchObject({ gap: true, startedAt: null, startInferred: false });
+
+    const afterDeletedColumn = statusHistory(
+      [move("planned", "todo", day(2)), move("retired-column", "doing", day(6))],
+      roleOf,
+      { createdAt: CREATED, status: "doing" }
+    );
+    expect(afterDeletedColumn).toMatchObject({ gap: true, startedAt: null });
+    expect(afterDeletedColumn.kind === "recorded" && afterDeletedColumn.unknownColumns).toEqual(["retired-column"]);
+
+    const afterEmptyColumn = statusHistory(
+      [move("planned", "todo", day(2)), move("", "doing", day(6))],
+      roleOf,
+      { createdAt: CREATED, status: "doing" }
+    );
+    expect(afterEmptyColumn).toMatchObject({ gap: true, startedAt: null });
+    expect(afterEmptyColumn.kind === "recorded" && afterEmptyColumn.unknownColumns).toEqual([]);
+  });
+
+  it("a start already recorded before a break stays", () => {
+    const history = statusHistory(
+      [move("todo", "doing", day(2)), move("review", "done", day(6))],
+      roleOf,
+      { createdAt: CREATED, status: "done" }
+    );
+
+    expect(history).toMatchObject({ gap: true, startedAt: day(2), finishedAt: day(6) });
+  });
+
   it("a move into done nobody wrote is a gap, and the later return to done is the finish", () => {
     const history = statusHistory(
       [move("todo", "doing", day(2)), move("done", "review", day(6)), move("review", "done", day(8))],

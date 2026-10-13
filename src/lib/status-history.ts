@@ -28,6 +28,7 @@ export type StatusHistory =
 interface Entry {
   column: string;
   at: Date | null;
+  afterBreak?: boolean;
 }
 
 /**
@@ -47,9 +48,13 @@ interface Entry {
  * A task with no rows is `no-history`: nothing is known about it, which is not the same as zero days.
  *
  * `gap` says a transition is missing: a row's `oldValue` is not the column the previous row left
- * the task in, or the last recorded column is not where the task is now. The column on the far side
- * of a break is entered at an unknown time, so it can neither give a start or a finish a time nor
- * be skipped over to find a later one. A reader that wants durations leaves a gap task out.
+ * the task in, or the last recorded column is not where the task is now. A break before any start
+ * was seen leaves the start unknown whatever the column beyond it is, because the missing moves may
+ * have passed through an active one; the column on the far side is entered at an unknown time.
+ * A reader that wants durations leaves out a task with `gap` or `startInferred`.
+ *
+ * What the rows cannot show: a move out and back with nothing written in between (a claim that was
+ * released, a lease that expired) leaves a chain that holds together, and so no gap.
  */
 export function statusHistory(
   rows: StatusRow[],
@@ -69,7 +74,7 @@ export function statusHistory(
   for (const [index, row] of ordered.entries()) {
     if (index > 0 && row.oldValue !== ordered[index - 1].newValue) {
       gap = true;
-      if (row.oldValue) entries.push({ column: row.oldValue, at: null });
+      entries.push({ column: row.oldValue, at: null, afterBreak: true });
     }
     entries.push({ column: row.newValue, at: row.createdAt });
   }
@@ -83,10 +88,11 @@ export function statusHistory(
   const unknownColumns = new Set<string>();
 
   const hasCreationEntry = Boolean(ordered[0].oldValue);
-  for (const [position, { column, at }] of entries.entries()) {
+  for (const [position, { column, at, afterBreak }] of entries.entries()) {
+    if (afterBreak && !startSeen) startSeen = true;
     const role = roleOf(column);
     if (role === "unknown") {
-      unknownColumns.add(column);
+      if (column) unknownColumns.add(column);
       continue;
     }
     if (role === "active" && !startSeen) {
