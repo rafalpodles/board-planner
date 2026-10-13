@@ -979,6 +979,18 @@ describe("releaseExpiredTasks", () => {
     }
   });
 
+  // startedAt is not cleared when a run ends, so a task a person put back in an active column by hand still
+  // carries an old one. Only a run still holding the task has a lease to expire (BP-1047)
+  it("only touches a task a run is still holding, in both the read and the write", async () => {
+    expired(expiredTask());
+
+    await releaseExpiredTasks(db, "p1", now);
+
+    for (const filter of [find.mock.calls[0][0], findOneAndUpdate.mock.calls[0][0]]) {
+      expect(filter["execution.runId"]).toEqual({ $nin: ["", null] });
+    }
+  });
+
   // The read decides who to try; the update decides who is moved. A task claimed or released in
   // between matches nothing, which is what stops a second poll writing the same row (BP-1045)
   it("repeats the lease and the task's id in the update, so a task moved since the read is left alone", async () => {

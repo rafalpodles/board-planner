@@ -1663,6 +1663,9 @@ export async function releaseExpiredTasks(db: ScopedDb, projectId: string, now =
     project: projectId,
     status: { $in: active },
     "execution.startedAt": { $lt: new Date(now.getTime() - EXECUTION_LEASE_MS) },
+    // startedAt is not cleared when a run ends, so on its own it outlives the run: a person who
+    // drags a finished task back into an active column would be swept out of it (BP-1047)
+    ...STILL_HELD,
     ...NOT_ARCHIVED,
   };
 
