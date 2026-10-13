@@ -11,11 +11,13 @@ import {
   FINISHED_TASK_TITLE,
   HELD_TASK_NUMBER,
   HELD_TASK_TITLE,
+  PROJECT_ID,
   PROJECT_KEY,
   PROJECT_NAME,
   SIBLING_TASK_ID,
   SIBLING_TASK_NUMBER,
   SIBLING_TASK_TITLE,
+  activityProjects,
   storedActivity,
   seed,
 } from "./seed";
@@ -184,6 +186,7 @@ test("a free card drags to another column, lands in the right place, and survive
     const activity = await storedActivity(DECOY_TASK_ID);
     const entry = activity.find((a) => a.action === "status_changed");
     expect(entry).toMatchObject({ field: "status", oldValue: "in_review", newValue: "todo" });
+    expect(await activityProjects(DECOY_TASK_ID, "status_changed")).toEqual([String(PROJECT_ID)]);
   });
 
   await test.step("a reload shows the same board — the move was never only optimistic", async () => {
@@ -326,6 +329,10 @@ test("a row edited in the list view really edits the task", async ({ page, reque
 
     const task = await readTask(request, SIBLING_TASK_NUMBER);
     expect(task.status).toBe("todo");
+
+    const entry = (await storedActivity(SIBLING_TASK_ID)).find((a) => a.action === "status_changed");
+    expect(entry).toMatchObject({ field: "status", oldValue: "in_progress", newValue: "todo" });
+    expect(await activityProjects(SIBLING_TASK_ID, "status_changed")).toEqual([String(PROJECT_ID)]);
   });
 
   await test.step("assignee and priority take effect too", async () => {
