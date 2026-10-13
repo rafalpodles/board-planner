@@ -16,6 +16,8 @@ ENV BUILD_STANDALONE=1
 # The build reads the variable but never opens a connection
 ENV MONGODB_URI=mongodb://127.0.0.1:1/build-does-not-connect
 RUN npm run build
+# The standalone output carries the code of what the server needs and none of the licence files beside it
+RUN node scripts/third-party-notices.mjs .next/standalone/node_modules node_modules > THIRD-PARTY-NOTICES.txt
 
 FROM node:26-alpine AS runner
 WORKDIR /app
@@ -32,6 +34,7 @@ ENV GIT_SHA=$GIT_SHA
 RUN addgroup -S nodejs && adduser -S -G nodejs nextjs
 
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/LICENSE /app/THIRD-PARTY-NOTICES.txt ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
