@@ -115,13 +115,13 @@ test("an apply gives each row its task's project, leaves the rows of a deleted t
   expect(await everyRow()).toBe(after);
 });
 
-test("a row that already names a project keeps it", async () => {
-  await col("activitylogs").insertOne(legacy(T2, "doing", day(3), P1));
+test("a row that already names a project keeps it, beside a row of the same task that did not", async () => {
+  await col("activitylogs").insertMany([legacy(T2, "doing", day(3)), legacy(T2, "done", day(5), P1)]);
 
   await backfillActivityProjects(mongoose.connection, { apply: true });
 
-  const [row] = await col("activitylogs").find({ task: T2 }).toArray();
-  expect(String(row.project)).toBe(String(P1));
+  const rows = await col("activitylogs").find({ task: T2 }).sort({ createdAt: 1 }).toArray();
+  expect(rows.map((row) => String(row.project))).toEqual([String(P2), String(P1)]);
 });
 
 test("logActivity writes the project it is given on the row", async () => {
