@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { useToast } from "@/components/ui/Toast";
-import { formatStorage } from "@/lib/storage-size";
+import { formatFileSize } from "@/lib/storage-size";
 
 interface StoredFile {
   id: string;
@@ -52,6 +52,7 @@ export function StorageFiles({ onDeleted }: { onDeleted: () => void }) {
       await api.del(`/api/organisation/storage/files/${file.id}`);
       toast(`${file.name} deleted`, "success");
       setAsking(null);
+      setListing((current) => current && { total: current.total - 1, files: current.files.filter((f) => f.id !== file.id) });
       onDeleted();
       await load();
     } catch (err) {
@@ -91,7 +92,7 @@ export function StorageFiles({ onDeleted }: { onDeleted: () => void }) {
                 {listing.total > listing.files.length
                   ? `The ${listing.files.length} largest of ${listing.total} files.`
                   : `${listing.total} ${listing.total === 1 ? "file" : "files"}.`}{" "}
-                Deleting one frees its space; a task or comment that links to it shows a broken attachment.
+                Deleting one frees its space. Anything that links to the file will show a broken attachment.
               </p>
               <ul className="divide-y divide-border rounded-md border border-border text-sm">
                 {listing.files.map((file) => (
@@ -103,12 +104,12 @@ export function StorageFiles({ onDeleted }: { onDeleted: () => void }) {
                       <p className="break-words text-xs text-text-muted">
                         {[
                           file.project ? file.project.name : "no board",
-                          file.uploadedBy ?? "an account that was deleted",
+                          file.uploadedBy ? `by ${file.uploadedBy}` : "uploader unknown",
                           new Date(file.uploadedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }),
                         ].join(" · ")}
                       </p>
                     </div>
-                    <span className="shrink-0 tabular-nums text-text-muted">{formatStorage(file.size)}</span>
+                    <span className="shrink-0 tabular-nums text-text-muted">{formatFileSize(file.size)}</span>
                     <Button
                       variant="secondary"
                       size="sm"
@@ -132,7 +133,7 @@ export function StorageFiles({ onDeleted }: { onDeleted: () => void }) {
         title={asking ? `Delete ${asking.name}?` : "Delete file?"}
         message={
           asking
-            ? `This frees ${formatStorage(asking.size)}. Anything that links to the file will show a broken attachment, and it cannot be undone.`
+            ? `This frees ${formatFileSize(asking.size)}. Anything that links to the file will show a broken attachment, and it cannot be undone.`
             : ""
         }
         loading={deleting}

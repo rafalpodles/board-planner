@@ -304,8 +304,9 @@ ORGANISATION_STORAGE_MB=  # Optional — uploaded files one organisation may kee
                           # 413. With ORGANISATION_DOMAIN set the default follows the plan: 1024 on Free,
                           # 20480 on Pro and its trial (`storageLimitFor`, BP-967); off without it. A value
                           # set here holds for every plan and offers no upgrade; 0 is off. Over the ceiling
-                          # after a downgrade nothing is deleted, but nothing removes a file either, so
-                          # new uploads stay refused until the plan gives room (BP-1025). A Pro
+                          # after a downgrade nothing is deleted, so new uploads stay refused until files
+                          # are deleted (an instance admin's list of the largest, from an interactive
+                          # session only, under Settings → Organisation, BP-1025) or the plan gives room. A Pro
                           # organisation at 20480 is told to write to contact@board-planner.com about Enterprise
                           # Settings → Organisation shows an admin the usage (`/api/organisation/storage`)
 LEGAL_TERMS_VERSION=      # Optional, with ORGANISATION_DOMAIN only — the date (YYYY-MM-DD) the cloud's Terms of

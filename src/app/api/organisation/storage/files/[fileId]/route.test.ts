@@ -73,4 +73,14 @@ describe("DELETE /api/organisation/storage/files/:fileId (BP-1025)", () => {
     expect(logInstanceAudit.mock.calls[0][1].target).toHaveLength(200);
     expect(logInstanceAudit.mock.calls[0][1].detail).toContain("no board");
   });
+
+  it("still answers, and still audits, when the file's project is not an id", async () => {
+    discard.mockResolvedValue({ _id: new mongoose.Types.ObjectId(FILE), filename: "hand.png", length: 70, metadata: { project: "not-an-id" } });
+
+    const response = await remove(FILE);
+
+    expect(response.status).toBe(200);
+    expect(findProject).not.toHaveBeenCalled();
+    expect(logInstanceAudit.mock.calls[0][1].detail).toBe(`70 B · no board · ${FILE}`);
+  });
 });

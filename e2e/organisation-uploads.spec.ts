@@ -109,12 +109,27 @@ test.describe("BP-1025: an administrator deletes a file to make room", () => {
     expect(audit).toContainEqual(expect.objectContaining({ action: "upload_deleted", target: "floor-plan.png" }));
   });
 
-  test("is the administrator's: a member can neither list nor delete, and the file stays", async ({ request }) => {
+  // A member's session, not a member's token: every token is refused on these routes, so a token cannot tell the gate from the refusal
+  test("is the administrator's: a member signed in can neither list nor delete, and the file stays", async ({ page, request }) => {
     const id = await upload(request, "keep.png");
+    await signIn(page, "member");
 
-    expect((await request.get("/api/organisation/storage/files", { headers: MEMBER_AUTH })).status()).toBe(403);
-    expect((await request.delete(`/api/organisation/storage/files/${id}`, { headers: MEMBER_AUTH })).status()).toBe(403);
+    expect((await page.request.get("/api/organisation/storage/files")).status()).toBe(403);
+    expect((await page.request.delete(`/api/organisation/storage/files/${id}`, { headers: SAME_ORIGIN })).status()).toBe(403);
     expect((await request.get(`/api/uploads/${id}`, { headers: ADMIN_AUTH })).status()).toBe(200);
+  });
+
+  test("an administrator deletes a file somebody else uploaded", async ({ page, request }) => {
+    const response = await request.post("/api/uploads", {
+      headers: MEMBER_AUTH,
+      multipart: { file: { name: "theirs.png", mimeType: "image/png", buffer: TINY_PNG }, projectId: String(PROJECT_ID) },
+    });
+    expect(response.status(), await response.text()).toBe(200);
+    const id = new URL((await response.json()).url, "http://x").pathname.split("/").pop()!;
+    await signIn(page);
+
+    expect((await page.request.delete(`/api/organisation/storage/files/${id}`, { headers: SAME_ORIGIN })).status()).toBe(200);
+    expect((await request.get(`/api/uploads/${id}`, { headers: ADMIN_AUTH })).status()).toBe(404);
   });
 
   test("a token is refused, an administrator's too, so one on a worker's disk cannot empty the storage", async ({ request }) => {

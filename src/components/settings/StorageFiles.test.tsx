@@ -8,12 +8,13 @@ vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 
 const MB = 1024 * 1024;
-const FILE = { id: "f1", name: "plan.pdf", size: 5 * MB, uploadedAt: "2026-10-01T10:00:00.000Z", project: { key: "TP", name: "Test Project" }, uploadedBy: "ola" };
+type Row = { id: string; name: string; size: number; uploadedAt: string; project: { key: string; name: string } | null; uploadedBy: string | null };
+const FILE: Row = { id: "f1", name: "plan.pdf", size: 5 * MB, uploadedAt: "2026-10-01T10:00:00.000Z", project: { key: "TP", name: "Test Project" }, uploadedBy: "ola" };
 
 beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 
-async function open(listing = { total: 1, files: [FILE] }) {
+async function open(listing: { total: number; files: Row[] } = { total: 1, files: [FILE] }) {
   api.get.mockResolvedValue(listing);
   const onDeleted = vi.fn();
   render(<StorageFiles onDeleted={onDeleted} />);
@@ -35,7 +36,15 @@ describe("the largest files on the organisation page (BP-1025)", () => {
     expect(row.textContent).toContain("plan.pdf");
     expect(row.textContent).toContain("5 MB");
     expect(row.textContent).toContain("Test Project");
-    expect(row.textContent).toContain("ola");
+    expect(row.textContent).toContain("by ola");
+  });
+
+  it("shows a small file at its own size, and says plainly when it does not know who uploaded it", async () => {
+    await open({ total: 1, files: [{ ...FILE, name: "tiny.png", size: 70, uploadedBy: null }] });
+
+    const row = await screen.findByTestId("storage-file");
+    expect(row.textContent).toContain("70 B");
+    expect(row.textContent).toContain("uploader unknown");
   });
 
   it("says how many of the files it shows when there are more than it lists", async () => {
