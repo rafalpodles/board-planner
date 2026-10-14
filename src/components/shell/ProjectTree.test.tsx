@@ -181,7 +181,7 @@ describe("ProjectTree", () => {
   it("renders every sub-nav entry as a link, never a button", async () => {
     const { container } = renderTree();
     const subNav = [...container.querySelectorAll("a, button")].filter((el) =>
-      ["Board", "Sprints", "Dashboard", "PM agent", "Settings"].includes(el.textContent?.trim() || "")
+      ["Board", "Sprints", "Dashboard", "Insights", "PM agent", "Settings"].includes(el.textContent?.trim() || "")
     );
     expect(subNav.length).toBeGreaterThan(0);
     expect(subNav.every((el) => el.tagName === "A")).toBe(true);
@@ -194,6 +194,9 @@ describe("ProjectTree", () => {
     );
     expect(screen.getByText("Dashboard").closest("a")?.getAttribute("href")).toBe(
       "/projects/TP/dashboard"
+    );
+    expect(screen.getByText("Insights").closest("a")?.getAttribute("href")).toBe(
+      "/projects/TP/insights"
     );
   });
 });

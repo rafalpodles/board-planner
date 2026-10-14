@@ -4,6 +4,7 @@ export const WEEK_MS = 7 * 86_400_000;
 export const DEFAULT_WEEKS = 12;
 export const MAX_WEEKS = 52;
 export const FINISHED_SAMPLE_CAP = 5000;
+export const SCATTER_POINTS_CAP = 500;
 
 export interface Spread {
   count: number;
@@ -15,6 +16,14 @@ export interface FlowFigures {
   throughput: number;
   leadTime: Spread | null;
   cycleTime: Spread | null;
+}
+
+export interface FinishedPoint {
+  taskNumber: number;
+  title: string;
+  finishedAt: string;
+  leadMs: number;
+  cycleMs: number | null;
 }
 
 export interface AgingTask {
@@ -34,11 +43,14 @@ export interface Insights {
   summary: FlowFigures;
   weekly: (FlowFigures & { weekStart: string })[];
   agingWip: { referenceP85Ms: number | null; tasks: AgingTask[] };
+  finished: { points: FinishedPoint[]; truncated: boolean };
   byCategory: Record<string, FlowFigures>;
   byEstimate?: { field: { id: string; name: string }; values: Record<string, FlowFigures> };
 }
 
 interface Finished {
+  taskNumber: number;
+  title: string;
   finishedAt: number;
   leadMs: number;
   cycleMs: number | null;
@@ -135,6 +147,8 @@ export function computeInsights(
       if (finishedAt < from || finishedAt > now) continue;
       const startedAt = history.startInferred ? null : history.startedAt;
       finishedAll.push({
+        taskNumber: task.taskNumber,
+        title: task.title,
         finishedAt,
         leadMs: Math.max(0, finishedAt - task.createdAt.getTime()),
         cycleMs: startedAt ? finishedAt - startedAt.getTime() : null,
@@ -186,6 +200,16 @@ export function computeInsights(
     summary: figures(finished),
     weekly,
     agingWip: { referenceP85Ms, tasks: agingTasks },
+    finished: {
+      points: finished.slice(0, SCATTER_POINTS_CAP).map((f) => ({
+        taskNumber: f.taskNumber,
+        title: f.title,
+        finishedAt: new Date(f.finishedAt).toISOString(),
+        leadMs: f.leadMs,
+        cycleMs: f.cycleMs,
+      })),
+      truncated: finished.length > SCATTER_POINTS_CAP,
+    },
     byCategory: groupBy(finished, (f) => f.category),
     ...(estimateField
       ? {

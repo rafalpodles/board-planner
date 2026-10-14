@@ -37,12 +37,16 @@ export const GET = withProjectAccess(
       sprint && !query.get("weeks") ? weeksSince(sprint.startDate, Date.now()) : weeks.weeks;
 
     const histories = await projectStatusHistories(db, projectId, { estimateFieldId: estimateField?.id });
-    const scoped = sprint ? histories.filter((task) => task.sprint === String(sprint._id)) : histories;
+    const category = query.get("category");
+    const scoped = histories.filter(
+      (task) => (!sprint || task.sprint === String(sprint._id)) && (!category || task.category === category)
+    );
 
     return NextResponse.json({
       sprint: sprint
         ? { id: String(sprint._id), name: sprint.name, startDate: sprint.startDate, endDate: sprint.endDate }
         : null,
+      category: category || null,
       ...computeInsights(scoped, { now: Date.now(), weeks: weeksShown, estimateField }),
     });
   })

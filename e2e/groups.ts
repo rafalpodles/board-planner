@@ -150,6 +150,7 @@ export const GROUPS = {
     "organisation-migration.spec.ts",
     "status-history.spec.ts",
     "insights.spec.ts",
+    "insights-page.spec.ts",
     "organisation-secrets-reseal.spec.ts",
     "organisation-uploads.spec.ts",
     "db-scope.spec.ts",
