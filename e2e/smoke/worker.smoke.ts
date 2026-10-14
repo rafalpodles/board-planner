@@ -283,7 +283,8 @@ function startWorker(enrolmentToken: string): ChildProcess {
 
 async function stop(child: ChildProcess | undefined, graceMs: number) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  const exited = new Promise<void>((done) => child.once("exit", () => done()));
+  // `close`, not `exit`: the log stream is flushed by then, so its last lines are in the dump and the attachment
+  const exited = new Promise<void>((done) => child.once("close", () => done()));
   child.kill("SIGTERM");
   const timer = setTimeout(() => child.kill("SIGKILL"), graceMs);
   await exited;
@@ -314,6 +315,10 @@ test.afterEach(async ({}, testInfo) => {
   await stop(worker, 30_000);
   await stop(daemon, 5_000);
   worker = daemon = undefined;
+  // The job log carries it even when the artifact upload fails (BP-1049)
+  if (testInfo.status !== testInfo.expectedStatus && existsSync(WORKER_LOG)) {
+    console.log(`--- worker.log, last 400 lines\n${readFileSync(WORKER_LOG, "utf8").split("\n").slice(-400).join("\n")}`);
+  }
   if (existsSync(WORKER_LOG)) await testInfo.attach("worker.log", { path: WORKER_LOG });
   if (existsSync(GH_LOG)) await testInfo.attach("gh.log", { path: GH_LOG });
 });

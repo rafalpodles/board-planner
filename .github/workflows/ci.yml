@@ -249,10 +249,22 @@ jobs:
       - run: npm ci
       - run: npm ci
         working-directory: worker
+      # A production build, as the server the worker really talks to is. In one run under `next dev` the
+      # worker's comment, status and release calls answered 404 while claim and runs succeeded; the cause
+      # was not established (BP-1050)
       - name: Smoke
+        env:
+          E2E_PROD: "1"
         run: npx playwright test -c playwright.smoke.config.ts --project=worker
+      # The worker creates worker.lock write-only, and a socket left by a killed worker cannot be opened:
+      # the archiver fails on either, so a failed smoke uploaded nothing (BP-1049)
+      - name: Make the artifacts readable
+        if: failure() || cancelled()
+        run: |
+          chmod -R u+rX e2e/.artifacts || true
+          find e2e/.artifacts -type s -delete || true
       - uses: actions/upload-artifact@v7
-        if: failure()
+        if: failure() || cancelled()
         with:
           name: smoke-artifacts-worker
           path: |
