@@ -14,6 +14,8 @@ type Comment = {
   generatedBy?: GeneratedBy;
   source?: string;
   sourceDetail?: string;
+  editedSource?: string;
+  editedSourceDetail?: string;
 };
 
 const nameOf = (person: Person) => (person && typeof person === "object" ? (person.username ?? null) : null);
@@ -35,6 +37,8 @@ export function commentLines(comments: Comment[]) {
       ...(comment.generatedBy ? { generatedBy: comment.generatedBy } : {}),
       source: shownSource(comment.source),
       ...(comment.sourceDetail ? { sourceDetail: comment.sourceDetail } : {}),
+      ...(comment.editedSource ? { editedSource: comment.editedSource } : {}),
+      ...(comment.editedSourceDetail ? { editedSourceDetail: comment.editedSourceDetail } : {}),
     };
   });
 }

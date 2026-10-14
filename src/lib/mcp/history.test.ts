@@ -29,10 +29,9 @@ describe("commentLines", () => {
   });
 
   it("says where a comment came from", () => {
-    expect(commentLines([{ _id: "c1", body: "b", source: "mcp", sourceDetail: "Notion" }])[0]).toMatchObject({
-      source: "mcp",
-      sourceDetail: "Notion",
-    });
+    expect(
+      commentLines([{ _id: "c1", body: "b", source: "web-ui", editedSource: "mcp", editedSourceDetail: "Notion" }])[0]
+    ).toMatchObject({ source: "web-ui", editedSource: "mcp", editedSourceDetail: "Notion" });
   });
 
   it("has no author to name for a comment whose author is gone", () => {
