@@ -1,33 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
+import { useAuditLog } from "@/hooks/use-audit-log";
+import { INSTANCE_AUDIT_PAGE } from "@/lib/audit-page-size";
 import { LoadFailed } from "@/components/ui/LoadFailed";
-import { useToast } from "@/components/ui/Toast";
-import { ApiInstanceAuditLog } from "@/types";
+import { Button } from "@/components/ui/Button";
+import { AuditFilters } from "@/components/audit/AuditFilters";
+import { ApiInstanceAuditLog, INSTANCE_AUDIT_ACTIONS } from "@/types";
 import { auditActionLabel, auditActor, auditIsNotable } from "@/lib/instance-audit-view";
 
+
+const ACTION_OPTIONS = INSTANCE_AUDIT_ACTIONS.map((action) => ({
+  value: action,
+  label: action === "worker_command_sent" ? "Worker told to stop or pause" : auditActionLabel({ action, detail: "" }),
+}));
+
 export default function InstanceAuditPage() {
-  const api = useApi();
   const router = useRouter();
   const { isAdmin, isLoading: authLoading } = useAuth();
-  const { toast } = useToast();
-
-  const [logs, setLogs] = useState<ApiInstanceAuditLog[] | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  const load = useCallback(async () => {
-    setFailed(false);
-    try {
-      setLogs(await api.get("/api/admin/audit"));
-    } catch {
-      toast("Failed to load the audit log", "error");
-      setFailed(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const { rows: logs, more, loading, failed, filters, apply, reload, loadMore } = useAuditLog<ApiInstanceAuditLog>(
+    "/api/admin/audit",
+    INSTANCE_AUDIT_PAGE
+  );
 
   useEffect(() => {
     if (authLoading) return;
@@ -35,10 +31,11 @@ export default function InstanceAuditPage() {
       router.replace("/projects");
       return;
     }
-    load();
-  }, [isAdmin, authLoading, router, load]);
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, authLoading, router]);
 
-  if (authLoading || (logs === null && !failed)) {
+  if (authLoading) {
     return (
       <div className="flex justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
@@ -60,15 +57,23 @@ export default function InstanceAuditPage() {
         </p>
       </div>
 
-      {failed || logs === null ? (
+      <AuditFilters actions={ACTION_OPTIONS} applied={filters} onApply={apply} exportUrl="/api/admin/audit/export" />
+
+      {logs === null && !failed ? (
+        <div className="flex justify-center py-12" role="status" aria-label="Loading the audit log">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+        </div>
+      ) : logs === null ? (
         // Not the empty state: "nothing recorded yet" is a claim about this instance's history
         <LoadFailed
           testId="instance-audit-error"
           message="Failed to load the audit log."
-          onRetry={load}
+          onRetry={reload}
         />
       ) : logs.length === 0 ? (
-        <p className="text-sm text-text-muted">Nothing recorded yet.</p>
+        <p className="text-sm text-text-muted">
+          {Object.values(filters).some(Boolean) ? "No entries match these filters." : "Nothing recorded yet."}
+        </p>
       ) : (
         <div className="border border-border rounded-lg overflow-hidden">
           <table className="w-full text-xs">
@@ -111,6 +116,23 @@ export default function InstanceAuditPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {logs !== null && failed && (
+        <LoadFailed
+          testId="instance-audit-more-error"
+          variant="row"
+          className="mt-3"
+          message="Failed to load more of the audit log."
+          onRetry={loadMore}
+        />
+      )}
+      {logs !== null && more && !failed && (
+        <div className="mt-3 flex justify-center">
+          <Button variant="secondary" size="sm" onClick={loadMore} disabled={loading}>
+            {loading ? "Loading…" : "Load more"}
+          </Button>
         </div>
       )}
     </div>

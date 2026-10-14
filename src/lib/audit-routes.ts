@@ -11,9 +11,8 @@ import {
   NEXT_CURSOR_HEADER,
   type ExportShape,
 } from "@/lib/audit-query";
+import { INSTANCE_AUDIT_PAGE, PROJECT_AUDIT_PAGE } from "@/lib/audit-page-size";
 
-const INSTANCE_DEFAULT_LIMIT = 200;
-const PROJECT_DEFAULT_LIMIT = 100;
 
 type Person = { username?: string } | null | undefined;
 type InstanceRow = { createdAt: Date; user: Person; actorUsername?: string; action: string; target: string; detail: string };
@@ -58,7 +57,7 @@ async function auditReader(db: ScopedDb, request: Request, scope: { projectId?: 
   const parsed = parseAuditParams(
     query,
     project ? PROJECT_AUDIT_ACTIONS : INSTANCE_AUDIT_ACTIONS,
-    project ? PROJECT_DEFAULT_LIMIT : INSTANCE_DEFAULT_LIMIT
+    project ? PROJECT_AUDIT_PAGE : INSTANCE_AUDIT_PAGE
   );
   if (!parsed.ok) return { ok: false, response: NextResponse.json({ error: parsed.error }, { status: 400 }) } as const;
   const filter = await auditFilter(
