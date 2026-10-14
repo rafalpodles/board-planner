@@ -35,7 +35,6 @@ export default function InstanceAuditPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, authLoading, router]);
 
-  // The page arrives whole the first time; a later read keeps the filters on screen
   if (authLoading || (isAdmin && !answered)) {
     return (
       <div className="flex justify-center py-12">
