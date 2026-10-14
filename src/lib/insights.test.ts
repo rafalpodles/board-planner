@@ -117,6 +117,19 @@ describe("computeInsights — figures a hand computation gives", () => {
     expect(insights.agingWip.tasks[0].ageMs).toBe(15 * DAY);
   });
 
+  it("a finish followed by a move into a column that is gone is not counted, since where it stands is unknown", () => {
+    const strayed = task(10, [
+      ["todo", "doing", 8],
+      ["doing", "done", 4],
+      ["done", "archive-gone", 2],
+    ]);
+
+    const insights = computeInsights([strayed], { now: NOW, weeks: 4 });
+
+    expect(strayed.history).toMatchObject({ finishedAt: at(4), gap: false });
+    expect(insights.summary.throughput).toBe(0);
+  });
+
   it("leaves a task with a gap out of every figure and counts it", () => {
     const holed = task(10, [
       ["todo", "doing", 8],
