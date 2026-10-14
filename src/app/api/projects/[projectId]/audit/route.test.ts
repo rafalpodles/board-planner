@@ -20,7 +20,7 @@ vi.mock("@/lib/grants", async (importOriginal) => {
   return { ...actual, check };
 });
 vi.mock("@/models/projectAuditLog", () => ({
-  ProjectAuditLog: { find: (...a: unknown[]) => (find(...a), { populate }) },
+  ProjectAuditLog: { find: (...a: unknown[]) => (find(...a), { sort }) },
 }));
 
 const { GET } = await import("./route");
@@ -33,9 +33,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue({ _id: "u1", role: "member" });
   check.mockResolvedValue(true);
-  populate.mockReturnValue({ sort });
   sort.mockReturnValue({ limit });
-  limit.mockReturnValue({ lean });
+  limit.mockReturnValue({ populate });
+  populate.mockReturnValue({ lean });
   lean.mockResolvedValue([]);
 });
 

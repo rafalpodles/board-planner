@@ -1681,28 +1681,31 @@ export interface ApiActivityLog {
 }
 
 // Project audit log
-export type ProjectAuditAction =
-  | "settings_updated"
-  | "component_added"
-  | "component_removed"
-  | "label_added"
-  | "label_removed"
-  | "template_added"
-  | "template_removed"
-  | "template_updated"
-  | "member_added"
-  | "member_role_changed"
-  | "member_removed"
-  | "member_invited"
-  | "member_invitation_removed"
-  | "task_created"
-  | "task_deleted"
-  | "bulk_delete"
-  | "bulk_move"
-  | "worker_updated"
-  | "webhook_secret_revealed"
-  | "webhook_secret_rotated"
-  | "project_exported";
+export const PROJECT_AUDIT_ACTIONS = [
+  "settings_updated",
+  "component_added",
+  "component_removed",
+  "label_added",
+  "label_removed",
+  "template_added",
+  "template_removed",
+  "template_updated",
+  "member_added",
+  "member_role_changed",
+  "member_removed",
+  "member_invited",
+  "member_invitation_removed",
+  "task_created",
+  "task_deleted",
+  "bulk_delete",
+  "bulk_move",
+  "worker_updated",
+  "webhook_secret_revealed",
+  "webhook_secret_rotated",
+  "project_exported",
+] as const;
+
+export type ProjectAuditAction = (typeof PROJECT_AUDIT_ACTIONS)[number];
 
 // The kill switch first, because "who stopped this machine" is the question this log exists to
 // answer. Separate verbs rather than one worker_updated with a detail column: an operator scanning

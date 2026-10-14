@@ -1,30 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IProjectAuditLog } from "@/types";
+import { IProjectAuditLog, PROJECT_AUDIT_ACTIONS } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
-
-const ACTIONS = [
-  "settings_updated",
-  "component_added",
-  "component_removed",
-  "label_added",
-  "label_removed",
-  "template_added",
-  "template_removed",
-  "template_updated",
-  "member_added",
-  "member_role_changed",
-  "member_removed",
-  "member_invited",
-  "member_invitation_removed",
-  "task_created",
-  "task_deleted",
-  "bulk_delete",
-  "bulk_move",
-  "worker_updated",
-  "webhook_secret_revealed",
-  "webhook_secret_rotated",
-  "project_exported",
-];
 
 const projectAuditLogSchema = new Schema<IProjectAuditLog>(
   {
@@ -40,7 +16,7 @@ const projectAuditLogSchema = new Schema<IProjectAuditLog>(
     },
     action: {
       type: String,
-      enum: ACTIONS,
+      enum: PROJECT_AUDIT_ACTIONS,
       required: true,
     },
     detail: {
@@ -56,6 +32,7 @@ const projectAuditLogSchema = new Schema<IProjectAuditLog>(
 );
 
 projectAuditLogSchema.index({ project: 1, createdAt: -1 });
+projectAuditLogSchema.index({ project: 1, action: 1, createdAt: -1 });
 
 withOrganisation(projectAuditLogSchema);
 

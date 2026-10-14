@@ -42,6 +42,7 @@ const instanceAuditLogSchema = new Schema<IInstanceAuditLog>(
 );
 
 instanceAuditLogSchema.index({ createdAt: -1 });
+instanceAuditLogSchema.index({ action: 1, createdAt: -1 });
 
 withOrganisation(instanceAuditLogSchema);
 
