@@ -44,6 +44,7 @@ interface Finished {
   cycleMs: number | null;
   category: string;
   estimate: number | null;
+  startInferred: boolean;
 }
 
 /** Linear interpolation between closest ranks, as numpy's default and Excel's PERCENTILE.INC. */
@@ -132,7 +133,6 @@ export function computeInsights(
     if (history.finishedAt && task.role === "done") {
       const finishedAt = history.finishedAt.getTime();
       if (finishedAt < from || finishedAt > now) continue;
-      if (history.startInferred) excluded.startInferred++;
       const startedAt = history.startInferred ? null : history.startedAt;
       finishedAll.push({
         finishedAt,
@@ -140,6 +140,7 @@ export function computeInsights(
         cycleMs: startedAt ? finishedAt - startedAt.getTime() : null,
         category: task.category,
         estimate: task.estimate,
+        startInferred: history.startInferred,
       });
     } else if (task.role === "active" && !task.archived) {
       if (history.startInferred) excluded.startInferred++;
@@ -150,6 +151,7 @@ export function computeInsights(
   finishedAll.sort((a, b) => b.finishedAt - a.finishedAt);
   const truncated = finishedAll.length > FINISHED_SAMPLE_CAP;
   const finished = truncated ? finishedAll.slice(0, FINISHED_SAMPLE_CAP) : finishedAll;
+  excluded.startInferred += finished.filter((f) => f.startInferred).length;
 
   const byWeek: Finished[][] = Array.from({ length: weeks }, () => []);
   for (const f of finished) byWeek[Math.min(weeks - 1, Math.floor((f.finishedAt - from) / WEEK_MS))].push(f);

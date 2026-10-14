@@ -202,6 +202,12 @@ describe("computeInsights — edges", () => {
     expect(computeInsights([skewed], { now: NOW, weeks: 2 }).summary.leadTime?.medianMs).toBe(0);
   });
 
+  it("a start recorded after now, from a clock ahead of this one, ages as zero rather than negative", () => {
+    const ahead = task(1, [["todo", "doing", -0.5]]);
+
+    expect(computeInsights([ahead], { now: NOW, weeks: 2 }).agingWip.tasks[0].ageMs).toBe(0);
+  });
+
   it("a task still in progress since an inferred start is counted apart, not aged from its creation", () => {
     const bornActive = task(5, [["doing", "review", 3], ["review", "doing", 2]]);
 
