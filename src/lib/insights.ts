@@ -55,6 +55,17 @@ export function percentile(sorted: number[], p: number): number {
   return sorted[low] + (sorted[high] - sorted[low]) * (rank - low);
 }
 
+function countBelow(sorted: number[], value: number): number {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (sorted[middle] < value) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
 function spread(values: number[]): Spread | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -135,13 +146,12 @@ export function computeInsights(
   const truncated = finishedAll.length > FINISHED_SAMPLE_CAP;
   const finished = truncated ? finishedAll.slice(0, FINISHED_SAMPLE_CAP) : finishedAll;
 
-  const weekly = Array.from({ length: weeks }, (_, i) => {
-    const start = from + i * WEEK_MS;
-    const end = start + WEEK_MS;
-    const last = i === weeks - 1;
-    const inWeek = finished.filter((f) => f.finishedAt >= start && (last ? f.finishedAt <= end : f.finishedAt < end));
-    return { weekStart: new Date(start).toISOString(), ...figures(inWeek) };
-  });
+  const byWeek: Finished[][] = Array.from({ length: weeks }, () => []);
+  for (const f of finished) byWeek[Math.min(weeks - 1, Math.floor((f.finishedAt - from) / WEEK_MS))].push(f);
+  const weekly = byWeek.map((inWeek, i) => ({
+    weekStart: new Date(from + i * WEEK_MS).toISOString(),
+    ...figures(inWeek),
+  }));
 
   const cycles = finished.flatMap((f) => (f.cycleMs === null ? [] : [f.cycleMs])).sort((a, b) => a - b);
   const referenceP85Ms = cycles.length ? Math.round(percentile(cycles, 85)) : null;
@@ -155,7 +165,7 @@ export function computeInsights(
         startedAt: new Date(startedAt).toISOString(),
         ageMs,
         olderThanPercent: cycles.length
-          ? Math.round((cycles.filter((c) => c < ageMs).length / cycles.length) * 100)
+          ? Math.round((countBelow(cycles, ageMs) / cycles.length) * 100)
           : null,
       };
     })
