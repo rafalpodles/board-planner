@@ -87,8 +87,9 @@ export function organisationUploads(db: ScopedDb) {
       const file = await files.findOne({ _id: id, "metadata.organisation": db.organisation });
       if (!file) return null;
       await chunks.deleteMany({ files_id: id });
-      await files.deleteOne({ _id: id });
-      return file;
+      // Two administrators on one file: only the one whose delete removed the row reports it
+      const { deletedCount } = await files.deleteOne({ _id: id });
+      return deletedCount === 1 ? file : null;
     },
     // Chunks before their file row, so an interrupted run leaves a row it can find again
     deleteAll: async (): Promise<number> => {

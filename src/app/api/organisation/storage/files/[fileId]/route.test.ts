@@ -6,9 +6,11 @@ const logInstanceAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
+const user = { _id: "admin-1", username: "root", viaMachineCredential: false };
+const findProject = vi.fn();
 vi.mock("@/lib/middleware", () => ({
   withAdmin: (handler: (request: Request, context: unknown) => unknown) => (request: Request, context: { params: Promise<unknown> }) =>
-    handler(request, { params: context.params, user: { _id: "admin-1", username: "root" }, db: {} }),
+    handler(request, { params: context.params, user, db: { Project: { findById: findProject } } }),
 }));
 vi.mock("@/lib/upload-ownership", () => ({ organisationUploads: () => ({ discard }) }));
 
@@ -18,11 +20,20 @@ const FILE = "6a9d0f0b5d781bded2cb9901";
 const remove = (fileId: string) =>
   DELETE(new Request(`https://x/api/organisation/storage/files/${fileId}`, { method: "DELETE" }), { params: Promise.resolve({ fileId }) });
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  user.viaMachineCredential = false;
+  findProject.mockReturnValue({ lean: async () => ({ key: "TP" }) });
+});
 
 describe("DELETE /api/organisation/storage/files/:fileId (BP-1025)", () => {
   it("deletes the file, says how much it freed and leaves a row in the audit log naming the file and who did it", async () => {
-    discard.mockResolvedValue({ _id: new mongoose.Types.ObjectId(FILE), filename: "plan.pdf", length: 5 * 1024 * 1024 });
+    discard.mockResolvedValue({
+      _id: new mongoose.Types.ObjectId(FILE),
+      filename: "plan.pdf",
+      length: 5 * 1024 * 1024,
+      metadata: { project: new mongoose.Types.ObjectId() },
+    });
 
     const response = await remove(FILE);
 
@@ -31,7 +42,7 @@ describe("DELETE /api/organisation/storage/files/:fileId (BP-1025)", () => {
     expect(String(discard.mock.calls[0][0])).toBe(FILE);
     expect(logInstanceAudit).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ action: "upload_deleted", actorUsername: "root", target: "plan.pdf", detail: "5 MB" })
+      expect.objectContaining({ action: "upload_deleted", actorUsername: "root", target: "plan.pdf", detail: `5 MB · TP · ${FILE}` })
     );
   });
 
@@ -45,5 +56,21 @@ describe("DELETE /api/organisation/storage/files/:fileId (BP-1025)", () => {
   it("answers 400 for something that is not a file id, before touching anything", async () => {
     expect((await remove("not-an-id")).status).toBe(400);
     expect(discard).not.toHaveBeenCalled();
+  });
+
+  it("is not for a machine credential: an admin token on a worker's disk cannot empty the storage", async () => {
+    user.viaMachineCredential = true;
+
+    expect((await remove(FILE)).status).toBe(403);
+    expect(discard).not.toHaveBeenCalled();
+  });
+
+  it("keeps a long file name out of the audit row's target", async () => {
+    discard.mockResolvedValue({ _id: new mongoose.Types.ObjectId(FILE), filename: "x".repeat(500), length: 1, metadata: {} });
+
+    await remove(FILE);
+
+    expect(logInstanceAudit.mock.calls[0][1].target).toHaveLength(200);
+    expect(logInstanceAudit.mock.calls[0][1].detail).toContain("no board");
   });
 });

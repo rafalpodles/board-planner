@@ -56,6 +56,8 @@ export function StorageFiles({ onDeleted }: { onDeleted: () => void }) {
       await load();
     } catch (err) {
       toast(err instanceof Error && err.message ? err.message : "Could not delete the file", "error");
+      setAsking(null);
+      await load();
     } finally {
       setDeleting(false);
     }

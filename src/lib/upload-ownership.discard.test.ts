@@ -36,7 +36,9 @@ function bucket(rows: Row[]) {
           (filter["metadata.organisation"] === undefined || String(f.metadata.organisation) === String(filter["metadata.organisation"]))
       ) ?? null,
     deleteOne: async ({ _id }: { _id: mongoose.Types.ObjectId }) => {
+      const before = state.files.length;
       state.files = state.files.filter((f) => !f._id.equals(_id));
+      return { deletedCount: before - state.files.length };
     },
   };
   const chunks = {
@@ -81,6 +83,16 @@ describe("deleting an uploaded file on an administrator's say (BP-1025)", () => 
     expect(gone?.filename).toBe("a.png");
     expect(state.files.map((f) => String(f._id))).toEqual([String(id(2))]);
     expect(state.chunks.map((c) => String(c.files_id))).toEqual([String(id(2))]);
+  });
+
+  it("reports nothing when another delete removed the row first, so only one of two administrators is told it was theirs", async () => {
+    const state = bucket([{ _id: id(1), length: 10, filename: "a.png", metadata: { organisation: ORGANISATION } }]);
+    const uploads = organisationUploads(db)!;
+
+    const [first, second] = await Promise.all([uploads.discard(id(1)), uploads.discard(id(1))]);
+
+    expect([first, second].filter(Boolean)).toHaveLength(1);
+    expect(state.files).toHaveLength(0);
   });
 
   it("does not touch a file of another organisation, and says there was none", async () => {

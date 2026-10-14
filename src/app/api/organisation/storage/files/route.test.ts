@@ -6,9 +6,10 @@ const count = vi.fn();
 const projectFind = vi.fn();
 const userFind = vi.fn();
 
+const session = { viaMachineCredential: false };
 vi.mock("@/lib/middleware", () => ({
   withAdmin: (handler: (request: Request, context: unknown) => unknown) => (request: Request) =>
-    handler(request, { params: Promise.resolve({}), db: { Project: { find: projectFind }, User: { find: userFind } } }),
+    handler(request, { params: Promise.resolve({}), user: session, db: { Project: { find: projectFind }, User: { find: userFind } } }),
 }));
 vi.mock("@/lib/upload-ownership", () => ({ organisationUploads: () => ({ largest, count }) }));
 
@@ -20,6 +21,7 @@ const lean = (rows: unknown[]) => ({ lean: async () => rows });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  session.viaMachineCredential = false;
   count.mockResolvedValue(40);
   projectFind.mockReturnValue(lean([{ _id: BOARD, key: "TP", name: "Test Project" }]));
   userFind.mockReturnValue(lean([{ _id: PERSON, username: "ola" }]));
@@ -68,5 +70,14 @@ describe("GET /api/organisation/storage/files (BP-1025)", () => {
     const [file] = (await (await GET(new Request("https://x/api/organisation/storage/files"), { params: Promise.resolve({}) })).json()).files;
 
     expect(file).toMatchObject({ name: "old.png", project: null, uploadedBy: null, contentType: null });
+  });
+
+  it("is not for a machine credential: an admin token on a worker's disk does not read the file names", async () => {
+    session.viaMachineCredential = true;
+
+    const response = await GET(new Request("https://x/api/organisation/storage/files"), { params: Promise.resolve({}) });
+
+    expect(response.status).toBe(403);
+    expect(largest).not.toHaveBeenCalled();
   });
 });

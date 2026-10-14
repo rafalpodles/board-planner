@@ -70,7 +70,9 @@ describe("the largest files on the organisation page (BP-1025)", () => {
 
     await waitFor(() => expect(toast).toHaveBeenCalledWith("File not found", "error"));
     expect(onDeleted).not.toHaveBeenCalled();
-    expect(screen.getAllByTestId("storage-file")).toHaveLength(1);
+    // Another administrator may have got there first, so the list is read again rather than trusted
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("says it could not read the list rather than showing an empty one", async () => {

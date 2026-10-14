@@ -7,8 +7,12 @@ import { formatStorage } from "@/lib/storage-size";
 import { organisationUploads } from "@/lib/upload-ownership";
 
 export const DELETE = withAdmin(async (_request, { params, user, db }) => {
+  // The one thing on this route that cannot be undone, so a token that sits on a worker's disk does not reach it
+  if (user.viaMachineCredential) {
+    return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
+  }
   const { fileId } = await params;
-  if (!mongoose.isValidObjectId(fileId)) return NextResponse.json({ error: "Invalid file id" }, { status: 400 });
+  if (!mongoose.isObjectIdOrHexString(fileId)) return NextResponse.json({ error: "Invalid file id" }, { status: 400 });
   await connectDB();
 
   const uploads = organisationUploads(db);
@@ -16,12 +20,14 @@ export const DELETE = withAdmin(async (_request, { params, user, db }) => {
   const file = await uploads.discard(new mongoose.Types.ObjectId(fileId));
   if (!file) return NextResponse.json({ error: "File not found" }, { status: 404 });
 
+  const board = file.metadata?.project ? await db.Project.findById(String(file.metadata.project), "key").lean() : null;
   void logInstanceAudit(db, {
     action: "upload_deleted",
     user: user._id,
     actorUsername: user.username,
-    target: file.filename,
-    detail: formatStorage(file.length),
+    // File names repeat, and the audit model has no length limit
+    target: file.filename.slice(0, 200),
+    detail: [formatStorage(file.length), board?.key ?? "no board", String(file._id)].join(" · "),
   });
   return NextResponse.json({ freedBytes: file.length });
 });

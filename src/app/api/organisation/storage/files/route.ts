@@ -8,7 +8,10 @@ const LISTED = 25;
 const ids = (values: unknown[]) =>
   [...new Set(values.map(String))].filter((value) => mongoose.isValidObjectId(value)).map((value) => new mongoose.Types.ObjectId(value));
 
-export const GET = withAdmin(async (_request, { db }) => {
+export const GET = withAdmin(async (_request, { db, user }) => {
+  if (user.viaMachineCredential) {
+    return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
+  }
   const uploads = organisationUploads(db);
   if (!uploads) return NextResponse.json({ error: "Database not connected" }, { status: 500 });
 

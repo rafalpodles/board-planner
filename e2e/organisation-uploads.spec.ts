@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import mongoose from "mongoose";
 import { Readable } from "node:stream";
-import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
+import { ADMIN_AUTH, MEMBER_AUTH, SAME_ORIGIN } from "./api";
 import { signIn } from "./session";
 import { E2E_MONGODB_URI, PROJECT_ID, seed } from "./seed";
 import { backfillOrganisations } from "../src/lib/organisation-migration";
@@ -117,10 +117,20 @@ test.describe("BP-1025: an administrator deletes a file to make room", () => {
     expect((await request.get(`/api/uploads/${id}`, { headers: ADMIN_AUTH })).status()).toBe(200);
   });
 
-  test("a file of another organisation is not found, so it cannot be deleted by naming its id", async ({ request }) => {
-    const id = await storeElsewhere();
+  test("a token is refused, an administrator's too, so one on a worker's disk cannot empty the storage", async ({ request }) => {
+    const id = await upload(request, "token.png");
 
-    expect((await request.delete(`/api/organisation/storage/files/${id}`, { headers: ADMIN_AUTH })).status()).toBe(404);
+    expect((await request.get("/api/organisation/storage/files", { headers: ADMIN_AUTH })).status()).toBe(403);
+    expect((await request.delete(`/api/organisation/storage/files/${id}`, { headers: ADMIN_AUTH })).status()).toBe(403);
+    expect((await request.get(`/api/uploads/${id}`, { headers: ADMIN_AUTH })).status()).toBe(200);
+  });
+
+  test("a file of another organisation is not found, so it cannot be deleted by naming its id", async ({ page }) => {
+    const id = await storeElsewhere();
+    await signIn(page);
+
+    // A cookie session writes with the origin a browser would send, which is what the provenance check asks for
+    expect((await page.request.delete(`/api/organisation/storage/files/${id}`, { headers: SAME_ORIGIN })).status()).toBe(404);
     expect(await withDb((db) => db.collection("uploads.files").countDocuments({ _id: new mongoose.Types.ObjectId(id) }))).toBe(1);
   });
 });
