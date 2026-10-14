@@ -147,6 +147,7 @@ test("on Free the page shows the sample and the upsell, and never asks for insig
   await expect(page.getByTestId("insights-aging")).toContainText("DEMO-151");
   await expect(page.getByTestId("insights-aging")).not.toContainText("FRE-");
   await expect(page.getByTestId("insights-trend").getByText("Sample data")).toBeVisible();
+  await expect(page.getByTestId("insights-dora").getByText("Sample data")).toHaveCount(0);
   await page.waitForTimeout(1_000);
   expect(asked).toEqual([]);
   await shot(page, "free-desktop");

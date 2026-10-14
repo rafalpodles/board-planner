@@ -22,9 +22,19 @@ const DAY = 86_400_000;
 
 export const SampleContext = createContext(false);
 
-function Panel({ title, children, testId }: { title: string; children: React.ReactNode; testId: string }) {
+function Panel({
+  title,
+  children,
+  testId,
+  showsData = true,
+}: {
+  title: string;
+  children: React.ReactNode;
+  testId: string;
+  showsData?: boolean;
+}) {
   const headingId = useId();
-  const sample = useContext(SampleContext);
+  const sample = useContext(SampleContext) && showsData;
   return (
     <section className="rounded-lg border border-border bg-bg-card p-4" data-testid={testId} aria-labelledby={headingId}>
       <h2 id={headingId} className="mb-3 flex flex-wrap items-center gap-2 font-semibold">
@@ -239,6 +249,19 @@ export function ScatterChart({
     <Panel title={title} testId="insights-scatter">
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="h-auto w-full" role="img" aria-label={description}>
         <YAxis max={max} format={formatDuration} />
+        {points.map((p) => (
+          <circle
+            key={p.taskNumber}
+            cx={x(p.finishedAt)}
+            cy={y(valueOf(p, measure)!)}
+            r={4}
+            className="fill-primary stroke-bg-card"
+            strokeWidth={2}
+            opacity={0.85}
+          >
+            <title>{`${projectRef}-${p.taskNumber} ${p.title}: ${formatDuration(valueOf(p, measure))}, finished ${new Date(p.finishedAt).toLocaleDateString()}`}</title>
+          </circle>
+        ))}
         {summary &&
           ([
             ["50%", summary.medianMs, y(summary.p85Ms) - y(summary.medianMs) > -20 ? 16 : -5],
@@ -267,19 +290,6 @@ export function ScatterChart({
               </text>
             </g>
           ))}
-        {points.map((p) => (
-          <circle
-            key={p.taskNumber}
-            cx={x(p.finishedAt)}
-            cy={y(valueOf(p, measure)!)}
-            r={4}
-            className="fill-primary stroke-bg-card"
-            strokeWidth={2}
-            opacity={0.85}
-          >
-            <title>{`${projectRef}-${p.taskNumber} ${p.title}: ${formatDuration(valueOf(p, measure))}, finished ${new Date(p.finishedAt).toLocaleDateString()}`}</title>
-          </circle>
-        ))}
       </svg>
       {insights.finished.truncated && (
         <p className="mt-2 text-xs text-text-muted">Showing the latest {points.length} tasks.</p>
@@ -390,7 +400,7 @@ export function AgingList({
                 {t.title}
               </span>
               <span className="shrink-0 tabular-nums">{formatDuration(t.ageMs)}</span>
-              <span className={`w-full text-xs sm:w-auto ${late ? "font-medium text-warning" : "text-text-muted"}`}>
+              <span className={`w-full text-xs ${late ? "font-medium text-warning" : "text-text-muted"}`}>
                 {t.olderThanPercent === null
                   ? "No finished work to compare with"
                   : `${late ? "⚠ " : ""}${agingNote(t.olderThanPercent)}`}
@@ -411,7 +421,7 @@ export function agingNote(percent: number): string {
 
 export function DeploymentsPanel() {
   return (
-    <Panel title="Deployments (DORA)" testId="insights-dora">
+    <Panel title="Deployments (DORA)" testId="insights-dora" showsData={false}>
       <EmptyPanel message="Deployment frequency and lead time for changes are not measured yet. Board Planner does not read deployments for this board." />
     </Panel>
   );
