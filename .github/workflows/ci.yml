@@ -249,8 +249,17 @@ jobs:
       - run: npm ci
       - run: npm ci
         working-directory: worker
+      # A production build, as the server the worker really talks to is. `next dev` compiles a route on its
+      # first request and answered a bare 404 to the worker's first comment, status and release calls (BP-1050)
       - name: Smoke
+        env:
+          E2E_PROD: "1"
         run: npx playwright test -c playwright.smoke.config.ts --project=worker
+      # The worker creates worker.lock write-only, which the archiver cannot read: without this a failed
+      # smoke uploaded nothing (BP-1049)
+      - name: Make the artifacts readable
+        if: failure()
+        run: chmod -R u+rX e2e/.artifacts || true
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
