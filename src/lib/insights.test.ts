@@ -148,6 +148,15 @@ describe("computeInsights — figures a hand computation gives", () => {
     expect(insights.summary.leadTime).toBeNull();
   });
 
+  it("a task with no rows that is neither in progress nor done is not counted as left out", () => {
+    const untouched = task(3, [], { status: "todo", role: "approved" });
+    const silentlyActive = task(3, [], { status: "doing", role: "active" });
+
+    const insights = computeInsights([untouched, silentlyActive], { now: NOW, weeks: 4 });
+
+    expect(insights.excluded.noHistory).toBe(1);
+  });
+
   it("an archived task that finished still counts, and an archived one in progress is not WIP", () => {
     const shippedThenArchived = task(12, [["todo", "doing", 10], ["doing", "done", 2]], { archived: true });
     const abandoned = task(12, [["todo", "doing", 10]], { archived: true });

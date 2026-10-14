@@ -106,7 +106,7 @@ export function computeInsights(
   for (const task of tasks) {
     const { history } = task;
     if (history.kind === "no-history") {
-      excluded.noHistory++;
+      if (task.role === "active" || task.role === "done") excluded.noHistory++;
       continue;
     }
     if (history.gap) {
