@@ -10,7 +10,6 @@
   "src/lib/db.ts",
   "src/lib/oidc/relay.ts",
   "src/lib/organisation-migration.ts",
-  "src/lib/organisation-secrets-migration.ts",
   "src/lib/platform-sign-in.ts",
   "src/lib/pm/availability.ts",
   "src/lib/pr-links.ts",

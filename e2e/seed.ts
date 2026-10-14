@@ -1885,16 +1885,19 @@ export async function seedWebhook(
   await mongoose.disconnect();
 }
 
-/** What a project names as its repository. A token planted here is written in the clear, which
- * `decryptSecret` passes through unchanged; nothing in these assertions reads one. */
+/** What a project names as its repository. A token is sealed under the server's key, as the app writes it. */
 export async function seedRepository(fields: {
   repositoryUrl?: string;
   githubToken?: string;
   gitlabToken?: string;
   gitlabHost?: string;
 }) {
+  const sealed = { ...fields };
+  for (const field of ["githubToken", "gitlabToken"] as const) {
+    if (sealed[field]) sealed[field] = await sealedWithTheServersKey(sealed[field]);
+  }
   const db = (await connect()).db!;
-  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: fields });
+  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: sealed });
   await mongoose.disconnect();
 }
 
