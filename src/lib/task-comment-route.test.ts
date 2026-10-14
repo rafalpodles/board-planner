@@ -22,8 +22,9 @@ vi.mock("@/lib/middleware", async () => {
 
 const { PUT, DELETE } = await import("./task-comment-route");
 const { logActivity } = await import("@/lib/activity");
+const { actingThrough } = await import("@/lib/activity-source");
 
-let comment: { author: { toString(): string }; body: string; save: typeof save; deleteOne?: () => Promise<void> };
+let comment: { author: { toString(): string }; body: string; save: typeof save; deleteOne?: () => Promise<void>; editedSource?: string; editedSourceDetail?: string };
 
 function edit(body: string) {
   return PUT(
@@ -43,6 +44,16 @@ beforeEach(() => {
   commentFindOne.mockImplementation((filter: { task?: unknown }) =>
     "task" in filter ? Promise.resolve(comment) : { populate: () => Promise.resolve({ _id: "c1" }) }
   );
+});
+
+// BP-824: a comment's source is where it was written; an edit through another door says so
+describe("PUT a comment records where the edit came from", () => {
+  it("names the source the edit arrived through", async () => {
+    const res = await actingThrough({ source: "mcp", detail: "Notion" }, () => edit("rewritten"));
+
+    expect(res.status).toBe(200);
+    expect(comment).toMatchObject({ body: "rewritten", editedSource: "mcp", editedSourceDetail: "Notion" });
+  });
 });
 
 // BP-323: the create path caps a comment, and an edit is the other way to grow one

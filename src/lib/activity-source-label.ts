@@ -14,7 +14,7 @@ const LABELS: Record<ShownActivitySource, string> = {
 const HUMAN: ReadonlySet<ShownActivitySource> = new Set(["web-ui", "legacy"]);
 
 export function sourceOf(source: string | undefined): ShownActivitySource {
-  return source && source in LABELS ? (source as ShownActivitySource) : "legacy";
+  return source && Object.hasOwn(LABELS, source) ? (source as ShownActivitySource) : "legacy";
 }
 
 export function sourceLabel(source: ShownActivitySource): string {

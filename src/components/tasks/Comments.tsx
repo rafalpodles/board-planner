@@ -19,6 +19,7 @@ import { useEditorTriggers } from "@/hooks/use-editor-triggers";
 import { COMMENT_BODY_MAX_LENGTH } from "@/lib/identifiers";
 import { AiBadge } from "@/components/ui/AiBadge";
 import { SourceBadge } from "@/components/ui/SourceBadge";
+import { sourceOf } from "@/lib/activity-source-label";
 import { PM_USERNAME } from "@/lib/pm/username";
 
 interface CommentsProps {
@@ -250,6 +251,9 @@ export function Comments({
                 <span className="text-xs text-text-muted italic">
                   (edited)
                 </span>
+              )}
+              {comment.editedSource && comment.editedSource !== sourceOf(comment.source) && (
+                <SourceBadge source={comment.editedSource} detail={comment.editedSourceDetail} edited />
               )}
               {isOwnComment(comment) && editingId !== comment._id && (
                 <div className="ml-auto flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

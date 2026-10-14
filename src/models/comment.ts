@@ -38,6 +38,8 @@ const commentSchema = new Schema<IComment>(
     generatedBy: { type: generatedBySchema, default: undefined },
     source: { type: String, enum: ACTIVITY_SOURCES, immutable: true },
     sourceDetail: { type: String, maxlength: SOURCE_DETAIL_MAX_LENGTH, immutable: true },
+    editedSource: { type: String, enum: ACTIVITY_SOURCES },
+    editedSourceDetail: { type: String, maxlength: SOURCE_DETAIL_MAX_LENGTH },
   },
   { timestamps: true }
 );

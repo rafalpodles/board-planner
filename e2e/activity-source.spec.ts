@@ -34,7 +34,7 @@ async function commentCard(page: Page, body: string): Promise<Locator> {
 }
 
 async function expectSource(scope: Locator, source: string, title: RegExp) {
-  const badge = scope.getByTestId("source-badge");
+  const badge = scope.locator('[data-testid="source-badge"]:not([data-edited])');
   await expect(badge).toHaveCount(1);
   await expect(badge).toHaveAttribute("data-source", source);
   await expect(badge).toHaveAttribute("title", title);
@@ -71,6 +71,11 @@ test("each comment and history entry says where it came from", async ({ page, re
   await page.getByRole("button", { name: "Comment", exact: true }).click();
   expect((await posted).status()).toBe(201);
 
+  // Written in the browser, then rewritten by a machine holding the same person's token
+  const rewritten = await page.request.post(COMMENTS, { headers: SAME_ORIGIN, data: { body: "Written by hand" } });
+  expect(rewritten.status()).toBe(201);
+  await callMcp(request, "edit_comment", { taskKey: TASK_KEY, commentId: (await rewritten.json())._id, body: "Rewritten through MCP" });
+
   // The header the MCP server sends, from a person's own session: the session wins
   const claimed = await page.request.post(COMMENTS, {
     headers: { ...SAME_ORIGIN, "x-bp-client": "mcp" },
@@ -84,14 +89,24 @@ test("each comment and history entry says where it came from", async ({ page, re
   await expectSource(await commentCard(page, "Posted through MCP"), "mcp", /^Through MCP/);
   await expectSource(await commentCard(page, "Posted with an API token"), "api", /^Through the API/);
   await expectSource(await commentCard(page, "Written before sources were kept"), "legacy", /before Board Planner kept/);
+  const rewrittenCard = await commentCard(page, "Rewritten through MCP");
+  await expectSource(rewrittenCard, "web-ui", /^Through the web app$/);
+  const edit = rewrittenCard.locator('[data-testid="source-badge"][data-edited]');
+  await expect(edit).toHaveAttribute("data-source", "mcp");
+  await expect(edit).toHaveText("Edited · MCP");
+  // An edit through the door it was written through says nothing more
+  await expect((await commentCard(page, "Typed in the browser")).locator("[data-edited]")).toHaveCount(0);
 
   const history = await openHistory(page);
   await expectSource(historyRow(history, /changed priority from \w+ to Urgent/i), "mcp", /^Through MCP/);
   await expectSource(historyRow(history, /changed priority from low to medium/), "legacy", /before Board Planner kept/);
-  await expect(historyRow(history, "added a comment").getByTestId("source-badge")).toHaveCount(4);
-  for (const source of ["web-ui", "mcp", "api"]) {
-    await expect(history.locator(`[data-testid="source-badge"][data-source="${source}"]`).first()).toBeVisible();
-  }
+  // Newest first: the session that sent the MCP header, the hand-written one, the browser, MCP, the token
+  expect(
+    await historyRow(history, "added a comment")
+      .getByTestId("source-badge")
+      .evaluateAll((badges) => badges.map((b) => b.getAttribute("data-source")))
+  ).toEqual(["web-ui", "web-ui", "web-ui", "mcp", "api"]);
+  await expectSource(historyRow(history, "edited a comment"), "mcp", /^Through MCP/);
 });
 
 test("what the PM agent writes is marked as the agent's, not the person's who asked", async ({ page }) => {

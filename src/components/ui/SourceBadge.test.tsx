@@ -25,6 +25,12 @@ describe("SourceBadge", () => {
     expect(screen.getByTestId("source-badge").getAttribute("data-source")).toBe("legacy");
   });
 
+  it("says an edit came through another door", () => {
+    render(<SourceBadge source="mcp" detail="Notion" edited />);
+    const badge = screen.getByRole("img", { name: "Last edited through MCP: Notion" });
+    expect(badge.textContent).toBe("Edited · MCP");
+  });
+
   it("tells a machine apart from a person by its colour", () => {
     const { rerender } = render(<SourceBadge source="web-ui" />);
     expect(screen.getByTestId("source-badge").className).not.toContain("text-primary");

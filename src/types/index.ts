@@ -1242,6 +1242,8 @@ export interface IComment {
   reactions: IReaction[];
   source?: ActivitySource;
   sourceDetail?: string;
+  editedSource?: ActivitySource;
+  editedSourceDetail?: string;
   generatedBy?: GeneratedBy;
   createdAt: Date;
   updatedAt: Date;
@@ -1550,6 +1552,8 @@ export interface ApiComment {
   reactions: ApiReaction[];
   source: ShownActivitySource;
   sourceDetail?: string;
+  editedSource?: ActivitySource;
+  editedSourceDetail?: string;
   generatedBy?: GeneratedBy;
   createdAt: string;
   updatedAt: string;
