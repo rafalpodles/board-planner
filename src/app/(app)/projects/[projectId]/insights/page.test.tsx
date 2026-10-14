@@ -90,6 +90,6 @@ describe("InsightsPage", () => {
     render(<InsightsPage />);
 
     await screen.findByTestId("insights-no-done-column");
-    expect(screen.getByTestId("insights-tiles").textContent).toContain("Throughput—No Done column");
+    expect((await screen.findByTestId("insights-tiles")).textContent).toContain("Throughput—No Done column");
   });
 });
