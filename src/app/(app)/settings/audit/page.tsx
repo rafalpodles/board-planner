@@ -20,7 +20,7 @@ const ACTION_OPTIONS = INSTANCE_AUDIT_ACTIONS.map((action) => ({
 export default function InstanceAuditPage() {
   const router = useRouter();
   const { isAdmin, isLoading: authLoading } = useAuth();
-  const { rows: logs, more, loading, failed, filters, apply, reload, loadMore } = useAuditLog<ApiInstanceAuditLog>(
+  const { rows: logs, more, loading, failed, answered, filters, apply, reload, loadMore } = useAuditLog<ApiInstanceAuditLog>(
     "/api/admin/audit",
     INSTANCE_AUDIT_PAGE
   );
@@ -35,7 +35,8 @@ export default function InstanceAuditPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, authLoading, router]);
 
-  if (authLoading) {
+  // The page arrives whole the first time; a later read keeps the filters on screen
+  if (authLoading || (isAdmin && !answered)) {
     return (
       <div className="flex justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />

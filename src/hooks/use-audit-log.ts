@@ -14,6 +14,7 @@ export function useAuditLog<T extends { _id: string }>(url: string, pageSize: nu
   const [more, setMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [answered, setAnswered] = useState(false);
   const [filters, setFilters] = useState<AuditFilterValues>(NO_AUDIT_FILTERS);
   const seq = useRef(0);
 
@@ -33,7 +34,10 @@ export function useAuditLog<T extends { _id: string }>(url: string, pageSize: nu
         if (mine !== seq.current) return;
         setFailed(true);
       } finally {
-        if (mine === seq.current) setLoading(false);
+        if (mine === seq.current) {
+          setLoading(false);
+          setAnswered(true);
+        }
       }
     },
     [api, url, pageSize]
@@ -52,5 +56,5 @@ export function useAuditLog<T extends { _id: string }>(url: string, pageSize: nu
   const reload = useCallback(() => apply(filters), [apply, filters]);
   const loadMore = useCallback(() => read(filters, rows), [read, filters, rows]);
 
-  return { rows, more, loading, failed, filters, apply, reload, loadMore };
+  return { rows, more, loading, failed, answered, filters, apply, reload, loadMore };
 }
