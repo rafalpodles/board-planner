@@ -235,7 +235,7 @@ test.describe("BP-894: one organisation's limits do not touch another's", () => 
 
     await expect(page.getByTestId("organisation-storage-used")).toHaveText("20 GB of 20 GB");
     const full = page.getByTestId("organisation-storage-full");
-    await expect(full).toHaveText("Full, so no more files can be uploaded. Write to contact@board-planner.com about Enterprise for more.");
+    await expect(full).toHaveText("Full, so no more files can be uploaded. Deleting files below makes room. Write to contact@board-planner.com about Enterprise for more.");
     await expect(full.getByRole("link", { name: "contact@board-planner.com" })).toHaveAttribute("href", "mailto:contact@board-planner.com");
     await expect(page.getByTestId("organisation-storage-free")).toHaveCount(0);
     await page.screenshot({ path: "e2e/.artifacts/bp967-storage-pro-full-desktop.png" });
@@ -258,7 +258,7 @@ test.describe("BP-894: one organisation's limits do not touch another's", () => 
     await filesOf(ACME, FREE_STORAGE_MB);
     await page.reload();
     await expect(page.getByTestId("organisation-storage-used")).toHaveText("1.3 GB of 1 GB");
-    await expect(page.getByTestId("organisation-storage-full")).toHaveText("Full, so no more files can be uploaded. Upgrade to Pro for 20 GB.");
+    await expect(page.getByTestId("organisation-storage-full")).toHaveText("Full, so no more files can be uploaded. Deleting files below makes room. Upgrade to Pro for 20 GB.");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
     await expect(page.getByTestId("organisation-storage-full")).toBeVisible();

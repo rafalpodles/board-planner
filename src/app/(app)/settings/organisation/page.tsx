@@ -13,6 +13,7 @@ import { useToast } from "@/components/ui/Toast";
 import { LicenceDetails, type LicenceSummary } from "@/components/settings/LicenceDetails";
 import { Subscription } from "@/components/settings/Subscription";
 import { StorageUsage } from "@/components/settings/StorageUsage";
+import { StorageFiles } from "@/components/settings/StorageFiles";
 import { BuildVersion } from "@/components/settings/BuildVersion";
 
 export default function OrganisationSettingsPage() {
@@ -25,6 +26,7 @@ export default function OrganisationSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [licence, setLicence] = useState<LicenceSummary | null>(null);
   const [licenceFailed, setLicenceFailed] = useState(false);
+  const [filesDeleted, setFilesDeleted] = useState(0);
 
   // The name, not the summary: the summary is read again while a payment is followed, and an unsaved edit stays
   const organisationName = organisation?.name;
@@ -120,11 +122,12 @@ export default function OrganisationSettingsPage() {
               <dd className="tabular-nums" data-testid="organisation-members">{organisation.members}</dd>
               <dt className="text-text-muted">Boards</dt>
               <dd className="tabular-nums" data-testid="organisation-projects">{organisation.projects}</dd>
-              <StorageUsage key={planKey} />
+              <StorageUsage key={`${planKey}|${filesDeleted}`} />
             </>
           )}
           <BuildVersion />
         </dl>
+        {organisation.members !== undefined && <StorageFiles onDeleted={() => setFilesDeleted((count) => count + 1)} />}
       </section>
 
       {isAdmin && (

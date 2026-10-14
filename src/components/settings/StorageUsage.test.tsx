@@ -54,7 +54,7 @@ describe("storage on the organisation page (BP-967)", () => {
     show();
 
     const full = await screen.findByTestId("organisation-storage-full");
-    expect(full.textContent).toBe("Full, so no more files can be uploaded. Upgrade to Pro for 20 GB.");
+    expect(full.textContent).toBe("Full, so no more files can be uploaded. Deleting files below makes room. Upgrade to Pro for 20 GB.");
     expect(full.getAttribute("role")).toBeNull();
     expect(screen.getByRole("progressbar").firstElementChild?.className).toContain("bg-danger");
   });
@@ -64,7 +64,7 @@ describe("storage on the organisation page (BP-967)", () => {
     show();
 
     const full = await screen.findByTestId("organisation-storage-full");
-    expect(full.textContent).toBe("Full, so no more files can be uploaded. Write to contact@board-planner.com about Enterprise for more.");
+    expect(full.textContent).toBe("Full, so no more files can be uploaded. Deleting files below makes room. Write to contact@board-planner.com about Enterprise for more.");
     expect(full.querySelector("a")?.getAttribute("href")).toBe("mailto:contact@board-planner.com");
     expect(screen.queryByTestId("organisation-storage-free")).toBeNull();
   });
@@ -73,7 +73,7 @@ describe("storage on the organisation page (BP-967)", () => {
     api.get.mockResolvedValue({ storedBytes: 300 * MB, limitBytes: 300 * MB, raisedBy: null });
     show();
 
-    expect((await screen.findByTestId("organisation-storage-full")).textContent).toBe("Full, so no more files can be uploaded.");
+    expect((await screen.findByTestId("organisation-storage-full")).textContent).toBe("Full, so no more files can be uploaded. Deleting files below makes room.");
     expect(screen.queryByTestId("organisation-storage-free")).toBeNull();
   });
 

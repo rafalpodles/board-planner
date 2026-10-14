@@ -64,7 +64,7 @@ export function StorageUsage() {
             )}
             {full && (
               <p className="mt-1 text-text-muted" data-testid="organisation-storage-full">
-                Full, so no more files can be uploaded.
+                Full, so no more files can be uploaded. Deleting files below makes room.
                 {storage.raisedBy === "pro" && ` Upgrade to Pro for ${formatStorage(PAID_STORAGE_MB * MB)}.`}
                 {storage.raisedBy === "enterprise" && (
                   <>

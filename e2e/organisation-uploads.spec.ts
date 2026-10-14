@@ -1,7 +1,8 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import mongoose from "mongoose";
 import { Readable } from "node:stream";
-import { ADMIN_AUTH } from "./api";
+import { ADMIN_AUTH, MEMBER_AUTH, SAME_ORIGIN } from "./api";
+import { signIn } from "./session";
 import { E2E_MONGODB_URI, PROJECT_ID, seed } from "./seed";
 import { backfillOrganisations } from "../src/lib/organisation-migration";
 import { DEFAULT_ORGANISATION_ID } from "../src/lib/organisation-field";
@@ -70,3 +71,85 @@ test.describe("BP-668: every uploaded file belongs to an organisation", () => {
     expect(Buffer.from(await response.body()).equals(TINY_PNG)).toBe(true);
   });
 });
+
+// BP-1025: nothing removed an uploaded file, so a Free organisation that was full could only buy Pro
+test.describe("BP-1025: an administrator deletes a file to make room", () => {
+  async function upload(request: APIRequestContext, name: string): Promise<string> {
+    const response = await request.post("/api/uploads", {
+      headers: ADMIN_AUTH,
+      multipart: { file: { name, mimeType: "image/png", buffer: TINY_PNG }, projectId: String(PROJECT_ID) },
+    });
+    expect(response.status(), await response.text()).toBe(200);
+    return new URL((await response.json()).url, "http://x").pathname.split("/").pop()!;
+  }
+
+  test("lists the files, deletes one after asking, and the space, the file and the audit log all follow", async ({ page, request }) => {
+    const id = await upload(request, "floor-plan.png");
+    await signIn(page);
+    await page.goto("/settings/organisation");
+    await expect(page.getByTestId("organisation-storage-used")).toHaveText("1 MB");
+
+    await page.getByTestId("storage-files-toggle").click();
+    const row = page.getByTestId("storage-file").filter({ hasText: "floor-plan.png" });
+    await expect(row).toBeVisible();
+    const board = await withDb((db) => db.collection("projects").findOne({ _id: PROJECT_ID }));
+    await expect(row).toContainText(String(board!.name));
+
+    await row.getByRole("button", { name: "Delete floor-plan.png" }).click();
+    const dialog = page.getByRole("dialog", { name: "Delete floor-plan.png?" });
+    await expect(dialog).toContainText("cannot be undone");
+    await dialog.getByRole("button", { name: "Delete" }).click();
+
+    await expect(page.getByTestId("storage-files-empty")).toBeVisible();
+    await expect(page.getByTestId("organisation-storage-used")).toHaveText("0 MB");
+    expect((await request.get(`/api/uploads/${id}`, { headers: ADMIN_AUTH })).status()).toBe(404);
+
+    // The log is for an interactive session, which the signed-in page has and a token does not
+    const audit = await (await page.request.get("/api/admin/audit")).json();
+    expect(audit).toContainEqual(expect.objectContaining({ action: "upload_deleted", target: "floor-plan.png" }));
+  });
+
+  // A member's session, not a member's token: every token is refused on these routes, so a token cannot tell the gate from the refusal
+  test("is the administrator's: a member signed in can neither list nor delete, and the file stays", async ({ page, request }) => {
+    const id = await upload(request, "keep.png");
+    await signIn(page, "member");
+
+    expect((await page.request.get("/api/organisation/storage/files")).status()).toBe(403);
+    expect((await page.request.delete(`/api/organisation/storage/files/${id}`, { headers: SAME_ORIGIN })).status()).toBe(403);
+    expect((await request.get(`/api/uploads/${id}`, { headers: ADMIN_AUTH })).status()).toBe(200);
+  });
+
+  test("an administrator deletes a file somebody else uploaded", async ({ page, request }) => {
+    const response = await request.post("/api/uploads", {
+      headers: MEMBER_AUTH,
+      multipart: { file: { name: "theirs.png", mimeType: "image/png", buffer: TINY_PNG }, projectId: String(PROJECT_ID) },
+    });
+    expect(response.status(), await response.text()).toBe(200);
+    const id = new URL((await response.json()).url, "http://x").pathname.split("/").pop()!;
+    await signIn(page);
+
+    expect((await page.request.delete(`/api/organisation/storage/files/${id}`, { headers: SAME_ORIGIN })).status()).toBe(200);
+    expect((await request.get(`/api/uploads/${id}`, { headers: ADMIN_AUTH })).status()).toBe(404);
+  });
+
+  test("a token is refused, an administrator's too, so one on a worker's disk cannot empty the storage", async ({ request }) => {
+    const id = await upload(request, "token.png");
+
+    expect((await request.get("/api/organisation/storage/files", { headers: ADMIN_AUTH })).status()).toBe(403);
+    expect((await request.delete(`/api/organisation/storage/files/${id}`, { headers: ADMIN_AUTH })).status()).toBe(403);
+    expect((await request.get(`/api/uploads/${id}`, { headers: ADMIN_AUTH })).status()).toBe(200);
+  });
+
+  test("a file of another organisation is not found, so it cannot be deleted by naming its id", async ({ page }) => {
+    const id = await storeElsewhere();
+    await signIn(page);
+
+    // A cookie session writes with the origin a browser would send, which is what the provenance check asks for
+    expect((await page.request.delete(`/api/organisation/storage/files/${id}`, { headers: SAME_ORIGIN })).status()).toBe(404);
+    expect(await withDb((db) => db.collection("uploads.files").countDocuments({ _id: new mongoose.Types.ObjectId(id) }))).toBe(1);
+  });
+});
+
+function storeElsewhere(): Promise<string> {
+  return storeByHand({ organisation: ELSEWHERE });
+}
