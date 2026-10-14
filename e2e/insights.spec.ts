@@ -178,3 +178,42 @@ test("a member who cannot reach the project is refused before the plan is asked"
 
   expect(response.status(), await response.text()).toBe(403);
 });
+
+test("breaks figures down by the designated estimate field, read from the stored task", async ({ request }) => {
+  await setPlan("pro");
+  const created = await request.post("/api/projects", { headers: ADMIN_AUTH, data: { name: "Estimated", key: "EST" } });
+  const { _id: projectId } = (await created.json()) as { _id: string };
+  const fields = await request.post(`/api/projects/${projectId}/custom-fields`, {
+    headers: ADMIN_AUTH,
+    data: { name: "Points", fieldType: "number" },
+  });
+  expect(fields.status(), await fields.text()).toBe(201);
+  const points = ((await fields.json()) as { _id: string; name: string }[]).find((f) => f.name === "Points")!;
+  const designated = await request.put(`/api/projects/${projectId}`, {
+    headers: ADMIN_AUTH,
+    data: { estimateFieldId: points._id },
+  });
+  expect(designated.status(), await designated.text()).toBe(200);
+
+  for (const [title, value] of [["three", 3], ["unestimated", null]] as const) {
+    const task = await request.post(`/api/projects/${projectId}/tasks`, {
+      headers: ADMIN_AUTH,
+      data: { title, status: "todo", ...(value === null ? {} : { customFieldValues: { [points._id]: value } }) },
+    });
+    expect(task.status(), await task.text()).toBe(201);
+    const { _id: taskId } = (await task.json()) as { _id: string };
+    for (const status of ["in_progress", "done"]) {
+      const moved = await request.patch(`/api/projects/${projectId}/tasks/${taskId}/status`, {
+        headers: ADMIN_AUTH,
+        data: { status },
+      });
+      expect(moved.status(), await moved.text()).toBe(200);
+    }
+  }
+
+  const body = await (await request.get(`/api/projects/${projectId}/insights`, { headers: ADMIN_AUTH })).json();
+
+  expect(body.byEstimate.field).toEqual({ id: points._id, name: "Points" });
+  expect(Object.keys(body.byEstimate.values).sort()).toEqual(["3", "none"]);
+  expect(body.byEstimate.values["3"].throughput).toBe(1);
+});

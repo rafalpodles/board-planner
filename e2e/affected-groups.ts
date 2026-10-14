@@ -100,6 +100,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   { prefix: "src/app/api/projects/[projectId]/coda/", groups: ["project"] },
   { prefix: "src/app/api/projects/[projectId]/webhooks/", groups: ["project"] },
   { prefix: "src/app/api/projects/[projectId]/templates/", groups: ["project"] },
+  { prefix: "src/app/api/projects/[projectId]/insights/", groups: ["people"] },
   { prefix: "src/app/api/projects/[projectId]/", groups: ["project"] },
   { prefix: "src/app/api/projects/", groups: ["project"] },
   { prefix: "src/app/api/tasks/", groups: ["tasks"] },
