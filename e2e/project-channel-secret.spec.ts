@@ -179,7 +179,7 @@ test.describe("a project's chat webhook URL", () => {
     await expect(page.getByText("https://hooks.slack.com/••••eRow")).toBeVisible();
   });
 
-  test("survives in a row written before BP-372, and is migrated by the next save", async ({
+  test("in a row written before BP-372 is not read, and is sealed by the next save", async ({
     page,
   }) => {
     await seedLegacyPlaintextChannel("Legacy");

@@ -34,7 +34,7 @@ export function maskSecretUrl(value: string | undefined): string {
 }
 
 /**
- * A channel's URL is stored encrypted, and an `enc:v2:…` envelope is a parseable URL with a
+ * A channel's URL is stored encrypted, and an `enc:v3:…` envelope is a parseable URL with a
  * non-special scheme — so masking the stored string would print `null/••••` plus a tail of
  * ciphertext instead of the host the owner needs to recognise the channel by.
  */

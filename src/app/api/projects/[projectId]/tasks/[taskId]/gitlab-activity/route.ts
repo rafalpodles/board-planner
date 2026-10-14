@@ -26,7 +26,15 @@ export const GET = withProjectAccess(async (_request, { params, db }) => {
   }
 
   const host = project.gitlabHost || "https://gitlab.com";
-  const token = decryptSecret(project.gitlabToken, db.organisation);
+  let token: string;
+  try {
+    token = decryptSecret(project.gitlabToken, db.organisation);
+  } catch {
+    return NextResponse.json(
+      { error: "The stored GitLab token can no longer be read. Enter it again in project settings." },
+      { status: 502 }
+    );
+  }
   const taskKey = `${project.key}-${task.taskNumber}`;
 
   // Commit search needs GitLab's search feature; a repo without it should still

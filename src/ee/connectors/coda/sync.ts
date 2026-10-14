@@ -29,7 +29,15 @@ export async function syncProjectToCoda(db: ScopedDb, projectId: string): Promis
   }
 
   const host = normaliseCodaHost(project.codaHost);
-  const token = decryptSecret(project.codaToken, db.organisation);
+  let token: string;
+  try {
+    token = decryptSecret(project.codaToken, db.organisation);
+  } catch {
+    return NextResponse.json(
+      { error: "The stored Coda token can no longer be read. Enter it again in project settings." },
+      { status: 502 }
+    );
+  }
 
   let columns: string[];
   try {

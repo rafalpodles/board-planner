@@ -14,11 +14,8 @@
  * The key goes in front even there: `--service MongoDB` injects the database service's variables,
  * and ENCRYPTION_KEY lives on the app service.
  *
- * RUN IT AFTER THE DEPLOY, never before. Reading plaintext exists only in the new code; the old
- * code hands the stored string straight to `isAllowedWebhookUrl`, which refuses an `enc:v2:…`
- * envelope for having no `https:` scheme — silently, and for every channel at once. An unmigrated
- * database on the new code keeps delivering, so the deploy does not wait for this. The reverse
- * is not true.
+ * Since BP-900 a channel URL stored in the clear is no longer read, so an unmigrated channel
+ * stops delivering until this has run. The deploy that ships it does not wait for the script.
  *
  * Safe to re-run: a channel whose URL already carries an `enc:` envelope is left alone. Which is
  * also what it will not do — a value written by a key since retired to ENCRYPTION_KEYS_OLD stays
@@ -82,6 +79,12 @@ async function main() {
       const url = channel.webhookUrl;
       if (!url) {
         nothingToDo.push(`${name}: ${label(channel)} stores no URL`);
+        continue;
+      }
+      if (/^enc:v[12]:/.test(url)) {
+        needsAttention.push(
+          `${name}: ${label(channel)} is sealed under the instance key and can no longer be read — enter its URL again`
+        );
         continue;
       }
       if (isEncryptedSecret(url)) {
