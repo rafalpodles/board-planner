@@ -1,0 +1,84 @@
+// @vitest-environment happy-dom
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
+import { StorageFiles } from "./StorageFiles";
+
+const { api, toast } = vi.hoisted(() => ({ api: { get: vi.fn(), del: vi.fn() }, toast: vi.fn() }));
+vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
+vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
+
+const MB = 1024 * 1024;
+const FILE = { id: "f1", name: "plan.pdf", size: 5 * MB, uploadedAt: "2026-10-01T10:00:00.000Z", project: { key: "TP", name: "Test Project" }, uploadedBy: "ola" };
+
+beforeEach(() => vi.clearAllMocks());
+afterEach(cleanup);
+
+async function open(listing = { total: 1, files: [FILE] }) {
+  api.get.mockResolvedValue(listing);
+  const onDeleted = vi.fn();
+  render(<StorageFiles onDeleted={onDeleted} />);
+  fireEvent.click(screen.getByTestId("storage-files-toggle"));
+  await screen.findAllByTestId("storage-file").catch(() => undefined);
+  return onDeleted;
+}
+
+describe("the largest files on the organisation page (BP-1025)", () => {
+  it("reads nothing until it is opened, then lists each file with its size, board and uploader", async () => {
+    api.get.mockResolvedValue({ total: 1, files: [FILE] });
+    render(<StorageFiles onDeleted={vi.fn()} />);
+    expect(api.get).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("storage-files-toggle"));
+    const row = await screen.findByTestId("storage-file");
+
+    expect(api.get).toHaveBeenCalledWith("/api/organisation/storage/files");
+    expect(row.textContent).toContain("plan.pdf");
+    expect(row.textContent).toContain("5 MB");
+    expect(row.textContent).toContain("Test Project");
+    expect(row.textContent).toContain("ola");
+  });
+
+  it("says how many of the files it shows when there are more than it lists", async () => {
+    await open({ total: 40, files: [FILE] });
+
+    expect(await screen.findByText(/The 1 largest of 40 files\./)).toBeTruthy();
+  });
+
+  it("asks before deleting, deletes the file, and tells the page so it can read the usage again", async () => {
+    const onDeleted = await open();
+    api.del.mockResolvedValue({ freedBytes: 5 * MB });
+    api.get.mockResolvedValue({ total: 0, files: [] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete plan.pdf" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("This frees 5 MB");
+    expect(api.del).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(api.del).toHaveBeenCalledWith("/api/organisation/storage/files/f1"));
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId("storage-files-empty")).toBeTruthy();
+  });
+
+  it("keeps the file in the list and says so when the delete fails", async () => {
+    const onDeleted = await open();
+    api.del.mockRejectedValue(new Error("File not found"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete plan.pdf" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("File not found", "error"));
+    expect(onDeleted).not.toHaveBeenCalled();
+    expect(screen.getAllByTestId("storage-file")).toHaveLength(1);
+  });
+
+  it("says it could not read the list rather than showing an empty one", async () => {
+    api.get.mockRejectedValue(new Error("boom"));
+    render(<StorageFiles onDeleted={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("storage-files-toggle"));
+
+    expect(await screen.findByTestId("storage-files-error")).toBeTruthy();
+    expect(screen.queryByTestId("storage-files-empty")).toBeNull();
+  });
+});

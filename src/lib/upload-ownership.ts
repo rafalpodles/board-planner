@@ -72,6 +72,24 @@ export function organisationUploads(db: ScopedDb) {
         await files.deleteOne({ _id });
       }
     },
+    // What an administrator deletes first to make room: this organisation's files, the largest first
+    largest: (limit: number): Promise<UploadedFile[]> =>
+      mongoose.connection
+        .db!.collection<UploadedFile>(`${UPLOAD_BUCKET}.files`)
+        .find({ "metadata.organisation": db.organisation })
+        .sort({ length: -1, _id: -1 })
+        .limit(limit)
+        .toArray(),
+    // One file of this organisation, whoever uploaded it; the row it had, or null when there is none to delete
+    discard: async (id: mongoose.Types.ObjectId): Promise<UploadedFile | null> => {
+      const files = mongoose.connection.db!.collection<UploadedFile>(`${UPLOAD_BUCKET}.files`);
+      const chunks = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.chunks`);
+      const file = await files.findOne({ _id: id, "metadata.organisation": db.organisation });
+      if (!file) return null;
+      await chunks.deleteMany({ files_id: id });
+      await files.deleteOne({ _id: id });
+      return file;
+    },
     // Chunks before their file row, so an interrupted run leaves a row it can find again
     deleteAll: async (): Promise<number> => {
       const files = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.files`);
