@@ -31,8 +31,8 @@ const projectAuditLogSchema = new Schema<IProjectAuditLog>(
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 
-projectAuditLogSchema.index({ project: 1, createdAt: -1 });
-projectAuditLogSchema.index({ project: 1, action: 1, createdAt: -1 });
+projectAuditLogSchema.index({ project: 1, createdAt: -1, _id: -1 });
+projectAuditLogSchema.index({ project: 1, action: 1, createdAt: -1, _id: -1 });
 
 withOrganisation(projectAuditLogSchema);
 

@@ -39,8 +39,7 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
         </div>
       ) : rows === null ? (
         // Not the empty state: "nothing was ever changed here" is a claim about this board's
-        // history, and a read that never answered supports no claim about it at all. The toast
-        // fades; this stays until somebody has an answer
+        // history, and a read that never answered supports no claim about it at all
         <LoadFailed
           testId="project-audit-error"
           message="Failed to load the audit log."

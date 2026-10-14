@@ -41,8 +41,9 @@ const instanceAuditLogSchema = new Schema<IInstanceAuditLog>(
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 
-instanceAuditLogSchema.index({ createdAt: -1 });
-instanceAuditLogSchema.index({ action: 1, createdAt: -1 });
+// Ending in _id because the log pages on { createdAt, _id }: without it every page sorts every matching row
+instanceAuditLogSchema.index({ createdAt: -1, _id: -1 });
+instanceAuditLogSchema.index({ action: 1, createdAt: -1, _id: -1 });
 
 withOrganisation(instanceAuditLogSchema);
 

@@ -25,6 +25,9 @@ describe("parseAuditParams", () => {
 
   it.each([
     ["from=yesterday", "from must be a date"],
+    ["from=2026-02-31", "from must be a date"],
+    ["from=1", "from must be a date"],
+    ["to=2026-10-14T10:00", "to must be a date"],
     ["from=2026-10-14&to=2026-10-01", "from must be before to"],
     ["action=drop_database", "Unknown action"],
     ["before=../etc", "before must be an entry id"],
@@ -33,6 +36,10 @@ describe("parseAuditParams", () => {
     [`actor=${"a".repeat(101)}`, "actor is too long"],
   ])("refuses %s", (query, error) => {
     expect(parse(query)).toEqual({ ok: false, error });
+  });
+
+  it("reads an instant with its zone exactly, not as a whole day", () => {
+    expect(parse("to=2026-10-14T10:00:00Z")).toMatchObject({ ok: true, value: { to: new Date("2026-10-14T10:00:00Z") } });
   });
 
   it("takes an action it knows, an actor and a cursor", () => {
@@ -64,6 +71,19 @@ describe("auditFilter", () => {
   it("matches the instance log's recorded name as well as the account", async () => {
     expect(await auditFilter(db(null), "instance", {}, { limit: 10, actor: "gone" })).toEqual({
       $and: [{}, { $or: [{ actorUsername: "gone" }] }],
+    });
+  });
+
+  it("keeps the end of the range out", async () => {
+    const to = new Date("2026-10-15T00:00:00Z");
+    expect(await auditFilter(db(null), "project", { project: "p1" }, { limit: 10, to })).toEqual({
+      $and: [{ project: "p1" }, { createdAt: { $lt: to } }],
+    });
+  });
+
+  it("matches the instance log's account as well as its recorded name", async () => {
+    expect(await auditFilter(db({ _id: account }), "instance", {}, { limit: 10, actor: "rafal" })).toEqual({
+      $and: [{}, { $or: [{ actorUsername: "rafal" }, { user: account }] }],
     });
   });
 
@@ -101,6 +121,9 @@ describe("auditPages", () => {
     const cursor = { _id: new Types.ObjectId(), createdAt: at };
     const m = model([], cursor);
     await auditPages(m as never, { project: "p1" })(String(cursor._id), 10);
+
+    // A cursor from another project names no entry here
+    expect(m.findOne).toHaveBeenCalledWith({ $and: [{ project: "p1" }, { _id: String(cursor._id) }] });
 
     expect(m.find).toHaveBeenCalledWith({
       $and: [{ project: "p1" }, { $or: [{ createdAt: { $lt: at } }, { createdAt: at, _id: { $lt: cursor._id } }] }],

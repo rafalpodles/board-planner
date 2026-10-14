@@ -20,11 +20,16 @@ export interface AuditParams {
 
 type Parsed = { ok: true; value: AuditParams } | { ok: false; error: string };
 
-// A bare day is that whole day: `to=2026-10-14` keeps the evening of the 14th
+const ZONED_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+// A bare day is that whole UTC day, so `to=2026-10-14` keeps its evening; an instant must name its zone
 function parseBound(raw: string, end: boolean): Date | null {
-  const at = new Date(DATE_ONLY.test(raw) ? `${raw}T00:00:00.000Z` : raw);
+  const day = DATE_ONLY.test(raw);
+  if (!day && !ZONED_INSTANT.test(raw)) return null;
+  const at = new Date(day ? `${raw}T00:00:00.000Z` : raw);
   if (Number.isNaN(at.getTime())) return null;
-  return end && DATE_ONLY.test(raw) ? new Date(at.getTime() + DAY_MS) : at;
+  if (day && at.toISOString().slice(0, 10) !== raw) return null;
+  return end && day ? new Date(at.getTime() + DAY_MS) : at;
 }
 
 export function parseAuditParams(
@@ -130,7 +135,7 @@ export function auditPages<T>(model: AuditModel, filter: Filter | null): PageRea
     let where = filter;
     if (before) {
       const cursor = await (model as ScopedDb["InstanceAuditLog"])
-        .findOne({ _id: before })
+        .findOne({ $and: [filter, { _id: before }] })
         .select("createdAt")
         .lean<{ _id: Types.ObjectId; createdAt: Date }>();
       if (!cursor) return "unknown-cursor";

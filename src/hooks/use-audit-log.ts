@@ -21,6 +21,7 @@ export function useAuditLog<T extends { _id: string }>(url: string, pageSize: nu
     async (applied: AuditFilterValues, after: T[] | null) => {
       const mine = ++seq.current;
       setLoading(true);
+      setFailed(false);
       const before = after?.length ? after[after.length - 1]._id : "";
       try {
         const page: T[] = await api.get(`${url}${auditQuery(applied, { before })}`);
