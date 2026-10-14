@@ -32,7 +32,7 @@ describe("emptyTimeMessage", () => {
   it("says finished tasks had no start when they finished without a cycle time", () => {
     const noStarts = { ...base, summary: { ...base.summary, cycleTime: null } };
 
-    expect(emptyTimeMessage(noStarts, "cycleTime", "fallback")).toContain("without passing through an In Progress column");
+    expect(emptyTimeMessage(noStarts, "cycleTime", "fallback")).toContain("No finished task has a recorded start");
     expect(emptyTimeMessage(noStarts, "leadTime", "fallback")).toBe("fallback");
   });
 

@@ -19,7 +19,7 @@ const PAD = { top: 14, right: 8, bottom: 26, left: 56 };
 const PLOT_W = WIDTH - PAD.left - PAD.right;
 const PLOT_H = HEIGHT - PAD.top - PAD.bottom;
 const DAY = 86_400_000;
-const NO_START = "Tasks finished here without passing through an In Progress column, so they have no cycle time.";
+const NO_START = "No finished task has a recorded start in an In Progress column, so there is no cycle time.";
 
 export function emptyTimeMessage(insights: Insights, measure: Measure, otherwise: string): string {
   return measure === "cycleTime" && insights.summary.throughput > 0 && !insights.summary.cycleTime ? NO_START : otherwise;

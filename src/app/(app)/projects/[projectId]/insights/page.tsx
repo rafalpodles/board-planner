@@ -31,6 +31,10 @@ import { sampleInsights } from "@/components/insights/sample";
 const WINDOWS = ["4", "8", "12"];
 const SAMPLE_KEY = "DEMO";
 
+function tasks(count: number): string {
+  return count === 1 ? "1 task was" : `${count} tasks were`;
+}
+
 interface InsightsResponse extends Insights {
   sprint: { id: string; name: string } | null;
   category: string | null;
@@ -219,13 +223,13 @@ export default function InsightsPage() {
             )}
             {!onSample && shown.excluded.startInferred > 0 && (
             <p data-testid="insights-start-inferred" className="mb-4 text-sm text-text-muted">
-              {shown.excluded.startInferred} tasks were created straight into In Progress, so they count in lead time but
-              have no cycle time or age.
+              {tasks(shown.excluded.startInferred)} created straight into In Progress, so there is no start to measure
+              cycle time or age from.
             </p>
           )}
           {!onSample && shown.excluded.noHistory + shown.excluded.gap > 0 && (
               <p data-testid="insights-excluded" className="mb-4 text-sm text-text-muted">
-                {shown.excluded.noHistory + shown.excluded.gap} tasks are left out because their history of moves is incomplete.
+                {tasks(shown.excluded.noHistory + shown.excluded.gap)} left out because the history of moves is incomplete.
               </p>
             )}
             <StatTiles insights={shown} noDoneColumn={noDoneColumn && !onSample} />
