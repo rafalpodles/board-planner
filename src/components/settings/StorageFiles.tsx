@@ -98,7 +98,7 @@ export function StorageFiles({ onDeleted }: { onDeleted: () => void }) {
                       <p className="truncate font-medium" title={file.name}>
                         {file.name}
                       </p>
-                      <p className="truncate text-xs text-text-muted">
+                      <p className="break-words text-xs text-text-muted">
                         {[
                           file.project ? file.project.name : "no board",
                           file.uploadedBy ?? "an account that was deleted",
@@ -108,7 +108,7 @@ export function StorageFiles({ onDeleted }: { onDeleted: () => void }) {
                     </div>
                     <span className="shrink-0 tabular-nums text-text-muted">{formatStorage(file.size)}</span>
                     <Button
-                      variant="danger"
+                      variant="secondary"
                       size="sm"
                       onClick={() => setAsking(file)}
                       aria-label={`Delete ${file.name}`}
