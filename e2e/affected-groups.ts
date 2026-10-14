@@ -43,6 +43,8 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   // Automation too: the PM, MCP and worker sections of project settings are driven by its specs
   { prefix: "src/app/(app)/projects/[projectId]/settings/", groups: ["project", "automation"] },
   { prefix: "src/app/(app)/projects/[projectId]/dashboard/", groups: ["project"] },
+  { prefix: "src/app/(app)/projects/[projectId]/insights/", groups: ["people"] },
+  { prefix: "src/components/insights/", groups: ["people"] },
   { prefix: "src/app/(app)/projects/[projectId]/pm/", groups: ["automation"] },
   { prefix: "src/app/(app)/projects/[projectId]/@modal/", groups: ["tasks"] },
   { prefix: "src/app/(app)/projects/[projectId]/", groups: ["board"] },

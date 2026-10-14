@@ -12,9 +12,9 @@ export const MEASURE_LABELS: Record<Measure, string> = {
   leadTime: "Lead time",
 };
 
-const WIDTH = 640;
-const HEIGHT = 200;
-const PAD = { top: 12, right: 12, bottom: 24, left: 44 };
+const WIDTH = 480;
+const HEIGHT = 220;
+const PAD = { top: 14, right: 8, bottom: 26, left: 56 };
 const PLOT_W = WIDTH - PAD.left - PAD.right;
 const PLOT_H = HEIGHT - PAD.top - PAD.bottom;
 const DAY = 86_400_000;
@@ -69,16 +69,16 @@ function AsTable({ caption, head, rows }: { caption: string; head: string[]; row
   );
 }
 
-function YAxis({ max, format }: { max: number; format: (v: number) => string }) {
+function YAxis({ max, format, ticks = [0, 0.5, 1] }: { max: number; format: (v: number) => string; ticks?: number[] }) {
   return (
     <g>
-      {[0, 0.5, 1].map((f) => {
+      {ticks.map((f) => {
         const y = PAD.top + PLOT_H * (1 - f);
         return (
           <g key={f}>
             <line x1={PAD.left} x2={WIDTH - PAD.right} y1={y} y2={y} className="stroke-border" strokeWidth={1} />
-            <text x={PAD.left - 6} y={y} dy="0.32em" textAnchor="end" className="fill-text-muted text-[10px]">
-              {format(max * f)}
+            <text x={PAD.left - 6} y={y} dy="0.32em" textAnchor="end" className="fill-text-muted text-[12px]">
+              {f === 0 ? "0" : format(max * f)}
             </text>
           </g>
         );
@@ -169,8 +169,8 @@ export function TrendChart({ insights, measure }: { insights: Insights; measure:
           ) : null
         )}
         {weeks.map((w, i) =>
-          i % Math.ceil(weeks.length / 6) === 0 ? (
-            <text key={i} x={x(i)} y={HEIGHT - 6} textAnchor="middle" className="fill-text-muted text-[10px]">
+          i % Math.ceil(weeks.length / 4) === 0 ? (
+            <text key={i} x={x(i)} y={HEIGHT - 6} textAnchor="middle" className="fill-text-muted text-[12px]">
               {formatWeek(w.weekStart)}
             </text>
           ) : null
@@ -234,7 +234,7 @@ export function ScatterChart({
                 strokeWidth={1}
                 strokeDasharray="4 3"
               />
-              <text x={WIDTH - PAD.right} y={y(ms) - 4} textAnchor="end" className="fill-text-muted text-[10px]">
+              <text x={WIDTH - PAD.right} y={y(ms) - 4} textAnchor="end" className="fill-text-muted text-[12px]">
                 {`${label}: ${formatDuration(ms)}`}
               </text>
             </g>
@@ -296,7 +296,7 @@ export function ThroughputChart({ insights, noDoneColumn }: { insights: Insights
   return (
     <Panel title={title} testId="insights-throughput">
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="h-auto w-full" role="img" aria-label={description}>
-        <YAxis max={max} format={(v) => String(Math.round(v))} />
+        <YAxis max={max} format={(v) => String(v)} ticks={max % 2 === 0 ? [0, 0.5, 1] : [0, 1]} />
         {weeks.map((w, i) => {
           const h = (w.throughput / max) * PLOT_H;
           const x = PAD.left + i * slot + (slot - barWidth) / 2;
@@ -307,8 +307,8 @@ export function ThroughputChart({ insights, noDoneColumn }: { insights: Insights
                   <title>{`Week of ${formatWeek(w.weekStart)}: ${w.throughput} finished`}</title>
                 </rect>
               )}
-              {i % Math.ceil(weeks.length / 6) === 0 && (
-                <text x={x + barWidth / 2} y={HEIGHT - 6} textAnchor="middle" className="fill-text-muted text-[10px]">
+              {i % Math.ceil(weeks.length / 4) === 0 && (
+                <text x={x + barWidth / 2} y={HEIGHT - 6} textAnchor="middle" className="fill-text-muted text-[12px]">
                   {formatWeek(w.weekStart)}
                 </text>
               )}
