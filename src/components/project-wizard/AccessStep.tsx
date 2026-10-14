@@ -26,10 +26,10 @@ interface AccessStepProps {
 }
 
 function pmUnavailable(pm: WizardSetup): string {
-  if (pm.pmLocked) return "An administrator has locked the PM agent off for this instance.";
-  if (pm.pmKeyUnreadable) return "The stored AI key cannot be read. Fix it in Settings → Agents.";
-  if (pm.pmNeedsPlan) return "The PM agent needs a plan with managed AI, or your own key in Settings → Agents.";
-  return "The PM agent needs a model key. Add one in Settings → Agents, then turn it on in the project's PM agent settings.";
+  if (pm.pmLocked) return "The operator has switched its AI key off for this organisation. Add your own key in Settings → AI key.";
+  if (pm.pmKeyUnreadable) return "The stored AI key cannot be read. Fix it in Settings → AI key.";
+  if (pm.pmNeedsPlan) return "The PM agent needs a plan with managed AI, or your own key in Settings → AI key.";
+  return "The PM agent needs a model key. Add one in Settings → AI key, then turn it on in the project's PM agent settings.";
 }
 
 export function AccessStep({ state, you, setup, onChange }: AccessStepProps) {

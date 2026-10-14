@@ -244,3 +244,29 @@ test("on a phone it is one step per screen, inside the screen", async ({ page })
     expect(box!.height).toBeGreaterThanOrEqual(44);
   }
 });
+
+// BP-1041: four messages named the wrong place for the AI key (Settings → Agents is PM Agents) or the wrong person who switched it off
+test("says where the AI key is when the PM agent cannot run", async ({ page }) => {
+  await signIn(page);
+
+  const cases = [
+    { say: { pmLocked: true }, text: "The operator has switched its AI key off for this organisation. Add your own key in Settings → AI key." },
+    { say: { pmKeyUnreadable: true }, text: "The stored AI key cannot be read. Fix it in Settings → AI key." },
+    { say: { pmNeedsPlan: true }, text: "The PM agent needs a plan with managed AI, or your own key in Settings → AI key." },
+    { say: {}, text: "The PM agent needs a model key. Add one in Settings → AI key, then turn it on in the project's PM agent settings." },
+  ];
+  for (const { say, text } of cases) {
+    await page.route("**/api/projects/setup", async (route) => {
+      const real = await (await route.fetch()).json();
+      await route.fulfill({ json: { ...real, pmAvailable: false, pmLocked: false, pmKeyUnreadable: false, pmNeedsPlan: false, ...say } });
+    });
+    await page.goto("/projects/new");
+    await nameTheProject(page, NAME, KEY);
+    await page.getByRole("button", { name: /^Next: Workflow/ }).click();
+    await page.getByRole("button", { name: /^Next: Task fields/ }).click();
+    await page.getByRole("button", { name: /^Next: Automation/ }).click();
+    await expect(heading(page, "Automation & access")).toBeVisible();
+    await expect(page.getByText(text, { exact: true })).toBeVisible();
+    await page.unroute("**/api/projects/setup");
+  }
+});
