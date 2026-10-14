@@ -8,6 +8,7 @@ export const FEATURE_KEYS = [
   "audit.export",
   "workers.multiple",
   "identity.sso",
+  "reports.insights",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

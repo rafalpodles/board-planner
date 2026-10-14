@@ -139,9 +139,22 @@ export const STATUS_CHANGE_SORT = { createdAt: 1 } as const;
 export interface TaskStatusHistory {
   taskId: string;
   taskNumber: number;
+  title: string;
+  category: string;
+  sprint: string | null;
   status: string;
+  role: HistoryRole;
   archived: boolean;
+  createdAt: Date;
+  estimate: number | null;
   history: StatusHistory;
+}
+
+function numericValue(raw: unknown): number | null {
+  if (typeof raw !== "number" && typeof raw !== "string") return null;
+  if (typeof raw === "string" && raw.trim() === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 /**
@@ -149,7 +162,11 @@ export interface TaskStatusHistory {
  * rows and its tasks. The rows come through `{project, action, createdAt}`; a task with none is included, as
  * `no-history`, so a caller cannot mistake a missing row for a fast task.
  */
-export async function projectStatusHistories(db: ScopedDb, projectId: string): Promise<TaskStatusHistory[]> {
+export async function projectStatusHistories(
+  db: ScopedDb,
+  projectId: string,
+  { estimateFieldId = "" }: { estimateFieldId?: string } = {}
+): Promise<TaskStatusHistory[]> {
   const project = await db.Project.findById(projectId, "columns").lean();
   if (!project) return [];
   const roleByColumn = new Map(getProjectColumns(project).map((column) => [column.id, column.role as HistoryRole]));
@@ -159,7 +176,10 @@ export async function projectStatusHistories(db: ScopedDb, projectId: string): P
     db.ActivityLog.find(statusChangeFilter(projectId), "task oldValue newValue createdAt")
       .sort(STATUS_CHANGE_SORT)
       .lean(),
-    db.Task.find({ project: projectId }, "taskNumber status createdAt archivedAt").lean(),
+    db.Task.find(
+      { project: projectId },
+      `taskNumber title category sprint status createdAt archivedAt${estimateFieldId ? ` customFieldValues.${estimateFieldId}` : ""}`
+    ).lean(),
   ]);
 
   const byTask = new Map<string, StatusRow[]>();
@@ -173,8 +193,16 @@ export async function projectStatusHistories(db: ScopedDb, projectId: string): P
   return tasks.map((task) => ({
     taskId: String(task._id),
     taskNumber: task.taskNumber,
+    title: task.title ?? "",
+    category: task.category ?? "",
+    sprint: task.sprint ? String(task.sprint) : null,
     status: task.status,
+    role: roleOf(task.status),
     archived: task.archivedAt != null,
+    createdAt: task.createdAt,
+    estimate: estimateFieldId
+      ? numericValue((task.customFieldValues as unknown as Record<string, unknown> | undefined)?.[estimateFieldId])
+      : null,
     history: statusHistory(byTask.get(String(task._id)) ?? [], roleOf, {
       createdAt: task.createdAt,
       status: task.status,
