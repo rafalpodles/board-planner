@@ -398,7 +398,7 @@ describe("automation and access", () => {
     render(<NewProjectPage />);
     toAccess();
 
-    await waitFor(() => expect(screen.getByText(/needs a model key/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/needs a model key. Add one in Settings → AI key,/)).toBeTruthy());
     expect(screen.queryByRole("switch")).toBeNull();
   });
 
@@ -756,13 +756,13 @@ describe("the PM agent", () => {
   });
 
   it.each([
-    ["an administrator has locked it", { pmLocked: true }, /locked the PM agent off/],
-    ["the plan does not include it", { pmNeedsPlan: true }, /needs a plan with managed AI/],
-    ["its key cannot be read", { pmKeyUnreadable: true }, /cannot be read/],
+    ["an administrator has locked it", { pmLocked: true }, /switched its AI key off for this organisation\. Add your own key in Settings → AI key\./],
+    ["the plan does not include it", { pmNeedsPlan: true }, /needs a plan with managed AI, or your own key in Settings → AI key\./],
+    ["its key cannot be read", { pmKeyUnreadable: true }, /cannot be read\. Fix it in Settings → AI key\./],
     [
       "several things are wrong, the lock is what is said",
       { pmLocked: true, pmKeyUnreadable: true, pmNeedsPlan: true },
-      /locked the PM agent off/,
+      /switched its AI key off for this organisation\. Add your own key in Settings → AI key\./,
     ],
     [
       "the key is unreadable and a plan is needed, the key is what is said",
