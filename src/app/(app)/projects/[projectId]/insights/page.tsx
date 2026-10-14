@@ -20,6 +20,7 @@ import {
   DeploymentsPanel,
   MEASURE_LABELS,
   Measure,
+  SampleContext,
   ScatterChart,
   StatTiles,
   ThroughputChart,
@@ -28,6 +29,7 @@ import {
 import { sampleInsights } from "@/components/insights/sample";
 
 const WINDOWS = ["4", "8", "12"];
+const SAMPLE_KEY = "DEMO";
 
 interface InsightsResponse extends Insights {
   sprint: { id: string; name: string } | null;
@@ -205,26 +207,28 @@ export default function InsightsPage() {
       {!shown && loading && <Spinner />}
 
       {shown && (
-        <div data-testid={onSample ? "insights-sample" : "insights-live"} aria-busy={loading}>
-          {!onSample && shown.empty && !noDoneColumn && (
-            <p data-testid="insights-empty" className="mb-4 text-sm text-text-muted">
-              No task finished in this window yet. Times appear once a task goes from In Progress to Done.
-            </p>
-          )}
-          {!onSample && shown.excluded.noHistory + shown.excluded.gap > 0 && (
-            <p data-testid="insights-excluded" className="mb-4 text-sm text-text-muted">
-              {shown.excluded.noHistory + shown.excluded.gap} tasks are left out because their history of moves is incomplete.
-            </p>
-          )}
-          <StatTiles insights={shown} noDoneColumn={noDoneColumn && !onSample} />
-          <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <TrendChart insights={shown} measure={measure} />
-            <ScatterChart insights={shown} measure={measure} projectRef={projectRef} />
-            <ThroughputChart insights={shown} noDoneColumn={noDoneColumn && !onSample} />
-            <AgingList insights={shown} projectRef={projectRef} linkTasks={!onSample} />
-            <DeploymentsPanel />
+        <SampleContext.Provider value={onSample}>
+          <div data-testid={onSample ? "insights-sample" : "insights-live"} aria-busy={loading}>
+            {!onSample && shown.empty && !noDoneColumn && (
+              <p data-testid="insights-empty" className="mb-4 text-sm text-text-muted">
+                No task finished in this window yet. Times appear once a task goes from In Progress to Done.
+              </p>
+            )}
+            {!onSample && shown.excluded.noHistory + shown.excluded.gap > 0 && (
+              <p data-testid="insights-excluded" className="mb-4 text-sm text-text-muted">
+                {shown.excluded.noHistory + shown.excluded.gap} tasks are left out because their history of moves is incomplete.
+              </p>
+            )}
+            <StatTiles insights={shown} noDoneColumn={noDoneColumn && !onSample} />
+            <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <TrendChart insights={shown} measure={measure} />
+              <ScatterChart insights={shown} measure={measure} projectRef={onSample ? SAMPLE_KEY : projectRef} />
+              <ThroughputChart insights={shown} noDoneColumn={noDoneColumn && !onSample} />
+              <AgingList insights={shown} projectRef={onSample ? SAMPLE_KEY : projectRef} linkTasks={!onSample} />
+              <DeploymentsPanel />
+            </div>
           </div>
-        </div>
+        </SampleContext.Provider>
       )}
     </div>
   );

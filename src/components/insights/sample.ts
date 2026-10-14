@@ -50,6 +50,8 @@ export function sampleInsights(now: number): Insights {
     };
   });
   const cycle = spread(points.map((p) => p.cycleMs));
+  const shareOlderThan = (ageMs: number) =>
+    Math.round((points.filter((p) => p.cycleMs < ageMs).length / points.length) * 100);
 
   return {
     window: { weeks: WEEKS, from: new Date(from).toISOString(), to: new Date(now).toISOString() },
@@ -65,14 +67,14 @@ export function sampleInsights(now: number): Insights {
     agingWip: {
       referenceP85Ms: cycle.p85Ms,
       tasks: [
-        { taskNumber: 151, title: "Migrate the search index", status: "in_progress", ageDays: 11, share: 92 },
-        { taskNumber: 154, title: "Audit-log export", status: "in_progress", ageDays: 4.5, share: 48 },
-        { taskNumber: 157, title: "Onboarding checklist", status: "in_progress", ageDays: 1.2, share: 9 },
-      ].map(({ ageDays, share, ...task }) => ({
+        { taskNumber: 151, title: "Migrate the search index", status: "in_progress", ageDays: 7.5 },
+        { taskNumber: 154, title: "Audit-log export", status: "in_progress", ageDays: 4.5 },
+        { taskNumber: 157, title: "Onboarding checklist", status: "in_progress", ageDays: 1.2 },
+      ].map(({ ageDays, ...task }) => ({
         ...task,
         startedAt: new Date(now - ageDays * DAY).toISOString(),
         ageMs: ageDays * DAY,
-        olderThanPercent: share,
+        olderThanPercent: shareOlderThan(ageDays * DAY),
       })),
     },
     finished: { points, truncated: false },

@@ -1,5 +1,6 @@
 "use client";
 
+import { createContext, useContext, useId } from "react";
 import Link from "next/link";
 import type { AgingTask, FinishedPoint, Insights, Spread } from "@/lib/insights";
 import { formatDuration, formatWeek, niceCeiling } from "@/lib/insights-format";
@@ -19,10 +20,19 @@ const PLOT_W = WIDTH - PAD.left - PAD.right;
 const PLOT_H = HEIGHT - PAD.top - PAD.bottom;
 const DAY = 86_400_000;
 
+export const SampleContext = createContext(false);
+
 function Panel({ title, children, testId }: { title: string; children: React.ReactNode; testId: string }) {
+  const headingId = useId();
+  const sample = useContext(SampleContext);
   return (
-    <section className="rounded-lg border border-border bg-bg-card p-4" data-testid={testId} aria-label={title}>
-      <h2 className="mb-3 font-semibold">{title}</h2>
+    <section className="rounded-lg border border-border bg-bg-card p-4" data-testid={testId} aria-labelledby={headingId}>
+      <h2 id={headingId} className="mb-3 flex flex-wrap items-center gap-2 font-semibold">
+        {title}
+        {sample && (
+          <span className="rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-text-muted">Sample data</span>
+        )}
+      </h2>
       {children}
     </section>
   );
@@ -39,7 +49,7 @@ export function EmptyPanel({ message }: { message: string }) {
 function AsTable({ caption, head, rows }: { caption: string; head: string[]; rows: (string | number)[][] }) {
   return (
     <details className="mt-3 text-xs">
-      <summary className="focus-ring w-fit cursor-pointer rounded text-text-muted hover:text-text">Show as table</summary>
+      <summary className="focus-ring w-fit cursor-pointer rounded py-1 text-text-muted hover:text-text">Show as table</summary>
       <div className="mt-2 overflow-x-auto">
         <table className="w-full text-left">
           <caption className="sr-only">{caption}</caption>
@@ -77,7 +87,7 @@ function YAxis({ max, format, ticks = [0, 0.5, 1] }: { max: number; format: (v: 
         return (
           <g key={f}>
             <line x1={PAD.left} x2={WIDTH - PAD.right} y1={y} y2={y} className="stroke-border" strokeWidth={1} />
-            <text x={PAD.left - 6} y={y} dy="0.32em" textAnchor="end" className="fill-text-muted text-[12px]">
+            <text x={PAD.left - 6} y={y} dy="0.32em" textAnchor="end" className="fill-text-muted text-[15px]">
               {f === 0 ? "0" : format(max * f)}
             </text>
           </g>
@@ -101,7 +111,11 @@ export function StatTiles({ insights, noDoneColumn }: { insights: Insights; noDo
       <p className="mt-1 text-xs text-text-muted">{note}</p>
     </div>
   );
-  const spreadNote = (s: Spread | null) => (s ? `85% within ${formatDuration(s.p85Ms)}` : "Nothing finished yet");
+  const spreadNote = (s: Spread | null) => {
+    if (!s) return "Nothing finished yet";
+    const p85 = formatDuration(s.p85Ms);
+    return p85.startsWith("under") ? `85% took ${p85}` : `85% took ${p85} or less`;
+  };
   return (
     <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4" data-testid="insights-tiles">
       {tile("Cycle time (median)", formatDuration(summary.cycleTime?.medianMs), spreadNote(summary.cycleTime))}
@@ -114,7 +128,7 @@ export function StatTiles({ insights, noDoneColumn }: { insights: Insights; noDo
       {tile(
         "In progress",
         String(agingWip.tasks.length),
-        over === null ? "No finished work to compare with" : `${over} older than 85% of finished work`
+        over === null ? "No finished work to compare with" : `${over} running longer than 85% of finished tasks took`
       )}
     </div>
   );
@@ -170,7 +184,13 @@ export function TrendChart({ insights, measure }: { insights: Insights; measure:
         )}
         {weeks.map((w, i) =>
           i % Math.ceil(weeks.length / 4) === 0 ? (
-            <text key={i} x={x(i)} y={HEIGHT - 6} textAnchor="middle" className="fill-text-muted text-[12px]">
+            <text
+              key={i}
+              x={x(i)}
+              y={HEIGHT - 6}
+              textAnchor={i === weeks.length - 1 && weeks.length > 1 ? "end" : i === 0 && weeks.length > 1 ? "start" : "middle"}
+              className="fill-text-muted text-[15px]"
+            >
               {formatWeek(w.weekStart)}
             </text>
           ) : null
@@ -221,9 +241,9 @@ export function ScatterChart({
         <YAxis max={max} format={formatDuration} />
         {summary &&
           ([
-            ["50%", summary.medianMs],
-            ["85%", summary.p85Ms],
-          ] as const).map(([label, ms]) => (
+            ["50%", summary.medianMs, y(summary.p85Ms) - y(summary.medianMs) > -20 ? 16 : -5],
+            ["85%", summary.p85Ms, -5],
+          ] as const).map(([label, ms, offset]) => (
             <g key={label}>
               <line
                 x1={PAD.left}
@@ -234,7 +254,15 @@ export function ScatterChart({
                 strokeWidth={1}
                 strokeDasharray="4 3"
               />
-              <text x={WIDTH - PAD.right} y={y(ms) - 4} textAnchor="end" className="fill-text-muted text-[12px]">
+              <text
+                x={WIDTH - PAD.right}
+                y={y(ms) + offset}
+                textAnchor="end"
+                className="fill-text-muted text-[15px]"
+                paintOrder="stroke"
+                stroke="var(--color-bg-card)"
+                strokeWidth={4}
+              >
                 {`${label}: ${formatDuration(ms)}`}
               </text>
             </g>
@@ -308,7 +336,7 @@ export function ThroughputChart({ insights, noDoneColumn }: { insights: Insights
                 </rect>
               )}
               {i % Math.ceil(weeks.length / 4) === 0 && (
-                <text x={x + barWidth / 2} y={HEIGHT - 6} textAnchor="middle" className="fill-text-muted text-[12px]">
+                <text x={x + barWidth / 2} y={HEIGHT - 6} textAnchor="middle" className="fill-text-muted text-[15px]">
                   {formatWeek(w.weekStart)}
                 </text>
               )}
@@ -358,12 +386,14 @@ export function AgingList({
               ) : (
                 <span className="shrink-0 font-mono text-xs text-text-muted">{label(t)}</span>
               )}
-              <span className="min-w-0 flex-1 truncate">{t.title}</span>
+              <span className="min-w-0 flex-1 truncate" title={t.title}>
+                {t.title}
+              </span>
               <span className="shrink-0 tabular-nums">{formatDuration(t.ageMs)}</span>
               <span className={`w-full text-xs sm:w-auto ${late ? "font-medium text-warning" : "text-text-muted"}`}>
                 {t.olderThanPercent === null
                   ? "No finished work to compare with"
-                  : `${late ? "⚠ " : ""}Older than ${t.olderThanPercent}% of finished work`}
+                  : `${late ? "⚠ " : ""}${agingNote(t.olderThanPercent)}`}
               </span>
             </li>
           );
@@ -374,10 +404,15 @@ export function AgingList({
   );
 }
 
+export function agingNote(percent: number): string {
+  if (percent >= 100) return "Running longer than any finished task took";
+  return `Running longer than ${percent}% of finished tasks took`;
+}
+
 export function DeploymentsPanel() {
   return (
     <Panel title="Deployments (DORA)" testId="insights-dora">
-      <EmptyPanel message="No deployments are connected to this board, so deployment frequency and lead time for changes cannot be measured yet." />
+      <EmptyPanel message="Deployment frequency and lead time for changes are not measured yet. Board Planner does not read deployments for this board." />
     </Panel>
   );
 }
