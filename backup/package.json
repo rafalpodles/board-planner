@@ -1,0 +1,8 @@
+{
+  "name": "board-planner-backup",
+  "private": true,
+  "description": "Only the Railway Infrastructure as Code SDK for .railway/railway.ts; the service itself is the Dockerfile",
+  "devDependencies": {
+    "railway": "3.15.0"
+  }
+}

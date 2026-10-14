@@ -57,3 +57,4 @@ backups/
 
 # MCP Apps single-file bundles, generated before dev/build
 /mcp-apps/dist/
+/backup/node_modules
