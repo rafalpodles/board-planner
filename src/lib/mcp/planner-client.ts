@@ -1,6 +1,7 @@
 import type { ApiCustomField, ApiProjectCategory, ApiProjectColumn } from "@/types";
 import { echo } from "@/lib/echo";
 import { isValidProjectKey } from "@/lib/identifiers";
+import { MCP_CLIENT_HEADER, MCP_CLIENT_VALUE } from "@/lib/activity-source";
 /** Only what the tools read: the id, and the field definitions the `fields` parameter resolves against */
 export interface McpProject {
   _id: string;
@@ -72,6 +73,7 @@ export class PlannerClient {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.token}`,
+        [MCP_CLIENT_HEADER]: MCP_CLIENT_VALUE,
       },
       body: body ? JSON.stringify(body) : undefined,
     });

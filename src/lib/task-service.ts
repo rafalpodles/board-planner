@@ -57,6 +57,7 @@ import { populateWithin, type ScopedDb } from "@/lib/db-scope";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
 import { withAiMark } from "@/lib/pm/username";
 import { currentGeneratedBy } from "@/lib/ai-generated";
+import { provenanceFields } from "@/lib/activity-source";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
@@ -1464,6 +1465,7 @@ export async function addComment(
     author: actor.id,
     body: bodyText.trim(),
     ...(generatedBy && { generatedBy }),
+    ...provenanceFields(),
   });
 
   const populated = await db.Comment.findById(comment._id).populate({

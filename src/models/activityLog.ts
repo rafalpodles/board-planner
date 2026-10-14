@@ -1,7 +1,8 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IActivityLog } from "@/types";
+import { ACTIVITY_SOURCES, IActivityLog } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
 import { generatedBySchema } from "@/lib/ai-generated";
+import { SOURCE_DETAIL_MAX_LENGTH } from "@/lib/activity-source";
 
 const ACTIONS = [
   "created",
@@ -68,6 +69,8 @@ const activityLogSchema = new Schema<IActivityLog>(
       default: "",
     },
     generatedBy: { type: generatedBySchema, default: undefined },
+    source: { type: String, enum: ACTIVITY_SOURCES, immutable: true },
+    sourceDetail: { type: String, maxlength: SOURCE_DETAIL_MAX_LENGTH, immutable: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

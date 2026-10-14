@@ -182,6 +182,8 @@ export interface IUser {
   // whether project access was narrowed: an unscoped admin token is still a machine credential, and
   // acts that need a person at a keyboard must key on this instead.
   viaMachineCredential?: boolean;
+  // Runtime-only: the registered name of the OAuth application this request's token was issued to
+  oauthClientName?: string;
   // Runtime-only, set for browser sessions — the Session row this request authenticated with, so a
   // handler can spare the calling session when it revokes the rest.
   sessionId?: Types.ObjectId;
@@ -1238,6 +1240,8 @@ export interface IComment {
   author: Types.ObjectId | IUser;
   body: string;
   reactions: IReaction[];
+  source?: ActivitySource;
+  sourceDetail?: string;
   generatedBy?: GeneratedBy;
   createdAt: Date;
   updatedAt: Date;
@@ -1544,6 +1548,8 @@ export interface ApiComment {
   author: ApiUser | string;
   body: string;
   reactions: ApiReaction[];
+  source: ShownActivitySource;
+  sourceDetail?: string;
   generatedBy?: GeneratedBy;
   createdAt: string;
   updatedAt: string;
@@ -1600,6 +1606,11 @@ export const LIST_SORT_FIELDS: SortField[] = SORT_OPTIONS.map((o) => o.value);
 export function defaultSortDir(field: SortKey): SortDir {
   return SORT_OPTIONS.find((o) => o.value === field)?.defaultDir ?? "asc";
 }
+
+export const ACTIVITY_SOURCES = ["web-ui", "pm-agent", "worker", "mcp", "api", "import", "system"] as const;
+export type ActivitySource = (typeof ACTIVITY_SOURCES)[number];
+// What a row written before sources were recorded reads as (BP-824)
+export type ShownActivitySource = ActivitySource | "legacy";
 
 // Activity log
 export type ActivityAction =
@@ -1658,6 +1669,8 @@ export interface IActivityLog {
   newValue: string;
   customField?: boolean;
   fieldType?: string;
+  source?: ActivitySource;
+  sourceDetail?: string;
   generatedBy?: GeneratedBy;
   createdAt: Date;
 }
@@ -1676,6 +1689,8 @@ export interface ApiActivityLog {
   customField?: boolean;
   fieldType?: string;
   cleared?: boolean;
+  source: ShownActivitySource;
+  sourceDetail?: string;
   generatedBy?: GeneratedBy;
   createdAt: string;
 }

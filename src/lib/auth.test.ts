@@ -38,7 +38,11 @@ vi.mock("@/models/apiToken", () => ({
   ApiToken: { find: apiTokenFind, updateOne: apiTokenUpdateOne },
 }));
 vi.mock("@/models/oauthToken", () => ({ OAuthToken: { findOne: oauthTokenFindOne } }));
-vi.mock("@/models/oauthClient", () => ({ OAuthClient: { exists: oauthClientExists } }));
+vi.mock("@/models/oauthClient", () => ({
+  OAuthClient: {
+    findOne: (filter: unknown) => ({ select: () => ({ lean: () => Promise.resolve(oauthClientExists(filter)) }) }),
+  },
+}));
 vi.mock("@/models/session", () => ({
   Session: { findOne: sessionFindOne, updateOne: sessionUpdateOne },
 }));
@@ -140,12 +144,14 @@ describe("getAuthUser — machine credentials", () => {
       accessExpiresAt: new Date(Date.now() + DAY_MS),
       allowedProjects: [],
     });
+    oauthClientExists.mockResolvedValue({ _id: "c1", clientName: "Notion" });
 
     const result = await getAuthUser(
       request({ authorization: `Bearer ${MACHINE_TOKEN}` })
     );
 
     expect(result?.viaMachineCredential).toBe(true);
+    expect(result?.oauthClientName).toBe("Notion");
     expect(result?.sessionId).toBeUndefined();
   });
 

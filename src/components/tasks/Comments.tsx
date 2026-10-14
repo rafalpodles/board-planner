@@ -18,6 +18,7 @@ import { SuggestionList } from "@/components/ui/SuggestionList";
 import { useEditorTriggers } from "@/hooks/use-editor-triggers";
 import { COMMENT_BODY_MAX_LENGTH } from "@/lib/identifiers";
 import { AiBadge } from "@/components/ui/AiBadge";
+import { SourceBadge } from "@/components/ui/SourceBadge";
 import { PM_USERNAME } from "@/lib/pm/username";
 
 interface CommentsProps {
@@ -241,6 +242,7 @@ export function Comments({
                   : "Deleted user"}
               </span>
               {comment.author && typeof comment.author === "object" && comment.author.username === PM_USERNAME && <AiBadge />}
+              <SourceBadge source={comment.source} detail={comment.sourceDetail} />
               <span className="text-xs text-text-muted">
                 {formatDate(comment.createdAt)}
               </span>

@@ -23,8 +23,16 @@ describe("commentLines", () => {
           { emoji: "👍", count: 2 },
           { emoji: "🎉", count: 1 },
         ],
+        source: "legacy",
       },
     ]);
+  });
+
+  it("says where a comment came from", () => {
+    expect(commentLines([{ _id: "c1", body: "b", source: "mcp", sourceDetail: "Notion" }])[0]).toMatchObject({
+      source: "mcp",
+      sourceDetail: "Notion",
+    });
   });
 
   it("has no author to name for a comment whose author is gone", () => {
@@ -41,9 +49,9 @@ describe("activityLines", () => {
 
   it("says when, by whom, what changed and from what to what, keeping the order it was given", () => {
     expect(activityLines(rows, 30)).toEqual([
-      { at: "2026-10-05T12:00:00.000Z", by: "rafal", action: "updated", field: "title", from: "Old", to: "New" },
-      { at: "2026-10-05T11:00:00.000Z", by: null, action: "status_changed", field: "status", from: "todo", to: "done" },
-      { at: "2026-10-05T10:00:00.000Z", by: "rafal", action: "created", field: null, from: "", to: "" },
+      { at: "2026-10-05T12:00:00.000Z", by: "rafal", action: "updated", field: "title", from: "Old", to: "New", source: "legacy" },
+      { at: "2026-10-05T11:00:00.000Z", by: null, action: "status_changed", field: "status", from: "todo", to: "done", source: "legacy" },
+      { at: "2026-10-05T10:00:00.000Z", by: "rafal", action: "created", field: null, from: "", to: "", source: "legacy" },
     ]);
   });
 

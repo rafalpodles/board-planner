@@ -9,6 +9,8 @@ const { logActivity, logActivities, editSessions, presentSessions, EDIT_SESSION_
   "./activity"
 );
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { actingThrough } = await import("@/lib/activity-source");
+const { writtenBy, pmAgentMark } = await import("@/lib/ai-generated");
 const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 const db = scopedToDefaultOrganisation();
 
@@ -50,7 +52,7 @@ describe("logActivities", () => {
     ]);
 
     expect(insertMany.mock.calls[0][0]).toEqual([
-      { project: "p1", task: "a", user: "u1", action: "link_removed", field: "parent_of", oldValue: "BP-9", newValue: "", organisation: DEFAULT_ORGANISATION_ID },
+      { project: "p1", task: "a", user: "u1", action: "link_removed", field: "parent_of", oldValue: "BP-9", newValue: "", source: "system", organisation: DEFAULT_ORGANISATION_ID },
     ]);
   });
 
@@ -116,8 +118,28 @@ describe("logActivity", () => {
       field: "",
       oldValue: "",
       newValue: "",
+      source: "system",
       organisation: DEFAULT_ORGANISATION_ID,
     });
+  });
+
+  it("records the source the request acted through, and its detail", async () => {
+    await actingThrough({ source: "mcp", detail: "Notion" }, () => logActivity(db, "p1", "a", "u1", "created"));
+    await actingThrough({ source: "worker", detail: "rpo-mbp" }, () =>
+      logActivities(db, [{ projectId: "p1", taskId: "a", userId: "u1", action: "created" }])
+    );
+
+    expect(create.mock.calls[0][0]).toMatchObject({ source: "mcp", sourceDetail: "Notion" });
+    expect(insertMany.mock.calls[0][0][0]).toMatchObject({ source: "worker", sourceDetail: "rpo-mbp" });
+  });
+
+  // A PM turn runs inside the person's own browser request, whose source is the web app
+  it("names the PM agent rather than the request it runs inside", async () => {
+    await actingThrough({ source: "web-ui" }, () =>
+      writtenBy(pmAgentMark("openai/gpt-6-luna"), () => logActivity(db, "p1", "a", "u1", "created"))
+    );
+
+    expect(create.mock.calls[0][0]).toMatchObject({ source: "pm-agent", sourceDetail: "openai/gpt-6-luna" });
   });
 
   // Null is a sync writing about what GitHub said, which no person authored (BP-628)
@@ -164,6 +186,7 @@ describe("editSessions", () => {
   it.each([
     ["somebody else's save", { user: "u2" }],
     ["another field", { field: "title" }],
+    ["the same person's save through another source", { source: "mcp" }],
     ["a project field that happens to share the name", { customField: true }],
     ["a change that is not a typed edit", { action: "status_changed", field: "status" }],
     ["a pick from a list", { field: "priority" }],
