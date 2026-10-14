@@ -12,7 +12,9 @@ function bucket(rows: Row[]) {
   const state = { files: [...rows], chunks: rows.map((r) => ({ files_id: r._id })) };
   const files = {
     find: (filter: Record<string, unknown>) => {
-      let found = state.files.filter((f) => String(f.metadata.organisation) === String(filter["metadata.organisation"]));
+      let found = state.files.filter(
+        (f) => filter["metadata.organisation"] === undefined || String(f.metadata.organisation) === String(filter["metadata.organisation"])
+      );
       const cursor = {
         sort: (order: { length: number }) => {
           found = [...found].sort((a, b) => (a.length - b.length) * order.length);
@@ -26,8 +28,13 @@ function bucket(rows: Row[]) {
       };
       return cursor;
     },
-    findOne: async (filter: { _id: mongoose.Types.ObjectId; "metadata.organisation": unknown }) =>
-      state.files.find((f) => f._id.equals(filter._id) && String(f.metadata.organisation) === String(filter["metadata.organisation"])) ?? null,
+    // Only the keys the query names count, as in Mongo: a query that leaves the organisation out matches every organisation
+    findOne: async (filter: { _id: mongoose.Types.ObjectId; "metadata.organisation"?: unknown }) =>
+      state.files.find(
+        (f) =>
+          f._id.equals(filter._id) &&
+          (filter["metadata.organisation"] === undefined || String(f.metadata.organisation) === String(filter["metadata.organisation"]))
+      ) ?? null,
     deleteOne: async ({ _id }: { _id: mongoose.Types.ObjectId }) => {
       state.files = state.files.filter((f) => !f._id.equals(_id));
     },
