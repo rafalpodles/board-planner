@@ -127,6 +127,38 @@ describe("GET /api/projects/[projectId]/insights — the query", () => {
     expect(body.window.weeks).toBe(2);
   });
 
+  it("narrows to one category when asked", async () => {
+    const finished = (taskNumber: number, category: string) => ({
+      taskId: `t${taskNumber}`,
+      taskNumber,
+      title: "",
+      category,
+      sprint: null,
+      status: "done",
+      role: "done",
+      archived: false,
+      createdAt: new Date(Date.now() - 3 * 86_400_000),
+      estimate: null,
+      history: {
+        kind: "recorded",
+        startedAt: new Date(Date.now() - 2 * 86_400_000),
+        startInferred: false,
+        finishedAt: new Date(Date.now() - 86_400_000),
+        reopened: 0,
+        endedIn: "done",
+        unknownColumns: [],
+        gap: false,
+      },
+    });
+    projectStatusHistories.mockResolvedValue([finished(1, "bug"), finished(2, "doc")]);
+
+    const body = await (await insights("?category=bug")).json();
+    const all = await (await insights()).json();
+
+    expect(body).toMatchObject({ category: "bug", summary: { throughput: 1 } });
+    expect(all).toMatchObject({ category: null, summary: { throughput: 2 } });
+  });
+
   it("asks for the estimate only when a live number field is designated", async () => {
     projectFindById.mockReturnValue(
       lean({

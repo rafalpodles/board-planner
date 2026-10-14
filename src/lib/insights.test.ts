@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeInsights, percentile, weeksOrRefusal, weeksSince, WEEK_MS, FINISHED_SAMPLE_CAP } from "./insights";
+import { computeInsights, percentile, weeksOrRefusal, weeksSince, WEEK_MS, FINISHED_SAMPLE_CAP, SCATTER_POINTS_CAP } from "./insights";
 import { statusHistory, type HistoryRole, type TaskStatusHistory } from "./status-history";
 
 const DAY = 86_400_000;
@@ -331,5 +331,32 @@ describe("weeks", () => {
     expect(weeksSince(new Date(NOW - 10 * DAY), NOW)).toBe(2);
     expect(weeksSince(new Date(NOW + DAY), NOW)).toBe(1);
     expect(weeksSince(new Date(NOW - 400 * DAY), NOW)).toBe(52);
+  });
+});
+
+describe("computeInsights — the scatter's points", () => {
+  it("one point per finished task, newest first, with its times", () => {
+    const older = task(10, [["todo", "doing", 8], ["doing", "done", 5]]);
+    const newer = task(4, [["doing", "done", 1]]);
+
+    const { finished } = computeInsights([older, newer], { now: NOW, weeks: 2 });
+
+    expect(finished.truncated).toBe(false);
+    expect(finished.points).toEqual([
+      { taskNumber: newer.taskNumber, title: newer.title, finishedAt: at(1).toISOString(), leadMs: 3 * DAY, cycleMs: null },
+      { taskNumber: older.taskNumber, title: older.title, finishedAt: at(5).toISOString(), leadMs: 5 * DAY, cycleMs: 3 * DAY },
+    ]);
+  });
+
+  it("keeps at most the latest points and says so", () => {
+    const many = Array.from({ length: SCATTER_POINTS_CAP + 1 }, (_, i) =>
+      task(20, [["todo", "doing", 15], ["doing", "done", 10 - i / 1000]])
+    );
+
+    const { finished } = computeInsights(many, { now: NOW, weeks: 4 });
+
+    expect(finished.points).toHaveLength(SCATTER_POINTS_CAP);
+    expect(finished.truncated).toBe(true);
+    expect(finished.points.map((p) => p.taskNumber)).not.toContain(many[0].taskNumber);
   });
 });
