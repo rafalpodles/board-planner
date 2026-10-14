@@ -413,8 +413,9 @@ webhook URLs behind a project's team channels and a person's own notifications â
 URL is a bearer credential, and anyone holding it posts into that room as the integration. Generate
 one with `openssl rand -hex 32`. Without it those fields cannot be saved â€” the app answers
 the save with an error rather than writing the secret in cleartext, and says so at startup. **A
-board that used team channels before this instance had a key still has those URLs in cleartext:
-`npx tsx scripts/migrate-channel-webhooks.ts` rewrites them, and they are worth rotating in Slack
+board that used team channels before this instance had a key still has those URLs in cleartext,
+which are no longer read, so such a channel delivers nothing until
+`npx tsx scripts/migrate-channel-webhooks.ts` rewrites them; they are worth rotating in Slack
 or Discord either way.** A key that is set
 but is not 32 bytes of hex or standard base64 **stops the app from starting**: a fumbled variable is
 not the same as an absent one and must not be treated as one. That includes base64url and a
