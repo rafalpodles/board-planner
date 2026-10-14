@@ -101,7 +101,8 @@ export const ORGANISATIONS_RELAY_ORIGIN = `http://127.0.0.1:${ORGANISATIONS_PORT
 
 // `next start` over a fresh build instead of `next dev`, for the specs whose subject only exists in
 // production output — the CSP nonce, where dev adds 'unsafe-eval' and scripts of its own (BP-313).
-// Only content-security-policy.spec.ts and keep-alive-timeout.spec.ts are run this way; the rest of the suite leans on dev-only
+// Only content-security-policy.spec.ts, keep-alive-timeout.spec.ts and the worker smoke (ci.yml sets it there, BP-1050) are run
+// this way; the rest of the suite leans on dev-only
 // surfaces such as /api/e2e/digest and loopback webhooks.
 export const RUN_AGAINST_PRODUCTION_BUILD = process.env.E2E_PROD === "1";
 

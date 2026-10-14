@@ -314,6 +314,10 @@ test.afterEach(async ({}, testInfo) => {
   await stop(worker, 30_000);
   await stop(daemon, 5_000);
   worker = daemon = undefined;
+  // The job log carries it even when the artifact upload fails (BP-1049)
+  if (testInfo.status !== testInfo.expectedStatus && existsSync(WORKER_LOG)) {
+    console.log(`--- worker.log, last 80 lines\n${readFileSync(WORKER_LOG, "utf8").split("\n").slice(-80).join("\n")}`);
+  }
   if (existsSync(WORKER_LOG)) await testInfo.attach("worker.log", { path: WORKER_LOG });
   if (existsSync(GH_LOG)) await testInfo.attach("gh.log", { path: GH_LOG });
 });
