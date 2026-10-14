@@ -28,7 +28,8 @@ function parseBound(raw: string, end: boolean): Date | null {
   if (!day && !ZONED_INSTANT.test(raw)) return null;
   const at = new Date(day ? `${raw}T00:00:00.000Z` : raw);
   if (Number.isNaN(at.getTime())) return null;
-  if (day && at.toISOString().slice(0, 10) !== raw) return null;
+  const date = raw.slice(0, 10);
+  if (new Date(`${date}T00:00:00.000Z`).toISOString().slice(0, 10) !== date) return null;
   return end && day ? new Date(at.getTime() + DAY_MS) : at;
 }
 

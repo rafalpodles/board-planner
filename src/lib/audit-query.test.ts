@@ -26,6 +26,7 @@ describe("parseAuditParams", () => {
   it.each([
     ["from=yesterday", "from must be a date"],
     ["from=2026-02-31", "from must be a date"],
+    ["from=2026-02-31T10:00Z", "from must be a date"],
     ["from=1", "from must be a date"],
     ["to=2026-10-14T10:00", "to must be a date"],
     ["from=2026-10-14&to=2026-10-01", "from must be before to"],
