@@ -445,6 +445,28 @@ export async function setTaskRow(taskId: mongoose.Types.ObjectId, set: Record<st
   await mongoose.disconnect();
 }
 
+/** A comment and a history row as they were stored before either recorded its source (BP-824) */
+export async function insertLegacyEntries(taskId: mongoose.Types.ObjectId, body: string) {
+  const db = (await connect()).db!;
+  const at = new Date(Date.now() - 60 * 60_000);
+  await db.collection("comments").insertOne(
+    withOrganisation({ task: taskId, author: ADMIN_ID, body, reactions: [], createdAt: at, updatedAt: at })
+  );
+  await db.collection("activitylogs").insertOne(
+    withOrganisation({
+      task: taskId,
+      project: PROJECT_ID,
+      user: ADMIN_ID,
+      action: "updated",
+      field: "priority",
+      oldValue: "low",
+      newValue: "medium",
+      createdAt: at,
+    })
+  );
+  await mongoose.disconnect();
+}
+
 /** The way a deactivation leaves an account: still on its tasks, no longer assignable */
 export async function deactivateUser(userId: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;
