@@ -18,6 +18,7 @@ const { api, auth, nav, theme, projectsState, replace } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
+vi.mock("./FleetPanel", () => ({ FleetPanel: () => <div data-testid="fleet-panel" /> }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("@/hooks/use-projects", () => ({ useProjects: () => projectsState }));
 const guideState = vi.hoisted(() => ({ guide: null as unknown }));
@@ -125,6 +126,16 @@ describe("Sidebar", () => {
     renderSidebar({ mobileOpen: true });
     expect(await screen.findByText("My Tasks")).toBeTruthy();
     expect(screen.getByText("Notifications")).toBeTruthy();
+  });
+
+  it("lists the machines in the open sidebar and leaves them off the collapsed rail", async () => {
+    renderSidebar();
+    expect(await screen.findByTestId("fleet-panel")).toBeTruthy();
+    cleanup();
+    localStorage.setItem("sidebar-collapsed", "1");
+    renderSidebar({ mobileOpen: false });
+    await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
+    expect(screen.queryByTestId("fleet-panel")).toBeNull();
   });
 
   it("shows labels when not collapsed", async () => {

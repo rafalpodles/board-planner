@@ -2079,6 +2079,16 @@ export interface ApiMyMachine {
   checkouts: number;
 }
 
+export type FleetState = "running" | "quiet" | "idle" | "paused" | "offline" | "off";
+
+/** A machine as the sidebar shows it; `task` names nothing when the reader cannot see its project */
+export interface ApiFleetMachine {
+  _id: string;
+  name: string;
+  state: FleetState;
+  task?: { key: string; title: string; phase?: string; projectKey: string; taskNumber: number } | { hidden: true };
+}
+
 export interface ApiAgent {
   _id: string;
   name: string;
