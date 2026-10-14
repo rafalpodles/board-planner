@@ -6,7 +6,7 @@ import { organisationUploads } from "@/lib/upload-ownership";
 const LISTED = 25;
 
 const ids = (values: unknown[]) =>
-  [...new Set(values.map(String))].filter((value) => mongoose.isValidObjectId(value)).map((value) => new mongoose.Types.ObjectId(value));
+  [...new Set(values.map(String))].filter((value) => mongoose.isObjectIdOrHexString(value)).map((value) => new mongoose.Types.ObjectId(value));
 
 export const GET = withAdmin(async (_request, { db, user }) => {
   if (user.viaMachineCredential) {

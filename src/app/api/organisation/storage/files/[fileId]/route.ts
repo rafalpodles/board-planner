@@ -22,7 +22,9 @@ export const DELETE = withAdmin(async (_request, { params, user, db }) => {
 
   // The file is gone by now: a project value that is not an id (a file stored by hand) must not turn that into a 500
   const projectId = String(file.metadata?.project ?? "");
-  const board = mongoose.isObjectIdOrHexString(projectId) ? await db.Project.findById(projectId, "key").lean() : null;
+  const board = mongoose.isObjectIdOrHexString(projectId)
+    ? await db.Project.findById(projectId, "key").lean().catch(() => null)
+    : null;
   void logInstanceAudit(db, {
     action: "upload_deleted",
     user: user._id,

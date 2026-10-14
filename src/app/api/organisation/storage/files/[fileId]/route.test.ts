@@ -23,7 +23,7 @@ const remove = (fileId: string) =>
 beforeEach(() => {
   vi.clearAllMocks();
   user.viaMachineCredential = false;
-  findProject.mockReturnValue({ lean: async () => ({ key: "TP" }) });
+  findProject.mockReturnValue({ lean: () => Promise.resolve({ key: "TP" }) });
 });
 
 describe("DELETE /api/organisation/storage/files/:fileId (BP-1025)", () => {
