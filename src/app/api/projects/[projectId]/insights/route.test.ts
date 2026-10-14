@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Types } from "mongoose";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
@@ -131,7 +132,7 @@ describe("GET /api/projects/[projectId]/insights — the query", () => {
       lean({
         _id: PROJECT_ID,
         estimateFieldId: FIELD_ID,
-        customFields: [{ _id: FIELD_ID, name: "Points", fieldType: "number", archived: false }],
+        customFields: [{ _id: new Types.ObjectId(FIELD_ID), name: "Points", fieldType: "number", archived: false }],
       })
     );
 
@@ -146,7 +147,7 @@ describe("GET /api/projects/[projectId]/insights — the query", () => {
       lean({
         _id: PROJECT_ID,
         estimateFieldId: FIELD_ID,
-        customFields: [{ _id: FIELD_ID, name: "Points", fieldType: "number", archived: true }],
+        customFields: [{ _id: new Types.ObjectId(FIELD_ID), name: "Points", fieldType: "number", archived: true }],
       })
     );
 

@@ -27,7 +27,10 @@ export const GET = withProjectAccess(
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
     if (sprintId && !sprint) return NextResponse.json({ error: "Sprint not found" }, { status: 404 });
 
-    const estimate = resolveEstimateField(project as never);
+    const estimate = resolveEstimateField({
+      estimateFieldId: project.estimateFieldId,
+      customFields: (project.customFields ?? []).map((field) => ({ ...field, _id: String(field._id) })) as never,
+    });
     const estimateField = estimate ? { id: String(estimate._id), name: estimate.name } : undefined;
 
     const weeksShown =

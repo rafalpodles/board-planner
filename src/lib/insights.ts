@@ -98,7 +98,10 @@ function groupBy(finished: Finished[], keyOf: (f: Finished) => string): Record<s
 /**
  * Figures over the tasks finished in the last `weeks` weeks, by when they finished rather than
  * `updatedAt`. A task with a gap in its history has no trustworthy times and is left out of every
- * figure; an inferred start is left out of cycle time and kept in lead time, which does not use it.
+ * figure; an inferred start is left out of cycle time and aging WIP and kept in lead time, which does
+ * not use it. `excluded` counts the tasks a figure would otherwise have used: for an inferred start,
+ * those finished in the window or in progress; for no history or a gap, whose times are unknown, any
+ * task in a done column or in progress.
  * An archived task that finished still counts as finished; it is never work in progress.
  */
 export function computeInsights(
@@ -116,29 +119,31 @@ export function computeInsights(
 
   for (const task of tasks) {
     const { history } = task;
+    const couldCount = task.role === "done" || (task.role === "active" && !task.archived);
     if (history.kind === "no-history") {
-      if (task.role === "active" || task.role === "done") excluded.noHistory++;
+      if (couldCount) excluded.noHistory++;
       continue;
     }
     if (history.gap) {
-      excluded.gap++;
+      if (couldCount) excluded.gap++;
       continue;
     }
-    if (history.startInferred) excluded.startInferred++;
 
     if (history.finishedAt && task.role === "done") {
       const finishedAt = history.finishedAt.getTime();
       if (finishedAt < from || finishedAt > now) continue;
+      if (history.startInferred) excluded.startInferred++;
       const startedAt = history.startInferred ? null : history.startedAt;
       finishedAll.push({
         finishedAt,
-        leadMs: finishedAt - task.createdAt.getTime(),
+        leadMs: Math.max(0, finishedAt - task.createdAt.getTime()),
         cycleMs: startedAt ? finishedAt - startedAt.getTime() : null,
         category: task.category,
         estimate: task.estimate,
       });
-    } else if (task.role === "active" && !task.archived && history.startedAt && !history.startInferred) {
-      inProgress.push({ task, startedAt: history.startedAt.getTime() });
+    } else if (task.role === "active" && !task.archived) {
+      if (history.startInferred) excluded.startInferred++;
+      else if (history.startedAt) inProgress.push({ task, startedAt: history.startedAt.getTime() });
     }
   }
 

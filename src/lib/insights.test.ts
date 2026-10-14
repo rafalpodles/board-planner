@@ -181,6 +181,47 @@ describe("computeInsights — figures a hand computation gives", () => {
   });
 });
 
+describe("computeInsights — edges", () => {
+  it("a finish at exactly now lands in the last week", () => {
+    const justNow = task(3, [["todo", "doing", 2], ["doing", "done", 0]]);
+
+    const insights = computeInsights([justNow], { now: NOW, weeks: 2 });
+
+    expect(insights.weekly.map((w) => w.throughput)).toEqual([0, 1]);
+  });
+
+  it("a finish after now, from a clock ahead of this one, is not counted", () => {
+    const ahead = task(3, [["todo", "doing", 2], ["doing", "done", -0.5]]);
+
+    expect(computeInsights([ahead], { now: NOW, weeks: 2 }).summary.throughput).toBe(0);
+  });
+
+  it("a finish recorded before the task's creation reads as zero lead time, not negative", () => {
+    const skewed = task(1, [["todo", "doing", 3], ["doing", "done", 2]]);
+
+    expect(computeInsights([skewed], { now: NOW, weeks: 2 }).summary.leadTime?.medianMs).toBe(0);
+  });
+
+  it("a task still in progress since an inferred start is counted apart, not aged from its creation", () => {
+    const bornActive = task(5, [["doing", "review", 3], ["review", "doing", 2]]);
+
+    const insights = computeInsights([bornActive], { now: NOW, weeks: 2 });
+
+    expect(insights.agingWip.tasks).toEqual([]);
+    expect(insights.excluded.startInferred).toBe(1);
+  });
+
+  it("left-out counts name only tasks a figure would have used", () => {
+    const backlogWithGap = task(10, [["todo", "doing", 8], ["review", "todo", 2]]);
+    const backlogBornActive = task(10, [["doing", "todo", 8]]);
+    const longAgoBornActive = task(100, [["doing", "done", 90]]);
+
+    const insights = computeInsights([backlogWithGap, backlogBornActive, longAgoBornActive], { now: NOW, weeks: 4 });
+
+    expect(insights.excluded).toEqual({ noHistory: 0, gap: 0, startInferred: 0 });
+  });
+});
+
 describe("computeInsights — aging WIP", () => {
   it("says what share of finished cycle times a task in progress is already older than", () => {
     const finished = [1, 2, 3, 4, 10].map((cycle) =>
@@ -190,14 +231,16 @@ describe("computeInsights — aging WIP", () => {
       ])
     );
     const stuck = task(9, [["todo", "doing", 5]]);
+    const exactlyAsOld = task(9, [["todo", "doing", 4]]);
     const fresh = task(1, [["todo", "doing", 0.5]]);
 
-    const { agingWip } = computeInsights([...finished, stuck, fresh], { now: NOW, weeks: 4 });
+    const { agingWip } = computeInsights([...finished, stuck, exactlyAsOld, fresh], { now: NOW, weeks: 4 });
 
     // cycles 1, 2, 3, 4, 10 → p85 = 4 + 0.4 * 6 = 6.4 days
     expect(agingWip.referenceP85Ms).toBe(Math.round(6.4 * DAY));
     expect(agingWip.tasks.map((t) => [t.taskNumber, t.olderThanPercent])).toEqual([
       [stuck.taskNumber, 80],
+      [exactlyAsOld.taskNumber, 60],
       [fresh.taskNumber, 0],
     ]);
   });
@@ -253,16 +296,21 @@ describe("computeInsights — breakdowns", () => {
 describe("computeInsights — the cap", () => {
   it("keeps the most recently finished tasks and says it truncated", () => {
     const many = Array.from({ length: FINISHED_SAMPLE_CAP + 1 }, (_, i) =>
-      task(20, [
-        ["todo", "doing", 15],
-        ["doing", "done", 10 - i / (FINISHED_SAMPLE_CAP + 10)],
-      ])
+      task(
+        20,
+        [
+          ["todo", "doing", 15],
+          ["doing", "done", 10 - i / (FINISHED_SAMPLE_CAP + 10)],
+        ],
+        { category: i === 0 ? "finished-first" : "bug" }
+      )
     );
 
     const insights = computeInsights(many, { now: NOW, weeks: 4 });
 
     expect(insights.sample).toEqual({ finished: FINISHED_SAMPLE_CAP, cap: FINISHED_SAMPLE_CAP, truncated: true });
     expect(insights.summary.throughput).toBe(FINISHED_SAMPLE_CAP);
+    expect(Object.keys(insights.byCategory)).toEqual(["bug"]);
   });
 });
 
