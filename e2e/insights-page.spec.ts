@@ -102,7 +102,9 @@ test("on Pro every panel draws the board's own figures, and the filters ask the 
   await expect(page.getByText("Sample data")).toHaveCount(0);
 
   await page.getByTestId("insights-throughput").getByText("Show as table").click();
-  await expect(page.getByTestId("insights-throughput").getByRole("table")).toContainText("3");
+  const weekRows = page.getByTestId("insights-throughput").getByRole("table").locator("tbody tr");
+  await expect(weekRows).toHaveCount(12);
+  await expect(weekRows.last().locator("td").nth(1)).toHaveText("3");
 
   const narrowed = page.waitForResponse((res) => /\/insights\?.*category=doc/.test(res.url()));
   await page.getByLabel("Category").selectOption("doc");

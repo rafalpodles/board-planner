@@ -4,7 +4,7 @@ const DAY_MS = 24 * HOUR_MS;
 export function formatDuration(ms: number | null | undefined): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
   if (ms < HOUR_MS) return "under 1 h";
-  if (ms < DAY_MS) return `${Math.round(ms / HOUR_MS)} h`;
+  if (Math.round(ms / HOUR_MS) < 24) return `${Math.round(ms / HOUR_MS)} h`;
   const days = ms / DAY_MS;
   return `${days < 10 ? days.toFixed(1).replace(/\.0$/, "") : Math.round(days)} d`;
 }

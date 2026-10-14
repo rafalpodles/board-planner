@@ -58,6 +58,7 @@ export default function InsightsPage() {
   const [data, setData] = useState<InsightsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState("");
+  const [planRefused, setPlanRefused] = useState(false);
   const generation = useRef(0);
 
   useEffect(() => {
@@ -77,7 +78,7 @@ export default function InsightsPage() {
   }, [projectId]);
 
   const load = useCallback(() => {
-    if (!entitlement.entitled) return;
+    if (!entitlement.entitled || planRefused) return;
     const mine = (generation.current += 1);
     const query = new URLSearchParams(WINDOWS.includes(scope) ? { weeks: scope } : { sprint: scope });
     if (category) query.set("category", category);
@@ -91,8 +92,10 @@ export default function InsightsPage() {
       .catch((reason: unknown) => {
         if (mine !== generation.current) return;
         setData(null);
-        const refusal = boardRefusal(reason);
-        if (refusal) setRefused(true);
+        if ((reason as { status?: number } | null)?.status === 402) {
+          setPlanRefused(true);
+          return;
+        }
         const message = (reason as { message?: string } | null)?.message;
         setFailure(message ? `Insights could not be loaded: ${message}` : "Insights could not be loaded.");
       })
@@ -100,7 +103,7 @@ export default function InsightsPage() {
         if (mine === generation.current) setLoading(false);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, entitlement.entitled, scope, category]);
+  }, [projectId, entitlement.entitled, planRefused, scope, category]);
 
   useEffect(load, [load]);
 
@@ -108,7 +111,7 @@ export default function InsightsPage() {
   const projectRef = project?.key ?? projectId;
   const noDoneColumn = project ? columnIdsWithRole(project, "done").length === 0 : false;
 
-  if (refused) return <div data-testid="insights-error"><NotFoundExperience /></div>;
+  if (refused) return <div data-testid="insights-not-found"><NotFoundExperience /></div>;
 
   const header = (
     <PageHeader
@@ -142,7 +145,7 @@ export default function InsightsPage() {
     );
   }
 
-  const onSample = !entitlement.entitled;
+  const onSample = !entitlement.entitled || planRefused;
   const shown = onSample ? sample : data;
 
   const scopeOptions = [
@@ -214,7 +217,13 @@ export default function InsightsPage() {
                 No task finished in this window yet. Times appear once a task goes from In Progress to Done.
               </p>
             )}
-            {!onSample && shown.excluded.noHistory + shown.excluded.gap > 0 && (
+            {!onSample && shown.excluded.startInferred > 0 && (
+            <p data-testid="insights-start-inferred" className="mb-4 text-sm text-text-muted">
+              {shown.excluded.startInferred} tasks were created straight into In Progress, so they count in lead time but
+              have no cycle time or age.
+            </p>
+          )}
+          {!onSample && shown.excluded.noHistory + shown.excluded.gap > 0 && (
               <p data-testid="insights-excluded" className="mb-4 text-sm text-text-muted">
                 {shown.excluded.noHistory + shown.excluded.gap} tasks are left out because their history of moves is incomplete.
               </p>

@@ -19,6 +19,11 @@ const PAD = { top: 14, right: 8, bottom: 26, left: 56 };
 const PLOT_W = WIDTH - PAD.left - PAD.right;
 const PLOT_H = HEIGHT - PAD.top - PAD.bottom;
 const DAY = 86_400_000;
+const NO_START = "Tasks finished here without passing through an In Progress column, so they have no cycle time.";
+
+export function emptyTimeMessage(insights: Insights, measure: Measure, otherwise: string): string {
+  return measure === "cycleTime" && insights.summary.throughput > 0 && !insights.summary.cycleTime ? NO_START : otherwise;
+}
 
 export const SampleContext = createContext(false);
 
@@ -122,7 +127,7 @@ export function StatTiles({ insights, noDoneColumn }: { insights: Insights; noDo
     </div>
   );
   const spreadNote = (s: Spread | null) => {
-    if (!s) return "Nothing finished yet";
+    if (!s) return summary.throughput > 0 ? "No finished task has a recorded start" : "Nothing finished yet";
     const p85 = formatDuration(s.p85Ms);
     return p85.startsWith("under") ? `85% took ${p85}` : `85% took ${p85} or less`;
   };
@@ -151,7 +156,7 @@ export function TrendChart({ insights, measure }: { insights: Insights; measure:
   if (!values.some(Boolean)) {
     return (
       <Panel title={title} testId="insights-trend">
-        <EmptyPanel message="No task finished in this window, so there is no time to plot yet." />
+        <EmptyPanel message={emptyTimeMessage(insights, measure, "No task finished in this window, so there is no time to plot yet.")} />
       </Panel>
     );
   }
@@ -234,7 +239,7 @@ export function ScatterChart({
   if (points.length === 0) {
     return (
       <Panel title={title} testId="insights-scatter">
-        <EmptyPanel message="Each finished task becomes a dot here, placed by the day it finished." />
+        <EmptyPanel message={emptyTimeMessage(insights, measure, "Each finished task becomes a dot here, placed by the day it finished.")} />
       </Panel>
     );
   }

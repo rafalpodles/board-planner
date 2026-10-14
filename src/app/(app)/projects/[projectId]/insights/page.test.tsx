@@ -24,7 +24,12 @@ const PROJECT = {
   ],
 };
 
-function answer({ plan = "pro", project = PROJECT, entitlementFails = false } = {}) {
+function answer({
+  plan = "pro",
+  project = PROJECT,
+  entitlementFails = false,
+  insightsFails = null as null | { status: number; message: string },
+} = {}) {
   api.get.mockImplementation((url: string) => {
     if (url === "/api/entitlements") {
       return entitlementFails ? Promise.reject(new Error("down")) : Promise.resolve({ plan, features: [], expiresAt: null });
@@ -32,6 +37,7 @@ function answer({ plan = "pro", project = PROJECT, entitlementFails = false } = 
     if (url === "/api/projects/p1") return Promise.resolve(project);
     if (url === "/api/projects/p1/sprints") return Promise.resolve([{ _id: "s1", name: "Sprint 1" }]);
     if (url.startsWith("/api/projects/p1/insights")) {
+      if (insightsFails) return Promise.reject(Object.assign(new Error(insightsFails.message), { status: insightsFails.status }));
       return Promise.resolve({ ...sampleInsights(Date.now()), sprint: null, category: null });
     }
     return Promise.reject(new Error(`unexpected ${url}`));
@@ -87,6 +93,25 @@ describe("InsightsPage", () => {
     expect((await screen.findByTestId("insights-error")).textContent).toContain("plan could not be read");
     expect(screen.queryByTestId("insights-sample")).toBeNull();
     expect(insightsCalls()).toEqual([]);
+  });
+
+  it("a 402 the plan read did not foresee, such as an expired trial, shows the sample and asks once", async () => {
+    answer({ insightsFails: { status: 402, message: "This feature requires a plan upgrade" } });
+    render(<InsightsPage />);
+
+    await screen.findByTestId("insights-sample");
+    expect(screen.getByTestId("insights-upsell")).toBeTruthy();
+    expect(screen.queryByTestId("insights-error")).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(insightsCalls()).toHaveLength(1);
+  });
+
+  it("a sprint that is gone answers an error on the page, not a page that does not exist", async () => {
+    answer({ insightsFails: { status: 404, message: "Sprint not found" } });
+    render(<InsightsPage />);
+
+    expect((await screen.findByTestId("insights-error")).textContent).toContain("Sprint not found");
+    expect(screen.queryByTestId("insights-not-found")).toBeNull();
   });
 
   it("a board with no Done column says so and shows a dash for throughput, not 0", async () => {

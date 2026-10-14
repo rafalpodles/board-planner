@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from "vitest";
 import { render, cleanup } from "@testing-library/react";
-import { agingNote, ScatterChart } from "./InsightsCharts";
+import { agingNote, emptyTimeMessage, ScatterChart } from "./InsightsCharts";
 import { sampleInsights } from "./sample";
 
 afterEach(cleanup);
@@ -23,5 +23,22 @@ describe("ScatterChart", () => {
     const [median, p85] = ["50%", "85%"].map((p) => Number(labels.find((t) => t.textContent!.startsWith(p))!.getAttribute("y")));
 
     expect(Math.abs(median - p85)).toBeGreaterThanOrEqual(14);
+  });
+});
+
+describe("emptyTimeMessage", () => {
+  const base = sampleInsights(Date.UTC(2026, 9, 14));
+
+  it("says finished tasks had no start when they finished without a cycle time", () => {
+    const noStarts = { ...base, summary: { ...base.summary, cycleTime: null } };
+
+    expect(emptyTimeMessage(noStarts, "cycleTime", "fallback")).toContain("without passing through an In Progress column");
+    expect(emptyTimeMessage(noStarts, "leadTime", "fallback")).toBe("fallback");
+  });
+
+  it("keeps the plain message when nothing finished", () => {
+    const nothing = { ...base, summary: { throughput: 0, leadTime: null, cycleTime: null } };
+
+    expect(emptyTimeMessage(nothing, "cycleTime", "fallback")).toBe("fallback");
   });
 });

@@ -15,6 +15,7 @@ describe("formatDuration", () => {
     expect(formatDuration(10 * 60_000)).toBe("under 1 h");
     expect(formatDuration(5 * HOUR)).toBe("5 h");
     expect(formatDuration(DAY)).toBe("1 d");
+    expect(formatDuration(23.6 * HOUR)).toBe("1 d");
     expect(formatDuration(2.25 * DAY)).toBe("2.3 d");
     expect(formatDuration(14.6 * DAY)).toBe("15 d");
   });
