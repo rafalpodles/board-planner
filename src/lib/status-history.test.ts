@@ -321,6 +321,34 @@ describe("projectStatusHistories", () => {
     expect(only.history).toMatchObject({ endedIn: "unknown", unknownColumns: ["gone"] });
   });
 
+  it("carries what the metrics group by, and the designated estimate as a number read from its own path", async () => {
+    logFind.mockReturnValue(leanOf([]));
+    taskFind.mockReturnValue(
+      leanOf([
+        { _id: "t1", taskNumber: 1, title: "A", category: "bug", sprint: "s1", status: "doing", createdAt: CREATED, customFieldValues: { f1: "3" } },
+        { _id: "t2", taskNumber: 2, title: "B", category: "doc", sprint: null, status: "done", createdAt: CREATED, customFieldValues: { f1: "" } },
+      ])
+    );
+
+    const result = await projectStatusHistories(db, "p1", { estimateFieldId: "f1" });
+
+    expect(taskFind.mock.calls[0][1]).toContain("customFieldValues.f1");
+    expect(result.map((r) => [r.title, r.category, r.sprint, r.role, r.estimate])).toEqual([
+      ["A", "bug", "s1", "active", 3],
+      ["B", "doc", null, "done", null],
+    ]);
+  });
+
+  it("reads no estimate and no field values when none is designated", async () => {
+    logFind.mockReturnValue(leanOf([]));
+    taskFind.mockReturnValue(leanOf([{ _id: "t1", taskNumber: 1, status: "doing", createdAt: CREATED, customFieldValues: { f1: 3 } }]));
+
+    const [only] = await projectStatusHistories(db, "p1");
+
+    expect(taskFind.mock.calls[0][1]).not.toContain("customFieldValues");
+    expect(only.estimate).toBeNull();
+  });
+
   it("answers nothing for a project that does not exist", async () => {
     projectFindById.mockReturnValue({ lean: () => Promise.resolve(null) });
 
