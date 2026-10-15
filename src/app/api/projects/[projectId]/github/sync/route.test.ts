@@ -24,6 +24,12 @@ const { fetchPullRequests, projectFindOne, taskFindOne, taskUpdateOne, taskFind,
   })
 );
 
+const plan = vi.hoisted(() => ({ value: "free" as "free" | "pro" }));
+const syncGithubDeployments = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/organisation", () => ({
+  getOrganisation: async () => ({ _id: "o1", entitlements: { plan: plan.value, features: [] } }),
+}));
+vi.mock("@/lib/github-deployments", () => ({ syncGithubDeployments }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
@@ -98,6 +104,7 @@ const ctx = () => ({ params: Promise.resolve({ projectId: "p1" }) });
 beforeEach(() => {
   taskUpdateOne.mockResolvedValue({ modifiedCount: 1 });
   vi.clearAllMocks();
+  plan.value = "free";
   projectFindOne.mockReturnValue({ lean: () => project() });
   taskFindOne.mockResolvedValue(task());
   taskFind.mockResolvedValue([]);
@@ -389,5 +396,35 @@ describe("POST .../github/sync", () => {
 
       expect(taskUpdateOne).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("POST .../github/sync and deployments", () => {
+  it("reads no deployments for an organisation without Insights", async () => {
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(syncGithubDeployments).not.toHaveBeenCalled();
+    expect(body).not.toHaveProperty("deployments");
+  });
+
+  it("reads deployments on Pro and says what it found", async () => {
+    plan.value = "pro";
+    syncGithubDeployments.mockResolvedValue({ ran: true, requests: 2, inserted: 3, finished: 1 });
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(syncGithubDeployments.mock.calls[0][1]).toMatchObject({ _id: "p1" });
+    expect(body).toMatchObject({ synced: true, deployments: { ran: true, inserted: 3 } });
+  });
+
+  it("keeps the pull-request answer when the deployments fail", async () => {
+    plan.value = "pro";
+    syncGithubDeployments.mockRejectedValue(new Error("GitHub answered 500"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(request(), ctx());
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ synced: true, deployments: { ran: false, reason: "failed", error: "GitHub answered 500" } });
   });
 });

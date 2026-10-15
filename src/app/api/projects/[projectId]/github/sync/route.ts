@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { syncGithubPullRequests } from "@/lib/github-sync";
 import { withProjectAccess } from "@/lib/middleware";
+import { syncGithubDeployments } from "@/lib/github-deployments";
+import { getOrganisation } from "@/lib/organisation";
+import { can } from "@/lib/entitlements";
 
 // The library already keeps GitHub's own body out of the message (see `refusal`); this is the
 // last cap before it reaches a toast.
@@ -48,5 +51,13 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
   }
 
   const { ok: _ok, ...counts } = result;
-  return NextResponse.json({ synced: true, ...counts });
+  if (!can(await getOrganisation(db.organisation), "reports.insights")) {
+    return NextResponse.json({ synced: true, ...counts });
+  }
+  // A deployment failure must not undo a pull-request sync that already landed
+  const deployments = await syncGithubDeployments(db, project).catch((err: unknown) => {
+    console.error("GitHub deployment sync failed:", err);
+    return { ran: false as const, reason: "failed" as const, error: firstLine(err) };
+  });
+  return NextResponse.json({ synced: true, ...counts, deployments });
 });
