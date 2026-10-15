@@ -241,7 +241,7 @@ export function CsvMapping({
   ];
   const userOptions = [
     { value: AUTOMATIC, label: "By username or e-mail" },
-    { value: UNASSIGNED, label: "Not on this board (left unassigned, named in comments)" },
+    { value: UNASSIGNED, label: "Not on this board" },
     ...(members ?? []).map((m) => ({ value: m.username, label: m.fullName ? `${m.fullName} (${m.username})` : m.username })),
   ];
 

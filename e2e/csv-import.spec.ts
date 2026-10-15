@@ -102,7 +102,7 @@ test("a semicolon Excel file maps its columns, statuses and people, imports, and
 
   // People: one picked from the members, one deliberately left unassigned, one found by e-mail
   await mapping.getByLabel("Person “Jan Nowak”").selectOption(MEMBER_USERNAME);
-  await mapping.getByLabel("Person “Old Colleague”").selectOption({ label: "Not on this board (left unassigned, named in comments)" });
+  await mapping.getByLabel("Person “Old Colleague”").selectOption({ label: "Not on this board" });
 
   await check(page);
   const report = page.getByTestId("import-report");
