@@ -43,7 +43,7 @@ async function tasks() {
     .toArray();
 }
 
-const card = (page: Page) => page.locator("section").filter({ has: page.getByLabel("Import file (CSV or JSON)") });
+const card = (page: Page) => page.locator("section").filter({ has: page.getByLabel("Import file (CSV, Excel, Jira XML or JSON)") });
 
 async function check(page: Page) {
   const answered = page.waitForResponse((r) => r.url().endsWith("/import") && r.request().method() === "POST");
@@ -70,7 +70,7 @@ test.afterEach(async () => {
 test("a semicolon Excel file maps its columns, statuses and people, imports, and a second upload updates it", async ({ page }) => {
   await signIn(page, "owner");
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
-  await page.getByLabel("Import file (CSV or JSON)").setInputFiles(file(CSV));
+  await page.getByLabel("Import file (CSV, Excel, Jira XML or JSON)").setInputFiles(file(CSV));
 
   const mapping = page.getByTestId("csv-mapping");
   await expect(mapping).toContainText("5 rows, 7 columns.");
@@ -101,8 +101,8 @@ test("a semicolon Excel file maps its columns, statuses and people, imports, and
   await page.getByRole("button", { name: /^Import\b/ }).first().click();
 
   // People: one picked from the members, one deliberately left unassigned, one found by e-mail
-  await mapping.getByLabel("Assignee “Jan Nowak”").selectOption(MEMBER_USERNAME);
-  await mapping.getByLabel("Assignee “Old Colleague”").selectOption({ label: "Leave unassigned" });
+  await mapping.getByLabel("Person “Jan Nowak”").selectOption(MEMBER_USERNAME);
+  await mapping.getByLabel("Person “Old Colleague”").selectOption({ label: "Not on this board" });
 
   await check(page);
   const report = page.getByTestId("import-report");
@@ -133,7 +133,7 @@ test("a semicolon Excel file maps its columns, statuses and people, imports, and
 
   // The same shape again: the mapping is remembered and nothing is made twice
   await page.reload();
-  await page.getByLabel("Import file (CSV or JSON)").setInputFiles(file(CSV.replace("Second task;Done;", "Second task, renamed;;")));
+  await page.getByLabel("Import file (CSV, Excel, Jira XML or JSON)").setInputFiles(file(CSV.replace("Second task;Done;", "Second task, renamed;;")));
   await expect(mapping.getByLabel("Status “Do zrobienia”")).toHaveValue("todo");
   await check(page);
   await expect(report).toContainText("Would create 0 and would update 5 of 5 tasks from eksport");
@@ -152,7 +152,7 @@ test("a semicolon Excel file maps its columns, statuses and people, imports, and
 test("a file with no title column cannot be checked, and one with no id column is added again by a re-upload", async ({ page }) => {
   await signIn(page, "owner");
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
-  await page.getByLabel("Import file (CSV or JSON)").setInputFiles(file("Name,Owner\nOne,someone\n"));
+  await page.getByLabel("Import file (CSV, Excel, Jira XML or JSON)").setInputFiles(file("Name,Owner\nOne,someone\n"));
 
   const mapping = page.getByTestId("csv-mapping");
   await expect(mapping).toContainText("No ID column");
@@ -166,7 +166,7 @@ test("a file with no title column cannot be checked, and one with no id column i
   await importIt(page);
   await expect(page.getByTestId("import-report")).toContainText("Created 1 and updated 0 of 1 tasks");
 
-  await page.getByLabel("Import file (CSV or JSON)").setInputFiles(file("Name,Owner\nOne,someone\n"));
+  await page.getByLabel("Import file (CSV, Excel, Jira XML or JSON)").setInputFiles(file("Name,Owner\nOne,someone\n"));
   await check(page);
   await expect(page.getByTestId("import-report")).toContainText("Would create 1 and would update 0 of 1 tasks");
 });
@@ -174,7 +174,7 @@ test("a file with no title column cannot be checked, and one with no id column i
 test("a status mapped to another column goes there, even though a column has its name", async ({ page }) => {
   await signIn(page, "owner");
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
-  await page.getByLabel("Import file (CSV or JSON)").setInputFiles(file("ID,Title,Status\nP-1,Parked on purpose,Done\n"));
+  await page.getByLabel("Import file (CSV, Excel, Jira XML or JSON)").setInputFiles(file("ID,Title,Status\nP-1,Parked on purpose,Done\n"));
   const mapping = page.getByTestId("csv-mapping");
   await expect(mapping.getByLabel("Status “Done”")).toHaveValue("done");
   await mapping.getByLabel("Status “Done”").selectOption({ label: "Planned" });
@@ -186,4 +186,15 @@ test("a status mapped to another column goes there, even though a column has its
   await importIt(page);
   await expect(report).toContainText("Created 1");
   expect((await tasks()).map((t) => t.status)).toEqual(["planned"]);
+});
+
+test("a sheet whose text holds an HTML table is read as the sheet it is", async ({ page }) => {
+  await signIn(page, "owner");
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
+  await page
+    .getByLabel("Import file (CSV, Excel, Jira XML or JSON)")
+    .setInputFiles(file('ID,Title,Description\nH-1,Has a table,"<table><tr><td>cell</td></tr></table>"\n'));
+  await expect(page.getByTestId("csv-mapping")).toContainText("1 rows, 3 columns.");
+  await check(page);
+  await expect(page.getByTestId("import-report")).toContainText("Would create 1");
 });

@@ -82,4 +82,66 @@ describe("CsvMapping", () => {
     fireEvent.change(select, { target: { value: "" } });
     await waitFor(() => expect(last()!.mapping.statuses).toEqual({}));
   });
+
+  it("keeps a repeatable target on every column it is on, and moves any other off the column that had it", async () => {
+    const sheet = readCsvTable("Title,Note,Other\nOne,a,b\n");
+    const onChange = vi.fn();
+    render(<CsvMapping projectId="p1" project={project} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
+    await waitFor(() => expect(onChange.mock.calls.at(-1)![0]).not.toBeNull());
+    fireEvent.change(screen.getByLabelText("Note"), { target: { value: "comment" } });
+    fireEvent.change(screen.getByLabelText("Other"), { target: { value: "comment" } });
+    expect((screen.getByLabelText("Note") as HTMLSelectElement).value).toBe("comment");
+    fireEvent.change(screen.getByLabelText("Other"), { target: { value: "title" } });
+    expect((screen.getByLabelText("Title") as HTMLSelectElement).value).toBe("ignore");
+  });
+
+  it("keeps only the first of a remembered repeat whose field no longer takes one", async () => {
+    const sheet = readCsvTable("Title,Tag,Tag\nOne,a,b\n");
+    const withDropdown = { ...project, customFields: [{ _id: "f", name: "Tag", fieldType: "dropdown", options: [{ id: "a", value: "a" }, { id: "b", value: "b" }], archived: false }] } as unknown as ApiProject;
+    rememberCsvMapping("p1", sheet.headers, { targets: ["title", "field:Tag", "field:Tag"], statuses: {}, users: {} });
+    const onChange = vi.fn();
+    render(<CsvMapping projectId="p1" project={withDropdown} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
+    await waitFor(() => expect(onChange.mock.calls.at(-1)![0]).not.toBeNull());
+    expect((onChange.mock.calls.at(-1)![0] as CsvPayload).bundle.tasks[0].fields).toEqual({ Tag: "a" });
+    expect((screen.getByLabelText("Tag (column 3)") as HTMLSelectElement).value).toBe("ignore");
+  });
+
+  it("recalls a mapping when the next export has one more comment column", async () => {
+    // "Note" is not guessed as anything, so only the remembered mapping can make these comments
+    rememberCsvMapping("p1", ["Title", "Note", "Note"], { targets: ["title", "comment", "comment"], statuses: {}, users: {} });
+    const sheet = readCsvTable("Title,Note,Note,Note\nOne,a,b,c\n");
+    const onChange = vi.fn();
+    render(<CsvMapping projectId="p1" project={project} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
+    await waitFor(() => expect((onChange.mock.calls.at(-1)?.[0] as CsvPayload | null)?.bundle.tasks[0].comments).toHaveLength(3));
+  });
+
+  it("keeps a column deliberately left out of a run, at the same shape", async () => {
+    rememberCsvMapping("p1", ["Title", "Comment", "Comment"], { targets: ["title", "comment", "ignore"], statuses: {}, users: {} });
+    const sheet = readCsvTable("Title,Comment,Comment\nOne,a,b\n");
+    const onChange = vi.fn();
+    render(<CsvMapping projectId="p1" project={project} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
+    await waitFor(() => expect((onChange.mock.calls.at(-1)?.[0] as CsvPayload | null)?.bundle.tasks[0].comments).toEqual([{ id: "c1", body: "a" }]));
+  });
+
+  it("never applies a full list to another layout of the same runs, and keeps the people when the columns do not fit", async () => {
+    rememberCsvMapping("p1", ["Title", "Note", "Note", "Tag"], {
+      targets: ["title", "comment", "ignore", "assignee"],
+      statuses: {},
+      users: { a: "maya" },
+    });
+    const sheet = readCsvTable("Title,Note,Tag,Tag\nOne,x,a,b\n");
+    const onChange = vi.fn();
+    render(<CsvMapping projectId="p1" project={project} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
+    await waitFor(() => expect(onChange.mock.calls.at(-1)?.[0]).not.toBeNull());
+    // The guess, not the other layout's list: Note is guessed as nothing
+    expect((screen.getByLabelText("Note") as HTMLSelectElement).value).toBe("ignore");
+  });
+
+  it("keeps the people chosen before when a run's split choice does not fit the next file", async () => {
+    rememberCsvMapping("p1", ["Title", "Owner", "Note", "Note"], { targets: ["title", "assignee", "comment", "ignore"], statuses: {}, users: { x: "maya" } });
+    const sheet = readCsvTable("Title,Owner,Note,Note,Note\nOne,x,a,b,c\n");
+    const onChange = vi.fn();
+    render(<CsvMapping projectId="p1" project={project} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
+    await waitFor(() => expect((onChange.mock.calls.at(-1)?.[0] as CsvPayload | null)?.mapping.users).toEqual({ x: "maya" }));
+  });
 });

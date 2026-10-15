@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { csvToBundle, decodeCsv, detectDelimiter, guessTargets, normaliseDay, normaliseInstant, parseCsv, readCsvTable } from "./csv";
+import { commentAuthors, csvToBundle, decodeCsv, detectDelimiter, guessTargets, isJiraExport, normaliseDay, normaliseInstant, parseCsv, readCsvTable } from "./csv";
 import { parseBundle } from "./bundle";
 
 const FIELDS = [
@@ -148,5 +148,124 @@ describe("csvToBundle", () => {
   it("numbers rows by their line in the file when there is no id column", () => {
     const bundle = csvToBundle(table, targets.map((t) => (t === "id" ? "ignore" : t)), "CSV", FIELDS, "u1");
     expect(bundle.tasks.map((t) => t.id)).toEqual(["row-2", "row-3"]);
+  });
+});
+
+describe("a Jira export", () => {
+  const JIRA = [
+    "Summary,Issue key,Issue id,Issue Type,Status,Priority,Assignee,Created,Resolved,Due date,Labels,Labels,Description,Comment,Comment,Parent",
+    'Export invoices,ORB-12,10012,Bug,Done,Highest,Maya Kowalska,15/Oct/25 9:30 AM,16/Oct/25 1:05 PM,20/paź/26,billing,urgent-fix,"Line 1\nLine 2","15/Oct/25 9:45 AM;712020:abc;First comment","16/Oct/25 12:05 AM;712020:def;Second; with a semicolon",10010',
+    "Plain one,ORB-13,10013,Story,To Do,Medium,,01/Jan/26 12:00 PM,,,,,,just text with no date,,",
+  ].join("\n");
+  const fields = [{ name: "Labels", fieldType: "multiselect" }];
+  const table = readCsvTable(JIRA);
+  const targets = guessTargets(table.headers, fields);
+
+  it("is recognised by its headers, and its columns are guessed with repeats kept", () => {
+    expect(isJiraExport(table.headers)).toBe(true);
+    expect(isJiraExport(["Title", "Status"])).toBe(false);
+    expect(targets).toEqual([
+      "title", "id", "ignore", "category", "status", "priority", "assignee", "createdAt", "completedAt", "dueDate",
+      "field:Labels", "field:Labels", "description", "comment", "comment", "parent",
+    ]);
+  });
+
+  it("carries Jira's dates, both label columns, every comment with its time and author, and the parent", () => {
+    const bundle = csvToBundle(table, targets, "Jira", fields, "u1");
+    expect(parseBundle(bundle).ok).toBe(true);
+    expect(bundle.tasks[0]).toEqual({
+      id: "ORB-12",
+      title: "Export invoices",
+      description: "Line 1\nLine 2",
+      status: "Done",
+      assignee: "Maya Kowalska",
+      priority: "Highest",
+      type: "Bug",
+      dueDate: "2026-10-20",
+      createdAt: "2025-10-15T09:30:00Z",
+      completedAt: "2025-10-16T13:05:00Z",
+      parent: "10010",
+      fields: { Labels: ["billing", "urgent-fix"] },
+      comments: [
+        { id: "2025-10-15T09:45:00Z|712020:abc", createdAt: "2025-10-15T09:45:00Z", author: "712020:abc", body: "First comment" },
+        { id: "2025-10-16T00:05:00Z|712020:def", createdAt: "2025-10-16T00:05:00Z", author: "712020:def", body: "Second; with a semicolon" },
+      ],
+    });
+    expect(bundle.tasks[1].comments).toEqual([{ id: "c1", body: "just text with no date" }]);
+    expect(bundle.tasks[1].createdAt).toBe("2026-01-01T12:00:00Z");
+  });
+
+  it("keeps a comment's identity when an earlier one is deleted in Jira, and tells two in the same minute apart", () => {
+    const sheet = (cells: string[]) => readCsvTable(["Issue key,Summary,Comment,Comment,Comment", ["X-1", "t", ...cells].map((c) => `"${c}"`).join(",")].join("\n"));
+    const ids = (cells: string[]) => csvToBundle(sheet(cells), ["id", "title", "comment", "comment", "comment"], "Jira", [], "u1").tasks[0].comments!.map((c) => c.id);
+    const [a, b, c] = ["01/Jan/26 9:00 AM;u1;one", "01/Jan/26 9:00 AM;u1;two", "02/Jan/26 9:00 AM;u2;three"];
+    expect(ids([a, b, c])).toEqual(["2026-01-01T09:00:00Z|u1", "2026-01-01T09:00:00Z|u1#2", "2026-01-02T09:00:00Z|u2"]);
+    expect(ids([a, c, ""])).toEqual(["2026-01-01T09:00:00Z|u1", "2026-01-02T09:00:00Z|u2"]);
+  });
+
+  it.each([
+    ["15/Oct/26", "2026-10-15"],
+    ["5/maj/2026", "2026-05-05"],
+    ["31/Feb/26", "31/Feb/26"],
+    ["15/Foo/26", "15/Foo/26"],
+  ])("reads the day %s as %s", (raw, day) => expect(normaliseDay(raw)).toBe(day));
+
+  it.each([
+    ["15/Oct/26 12:00 AM", "2026-10-15T00:00:00Z"],
+    ["15/Oct/26 12:30 PM", "2026-10-15T12:30:00Z"],
+    ["15/Oct/26 17:30", "2026-10-15T17:30:00Z"],
+    ["15/Oct/26 13:00 PM", "15/Oct/26 13:00 PM"],
+  ])("reads the time %s as %s", (raw, at) => expect(normaliseInstant(raw)).toBe(at));
+});
+
+describe("Jira's own conventions", () => {
+  it("lists every comment author, from comment columns and from comments kept apart", () => {
+    const table = readCsvTable('Issue key,Summary,Comment,Comment\nX-1,t,"01/Jan/26 9:00 AM;u1;a","just text"\nX-2,t,"02/Jan/26 9:00 AM;u2;b",');
+    expect(commentAuthors(table, ["id", "title", "comment", "comment"])).toEqual(["u1", "u2"]);
+    expect(commentAuthors({ ...table, comments: [[{ id: "1", body: "x", author: "Ann" }], []] }, ["id", "title", "ignore", "ignore"])).toEqual(["Ann"]);
+  });
+
+  it("takes Parent key over the numeric Parent, and turns a numeric Parent into a key when the parent is in the file", () => {
+    expect(guessTargets(["Issue key", "Summary", "Parent", "Parent key"], [])).toEqual(["id", "title", "ignore", "parent"]);
+    const table = readCsvTable("Issue key,Issue id,Summary,Issue Type,Parent\nX-1,101,Epic,Epic,\nX-2,102,Child,Story,101\nX-3,103,Orphan,Story,999");
+    const bundle = csvToBundle(table, guessTargets(table.headers, []), "Jira", [], "u1");
+    expect(bundle.tasks.map((t) => t.parent)).toEqual([undefined, "X-1", "999"]);
+  });
+
+  it("turns a Jira export's wiki markup into Markdown, and leaves any other sheet's text as it is", () => {
+    const jira = readCsvTable('Issue key,Summary,Issue Type,Description,Comment\nX-1,t,Bug,"h2. Context\n{{code}} *bold*","01/Jan/26 9:00 AM;u;see {{x}}"');
+    const plain = readCsvTable('Key,Title,Description\nX-1,t,"h2. Context"');
+    const [j] = csvToBundle(jira, guessTargets(jira.headers, []), "Jira", [], "u1").tasks;
+    const [p] = csvToBundle(plain, guessTargets(plain.headers, []), "CSV", [], "u1").tasks;
+    expect([j.description, j.comments![0].body, p.description]).toEqual(["## Context\n`code` **bold**", "see `x`", "h2. Context"]);
+  });
+
+  it("keeps a comment by a very long author name importable", () => {
+    const long = "a".repeat(255);
+    const table = readCsvTable(`Issue key,Summary,Comment\nX-1,t,"01/Jan/26 9:00 AM;${long};hi"`);
+    const bundle = csvToBundle(table, ["id", "title", "comment"], "Jira", [], "u1");
+    expect(parseBundle(bundle).ok).toBe(true);
+    expect(bundle.tasks[0].comments![0].author).toBe(long);
+  });
+
+  it("reads a plain comment holding semicolons as text", () => {
+    const table = readCsvTable('Issue key,Summary,Comment\nX-1,t,"a;b;c"');
+    expect(csvToBundle(table, ["id", "title", "comment"], "Jira", [], "u1").tasks[0].comments).toEqual([{ id: "c1", body: "a;b;c" }]);
+  });
+
+  it.each([
+    ["15/Oct/99", "1999-10-15"],
+    ["15/Sept/26", "2026-09-15"],
+  ])("reads %s as %s", (raw, day) => expect(normaliseDay(raw)).toBe(day));
+
+  it("refuses an hour of zero on a twelve-hour clock", () => {
+    expect(normaliseInstant("15/Oct/26 0:30 AM")).toBe("15/Oct/26 0:30 AM");
+  });
+
+  it("needs all three of Jira's headers to call a sheet a Jira export", () => {
+    expect(isJiraExport(["Issue key", "Summary"])).toBe(false);
+    expect(isJiraExport(["Issue key", "Issue Type"])).toBe(false);
+    expect(isJiraExport(["Summary", "Issue Type"])).toBe(false);
+    expect(isJiraExport(["Klucz zgłoszenia", "Podsumowanie", "Typ zgłoszenia"])).toBe(true);
   });
 });

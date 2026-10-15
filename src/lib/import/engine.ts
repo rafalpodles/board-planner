@@ -19,6 +19,15 @@ import { normaliseInstant } from "./dates";
 
 export const IMPORT_CHUNK = 200;
 const PRIORITIES: readonly Priority[] = ["low", "medium", "high", "urgent"];
+const NO_PRIORITY = new Set(["no priority", "none", "-"]);
+// The scales other trackers ship with: Jira's current and classic ones, and Linear's
+const PRIORITY_NAMES: Record<string, Priority> = {
+  highest: "urgent", blocker: "urgent", critical: "urgent",
+  major: "high",
+  normal: "medium",
+  lowest: "low", minor: "low", trivial: "low",
+  najwyższy: "urgent", krytyczny: "urgent", blokujący: "urgent", poważny: "high", drobny: "low", trywialny: "low", wysoki: "high", średni: "medium", normalny: "medium", niski: "low", najniższy: "low",
+};
 
 export type SkipReason = "no title";
 
@@ -129,7 +138,17 @@ function resolveFields(report: ImportReport, task: ImportTask, board: Board): Re
     if (raw === null || raw === undefined || raw === "") continue;
     let value: unknown = raw;
     if (field.fieldType === "dropdown") value = matchOptionValue(field, raw) ?? raw;
-    if (field.fieldType === "multiselect" && Array.isArray(raw)) value = raw.map((v) => matchOptionValue(field, v) ?? v);
+    if (field.fieldType === "multiselect" && Array.isArray(raw)) {
+      // Labels are free-form in most trackers: the ones this board offers come across, each other one is listed
+      const known: string[] = [];
+      for (const v of raw) {
+        const id = matchOptionValue(field, v);
+        if (id) known.push(id);
+        else report.dropped.push({ id: task.id, field: field.name, value: shown(v), reason: `${field.name} has no such option` });
+      }
+      if (known.length === 0) continue;
+      value = [...new Set(known)];
+    }
     if (field.fieldType === "number" && typeof raw === "string" && raw.trim() && !Number.isNaN(Number(raw))) value = Number(raw);
     const verdict = validateCustomFieldValues({ [String(field._id)]: value }, [{ ...field, required: false }]);
     if (!verdict.valid) {
@@ -209,8 +228,8 @@ function resolveTask(
 
   let priority: Priority = "medium";
   let priorityGiven = false;
-  if (task.priority) {
-    const found = byName(PRIORITIES, task.priority);
+  if (task.priority && !NO_PRIORITY.has(task.priority.trim().toLowerCase())) {
+    const found = byName(PRIORITIES, task.priority) ?? PRIORITY_NAMES[task.priority.trim().toLowerCase()];
     if (found) [priority, priorityGiven] = [found, true];
     else report.dropped.push({ id: task.id, field: "priority", value: shown(task.priority), reason: "not low, medium, high or urgent" });
   }

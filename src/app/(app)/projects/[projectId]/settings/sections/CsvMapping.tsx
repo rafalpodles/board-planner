@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import type { ImportBundle, ImportMapping } from "@/lib/import/bundle";
 import { MAX_IMPORT_TASKS } from "@/lib/import/limits";
-import { type CsvTable, type CsvTarget, csvToBundle, distinctValues, guessTargets, shapeKey } from "@/lib/import/csv";
+import { type CsvTable, type CsvTarget, commentAuthors, csvToBundle, distinctValues, guessTargets, headerRuns, isJiraExport, repeatable, shapeKey } from "@/lib/import/csv";
 import { effectiveColumns, MAX_COLUMN_LABEL } from "@/lib/columns";
 import { COLUMN_ROLES, type ApiProject, type ApiProjectColumn, type ColumnRole, ROLE_LABELS } from "@/types";
 
@@ -42,14 +42,37 @@ const BUILT_IN: { value: CsvTarget; label: string }[] = [
   { value: "dueDate", label: "Due date" },
   { value: "createdAt", label: "Created" },
   { value: "completedAt", label: "Completed" },
+  { value: "comment", label: "Comment (one per column)" },
+  { value: "parent", label: "Parent (listed, not linked)" },
 ];
 
 const storageKey = (projectId: string, headers: string[]) => `bp:csv-import:${projectId}:${shapeKey(headers)}`;
 
-function recall(projectId: string, headers: string[]): Saved | null {
+const exactShape = (headers: string[]) => headers.map((h) => h.trim().toLowerCase()).join("\u0001");
+
+interface Stored {
+  // One choice per run of a repeated header, kept when every column of the run agreed
+  runs?: CsvTarget[];
+  // Every column's choice, for exactly this layout
+  targets?: CsvTarget[];
+  shape?: string;
+  statuses?: Record<string, string>;
+  users?: Record<string, string | null>;
+}
+
+// Targets that fit no longer leave the status and people choices behind: those are the slow ones to redo
+function recall(projectId: string, headers: string[]): { targets?: CsvTarget[]; statuses: Record<string, string>; users: Record<string, string | null> } | null {
   try {
-    const saved = JSON.parse(window.localStorage.getItem(storageKey(projectId, headers)) ?? "null") as Saved | null;
-    return saved && Array.isArray(saved.targets) && saved.targets.length === headers.length ? saved : null;
+    const saved = JSON.parse(window.localStorage.getItem(storageKey(projectId, headers)) ?? "null") as Stored | null;
+    if (!saved || typeof saved !== "object") return null;
+    const runs = headerRuns(headers);
+    const expand = (perRun: CsvTarget[]) => headers.map((_, i) => perRun[runs.filter((start) => start <= i).length - 1]);
+    let targets: CsvTarget[] | undefined;
+    if (Array.isArray(saved.targets) && saved.targets.length === headers.length && (saved.shape ?? exactShape(headers)) === exactShape(headers)) {
+      targets = saved.targets;
+    } else if (Array.isArray(saved.runs) && saved.runs.length === runs.length) targets = expand(saved.runs);
+    else if (!saved.shape && Array.isArray(saved.targets) && saved.targets.length === runs.length) targets = expand(saved.targets);
+    return { targets, statuses: saved.statuses ?? {}, users: saved.users ?? {} };
   } catch {
     return null;
   }
@@ -57,7 +80,16 @@ function recall(projectId: string, headers: string[]): Saved | null {
 
 export function rememberCsvMapping(projectId: string, headers: string[], saved: Saved) {
   try {
-    window.localStorage.setItem(storageKey(projectId, headers), JSON.stringify(saved));
+    const runs = headerRuns(headers);
+    const uniform = runs.every((start, r) => saved.targets.slice(start, runs[r + 1] ?? headers.length).every((t) => t === saved.targets[start]));
+    const stored: Stored = {
+      ...(uniform && { runs: runs.map((start) => saved.targets[start]) }),
+      targets: saved.targets,
+      shape: exactShape(headers),
+      statuses: saved.statuses,
+      users: saved.users,
+    };
+    window.localStorage.setItem(storageKey(projectId, headers), JSON.stringify(stored));
   } catch {}
 }
 
@@ -106,7 +138,8 @@ export function CsvMapping({
   const [statuses, setStatuses] = useState<Record<string, string>>(remembered?.statuses ?? {});
   const [users, setUsers] = useState<Record<string, string | null>>(remembered?.users ?? {});
   // Not remembered: a source name carried over to another file of the same shape would update that file's tasks
-  const [source, setSource] = useState(() => sourceFrom(fileName));
+  // Every Jira export, whatever its kind or file name, is one source, so its tasks update whichever kind comes next
+  const [source, setSource] = useState(() => (isJiraExport(table.headers) ? "Jira" : sourceFrom(fileName)));
   const [members, setMembers] = useState<{ username: string; fullName?: string }[] | null>(null);
   const [membersFailed, setMembersFailed] = useState(false);
   const [roles, setRoles] = useState<Record<string, ColumnRole>>({});
@@ -125,11 +158,19 @@ export function CsvMapping({
   }, [projectId]);
 
   const statusValues = useMemo(() => distinctValues(table, targets.indexOf("status")), [table, targets]);
-  const userValues = useMemo(() => distinctValues(table, targets.indexOf("assignee")), [table, targets]);
+  const userValues = useMemo(
+    () => [...new Set([...distinctValues(table, targets.indexOf("assignee")), ...commentAuthors(table, targets)])],
+    [table, targets]
+  );
   // A recalled choice that no longer names something on this board falls back to the automatic one
   const liveTargets = useMemo(
-    () => targets.map((t) => (targetOptions.some((o) => o.value === t) ? t : "ignore")),
-    [targets, targetOptions]
+    () =>
+      targets.map((t, i) => {
+        if (!targetOptions.some((o) => o.value === t)) return "ignore";
+        // A remembered repeat stays only while the target still takes one; otherwise the first column keeps it
+        return t !== "ignore" && targets.indexOf(t) < i && !repeatable(t, fieldShapes) ? "ignore" : t;
+      }),
+    [targets, targetOptions, fieldShapes]
   );
   const statusOf = (value: string) => {
     const chosen = statuses[value];
@@ -200,7 +241,7 @@ export function CsvMapping({
   ];
   const userOptions = [
     { value: AUTOMATIC, label: "By username or e-mail" },
-    { value: UNASSIGNED, label: "Leave unassigned" },
+    { value: UNASSIGNED, label: "Not on this board" },
     ...(members ?? []).map((m) => ({ value: m.username, label: m.fullName ? `${m.fullName} (${m.username})` : m.username })),
   ];
 
@@ -208,6 +249,10 @@ export function CsvMapping({
     <div data-testid="csv-mapping" className="space-y-5">
       <p className="text-sm text-text-muted">
         {table.rows.length} rows, {table.headers.length} columns.
+        {isJiraExport(table.headers) && " Recognised as a Jira export."}
+        {((n) => (n > 0 ? ` Its ${n} ${n === 1 ? "comment comes" : "comments come"} with it.` : ""))(
+          table.comments?.reduce((total, c) => total + c.length, 0) ?? 0
+        )}
       </p>
       {tooMany && (
         <p role="alert" className="text-sm text-danger">
@@ -227,7 +272,11 @@ export function CsvMapping({
                 options={targetOptions}
                 onChange={(e) => {
                   const value = e.target.value as CsvTarget;
-                  setTargets(liveTargets.map((t, j) => (j === i ? value : value !== "ignore" && t === value ? "ignore" : t)));
+                  setTargets(
+                    liveTargets.map((t, j) =>
+                      j === i ? value : value !== "ignore" && t === value && !repeatable(value, fieldShapes) ? "ignore" : t
+                    )
+                  );
                 }}
               />
               {table.rows[0]?.[i] && (
@@ -310,7 +359,7 @@ export function CsvMapping({
             {userValues.slice(0, LISTED_VALUES).map((value) => (
               <Select
                 key={value}
-                label={`Assignee “${value}”`}
+                label={`Person “${value}”`}
                 value={((chosen) => (chosen === undefined ? AUTOMATIC : (chosen ?? UNASSIGNED)))(userOf(value))}
                 options={userOptions}
                 onChange={(e) => {
