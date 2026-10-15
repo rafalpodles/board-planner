@@ -20,6 +20,7 @@ import { useOrganisation } from "@/hooks/use-organisation";
 import { PlanBadge } from "./PlanBadge";
 import { ProjectTree } from "./ProjectTree";
 import { ProjectRail } from "./ProjectRail";
+import { FleetPanel } from "./FleetPanel";
 import { APP_NAME } from "@/lib/brand";
 
 const ICONS = {
@@ -443,6 +444,10 @@ export function Sidebar({
             onDragActiveChange={setDragging}
           />
         )}
+
+        <div hidden={compact}>
+          <FleetPanel />
+        </div>
       </nav>
       )}
 

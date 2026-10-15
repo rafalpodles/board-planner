@@ -445,7 +445,8 @@ test.describe("a turn, from the box to the bubble", () => {
       name: "create_task",
       arguments: { title: "Release checklist written by the agent" },
     });
-    const chip = page.getByRole("link", { name: new RegExp(`${PROJECT_KEY}-\\d+`) }).last();
+    // The sidebar names a machine's task too; the chip is the conversation's own
+    const chip = page.locator("#main-content").getByRole("link", { name: new RegExp(`${PROJECT_KEY}-\\d+`) }).last();
     await expect(chip).toBeVisible();
     await chip.click();
 
