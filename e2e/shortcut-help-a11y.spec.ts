@@ -20,7 +20,7 @@ import { signIn } from "./session";
 const helpDialog = (page: Page) => page.getByRole("dialog", { name: "Keyboard Shortcuts" });
 
 const cardVisible = (page: Page) =>
-  expect(page.locator(`a[href^="/projects/${PROJECT_KEY}/tasks/"]`).first()).toBeVisible();
+  expect(page.locator(`#main-content a[href^="/projects/${PROJECT_KEY}/tasks/"]`).first()).toBeVisible();
 
 async function openBoard(page: Page) {
   await signIn(page);
