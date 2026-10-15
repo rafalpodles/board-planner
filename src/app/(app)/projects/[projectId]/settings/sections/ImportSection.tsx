@@ -110,6 +110,10 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
           return { table: null, error: "This workbook could not be read. Save it as .xlsx or .csv and try again." };
         }
       }
+      const utf16 = (bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff);
+      if (!utf16 && bytes.subarray(0, 4096).includes(0)) {
+        return { table: null, error: "This is not a text file. Save it as .xlsx or .csv and try again." };
+      }
       const text = decodeCsv(bytes);
       if (isJiraXml(text)) {
         const table = jiraXmlToTable(text, new DOMParser());
