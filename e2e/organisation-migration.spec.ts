@@ -167,7 +167,7 @@ const declaredPerOrganisationUniques: Spec[] = scopedModelNames().flatMap((model
 );
 
 // A model born scoped has no global twin to keep beside its unique or to retire: nothing existed before it (AiBudget, BP-680)
-const BORN_SCOPED = new Set(["AiBudget"]);
+const BORN_SCOPED = new Set(["AiBudget", "Deployment"]);
 const uniquesWithGlobalTwin = declaredPerOrganisationUniques.filter((u) => !BORN_SCOPED.has(u.model));
 
 test("the per-organisation uniques build beside the old ones on data that has blank e-mails and answered invitations", async () => {

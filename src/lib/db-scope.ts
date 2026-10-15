@@ -5,6 +5,7 @@ import { AgentBlock } from "@/models/agentBlock";
 import { AgentRun } from "@/models/agentRun";
 import { ApiToken } from "@/models/apiToken";
 import { Comment } from "@/models/comment";
+import { Deployment } from "@/models/deployment";
 import { DeviceEnrolment } from "@/models/deviceEnrolment";
 import { EmailChangeToken } from "@/models/emailChangeToken";
 import { EnrolmentToken } from "@/models/enrolmentToken";
@@ -46,6 +47,7 @@ export const SCOPED_MODELS = {
   AgentRun: () => AgentRun,
   ApiToken: () => ApiToken,
   Comment: () => Comment,
+  Deployment: () => Deployment,
   DeviceEnrolment: () => DeviceEnrolment,
   EmailChangeToken: () => EmailChangeToken,
   EnrolmentToken: () => EnrolmentToken,
