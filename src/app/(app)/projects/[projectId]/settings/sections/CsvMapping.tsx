@@ -267,7 +267,7 @@ export function CsvMapping({
                   <Select
                     aria-label={`Kind of column for “${value}”`}
                     value={roles[value] ?? "active"}
-                    options={COLUMN_ROLES.map((r) => ({ value: r, label: ROLE_LABELS[r].label }))}
+                    options={COLUMN_ROLES.map((r) => ({ value: r, label: `Kind: ${ROLE_LABELS[r].label}` }))}
                     onChange={(e) => setRoles((r) => ({ ...r, [value]: e.target.value as ColumnRole }))}
                   />
                   <Button
