@@ -70,6 +70,28 @@ describe("computeDora — a hand computation", () => {
   });
 });
 
+describe("computeDora — joining a change to its deployment", () => {
+  it("prefers the deployment of the pull request's own head commit over an earlier one after the merge", () => {
+    const dora = computeDora(
+      [deploy("other", "success", 5), deploy("head", "success", 3)],
+      [{ url: "pr/1", headSha: "head", mergedAt: at(6) }],
+      options
+    );
+    // head went live 3 d − 1 h ago: 6 − 3 d + 1 h = 3 d + 1 h, not the 1 d + 1 h "other" would give
+    expect(dora.leadTimeForChanges?.medianMs).toBe(3 * DAY + HOUR);
+    expect(dora.deploymentsWithoutChanges).toBe(1);
+  });
+
+  it("a change whose deployment went live before the window is not in it", () => {
+    const dora = computeDora(
+      [deploy("old", "success", 19), deploy("new", "success", 2)],
+      [{ url: "pr/old", headSha: "old", mergedAt: at(20) }],
+      options
+    );
+    expect(dora.leadTimeForChanges).toBeNull();
+  });
+});
+
 describe("computeDora — edges", () => {
   it("nothing deployed answers nulls, not zeros", () => {
     const dora = computeDora([], [], options);
