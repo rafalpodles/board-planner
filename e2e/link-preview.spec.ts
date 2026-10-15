@@ -17,19 +17,20 @@ const TASK = `/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`;
 async function head(request: APIRequestContext, path: string) {
   const response = await request.get(path, { maxRedirects: 0, headers: { "user-agent": TEAMS_UNFURLER } });
   expect(response.status()).toBe(200);
-  const html = (await response.text()).split("</head>")[0];
+  const page = await response.text();
+  const html = page.split("</head>")[0];
   const meta = (property: string) =>
     html.match(new RegExp(`<meta (?:property|name)="${property}" content="([^"]*)"`))?.[1] ?? null;
   const count = (property: string) => html.match(new RegExp(`<meta (?:property|name)="${property}"`, "g"))?.length ?? 0;
-  return { html, meta, count };
+  return { page, meta, count };
 }
 
 test("a task link unfurls with its key and the branded image, without a session", async ({ request, baseURL }) => {
-  const { html, meta, count } = await head(request, TASK);
+  const { page, meta, count } = await head(request, TASK);
 
   expect(meta("og:title")).toBe(`${SIBLING_TASK_KEY} — ${APP_NAME}`);
   expect(meta("twitter:card")).toBe("summary_large_image");
-  expect(html).not.toContain(SIBLING_TASK_TITLE);
+  expect(page).not.toContain(SIBLING_TASK_TITLE);
 
   const image = meta("og:image");
   expect(image).not.toBeNull();
