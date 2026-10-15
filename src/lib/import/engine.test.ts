@@ -29,6 +29,8 @@ const project = {
   ],
 };
 
+const ACCOUNTS = [{ _id: MEMBER, username: "maya", email: "maya.k@example.com" }];
+
 type Existing = { id: string; status?: string; held?: boolean; comments?: string[] };
 
 function fakeDb({ existing = [] as Existing[], failOn = 0, landBeforeFailing = 0 } = {}) {
@@ -52,7 +54,12 @@ function fakeDb({ existing = [] as Existing[], failOn = 0, landBeforeFailing = 0
       },
     },
     User: {
-      find: () => chain(() => [{ _id: MEMBER, username: "maya" }]),
+      find: (filter: { $or: { username?: { $in: string[] }; email?: { $in: string[] } }[] }) =>
+        chain(() =>
+          ACCOUNTS.filter((u) =>
+            filter.$or.some((clause) => clause.username?.$in.includes(u.username) || clause.email?.$in.includes(u.email))
+          )
+        ),
     },
     Task: {
       find: (filter: Record<string, unknown>) => {
@@ -141,6 +148,40 @@ describe("runImport", () => {
     expect(report.unmapped.users).toEqual(["maya"]);
   });
 
+  it("finds a person by e-mail as well as by username, whatever the case", async () => {
+    const { db, writes } = fakeDb();
+    const report = await run(db, [
+      { id: "1", title: "a", assignee: "Maya.K@Example.com" },
+      { id: "2", title: "b", assignee: "nobody@example.com" },
+    ]);
+    expect(writes.tasks.map((t) => t.assignee)).toEqual([MEMBER, null]);
+    expect(report.unmapped.users).toEqual(["nobody@example.com"]);
+  });
+
+  it("does not list a person the mapping deliberately leaves unassigned", async () => {
+    const { db, writes } = fakeDb();
+    const report = await run(db, [{ id: "1", title: "a", assignee: "maya" }, { id: "2", title: "b", assignee: "ghost" }], { users: { maya: null } });
+    expect(writes.tasks.map((t) => t.assignee)).toEqual([null, null]);
+    expect(report.unmapped.users).toEqual(["ghost"]);
+  });
+
+  it("keeps a due day, refuses one that is not a calendar day and says so, and never clears one on a re-run", async () => {
+    const { db, writes } = fakeDb({ existing: [{ id: "3" }] });
+    const report = await run(db, [
+      { id: "1", title: "a", dueDate: "2027-02-28" },
+      { id: "2", title: "b", dueDate: "2027-02-31" },
+      { id: "3", title: "c" },
+      { id: "4", title: "d", dueDate: "2027-02-28T10:00" },
+    ]);
+    expect(writes.tasks.map((t) => t.dueDate)).toEqual([new Date("2027-02-28T00:00:00.000Z"), null, null]);
+    expect(report.dropped.map((d) => [d.id, d.value])).toEqual([
+      ["2", "2027-02-31"],
+      ["4", "2027-02-28T10:00"],
+    ]);
+    expect(report.dropped[0]).toEqual({ id: "2", field: "dueDate", value: "2027-02-31", reason: "not a day, YYYY-MM-DD" });
+    expect(writes.updates[0].update.$set).not.toHaveProperty("dueDate");
+  });
+
   it("validates every field value and reports each one it drops, instead of dropping it silently", async () => {
     const { db, writes } = fakeDb();
     const report = await run(db, [
@@ -154,6 +195,13 @@ describe("runImport", () => {
       ["2", "Size", "Size must be one of its options"],
       ["2", "Points", "Points must be a number"],
     ]);
+  });
+
+  it("keeps the line breaks of a description and a comment, and turns a title's into a space", async () => {
+    const { db, writes } = fakeDb();
+    await run(db, [{ id: "1", title: "a\nb", description: "one\r\ntwo\n\tthree\u202e", comments: [{ id: "c", author: "maya", body: "x\ry" }] }]);
+    expect(writes.tasks[0]).toMatchObject({ title: "a b", description: "one\ntwo\n\tthree" });
+    expect(writes.comments[0].body).toBe("x\ny");
   });
 
   it("skips a task with no title, shortens what is too long, and says so", async () => {
@@ -229,6 +277,55 @@ describe("runImport", () => {
     expect(writes.updates[0].update.$set).not.toHaveProperty("status");
     expect(report.notImported).toEqual([{ id: "1", what: "its column: a machine is running it" }]);
     expect(logActivities.mock.calls.at(-1)![1]).toEqual([]);
+  });
+
+  it("leaves a description, category or priority the file does not carry as the board has it on a re-run", async () => {
+    const { db, writes } = fakeDb({ existing: [{ id: "1" }, { id: "2" }] });
+    await run(db, [
+      { id: "1", title: "a" },
+      { id: "2", title: "b", description: "new", type: "bug", priority: "high" },
+    ]);
+    expect(writes.updates[0].update.$set).not.toHaveProperty("description");
+    expect(writes.updates[0].update.$set).not.toHaveProperty("category");
+    expect(writes.updates[0].update.$set).not.toHaveProperty("priority");
+    expect(writes.updates[1].update.$set).toMatchObject({ description: "new", category: "bug", priority: "high" });
+  });
+
+  it("leaves a task in its column on a re-run when the file gives no status, or one it cannot match", async () => {
+    const { db, writes } = fakeDb({ existing: [{ id: "1", status: "doing" }, { id: "2", status: "doing" }, { id: "3", status: "doing" }] });
+    const report = await run(db, [
+      { id: "1", title: "a" },
+      { id: "2", title: "b", status: "Waiting for QA" },
+      { id: "3", title: "c", status: "done" },
+    ]);
+    expect(writes.updates.map((u) => u.update.$set.status)).toEqual([undefined, undefined, "done"]);
+    expect(report.unmapped.statuses).toEqual(["Waiting for QA"]);
+    expect((logActivities.mock.calls.at(-1)![1] as { taskId: unknown }[]).length).toBe(1);
+  });
+
+  it("refuses a day that does not exist rather than rolling it into the next month, and reads a time with no zone as UTC", async () => {
+    // CI runs in UTC, where reading a zone-less time locally would look right too
+    const zone = process.env.TZ;
+    process.env.TZ = "Europe/Warsaw";
+    try {
+      const { db, writes } = fakeDb();
+      const report = await run(db, [
+        { id: "1", title: "a", createdAt: "2026-02-31T08:00:00Z" },
+        { id: "2", title: "b", createdAt: "2026-01-15T08:00" },
+        { id: "3", title: "c", createdAt: "2026-01-15 09:30" },
+      ]);
+      expect(report.dropped.map((d) => [d.id, d.field])).toEqual([["1", "createdAt"]]);
+      expect(writes.tasks.slice(1).map((t) => t.createdAt)).toEqual([new Date("2026-01-15T08:00:00.000Z"), new Date("2026-01-15T09:30:00.000Z")]);
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
+  });
+
+  it("reads only ISO dates for a creation or finish time, so a day-first date is never read month-first", async () => {
+    const { db, writes } = fakeDb();
+    const report = await run(db, [{ id: "1", title: "a", createdAt: "05/10/2026" }]);
+    expect(report.dropped).toEqual([{ id: "1", field: "createdAt", value: "05/10/2026", reason: "not a date in the past" }]);
   });
 
   it("never unassigns: somebody it cannot name leaves the board's assignee as it is", async () => {

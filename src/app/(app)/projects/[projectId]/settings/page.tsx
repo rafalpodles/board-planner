@@ -402,7 +402,7 @@ export default function ProjectSettingsPage() {
             {s.id === "integrations" && <IntegrationsSection {...sectionProps} />}
             {s.id === "workers" && <WorkersSection {...sectionProps} />}
             {s.id === "pm" && <PmAgentSection {...sectionProps} />}
-            {s.id === "import" && <ImportSection projectId={projectId} />}
+            {s.id === "import" && <ImportSection {...sectionProps} />}
             {s.id === "audit" && (
               <AuditSection projectId={projectId} active={active === "audit"} />
             )}

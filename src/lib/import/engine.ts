@@ -8,12 +8,14 @@ import {
   COMMENT_BODY_MAX_LENGTH,
   TASK_DESCRIPTION_MAX_LENGTH,
   TASK_TITLE_MAX_LENGTH,
+  isControlCodePoint,
   stripControlCharacters,
 } from "@/lib/identifiers";
 import { logActivities } from "@/lib/activity";
 import { actingThrough } from "@/lib/activity-source";
 import { logProjectAudit } from "@/lib/projectAudit";
 import type { ImportBundle, ImportComment, ImportMapping, ImportTask } from "./bundle";
+import { normaliseInstant } from "./dates";
 
 export const IMPORT_CHUNK = 200;
 const PRIORITIES: readonly Priority[] = ["low", "medium", "high", "urgent"];
@@ -55,6 +57,8 @@ interface Resolved {
   assignee: Types.ObjectId | null;
   createdAt: Date | null;
   completedAt: Date | null;
+  dueDate: Date | null;
+  given: { status: boolean; description: boolean; category: boolean; priority: boolean };
   customFieldValues: Record<string, unknown>;
   comments: { ref: string; body: string; author: Types.ObjectId; createdAt: Date | null }[];
 }
@@ -64,8 +68,16 @@ const shown = (value: unknown) => {
   return text.length > 80 ? `${text.slice(0, 80)}…` : text;
 };
 
-function clip(report: ImportReport, id: string, field: string, text: string, max: number): string {
-  const clean = stripControlCharacters(text).trim();
+function keepLines(text: string): string {
+  let out = "";
+  for (const character of text.replace(/\r\n?/g, "\n")) {
+    if (character === "\n" || character === "\t" || !isControlCodePoint(character.codePointAt(0) ?? 0)) out += character;
+  }
+  return out;
+}
+
+function clip(report: ImportReport, id: string, field: string, text: string, max: number, { lines = false } = {}): string {
+  const clean = (lines ? keepLines(text) : stripControlCharacters(text.replace(/\s*[\r\n]+\s*/g, " "))).trim();
   if (clean.length <= max) return clean;
   report.truncated.push({ id, field });
   return clean.slice(0, max);
@@ -73,8 +85,9 @@ function clip(report: ImportReport, id: string, field: string, text: string, max
 
 function instant(report: ImportReport, id: string, field: string, raw: string | undefined): Date | null {
   if (!raw) return null;
-  const at = new Date(raw);
-  if (Number.isNaN(at.getTime()) || at.getTime() > Date.now()) {
+  // A time with no zone is read as UTC, so the same file means the same instant on every server
+  const at = new Date(normaliseInstant(raw));
+  if (!isCalendarDay(raw.slice(0, 10)) || Number.isNaN(at.getTime()) || at.getTime() > Date.now()) {
     report.dropped.push({ id, field, value: shown(raw), reason: "not a date in the past" });
     return null;
   }
@@ -85,6 +98,20 @@ function instant(report: ImportReport, id: string, field: string, raw: string | 
 function byName<T extends string>(candidates: readonly T[], name: string): T | undefined {
   const wanted = name.trim().toLowerCase();
   return candidates.find((c) => c.toLowerCase() === wanted);
+}
+
+function isCalendarDay(text: string): boolean {
+  const at = new Date(`${text}T00:00:00.000Z`);
+  return !Number.isNaN(at.getTime()) && at.toISOString().slice(0, 10) === text;
+}
+
+function calendarDay(report: ImportReport, id: string, raw: string | undefined): Date | null {
+  if (!raw) return null;
+  if (!isCalendarDay(raw)) {
+    report.dropped.push({ id, field: "dueDate", value: shown(raw), reason: "not a day, YYYY-MM-DD" });
+    return null;
+  }
+  return new Date(`${raw}T00:00:00.000Z`);
 }
 
 function noteUnmapped(list: string[], value: string) {
@@ -132,11 +159,17 @@ async function resolveUsers(
   }
   const usernames = [...new Set([...wanted.values()].filter((v): v is string => !!v))];
   const accounts = usernames.length
-    ? await db.User.find({ username: { $in: usernames }, deactivatedAt: null }).select("_id username").lean<{ _id: Types.ObjectId; username: string }[]>()
+    ? await db.User.find({ $or: [{ username: { $in: usernames } }, { email: { $in: usernames } }], deactivatedAt: null })
+        .select("_id username email")
+        .lean<{ _id: Types.ObjectId; username: string; email?: string }[]>()
     : [];
   const members = new Set(await recipientsWithAccess(db, accounts.map((a) => String(a._id)), projectId));
-  const byUsername = new Map(accounts.filter((a) => members.has(String(a._id))).map((a) => [a.username, a._id]));
-  return new Map([...wanted].map(([name, username]) => [name, username ? byUsername.get(username) ?? null : null]));
+  const reachable = accounts.filter((a) => members.has(String(a._id)));
+  const byUsername = new Map(reachable.map((a) => [a.username, a._id]));
+  const byEmail = new Map(reachable.filter((a) => a.email).map((a) => [a.email!, a._id]));
+  return new Map(
+    [...wanted].map(([name, wantedName]) => [name, wantedName ? (byUsername.get(wantedName) ?? byEmail.get(wantedName) ?? null) : null])
+  );
 }
 
 function resolveTask(
@@ -154,35 +187,39 @@ function resolveTask(
   }
   const columnIds = board.columns.map((c) => c.id);
   let status = board.defaultStatus;
+  let statusGiven = false;
   if (task.status) {
     const mapped = mapping.statuses?.[task.status];
     const found =
       (mapped && columnIds.includes(mapped) ? mapped : undefined) ??
       byName(columnIds, task.status) ??
       board.columns.find((c) => c.label.trim().toLowerCase() === task.status!.trim().toLowerCase())?.id;
-    if (found) status = found;
+    if (found) [status, statusGiven] = [found, true];
     else noteUnmapped(report.unmapped.statuses, task.status);
   }
 
   let category = board.defaultCategory;
+  let categoryGiven = false;
   if (task.type) {
     const mapped = mapping.types?.[task.type];
     const found = (mapped && board.categories.includes(mapped) ? mapped : undefined) ?? byName(board.categories, task.type);
-    if (found) category = found;
+    if (found) [category, categoryGiven] = [found, true];
     else noteUnmapped(report.unmapped.types, task.type);
   }
 
   let priority: Priority = "medium";
+  let priorityGiven = false;
   if (task.priority) {
     const found = byName(PRIORITIES, task.priority);
-    if (found) priority = found;
+    if (found) [priority, priorityGiven] = [found, true];
     else report.dropped.push({ id: task.id, field: "priority", value: shown(task.priority), reason: "not low, medium, high or urgent" });
   }
 
   let assignee: Types.ObjectId | null = null;
   if (task.assignee) {
     assignee = users.get(task.assignee) ?? null;
-    if (!assignee) noteUnmapped(report.unmapped.users, task.assignee);
+    const leftUnassigned = mapping.users?.[task.assignee] === null && Object.hasOwn(mapping.users, task.assignee);
+    if (!assignee && !leftUnassigned) noteUnmapped(report.unmapped.users, task.assignee);
   }
 
   const createdAt = instant(report, task.id, "createdAt", task.createdAt);
@@ -208,13 +245,15 @@ function resolveTask(
   return {
     ref: task.id,
     title,
-    description: clip(report, task.id, "description", task.description ?? "", TASK_DESCRIPTION_MAX_LENGTH),
+    description: clip(report, task.id, "description", task.description ?? "", TASK_DESCRIPTION_MAX_LENGTH, { lines: true }),
     status,
     category,
     priority,
     assignee,
     createdAt,
     completedAt,
+    dueDate: calendarDay(report, task.id, task.dueDate),
+    given: { status: statusGiven, description: task.description !== undefined && task.description !== null, category: categoryGiven, priority: priorityGiven },
     customFieldValues: resolveFields(report, task, board),
     comments: (task.comments ?? []).flatMap((comment) => resolveComment(report, task.id, comment, users, importer)),
   };
@@ -231,7 +270,7 @@ function resolveComment(
   const createdAt = instant(report, `${taskId}#${comment.id}`, "createdAt", comment.createdAt);
   // When the writer has no account here, their name stays in the text rather than being lost
   const byline = author ? "" : `*Originally by ${stripControlCharacters(comment.author ?? "an unknown author").trim() || "an unknown author"}*\n\n`;
-  const body = byline + clip(report, `${taskId}#${comment.id}`, "body", comment.body, COMMENT_BODY_MAX_LENGTH - byline.length);
+  const body = byline + clip(report, `${taskId}#${comment.id}`, "body", comment.body, COMMENT_BODY_MAX_LENGTH - byline.length, { lines: true });
   if (!body.trim()) return [];
   return [{ ref: comment.id, body, author: author ?? importer, createdAt }];
 }
@@ -280,7 +319,7 @@ async function storedTasks(db: ScopedDb, projectId: string, source: string, refs
 
 // A run's task refuses to leave its column through every writer, an import included
 function noteHeld(report: ImportReport, t: Resolved, stored: Stored) {
-  if (stored.held && stored.status !== t.status) report.notImported.push({ id: t.ref, what: "its column: a machine is running it" });
+  if (t.given.status && stored.held && stored.status !== t.status) report.notImported.push({ id: t.ref, what: "its column: a machine is running it" });
 }
 
 async function storedComments(db: ScopedDb, source: string, taskIds: Types.ObjectId[]): Promise<Set<string>> {
@@ -333,6 +372,7 @@ async function writeChunk(
         priority: t.priority,
         assignee: t.assignee,
         assignedBy: t.assignee ? importer : null,
+        dueDate: t.dueDate,
         customFieldValues: t.customFieldValues,
         externalRef: { source, id: t.ref },
         createdBy: importer,
@@ -375,7 +415,7 @@ async function writeChunk(
         const before = stored.get(t.ref)!;
         noteHeld(report, t, before);
         // Dated now, not at the source's finish: the board may have moved it since the last import
-        const moved = !before.held && before.status !== t.status;
+        const moved = t.given.status && !before.held && before.status !== t.status;
         if (moved) {
           moves.push({ projectId, taskId: before._id, userId: importer, action: "status_changed", field: "status", oldValue: before.status, newValue: t.status, at: now });
         }
@@ -385,11 +425,13 @@ async function writeChunk(
             update: {
               $set: {
                 title: t.title,
-                description: t.description,
-                category: t.category,
-                priority: t.priority,
+                // What the file does not carry stays as the board has it
+                ...(t.given.description && { description: t.description }),
+                ...(t.given.category && { category: t.category }),
+                ...(t.given.priority && { priority: t.priority }),
                 // An import never unassigns: somebody it cannot name is left as the board has it
                 ...(t.assignee && { assignee: t.assignee, assignedBy: importer }),
+                ...(t.dueDate && { dueDate: t.dueDate }),
                 ...(moved && { status: t.status }),
                 ...Object.fromEntries(Object.entries(t.customFieldValues).map(([k, v]) => [`customFieldValues.${k}`, v])),
               },

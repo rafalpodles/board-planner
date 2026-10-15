@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
@@ -44,6 +44,17 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
   const dragIndex = useRef<number | null>(null);
 
   const columns = draft.value.columns;
+
+  // A column added from elsewhere on this page (the import's mapping step) joins the list, or the
+  // next save here would drop it
+  useEffect(() => {
+    const known = new Set(draft.baseline.columns.map((c) => c.id));
+    const arrived = toDrafts(project.columns).filter((c) => c.id && !known.has(c.id));
+    if (arrived.length === 0) return;
+    draft.rebase((prev) => ({ columns: [...prev.columns, ...arrived] }));
+    draft.setValue((prev) => ({ ...prev, columns: [...prev.columns, ...arrived] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.columns]);
 
   function update(index: number, patch: Partial<ColumnDraft>) {
     draft.set(
