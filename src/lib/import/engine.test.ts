@@ -292,13 +292,22 @@ describe("runImport", () => {
   });
 
   it("refuses a day that does not exist rather than rolling it into the next month, and reads a time with no zone as UTC", async () => {
-    const { db, writes } = fakeDb();
-    const report = await run(db, [
-      { id: "1", title: "a", createdAt: "2026-02-31T08:00:00Z" },
-      { id: "2", title: "b", createdAt: "2026-01-15T08:00" },
-    ]);
-    expect(report.dropped.map((d) => [d.id, d.field])).toEqual([["1", "createdAt"]]);
-    expect(writes.tasks[1].createdAt).toEqual(new Date("2026-01-15T08:00:00.000Z"));
+    // CI runs in UTC, where reading a zone-less time locally would look right too
+    const zone = process.env.TZ;
+    process.env.TZ = "Europe/Warsaw";
+    try {
+      const { db, writes } = fakeDb();
+      const report = await run(db, [
+        { id: "1", title: "a", createdAt: "2026-02-31T08:00:00Z" },
+        { id: "2", title: "b", createdAt: "2026-01-15T08:00" },
+        { id: "3", title: "c", createdAt: "2026-01-15 09:30" },
+      ]);
+      expect(report.dropped.map((d) => [d.id, d.field])).toEqual([["1", "createdAt"]]);
+      expect(writes.tasks.slice(1).map((t) => t.createdAt)).toEqual([new Date("2026-01-15T08:00:00.000Z"), new Date("2026-01-15T09:30:00.000Z")]);
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
   });
 
   it("reads only ISO dates for a creation or finish time, so a day-first date is never read month-first", async () => {
