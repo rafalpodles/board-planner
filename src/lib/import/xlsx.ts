@@ -47,8 +47,9 @@ const text = (el: Element | undefined | null) => unescapeXml(el?.textContent ?? 
 const unescapeXml = (value: string) => value.replace(/_x([0-9A-Fa-f]{4})_/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 
 // Excel keeps a date as a number of days since 1899-12-30, and only its cell's format says it is one
+// Formats 18 to 21 and 45 to 47 are times of day or durations with no date, so they stay numbers
 const BUILT_IN_DATES = new Map<number, boolean>([
-  [14, false], [15, false], [16, false], [17, false], [22, true], [45, true], [46, true], [47, true], [18, true], [19, true], [20, true], [21, true],
+  [14, false], [15, false], [16, false], [17, false], [22, true],
 ]);
 
 function datedStyles(styles: Document | null): Map<number, boolean> {
@@ -62,7 +63,7 @@ function datedStyles(styles: Document | null): Map<number, boolean> {
     const id = Number(xf.getAttribute("numFmtId") ?? 0);
     if (BUILT_IN_DATES.has(id)) return out.set(index, BUILT_IN_DATES.get(id)!);
     const code = (custom.get(id) ?? "").replace(/"[^"]*"|\[[^\]]*\]|\\./g, "").toLowerCase();
-    if (/[dy]/.test(code) || (/m/.test(code) && /[dyh]/.test(code))) out.set(index, /h|s/.test(code));
+    if (/[dy]/.test(code)) out.set(index, /h|s/.test(code));
   });
   return out;
 }
@@ -106,7 +107,7 @@ export async function readXlsxTable(bytes: Uint8Array, parser: DOMParser): Promi
           ? (shared[Number(value)] ?? "")
           : type === "inlineStr"
             ? text(c.getElementsByTagName("is")[0])
-            : !type && value && dateStyles.has(style)
+            : (!type || type === "n") && value && dateStyles.has(style)
               ? fromSerial(Number(value), dateStyles.get(style)!)
               : value;
       next = index + 1;

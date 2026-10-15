@@ -125,7 +125,7 @@ export function jiraXmlToTable(text: string, parser: DOMParser): CsvTable | null
         textOf(item, "type"),
         textOf(item, "status"),
         textOf(item, "priority"),
-        assignee && assignee.getAttribute("accountid") !== "-1" ? (assignee.textContent?.trim() ?? "") : "",
+        assignee && (assignee.getAttribute("accountid") ?? assignee.getAttribute("username")) !== "-1" ? (assignee.textContent?.trim() ?? "") : "",
         instant(textOf(item, "created")),
         instant(textOf(item, "resolved")),
         dayOf(textOf(item, "due")),
