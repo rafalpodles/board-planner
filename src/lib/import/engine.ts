@@ -15,7 +15,7 @@ import { logActivities } from "@/lib/activity";
 import { actingThrough } from "@/lib/activity-source";
 import { logProjectAudit } from "@/lib/projectAudit";
 import type { ImportBundle, ImportComment, ImportMapping, ImportTask } from "./bundle";
-import { normaliseInstant } from "./csv";
+import { normaliseInstant } from "./dates";
 
 export const IMPORT_CHUNK = 200;
 const PRIORITIES: readonly Priority[] = ["low", "medium", "high", "urgent"];
