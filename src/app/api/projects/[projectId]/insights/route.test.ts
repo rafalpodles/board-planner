@@ -6,6 +6,8 @@ const check = vi.fn();
 const projectStatusHistories = vi.fn();
 const projectFindById = vi.fn();
 const sprintFindOne = vi.fn();
+const deploymentFind = vi.fn();
+const taskFind = vi.fn();
 const plan = vi.hoisted(() => ({ value: "pro" as "free" | "pro" }));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -17,6 +19,11 @@ vi.mock("@/lib/organisation", () => ({
 vi.mock("@/lib/status-history", () => ({ projectStatusHistories }));
 vi.mock("@/models/project", () => ({ Project: { findOne: projectFindById } }));
 vi.mock("@/models/sprint", () => ({ Sprint: { findOne: sprintFindOne } }));
+vi.mock("@/models/deployment", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/models/deployment")>()),
+  Deployment: { find: deploymentFind },
+}));
+vi.mock("@/models/task", () => ({ Task: { find: taskFind } }));
 
 const { GET } = await import("./route");
 
@@ -24,6 +31,10 @@ const PROJECT_ID = "507f1f77bcf86cd799439011";
 const SPRINT_ID = "507f1f77bcf86cd799439022";
 const FIELD_ID = "507f1f77bcf86cd799439033";
 const lean = (value: unknown) => ({ lean: () => Promise.resolve(value) });
+const chain = (rows: unknown[]) => {
+  const c = { sort: () => c, limit: () => c, lean: () => Promise.resolve(rows) };
+  return c;
+};
 const insights = (query = "") =>
   GET(new Request(`http://localhost/api/projects/${PROJECT_ID}/insights${query}`), {
     params: Promise.resolve({ projectId: PROJECT_ID }),
@@ -37,6 +48,8 @@ beforeEach(() => {
   projectFindById.mockReturnValue(lean({ _id: PROJECT_ID, customFields: [], estimateFieldId: "" }));
   sprintFindOne.mockReturnValue(lean(null));
   projectStatusHistories.mockResolvedValue([]);
+  deploymentFind.mockReturnValue(chain([]));
+  taskFind.mockReturnValue(chain([]));
 });
 
 describe("GET /api/projects/[projectId]/insights — the guard", () => {
@@ -74,6 +87,7 @@ describe("GET /api/projects/[projectId]/insights — the guard", () => {
     expect(res.status).toBe(402);
     expect(await res.json()).toMatchObject({ feature: "reports.insights", plan: "free" });
     expect(projectStatusHistories).not.toHaveBeenCalled();
+    expect(deploymentFind).not.toHaveBeenCalled();
   });
 });
 
@@ -186,5 +200,59 @@ describe("GET /api/projects/[projectId]/insights — the query", () => {
     const body = await (await insights()).json();
 
     expect(body).not.toHaveProperty("byEstimate");
+  });
+});
+
+describe("GET /api/projects/[projectId]/insights — DORA", () => {
+  const github = {
+    _id: PROJECT_ID,
+    customFields: [],
+    estimateFieldId: "",
+    repositoryUrl: "https://github.com/example/board",
+    githubToken: "sealed",
+    deploymentEnvironment: "",
+    deploymentSync: { syncedThrough: new Date("2026-10-14T00:00:00Z"), blockedUntil: null },
+  };
+
+  it("answers no DORA block for a project that does not deploy from GitHub", async () => {
+    const body = await (await insights()).json();
+
+    expect(body.dora).toBeNull();
+    expect(deploymentFind).not.toHaveBeenCalled();
+  });
+
+  it("figures a GitHub project's production deployments and the merged pull requests on its tasks", async () => {
+    projectFindById.mockReturnValue(lean(github));
+    const hour = 3_600_000;
+    const now = Date.now();
+    deploymentFind.mockReturnValue(
+      chain([
+        { sha: "s1", state: "success", startedAt: new Date(now - 5 * hour), finishedAt: new Date(now - 4 * hour) },
+        { sha: "s2", state: "failure", startedAt: new Date(now - 3 * hour), finishedAt: new Date(now - 2 * hour) },
+      ])
+    );
+    taskFind.mockReturnValue(
+      chain([
+        {
+          linkedPRs: [
+            { url: "pr/1", provider: "github", headSha: "s1", mergedAt: new Date(now - 6 * hour) },
+            { url: "mr/1", provider: "gitlab", headSha: "s1", mergedAt: new Date(now - 6 * hour) },
+            { url: "pr/2", provider: "github", headSha: "s9", mergedAt: null },
+          ],
+        },
+      ])
+    );
+
+    const body = await (await insights()).json();
+
+    expect(deploymentFind.mock.calls[0][0]).toMatchObject({ project: PROJECT_ID, environment: "production" });
+    expect(body.dora).toMatchObject({
+      environment: "production",
+      deployments: 2,
+      changeFailureRate: 0.5,
+      leadTimeForChanges: { count: 1, medianMs: 2 * hour },
+      unrestored: 1,
+      syncedThrough: "2026-10-14T00:00:00.000Z",
+    });
   });
 });
