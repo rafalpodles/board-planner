@@ -82,6 +82,16 @@ describe("computeDora — joining a change to its deployment", () => {
     expect(dora.deploymentsWithoutChanges).toBe(1);
   });
 
+  it("a deployment of the head commit from before the merge is not the one that shipped it", () => {
+    const dora = computeDora(
+      [deploy("head", "success", 8), deploy("after", "success", 5)],
+      [{ url: "pr/1", headSha: "head", mergedAt: at(6) }],
+      options
+    );
+    // 6 − 5 d + 1 h, not 0
+    expect(dora.leadTimeForChanges?.medianMs).toBe(DAY + HOUR);
+  });
+
   it("a change whose deployment went live before the window is not in it", () => {
     const dora = computeDora(
       [deploy("old", "success", 19), deploy("new", "success", 2)],
@@ -112,10 +122,20 @@ describe("computeDora — edges", () => {
     expect(dora.unrestored).toBe(1);
   });
 
-  it("deployments outside the window are left out, but may still restore one inside it", () => {
-    const dora = computeDora([deploy("old", "failure", 30), deploy("b", "failure", 1), deploy("fix", "success", 0.5)], [], options);
-    expect(dora.deployments).toBe(2);
-    expect(dora.timeToRestore?.count).toBe(1);
+  it("a failure before the window is neither counted nor restored inside it", () => {
+    const dora = computeDora([deploy("old", "failure", 30), deploy("fix", "success", 0.5)], [], options);
+    expect(dora.deployments).toBe(1);
+    expect(dora.timeToRestore).toBeNull();
+    expect(dora.unrestored).toBe(0);
+  });
+
+  it("says how many succeeded and how many failures were restored, and whether a cap cut the rows", () => {
+    const dora = computeDora(
+      [deploy("a", "success", 5), deploy("b", "failure", 4), deploy("c", "success", 3), deploy("d", "failure", 1)],
+      [],
+      { ...options, capped: true, lastError: "GitHub answered 403" }
+    );
+    expect(dora).toMatchObject({ successes: 2, restored: 1, unrestored: 1, capped: true, lastError: "GitHub answered 403" });
   });
 
   it("says until when a rate limit holds, and only while it does", () => {

@@ -20,6 +20,7 @@ const PAD = { top: 14, right: 8, bottom: 26, left: 56 };
 const PLOT_W = WIDTH - PAD.left - PAD.right;
 const PLOT_H = HEIGHT - PAD.top - PAD.bottom;
 const DAY = 86_400_000;
+const DORA_ROWS_SHOWN = "5,000";
 const NO_START = "No finished task has a recorded start in an In Progress column, so there is no cycle time.";
 
 export function emptyTimeMessage(insights: Insights, measure: Measure, otherwise: string): string {
@@ -430,8 +431,14 @@ function doraEmptyMessage(dora: Dora | null): string | null {
     return "Deployments are read from GitHub. Set this board's GitHub repository and token in Settings → Integrations to measure them.";
   }
   if (dora.deployments > 0) return null;
+  if (dora.rateLimitedUntil) {
+    return `GitHub's rate limit was reached, so deployments are read again after ${new Date(dora.rateLimitedUntil).toLocaleString()}.`;
+  }
+  if (dora.lastError) {
+    return `GitHub refused to list this board's deployments (${dora.lastError}). The token needs read access to deployments.`;
+  }
   if (!dora.syncedThrough) {
-    return `No deployments to “${dora.environment}” have been read yet. GitHub is asked every few minutes.`;
+    return `No deployments to “${dora.environment}” have been read yet. They are read on the next sync with GitHub.`;
   }
   return `No deployment to “${dora.environment}” finished in this window.`;
 }
@@ -464,7 +471,7 @@ export function DeploymentsPanel({ dora }: { dora: Dora | null }) {
         {figure(
           "Deployment frequency",
           dora.deploymentsPerWeek === null ? "—" : `${dora.deploymentsPerWeek} / week`,
-          `${dora.deployments} finished to ${dora.environment}`
+          `${dora.successes} succeeded of ${dora.deployments} finished`
         )}
         {figure(
           "Lead time for changes",
@@ -476,13 +483,15 @@ export function DeploymentsPanel({ dora }: { dora: Dora | null }) {
         {figure(
           "Change failure rate",
           dora.changeFailureRate === null ? "—" : `${Math.round(dora.changeFailureRate * 100)}%`,
-          "of finished deployments failed"
+          `${dora.deployments - dora.successes} of ${dora.deployments} finished deployments failed`
         )}
         {figure(
           "Time to restore",
           formatDuration(dora.timeToRestore?.medianMs),
           dora.unrestored > 0
-            ? `${dora.unrestored} not restored yet`
+            ? dora.timeToRestore
+              ? `median of ${dora.restored} restored; ${dora.unrestored} not yet`
+              : `${dora.unrestored} not restored yet`
             : dora.timeToRestore
               ? "median, failure to next success"
               : "No failure to restore from"
@@ -530,10 +539,15 @@ export function DeploymentsPanel({ dora }: { dora: Dora | null }) {
           );
         })}
       </svg>
+      {dora.capped && (
+        <p className="mt-2 text-xs text-text-muted">
+          Only the latest {DORA_ROWS_SHOWN} deployments and linked changes are counted, so the oldest weeks may read low.
+        </p>
+      )}
       {dora.rateLimitedUntil && (
         <p className="mt-2 text-xs text-text-muted">
           GitHub&apos;s rate limit was reached; deployments are read again after{" "}
-          {new Date(dora.rateLimitedUntil).toLocaleTimeString()}.
+          {new Date(dora.rateLimitedUntil).toLocaleString()}.
         </p>
       )}
       <AsTable

@@ -258,8 +258,9 @@ const projectSchema = new Schema<IProject>(
       type: {
         syncedThrough: { type: Date, default: null },
         blockedUntil: { type: Date, default: null },
+        lastError: { type: String, default: "" },
       },
-      default: () => ({ syncedThrough: null, blockedUntil: null }),
+      default: () => ({ syncedThrough: null, blockedUntil: null, lastError: "" }),
       _id: false,
     },
     gitlabRepo: {

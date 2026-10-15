@@ -237,7 +237,9 @@ describe("the background tick", () => {
     plan.value = "pro";
     await githubSyncTick();
     expect(syncGithubDeployments.mock.calls.map(([, p]) => (p as { key: string }).key)).toEqual(["AA", "BB"]);
-    expect(projectFind.mock.calls.at(-1)?.[1]).toContain("deploymentSync");
+    for (const field of ["deploymentSync", "deploymentEnvironment", "repositoryUrl", "githubToken"]) {
+      expect(String(projectFind.mock.calls.at(-1)?.[1]).split(" ")).toContain(field);
+    }
   });
 
   it("keeps going after one project's deployments fail", async () => {

@@ -414,6 +414,7 @@ describe("POST .../github/sync and deployments", () => {
     const body = await (await POST(request(), ctx())).json();
 
     expect(syncGithubDeployments.mock.calls[0][1]).toMatchObject({ _id: "p1" });
+    expect(syncGithubDeployments.mock.calls[0][3]).toEqual({ askedByPerson: true });
     expect(body).toMatchObject({ synced: true, deployments: { ran: true, inserted: 3 } });
   });
 

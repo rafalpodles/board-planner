@@ -1029,7 +1029,7 @@ export interface IProject {
   githubRepo: string;
   githubToken: string;
   deploymentEnvironment: string;
-  deploymentSync: { syncedThrough: Date | null; blockedUntil: Date | null };
+  deploymentSync: { syncedThrough: Date | null; blockedUntil: Date | null; lastError?: string };
   /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   gitlabRepo: string;
   gitlabHost: string;

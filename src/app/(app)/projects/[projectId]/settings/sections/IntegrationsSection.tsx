@@ -514,7 +514,8 @@ export function IntegrationsSection({
                         placeholder="production"
                       />
                       <p className="mt-1 text-xs text-text-muted">
-                        The GitHub deployment environment Insights reads for DORA, on Pro.
+                        The GitHub deployment environment Insights reads for DORA, on Pro. The token then
+                        also needs read access to deployments.
                       </p>
                     </div>
                   </div>
@@ -542,7 +543,7 @@ export function IntegrationsSection({
                                 result.autoTransitioned > 0
                                   ? `, ${result.autoTransitioned} auto-transitioned`
                                   : ""
-                              }`,
+                              }${deploymentsNote(result.deployments)}`,
                               "success",
                             );
                           } catch (err) {
@@ -961,4 +962,19 @@ export function IntegrationsSection({
       />
     </>
   );
+}
+
+type DeploymentSyncAnswer =
+  | { ran: true; inserted: number; finished: number }
+  | { ran: false; reason: string; error?: string }
+  | undefined;
+
+export function deploymentsNote(deployments: DeploymentSyncAnswer): string {
+  if (!deployments) return "";
+  if (deployments.ran) {
+    return deployments.inserted > 0 ? `; ${deployments.inserted} new deployments read` : "";
+  }
+  if (deployments.reason === "rate limited") return "; deployments wait for GitHub's rate limit";
+  if (deployments.reason === "failed") return `; deployments could not be read: ${deployments.error ?? "GitHub did not answer"}`;
+  return "";
 }

@@ -24,8 +24,15 @@ import { PROJECT_ICONS, type IPmMcpServer } from "@/types";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import { githubWebBase } from "@/lib/github-host";
 import { DEFAULT_DEPLOYMENT_ENVIRONMENT } from "@/lib/github-deployments";
+import { parseRepoString } from "@/lib/github";
 
-const MAX_DEPLOYMENT_ENVIRONMENT = 100;
+const MAX_DEPLOYMENT_ENVIRONMENT = 255;
+
+function repositoryIdentity(url: string): string {
+  const bare = url.trim().replace(/\/+$/, "");
+  const parsed = parseRepoString(bare);
+  return parsed ? `${parsed.owner}/${parsed.repo}`.toLowerCase() : bare.toLowerCase();
+}
 
 export const GET = withProjectAccessOrWorker(async (_request, { params, user, db }) => {
   await connectDB();
@@ -361,11 +368,21 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     return NextResponse.json({ error: written.error }, { status: written.status });
   }
   const beforeImage = written.before;
+  const repositoryMoved =
+    updates.repositoryUrl !== undefined &&
+    repositoryIdentity(String(updates.repositoryUrl)) !== repositoryIdentity(projectRepositoryUrl(beforeImage as never));
+  if (repositoryMoved) {
+    await db.Deployment.deleteMany({ project: projectId });
+  }
   if (
-    updates.deploymentEnvironment !== undefined &&
-    updates.deploymentEnvironment !== (beforeImage.deploymentEnvironment || DEFAULT_DEPLOYMENT_ENVIRONMENT)
+    repositoryMoved ||
+    (updates.deploymentEnvironment !== undefined &&
+      updates.deploymentEnvironment !== (beforeImage.deploymentEnvironment || DEFAULT_DEPLOYMENT_ENVIRONMENT))
   ) {
-    await db.Project.updateOne({ _id: projectId }, { $set: { "deploymentSync.syncedThrough": null } });
+    await db.Project.updateOne(
+      { _id: projectId },
+      { $set: { "deploymentSync.syncedThrough": null, "deploymentSync.lastError": "", "deploymentSync.blockedUntil": null } }
+    );
   }
   // Both trails before anything else can fail: the write has landed, and a retry would find
   // nothing left to record
@@ -448,6 +465,7 @@ export const DELETE = withProjectOwner(async (_request, { params, db }) => {
   await db.Sprint.deleteMany({ project: projectId });
   await db.Notification.deleteMany({ project: projectId });
   await db.PmMessage.deleteMany({ project: projectId });
+  await db.Deployment.deleteMany({ project: projectId });
 
   // Delete project audit logs and the project itself
   await db.ProjectAuditLog.deleteMany({ project: projectId });

@@ -563,7 +563,7 @@ export async function fetchDeploymentStatuses(
   deploymentId: number
 ): Promise<GitHubDeploymentStatus[]> {
   const res = await safeFetch(
-    `${API_BASE()}/repos/${owner}/${repo}/deployments/${deploymentId}/statuses?per_page=10`,
+    `${API_BASE()}/repos/${owner}/${repo}/deployments/${deploymentId}/statuses?per_page=30`,
     { headers: headersFor(token), signal: AbortSignal.timeout(15000) },
     GITHUB_DESTINATION
   );

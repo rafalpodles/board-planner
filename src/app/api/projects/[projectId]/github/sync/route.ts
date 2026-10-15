@@ -55,7 +55,7 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
     return NextResponse.json({ synced: true, ...counts });
   }
   // A deployment failure must not undo a pull-request sync that already landed
-  const deployments = await syncGithubDeployments(db, project).catch((err: unknown) => {
+  const deployments = await syncGithubDeployments(db, project, new Date(), { askedByPerson: true }).catch((err: unknown) => {
     console.error("GitHub deployment sync failed:", err);
     return { ran: false as const, reason: "failed" as const, error: firstLine(err) };
   });

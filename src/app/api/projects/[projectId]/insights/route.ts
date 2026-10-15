@@ -33,6 +33,7 @@ async function doraFor(db: ScopedDb, projectId: string, project: DoraProject, no
       { project: projectId, linkedPRs: { $elemMatch: { mergedAt: { $gte: since }, provider: { $in: ["github", null] } } } },
       "linkedPRs"
     )
+      .sort({ _id: -1 })
       .limit(DORA_ROW_CAP)
       .lean(),
   ]);
@@ -47,6 +48,8 @@ async function doraFor(db: ScopedDb, projectId: string, project: DoraProject, no
     environment,
     syncedThrough: project.deploymentSync?.syncedThrough ?? null,
     rateLimitedUntil: project.deploymentSync?.blockedUntil ?? null,
+    lastError: project.deploymentSync?.lastError ?? null,
+    capped: deployments.length === DORA_ROW_CAP || tasks.length === DORA_ROW_CAP,
   });
 }
 

@@ -190,3 +190,39 @@ test("a rate limit pauses deployments until it resets, and the pull requests sti
   expect(again.deployments).toMatchObject({ ran: false, reason: "rate limited", requests: 0 });
   expect((await askedFor(request)).some((path) => path.includes("/deployments"))).toBe(false);
 });
+
+test("a first read gives old deployments their outcome too, not only the last few days'", async ({ request }) => {
+  await setPlan("pro");
+  await github(request, {
+    ...scenario(),
+    deployments: [
+      { id: 7, sha: "old", ref: "main", environment: "production", created_at: ago(24 * 10), statuses: [{ state: "success", created_at: ago(24 * 10 - 1) }] },
+      { id: 8, sha: "new", ref: "main", environment: "production", created_at: ago(2), statuses: [{ state: "failure", created_at: ago(1) }] },
+    ],
+  });
+
+  await syncNow(request);
+
+  expect((await stored()).map((r) => [r.githubId, r.state])).toEqual([
+    [7, "success"],
+    [8, "failure"],
+  ]);
+});
+
+test("a token GitHub will not list deployments for says so on the page, and Sync can ask again at once", async ({ page, request }) => {
+  await setPlan("pro");
+  await github(request, scenario({ deploymentsRefused: true }));
+
+  const result = await syncNow(request);
+  expect(result).toMatchObject({ synced: true, deployments: { ran: false, reason: "failed", error: "GitHub answered 403" } });
+
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}/insights`);
+  await expect(page.getByTestId("insights-dora")).toContainText("GitHub refused to list this board's deployments (GitHub answered 403)");
+
+  await github(request, scenario());
+  const again = await syncNow(request);
+  expect(again.deployments).toMatchObject({ ran: true, inserted: 3 });
+  await page.reload();
+  await expect(page.getByTestId("insights-dora-figures")).toContainText("Change failure rate33%");
+});

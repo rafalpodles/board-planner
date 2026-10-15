@@ -14,6 +14,7 @@ export interface IDeployment {
   startedAt: Date;
   finishedAt: Date | null;
   url: string;
+  lastCheckedAt: Date | null;
 }
 
 const deploymentSchema = new Schema<IDeployment>({
@@ -26,6 +27,7 @@ const deploymentSchema = new Schema<IDeployment>({
   startedAt: { type: Date, required: true },
   finishedAt: { type: Date, default: null },
   url: { type: String, default: "" },
+  lastCheckedAt: { type: Date, default: null },
 });
 
 deploymentSchema.index({ project: 1, githubId: 1, organisation: 1 }, { unique: true });

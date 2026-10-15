@@ -23,8 +23,12 @@ export interface Dora {
   timeToRestore: Spread | null;
   unrestored: number;
   deploymentsWithoutChanges: number;
+  successes: number;
+  restored: number;
+  capped: boolean;
   syncedThrough: string | null;
   rateLimitedUntil: string | null;
+  lastError: string | null;
 }
 
 function spread(values: number[]): Spread | null {
@@ -46,7 +50,7 @@ const live = (d: DoraDeployment) => (d.finishedAt ?? d.startedAt).getTime();
  *   failure of a run of them; a failure with no success after it yet is counted as unrestored;
  * - lead time for changes: a merged pull request's `mergedAt` to the moment the deployment that
  *   shipped it succeeded. That deployment is the first successful one of the pull request's head
- *   commit if there is one, and otherwise the first successful one that started at or after the
+ *   commit started at or after the merge if there is one, and otherwise the first successful one that started at or after the
  *   merge — a squash or merge commit is never the head commit, so an exact match alone would leave
  *   most repositories without a figure. A change is counted in the window its deployment falls in.
  */
@@ -59,7 +63,17 @@ export function computeDora(
     environment,
     syncedThrough,
     rateLimitedUntil,
-  }: { now: number; weeks: number; environment: string; syncedThrough: Date | null; rateLimitedUntil: Date | null }
+    lastError = null,
+    capped = false,
+  }: {
+    now: number;
+    weeks: number;
+    environment: string;
+    syncedThrough: Date | null;
+    rateLimitedUntil: Date | null;
+    lastError?: string | null;
+    capped?: boolean;
+  }
 ): Dora {
   const from = now - weeks * WEEK_MS;
   const ordered = [...allDeployments].sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
@@ -96,7 +110,7 @@ export function computeDora(
     seen.add(change.url);
     const merged = change.mergedAt.getTime();
     const deployment =
-      (change.headSha && successes.find((s) => s.sha === change.headSha)) ||
+      (change.headSha && successes.find((s) => s.sha === change.headSha && s.startedAt.getTime() >= merged)) ||
       successes.find((s) => s.startedAt.getTime() >= merged);
     if (!deployment || live(deployment) < from || live(deployment) > now) continue;
     shipped.add(deployment);
@@ -113,7 +127,11 @@ export function computeDora(
     timeToRestore: spread(restores),
     unrestored,
     deploymentsWithoutChanges: finished.filter((d) => d.state === "success" && !shipped.has(d)).length,
+    successes: successCount,
+    restored: restores.length,
+    capped,
     syncedThrough: syncedThrough ? syncedThrough.toISOString() : null,
     rateLimitedUntil: rateLimitedUntil && rateLimitedUntil.getTime() > now ? rateLimitedUntil.toISOString() : null,
+    lastError: lastError || null,
   };
 }

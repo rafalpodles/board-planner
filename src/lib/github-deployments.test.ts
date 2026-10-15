@@ -22,7 +22,9 @@ vi.mock("@/lib/github", async (importOriginal) => ({
   fetchDeploymentStatuses,
 }));
 
-const { syncGithubDeployments, outcomeOf, STATUS_CHECKS_PER_TICK, DEPLOYMENT_PAGES_PER_TICK } = await import("./github-deployments");
+const { syncGithubDeployments, outcomeOf, STATUS_CHECKS_PER_TICK, DEPLOYMENT_PAGES_PER_TICK, REFUSED_RETRY_MS } = await import(
+  "./github-deployments"
+);
 const { GitHubRateLimited } = await import("@/lib/github");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const db = scopedToDefaultOrganisation();
@@ -47,14 +49,24 @@ const project = (over: Record<string, unknown> = {}) => ({
 
 let known: { _id: string; githubId: number }[] = [];
 let pending: { _id: string; githubId: number }[] = [];
+let pendingSort: unknown = null;
 
 beforeEach(() => {
   vi.clearAllMocks();
   known = [];
   pending = [];
+  pendingSort = null;
   deploymentFind.mockImplementation((filter: Record<string, unknown>) => {
-    const rows = filter.state === "pending" ? pending : known;
-    const chain = { sort: () => chain, limit: () => chain, lean: () => Promise.resolve(rows) };
+    const isPending = filter.state === "pending";
+    const rows = isPending ? pending : known;
+    const chain = {
+      sort: (order: unknown) => {
+        if (isPending) pendingSort = order;
+        return chain;
+      },
+      limit: () => chain,
+      lean: () => Promise.resolve(rows),
+    };
     return chain;
   });
   deploymentInsertMany.mockResolvedValue([]);
@@ -102,8 +114,17 @@ describe("syncGithubDeployments", () => {
     expect(fetchDeployments).toHaveBeenCalledWith("example", "board", "plain:sealed", "production", 1);
     expect(deploymentInsertMany.mock.calls[0][0].map((d: { githubId: number }) => d.githubId)).toEqual([3, 2]);
     expect(deploymentInsertMany.mock.calls[0][0][0]).toMatchObject({ state: "pending", sha: "sha3", environment: "production", startedAt: new Date(hoursAgo(1)) });
+    expect(projectUpdateOne.mock.calls[0][0]).toMatchObject({
+      _id: "p1",
+      deploymentEnvironment: "production",
+      repositoryUrl: "https://github.com/example/board",
+    });
     expect(projectUpdateOne.mock.calls[0][1]).toEqual({
-      $set: { "deploymentSync.syncedThrough": new Date(hoursAgo(1)), "deploymentSync.blockedUntil": null },
+      $set: {
+        "deploymentSync.syncedThrough": new Date(hoursAgo(1)),
+        "deploymentSync.blockedUntil": null,
+        "deploymentSync.lastError": "",
+      },
     });
     expect(result).toMatchObject({ ran: true, inserted: 2, requests: 1 });
   });
@@ -130,7 +151,7 @@ describe("syncGithubDeployments", () => {
     expect(projectUpdateOne.mock.calls[0][1].$set["deploymentSync.syncedThrough"]).toEqual(cursor);
   });
 
-  it("asks unfinished deployments for their outcome, newest first and at most the cap, and records a finished one", async () => {
+  it("asks unfinished deployments for their outcome, never-asked first, at most the cap, and records what it learnt", async () => {
     fetchDeployments.mockResolvedValueOnce([]);
     pending = [
       { _id: "d9", githubId: 9 },
@@ -143,15 +164,19 @@ describe("syncGithubDeployments", () => {
     const result = await syncGithubDeployments(db, project(), NOW);
 
     expect(fetchDeploymentStatuses.mock.calls.map((c) => c[3])).toEqual([9, 8]);
-    expect(deploymentUpdateOne).toHaveBeenCalledTimes(1);
     expect(deploymentUpdateOne.mock.calls[0][0]).toMatchObject({ _id: "d9", state: "pending" });
     expect(deploymentUpdateOne.mock.calls[0][1]).toEqual({
-      $set: { state: "failure", finishedAt: new Date(hoursAgo(1)), url: "https://ci.example/9" },
+      $set: { state: "failure", finishedAt: new Date(hoursAgo(1)), url: "https://ci.example/9", lastCheckedAt: NOW },
     });
+    expect(deploymentUpdateOne.mock.calls[1][1]).toEqual({ $set: { lastCheckedAt: NOW } });
     expect(result).toMatchObject({ ran: true, finished: 1, requests: 3 });
     const pendingQuery = deploymentFind.mock.calls.find(([f]) => f.state === "pending")![0];
-    expect(pendingQuery.startedAt.$gte).toEqual(new Date(NOW.getTime() - 3 * 86_400_000));
+    expect(pendingQuery.$or).toEqual([
+      { lastCheckedAt: null },
+      { startedAt: { $gte: new Date(NOW.getTime() - 3 * 86_400_000) } },
+    ]);
     expect(pendingQuery.environment).toBe("production");
+    expect(pendingSort).toEqual({ lastCheckedAt: 1, startedAt: -1 });
     expect(STATUS_CHECKS_PER_TICK).toBe(10);
   });
 
@@ -162,15 +187,70 @@ describe("syncGithubDeployments", () => {
     const result = await syncGithubDeployments(db, project(), NOW);
 
     expect(result).toEqual({ ran: false, reason: "rate limited", requests: 1 });
-    expect(projectUpdateOne.mock.calls[0][1]).toEqual({ $set: { "deploymentSync.blockedUntil": until } });
+    expect(projectUpdateOne.mock.calls[0][1]).toEqual({
+      $set: { "deploymentSync.blockedUntil": until, "deploymentSync.lastError": "" },
+    });
     expect(deploymentInsertMany).not.toHaveBeenCalled();
   });
 
-  it("lets any other failure through, so the tick logs it", async () => {
-    fetchDeployments.mockRejectedValueOnce(new Error("GitHub answered 500"));
+  it("a listing GitHub refuses is kept as the reason, waits an hour, and is let through so the tick logs it", async () => {
+    fetchDeployments.mockRejectedValueOnce(new Error("GitHub answered 403"));
 
-    await expect(syncGithubDeployments(db, project(), NOW)).rejects.toThrow("GitHub answered 500");
-    expect(projectUpdateOne).not.toHaveBeenCalled();
+    await expect(syncGithubDeployments(db, project(), NOW)).rejects.toThrow("GitHub answered 403");
+    expect(projectUpdateOne.mock.calls[0][1]).toEqual({
+      $set: {
+        "deploymentSync.lastError": "GitHub answered 403",
+        "deploymentSync.blockedUntil": new Date(NOW.getTime() + REFUSED_RETRY_MS),
+      },
+    });
+  });
+
+  it("a person pressing Sync may ask again after a refusal, but never past a rate limit", async () => {
+    const later = new Date(NOW.getTime() + 600_000);
+    const refused = project({ deploymentSync: { syncedThrough: null, blockedUntil: later, lastError: "GitHub answered 403" } });
+    const limited = project({ deploymentSync: { syncedThrough: null, blockedUntil: later, lastError: "" } });
+    fetchDeployments.mockResolvedValue([]);
+
+    expect(await syncGithubDeployments(db, refused, NOW)).toMatchObject({ ran: false, reason: "refused" });
+    expect(await syncGithubDeployments(db, limited, NOW, { askedByPerson: true })).toMatchObject({ ran: false, reason: "rate limited" });
+    expect(fetchDeployments).not.toHaveBeenCalled();
+    expect(await syncGithubDeployments(db, refused, NOW, { askedByPerson: true })).toMatchObject({ ran: true });
+  });
+
+  it("one deployment GitHub will not describe does not stop the others, and is not asked again soon", async () => {
+    fetchDeployments.mockResolvedValueOnce([]);
+    pending = [
+      { _id: "d9", githubId: 9 },
+      { _id: "d8", githubId: 8 },
+    ];
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    fetchDeploymentStatuses
+      .mockRejectedValueOnce(new Error("GitHub answered 404"))
+      .mockResolvedValueOnce([{ state: "success", created_at: hoursAgo(1) }]);
+
+    const result = await syncGithubDeployments(db, project(), NOW);
+
+    expect(result).toMatchObject({ ran: true, finished: 1 });
+    expect(deploymentUpdateOne.mock.calls[0][1]).toEqual({ $set: { lastCheckedAt: NOW } });
+  });
+
+  it("a rate limit while asking for outcomes still stops the pass", async () => {
+    fetchDeployments.mockResolvedValueOnce([]);
+    pending = [{ _id: "d9", githubId: 9 }];
+    fetchDeploymentStatuses.mockRejectedValueOnce(new GitHubRateLimited("limited", new Date(NOW.getTime() + 60_000)));
+
+    expect(await syncGithubDeployments(db, project(), NOW)).toMatchObject({ ran: false, reason: "rate limited" });
+    expect(deploymentUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("a write that failed for any reason but a duplicate keeps the cursor where it was", async () => {
+    fetchDeployments.mockResolvedValueOnce([deployment(5, 1)]);
+    deploymentInsertMany.mockRejectedValueOnce(
+      Object.assign(new Error("bulk"), { writeErrors: [{ code: 11000 }, { code: 121 }] })
+    );
+
+    await expect(syncGithubDeployments(db, project(), NOW)).rejects.toThrow("bulk");
+    expect(projectUpdateOne.mock.calls.every(([, update]) => !("deploymentSync.syncedThrough" in update.$set))).toBe(true);
   });
 
   it("a deployment another sync stored first is not an error", async () => {

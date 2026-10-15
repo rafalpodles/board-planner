@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
-import { IntegrationsSection } from "./IntegrationsSection";
+import { deploymentsNote, IntegrationsSection } from "./IntegrationsSection";
 import { SettingsProvider } from "@/components/settings/settings-context";
 import { ApiProject } from "@/types";
 
@@ -168,5 +168,17 @@ describe("IntegrationsSection and Coda on a free instance (BP-651)", () => {
     await screen.findByLabelText("Doc ID");
     expect(screen.getByText("Connected")).toBeTruthy();
     expect(screen.queryByText("feature", { exact: false, selector: ".sr-only" })).toBeNull();
+  });
+});
+
+describe("deploymentsNote", () => {
+  it("says what a manual sync did with deployments, and nothing when it did not read them", () => {
+    expect(deploymentsNote(undefined)).toBe("");
+    expect(deploymentsNote({ ran: true, inserted: 0, finished: 2 })).toBe("");
+    expect(deploymentsNote({ ran: true, inserted: 3, finished: 0 })).toBe("; 3 new deployments read");
+    expect(deploymentsNote({ ran: false, reason: "rate limited" })).toBe("; deployments wait for GitHub's rate limit");
+    expect(deploymentsNote({ ran: false, reason: "failed", error: "GitHub answered 403" })).toBe(
+      "; deployments could not be read: GitHub answered 403"
+    );
   });
 });

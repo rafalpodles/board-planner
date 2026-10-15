@@ -17,6 +17,7 @@ import { readBody, serve } from "./stub-guard.mjs";
  *   deployments — `[{ id, sha, ref, environment, created_at, statuses: [...] }]`, what the
  *                  deployments listing and each deployment's statuses answer (BP-878)
  *   deploymentsLimited — answer the deployments listing with GitHub's primary rate limit
+ *   deploymentsRefused — answer it 403 as a token without access to deployments gets
  *
  * `GET /asked` returns every path the app has requested since the last reset, which is how a spec
  * asserts what was *not* asked about — the rate-limit rule, and the one about finished work.
@@ -45,6 +46,7 @@ let pulls = [];
 let checks = {};
 let deployments = [];
 let deploymentsLimited = false;
+let deploymentsRefused = false;
 let asked = [];
 let bearers = [];
 /** The one repository this stub is GitHub for, as `owner/repo`. */
@@ -93,6 +95,7 @@ serve({
       checks = body.checks ?? {};
       deployments = body.deployments ?? [];
       deploymentsLimited = body.deploymentsLimited === true;
+      deploymentsRefused = body.deploymentsRefused === true;
       repository = body.repository ?? "example/board";
       asked = [];
       bearers = [];
@@ -161,6 +164,7 @@ serve({
       checks = {};
       deployments = [];
       deploymentsLimited = false;
+      deploymentsRefused = false;
       asked = [];
       bearers = [];
       json(res, { ok: true });
@@ -198,6 +202,10 @@ serve({
           "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 3600),
         });
         res.end(JSON.stringify({ message: "API rate limit exceeded" }));
+        return;
+      }
+      if (deploymentsRefused) {
+        json(res, { message: "Resource not accessible by personal access token" }, 403);
         return;
       }
       const environment = searchParams.get("environment");
