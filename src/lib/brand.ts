@@ -5,6 +5,8 @@
  */
 export const APP_NAME = "Board Planner";
 
+export const APP_DESCRIPTION = "A project board small teams can run — and coding agents can use.";
+
 /** Where the product lives. Used for defaults that need an address rather than a name. */
 export const APP_DOMAIN = "board-planner.com";
 

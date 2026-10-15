@@ -6,7 +6,7 @@ const findById = vi.hoisted(() => vi.fn());
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/organisation", () => ({ Organisation: { findOne, findById } }));
 
-const { assertOrganisationDomainConfig, classifyHost, organisationOfRequest, forgetOrganisationSlugs, organisationOrigin, SLUG_CACHE_LIMIT } = await import("./organisation-host");
+const { assertOrganisationDomainConfig, classifyHost, organisationOfRequest, forgetOrganisationSlugs, organisationOrigin, originOfHost, SLUG_CACHE_LIMIT } = await import("./organisation-host");
 const { scopedForRequest } = await import("./db-scope");
 const { DEFAULT_ORGANISATION_ID } = await import("./organisation-field");
 
@@ -130,6 +130,37 @@ describe("classifyHost", () => {
   it("ignores the port and a trailing dot", () => {
     expect(classifyHost("acme.board.test:3000", "board.test")).toEqual({ kind: "organisation", slug: "acme" });
     expect(classifyHost("acme.board.test.", "board.test")).toEqual({ kind: "organisation", slug: "acme" });
+  });
+});
+
+describe("originOfHost (BP-1058)", () => {
+  afterEach(() => {
+    delete process.env.ORGANISATION_DEFAULT_HOST;
+  });
+
+  it("is PUBLIC_ORIGIN on a single-organisation instance, whatever host the request names", () => {
+    process.env.PUBLIC_ORIGIN = "https://boards.example.com";
+    expect(originOfHost("evil.example")).toBe("https://boards.example.com");
+  });
+
+  it("is the organisation's own host, on the platform's scheme and port, without reading anything", () => {
+    process.env.ORGANISATION_DOMAIN = "board.test";
+    process.env.PUBLIC_ORIGIN = "http://board.test:3000";
+    expect(originOfHost("Acme.board.test:3000")).toBe("http://acme.board.test:3000");
+  });
+
+  it("is the default organisation's host when it lies outside the domain", () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    process.env.ORGANISATION_DEFAULT_HOST = "boards.acme-corp.com";
+    process.env.PUBLIC_ORIGIN = "https://board-planner.com";
+    expect(originOfHost("boards.acme-corp.com")).toBe("https://boards.acme-corp.com");
+  });
+
+  it("falls back to PUBLIC_ORIGIN for a host outside the domain, so a forged Host names no other site", () => {
+    process.env.ORGANISATION_DOMAIN = "board-planner.com";
+    process.env.PUBLIC_ORIGIN = "https://board-planner.com";
+    expect(originOfHost("evil.example")).toBe("https://board-planner.com");
+    expect(originOfHost(null)).toBe("https://board-planner.com");
   });
 });
 

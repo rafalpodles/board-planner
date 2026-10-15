@@ -1,6 +1,6 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { RUN_ORGANISATIONS_SERVER, ORGANISATIONS_PORT } from "../playwright.config";
-import { ACME, GLOBEX, PLATFORM_HOST, ORGANISATIONS_API, asOrganisation, bearer, originOf, seedTwoOrganisations, type OrganisationFixture } from "./organisations";
+import { ACME, GLOBEX, PLATFORM_HOST, ORGANISATIONS_API, SHARED_KEY, asOrganisation, bearer, hostOf, originOf, seedTwoOrganisations, type OrganisationFixture } from "./organisations";
 import { MCP_HEADERS } from "./mcp";
 import { bodyOf, mailFor } from "./mailbox";
 
@@ -92,5 +92,16 @@ test.describe("BP-670: each organisation's own addresses, documents and files", 
 
     const other = await request.get(`${ORGANISATIONS_API}${path}`, { headers: { ...asOrganisation(GLOBEX), ...bearer(GLOBEX) } });
     expect([403, 404]).toContain(other.status());
+  });
+
+  test("a task link's preview image is on the organisation's own host, whoever's host the link is opened on (BP-1058)", async ({ request }) => {
+    for (const who of [ACME, GLOBEX]) {
+      const res = await request.get(`${ORGANISATIONS_API}/projects/${SHARED_KEY}/tasks/1`, { headers: { host: hostOf(who) }, maxRedirects: 0 });
+      expect(res.status(), who.slug).toBe(200);
+      const image = (await res.text()).match(/<meta property="og:image" content="([^"]*)"/)?.[1];
+      expect(image, who.slug).toBe(`${originOf(who)}/opengraph-image`);
+      const png = await request.get(`${ORGANISATIONS_API}${new URL(image!).pathname}`, { headers: { host: hostOf(who) } });
+      expect(png.headers()["content-type"], who.slug).toBe("image/png");
+    }
   });
 });
