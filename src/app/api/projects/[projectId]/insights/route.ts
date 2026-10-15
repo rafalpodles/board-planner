@@ -47,7 +47,7 @@ async function doraFor(db: ScopedDb, projectId: string, project: DoraProject, no
     weeks,
     environment,
     syncedThrough: project.deploymentSync?.syncedThrough ?? null,
-    rateLimitedUntil: project.deploymentSync?.blockedUntil ?? null,
+    rateLimitedUntil: project.deploymentSync?.lastError ? null : (project.deploymentSync?.blockedUntil ?? null),
     lastError: project.deploymentSync?.lastError ?? null,
     capped: deployments.length === DORA_ROW_CAP || tasks.length === DORA_ROW_CAP,
   });

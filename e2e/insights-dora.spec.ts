@@ -133,7 +133,7 @@ test("production deployments are stored once and drawn as DORA on the Insights p
   await expect(figures).toContainText("Change failure rate33%");
   await expect(figures).toContainText("Lead time for changes2 h");
   await expect(figures).toContainText("Time to restore2 h");
-  await expect(figures).toContainText("3 finished to production");
+  await expect(figures).toContainText("2 succeeded of 3 finished");
   await page.getByTestId("insights-dora").getByText("Show as table").click();
   const thisWeek = page.getByTestId("insights-dora").getByRole("table").locator("tbody tr").last().locator("td");
   await expect(thisWeek.nth(1)).toHaveText("2");

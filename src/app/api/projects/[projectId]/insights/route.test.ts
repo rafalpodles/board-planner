@@ -255,4 +255,17 @@ describe("GET /api/projects/[projectId]/insights — DORA", () => {
       syncedThrough: "2026-10-14T00:00:00.000Z",
     });
   });
+
+  it("a refusal GitHub gave is the reason it states, not a rate limit", async () => {
+    projectFindById.mockReturnValue(
+      lean({
+        ...github,
+        deploymentSync: { syncedThrough: null, blockedUntil: new Date(Date.now() + 3_600_000), lastError: "GitHub answered 403" },
+      })
+    );
+
+    const body = await (await insights()).json();
+
+    expect(body.dora).toMatchObject({ lastError: "GitHub answered 403", rateLimitedUntil: null });
+  });
 });

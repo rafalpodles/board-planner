@@ -431,11 +431,11 @@ function doraEmptyMessage(dora: Dora | null): string | null {
     return "Deployments are read from GitHub. Set this board's GitHub repository and token in Settings → Integrations to measure them.";
   }
   if (dora.deployments > 0) return null;
-  if (dora.rateLimitedUntil) {
-    return `GitHub's rate limit was reached, so deployments are read again after ${new Date(dora.rateLimitedUntil).toLocaleString()}.`;
-  }
   if (dora.lastError) {
     return `GitHub refused to list this board's deployments (${dora.lastError}). The token needs read access to deployments.`;
+  }
+  if (dora.rateLimitedUntil) {
+    return `GitHub's rate limit was reached, so deployments are read again after ${new Date(dora.rateLimitedUntil).toLocaleString()}.`;
   }
   if (!dora.syncedThrough) {
     return `No deployments to “${dora.environment}” have been read yet. They are read on the next sync with GitHub.`;
