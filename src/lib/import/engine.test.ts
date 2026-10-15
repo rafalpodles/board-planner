@@ -291,6 +291,18 @@ describe("runImport", () => {
     expect(writes.updates[1].update.$set).toMatchObject({ description: "new", category: "bug", priority: "high" });
   });
 
+  it("leaves a task in its column on a re-run when the file gives no status, or one it cannot match", async () => {
+    const { db, writes } = fakeDb({ existing: [{ id: "1", status: "doing" }, { id: "2", status: "doing" }, { id: "3", status: "doing" }] });
+    const report = await run(db, [
+      { id: "1", title: "a" },
+      { id: "2", title: "b", status: "Waiting for QA" },
+      { id: "3", title: "c", status: "done" },
+    ]);
+    expect(writes.updates.map((u) => u.update.$set.status)).toEqual([undefined, undefined, "done"]);
+    expect(report.unmapped.statuses).toEqual(["Waiting for QA"]);
+    expect((logActivities.mock.calls.at(-1)![1] as { taskId: unknown }[]).length).toBe(1);
+  });
+
   it("refuses a day that does not exist rather than rolling it into the next month, and reads a time with no zone as UTC", async () => {
     // CI runs in UTC, where reading a zone-less time locally would look right too
     const zone = process.env.TZ;

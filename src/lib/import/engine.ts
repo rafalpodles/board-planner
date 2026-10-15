@@ -58,7 +58,7 @@ interface Resolved {
   createdAt: Date | null;
   completedAt: Date | null;
   dueDate: Date | null;
-  given: { description: boolean; category: boolean; priority: boolean };
+  given: { status: boolean; description: boolean; category: boolean; priority: boolean };
   customFieldValues: Record<string, unknown>;
   comments: { ref: string; body: string; author: Types.ObjectId; createdAt: Date | null }[];
 }
@@ -187,13 +187,14 @@ function resolveTask(
   }
   const columnIds = board.columns.map((c) => c.id);
   let status = board.defaultStatus;
+  let statusGiven = false;
   if (task.status) {
     const mapped = mapping.statuses?.[task.status];
     const found =
       (mapped && columnIds.includes(mapped) ? mapped : undefined) ??
       byName(columnIds, task.status) ??
       board.columns.find((c) => c.label.trim().toLowerCase() === task.status!.trim().toLowerCase())?.id;
-    if (found) status = found;
+    if (found) [status, statusGiven] = [found, true];
     else noteUnmapped(report.unmapped.statuses, task.status);
   }
 
@@ -252,7 +253,7 @@ function resolveTask(
     createdAt,
     completedAt,
     dueDate: calendarDay(report, task.id, task.dueDate),
-    given: { description: task.description !== undefined && task.description !== null, category: categoryGiven, priority: priorityGiven },
+    given: { status: statusGiven, description: task.description !== undefined && task.description !== null, category: categoryGiven, priority: priorityGiven },
     customFieldValues: resolveFields(report, task, board),
     comments: (task.comments ?? []).flatMap((comment) => resolveComment(report, task.id, comment, users, importer)),
   };
@@ -318,7 +319,7 @@ async function storedTasks(db: ScopedDb, projectId: string, source: string, refs
 
 // A run's task refuses to leave its column through every writer, an import included
 function noteHeld(report: ImportReport, t: Resolved, stored: Stored) {
-  if (stored.held && stored.status !== t.status) report.notImported.push({ id: t.ref, what: "its column: a machine is running it" });
+  if (t.given.status && stored.held && stored.status !== t.status) report.notImported.push({ id: t.ref, what: "its column: a machine is running it" });
 }
 
 async function storedComments(db: ScopedDb, source: string, taskIds: Types.ObjectId[]): Promise<Set<string>> {
@@ -414,7 +415,7 @@ async function writeChunk(
         const before = stored.get(t.ref)!;
         noteHeld(report, t, before);
         // Dated now, not at the source's finish: the board may have moved it since the last import
-        const moved = !before.held && before.status !== t.status;
+        const moved = t.given.status && !before.held && before.status !== t.status;
         if (moved) {
           moves.push({ projectId, taskId: before._id, userId: importer, action: "status_changed", field: "status", oldValue: before.status, newValue: t.status, at: now });
         }

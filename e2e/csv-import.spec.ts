@@ -133,7 +133,7 @@ test("a semicolon Excel file maps its columns, statuses and people, imports, and
 
   // The same shape again: the mapping is remembered and nothing is made twice
   await page.reload();
-  await page.getByLabel("Import file (CSV or JSON)").setInputFiles(file(CSV.replace("Second task", "Second task, renamed")));
+  await page.getByLabel("Import file (CSV or JSON)").setInputFiles(file(CSV.replace("Second task;Done;", "Second task, renamed;;")));
   await expect(mapping.getByLabel("Status “Do zrobienia”")).toHaveValue("todo");
   await check(page);
   await expect(report).toContainText("Would create 0 and would update 5 of 5 tasks from eksport");
@@ -142,6 +142,8 @@ test("a semicolon Excel file maps its columns, statuses and people, imports, and
   const again = await tasks();
   expect(again).toHaveLength(5);
   expect(again[1].title).toBe("Second task, renamed");
+  // A row whose status cell is now empty leaves its task in the column it is in
+  expect(again[1].status).toBe("done");
 
   await page.goto(`/projects/${PROJECT_KEY}`);
   await expect(page.getByText("Zażółć gęślą jaźń").first()).toBeVisible();
