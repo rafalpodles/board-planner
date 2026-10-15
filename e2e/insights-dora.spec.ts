@@ -138,6 +138,15 @@ test("production deployments are stored once and drawn as DORA on the Insights p
   const thisWeek = page.getByTestId("insights-dora").getByRole("table").locator("tbody tr").last().locator("td");
   await expect(thisWeek.nth(1)).toHaveText("2");
   await expect(thisWeek.nth(2)).toHaveText("1");
+  if (process.env.INSIGHTS_SHOTS_DIR) {
+    const dora = page.getByTestId("insights-dora");
+    await dora.scrollIntoViewIfNeeded();
+    await dora.screenshot({ path: `${process.env.INSIGHTS_SHOTS_DIR}/dora-desktop.png` });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.reload();
+    await page.getByTestId("insights-dora").scrollIntoViewIfNeeded();
+    await page.getByTestId("insights-dora").screenshot({ path: `${process.env.INSIGHTS_SHOTS_DIR}/dora-phone.png` });
+  }
 });
 
 test("the second sync asks only for the newest page and nothing about finished deployments", async ({ request }) => {
