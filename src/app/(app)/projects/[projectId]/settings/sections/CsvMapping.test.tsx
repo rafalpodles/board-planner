@@ -107,8 +107,9 @@ describe("CsvMapping", () => {
   });
 
   it("recalls a mapping when the next export has one more comment column", async () => {
-    rememberCsvMapping("p1", ["Title", "Comment", "Comment"], { targets: ["title", "comment", "comment"], statuses: {}, users: {} });
-    const sheet = readCsvTable("Title,Comment,Comment,Comment\nOne,a,b,c\n");
+    // "Note" is not guessed as anything, so only the remembered mapping can make these comments
+    rememberCsvMapping("p1", ["Title", "Note", "Note"], { targets: ["title", "comment", "comment"], statuses: {}, users: {} });
+    const sheet = readCsvTable("Title,Note,Note,Note\nOne,a,b,c\n");
     const onChange = vi.fn();
     render(<CsvMapping projectId="p1" project={project} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
     await waitFor(() => expect((onChange.mock.calls.at(-1)?.[0] as CsvPayload | null)?.bundle.tasks[0].comments).toHaveLength(3));
