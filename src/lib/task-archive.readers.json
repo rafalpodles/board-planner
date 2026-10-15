@@ -46,6 +46,7 @@
     "src/lib/task-archive-service.ts": "the archive and restore writers read the task they act on",
     "src/lib/task-comment-route.ts": "by id",
     "src/lib/task-decisions.ts":"a refused change waits on a person whether or not its task was archived since",
+    "src/lib/upload-cleanup.ts": "a file is kept while any task still names it, archived or not: an archived task is restored with its images",
     "src/lib/task-links.ts": "dependency and parent graphs span the whole board, so a cycle through an archived task is still a cycle",
     "src/lib/task-parents.ts": "a card names its parent whatever the parent's state",
     "src/app/api/workers/[workerId]/route.ts": "the tasks a run holds, before the worker is deleted: an archived task is never held, and a held one cannot be archived without force"
