@@ -137,14 +137,11 @@ describe("CsvMapping", () => {
     expect((screen.getByLabelText("Note") as HTMLSelectElement).value).toBe("ignore");
   });
 
-  it("keeps the people chosen before when the columns no longer fit", async () => {
-    window.localStorage.setItem(
-      `bp:csv-import:p1:${["title", "owner"].join("\u0001")}`,
-      JSON.stringify({ targets: ["title", "assignee", "ignore"], shape: "title\u0001owner\u0001other", statuses: {}, users: { "old.friend": "maya" } })
-    );
-    const sheet = readCsvTable("Title,Owner\nOne,old.friend\n");
+  it("keeps the people chosen before when a run's split choice does not fit the next file", async () => {
+    rememberCsvMapping("p1", ["Title", "Owner", "Note", "Note"], { targets: ["title", "assignee", "comment", "ignore"], statuses: {}, users: { x: "maya" } });
+    const sheet = readCsvTable("Title,Owner,Note,Note,Note\nOne,x,a,b,c\n");
     const onChange = vi.fn();
     render(<CsvMapping projectId="p1" project={project} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
-    await waitFor(() => expect((onChange.mock.calls.at(-1)?.[0] as CsvPayload | null)?.mapping.users).toEqual({ "old.friend": "maya" }));
+    await waitFor(() => expect((onChange.mock.calls.at(-1)?.[0] as CsvPayload | null)?.mapping.users).toEqual({ x: "maya" }));
   });
 });
