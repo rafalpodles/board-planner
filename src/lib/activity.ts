@@ -30,27 +30,32 @@ export async function logActivities(
     newValue?: string;
     customField?: boolean;
     fieldType?: string;
+    // When it happened, for a row recording the past (an import); otherwise now
+    at?: Date;
   }[]
 ): Promise<void> {
   if (rows.length === 0) return;
+  const dated = rows.some((row) => row.at);
+  const now = new Date();
   const generatedBy = currentGeneratedBy();
   const provenance = provenanceFields();
   try {
-    await db.ActivityLog.insertMany(
-      rows.map((row) => ({
-        project: row.projectId,
-        task: row.taskId,
-        user: row.userId,
-        action: row.action,
-        field: row.field || "",
-        oldValue: row.oldValue || "",
-        newValue: row.newValue || "",
-        ...(row.customField && { customField: true }),
-        ...(row.fieldType && { fieldType: row.fieldType }),
-        ...(generatedBy && { generatedBy }),
-        ...provenance,
-      }))
-    );
+    const docs = rows.map((row) => ({
+      project: row.projectId,
+      task: row.taskId,
+      user: row.userId,
+      action: row.action,
+      field: row.field || "",
+      oldValue: row.oldValue || "",
+      newValue: row.newValue || "",
+      ...(row.customField && { customField: true }),
+      ...(row.fieldType && { fieldType: row.fieldType }),
+      ...(generatedBy && { generatedBy }),
+      ...provenance,
+      ...(dated && { createdAt: row.at ?? now }),
+    }));
+    if (dated) await db.ActivityLog.insertMany(docs, { timestamps: false });
+    else await db.ActivityLog.insertMany(docs);
   } catch (err) {
     // Same contract as logActivity: a history row must never break the write it describes. But an
     // ORDERED bulk stops at the first failure and keeps what went before it, and `rows` is built

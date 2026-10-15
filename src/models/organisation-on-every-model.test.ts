@@ -40,6 +40,8 @@ const GLOBAL_UNIQUE: Record<string, string> = {
   "PlatformSignIn.binderHash": "random cookie value; a platform row with no organisation",
   "Organisation.slug": "the subdomain naming the organisation: unique across the platform by definition (BP-666)",
   "Task.project+taskNumber": "project is an organisation-owned id",
+  "Task.project+externalRef.source+externalRef.id": "project is an organisation-owned id",
+  "Comment.task+externalRef.source+externalRef.id": "task is an organisation-owned id",
 };
 
 describe("every model carries an organisation", () => {

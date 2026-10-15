@@ -19,6 +19,7 @@ import { NotificationsSection } from "./sections/NotificationsSection";
 import { PmAgentSection } from "./sections/PmAgentSection";
 import { WorkersSection } from "./sections/WorkersSection";
 import { AuditSection } from "./sections/AuditSection";
+import { ImportSection } from "./sections/ImportSection";
 import {
   scrollSettingsToTop,
   SettingsShell,
@@ -143,6 +144,16 @@ const SECTIONS: SectionMeta[] = [
     icon: (
       <Icon d="M12 7V4M6 7h12a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V9a2 2 0 012-2zM9 13h.01M15 13h.01" />
     ),
+  },
+  {
+    id: "import",
+    label: "Import",
+    title: "Import",
+    blurb:
+      "Bring tasks in from another tracker. Check shows what would happen without writing anything; importing tells nobody and can be run again to update.",
+    keywords: "import migrate jira bundle json move tasks bulk",
+    access: "projectAdmin",
+    icon: <Icon d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />,
   },
   {
     id: "audit",
@@ -391,6 +402,7 @@ export default function ProjectSettingsPage() {
             {s.id === "integrations" && <IntegrationsSection {...sectionProps} />}
             {s.id === "workers" && <WorkersSection {...sectionProps} />}
             {s.id === "pm" && <PmAgentSection {...sectionProps} />}
+            {s.id === "import" && <ImportSection projectId={projectId} />}
             {s.id === "audit" && (
               <AuditSection projectId={projectId} active={active === "audit"} />
             )}

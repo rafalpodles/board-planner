@@ -39,6 +39,11 @@ export const DEFAULT_PROJECT_CATEGORIES: { name: string; color: string }[] = [
   { name: "idea", color: "#8b5cf6" },
 ];
 export const PRIORITIES: Priority[] = ["low", "medium", "high", "urgent"];
+export interface ExternalRef {
+  source: string;
+  id: string;
+}
+
 export interface GeneratedBy {
   kind: "ai";
   feature: "pm_agent";
@@ -1227,6 +1232,7 @@ export interface ITask {
   createdBy: Types.ObjectId | IUser;
   createdAt: Date;
   updatedAt: Date;
+  externalRef?: ExternalRef;
 }
 
 export interface IReaction {
@@ -1247,6 +1253,7 @@ export interface IComment {
   generatedBy?: GeneratedBy;
   createdAt: Date;
   updatedAt: Date;
+  externalRef?: ExternalRef;
 }
 
 // API response types (serialized, no ObjectId)
@@ -1722,6 +1729,7 @@ export const PROJECT_AUDIT_ACTIONS = [
   "webhook_secret_revealed",
   "webhook_secret_rotated",
   "project_exported",
+  "tasks_imported",
 ] as const;
 
 export type ProjectAuditAction = (typeof PROJECT_AUDIT_ACTIONS)[number];

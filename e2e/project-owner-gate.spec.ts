@@ -94,6 +94,7 @@ const RECIPES: Record<string, Recipe> = {
   },
   "GET /api/projects/[projectId]/audit": { send: get, handled: { status: 200, body: JSON_ARRAY } },
   "GET /api/projects/[projectId]/audit/export": { send: get, handled: { status: 200, body: /^createdAt,actor,action,detail\r\n/ } },
+  "POST /api/projects/[projectId]/import": { send: withBody("post", {}), handled: { status: 400, body: /The bundle must be an object/ } },
   // The check the settings page makes before the download: it answers without exporting or recording anything (BP-1011)
   "GET /api/projects/[projectId]/export": {
     send: (request, path) => request.get(`${path}?check=1`),
