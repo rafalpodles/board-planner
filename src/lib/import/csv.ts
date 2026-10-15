@@ -28,6 +28,8 @@ const DELIMITERS = [",", ";", "\t", "|"] as const;
 
 // Excel saves a "CSV" in the machine's ANSI code page, which in Poland is windows-1250
 export function decodeCsv(bytes: Uint8Array): string {
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes);
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes);
   try {
     return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
   } catch {
@@ -166,12 +168,20 @@ export function normaliseDay(raw: string): string {
   return value;
 }
 
-function normaliseInstant(raw: string): string {
+const ZONED = /(?:Z|[+-]\d{2}:?\d{2})$/i;
+
+// A time with no zone is read as UTC, so the same sheet means the same instant on every server
+export function normaliseInstant(raw: string): string {
   const value = raw.trim();
-  const dotted = /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/.exec(value);
-  if (!dotted) return value;
-  const date = day(+dotted[3], +dotted[2], +dotted[1]);
-  return date ? `${date}T${pad(+(dotted[4] ?? 0))}:${dotted[5] ?? "00"}:00` : value;
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d{1,2}:\d{2}/.test(value)) {
+    const iso = value.replace(" ", "T");
+    return ZONED.test(iso) ? iso : `${iso}Z`;
+  }
+  const parts = /^(\S+)(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(value);
+  if (!parts) return value;
+  const date = normaliseDay(parts[1]);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return value;
+  return `${date}T${pad(+(parts[2] ?? 0))}:${parts[3] ?? "00"}:${parts[4] ?? "00"}Z`;
 }
 
 const TRUE = new Set(["true", "yes", "y", "1", "x", "tak", "✓", "✔"]);
@@ -193,14 +203,15 @@ function fieldValue(raw: string, field: CsvField | undefined): unknown {
 
 export const NO_ID_PREFIX = "row-";
 
-export function csvToBundle(table: CsvTable, targets: CsvTarget[], source: string, fields: CsvField[]): ImportBundle {
+// `upload` names this upload alone: a row with no id of its own can then never match a task from another one
+export function csvToBundle(table: CsvTable, targets: CsvTarget[], source: string, fields: CsvField[], upload: string): ImportBundle {
   const at = (target: CsvTarget) => targets.indexOf(target);
   const idColumn = at("id");
   const tasks = table.rows.map((row, index): ImportTask => {
     const cell = (column: number) => (column < 0 ? "" : (row[column] ?? ""));
     const text = (target: CsvTarget) => cell(at(target)).trim() || undefined;
     const task: ImportTask = {
-      id: (idColumn >= 0 && cell(idColumn).trim()) || `${NO_ID_PREFIX}${index + 2}`,
+      id: idColumn < 0 ? `${NO_ID_PREFIX}${index + 2}` : cell(idColumn).trim() || `${upload}-${NO_ID_PREFIX}${index + 2}`,
       title: cell(at("title")),
       description: cell(at("description")) || undefined,
       status: text("status"),

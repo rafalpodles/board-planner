@@ -158,15 +158,27 @@ describe("runImport", () => {
     expect(report.unmapped.users).toEqual(["nobody@example.com"]);
   });
 
+  it("does not list a person the mapping deliberately leaves unassigned", async () => {
+    const { db, writes } = fakeDb();
+    const report = await run(db, [{ id: "1", title: "a", assignee: "maya" }, { id: "2", title: "b", assignee: "ghost" }], { users: { maya: null } });
+    expect(writes.tasks.map((t) => t.assignee)).toEqual([null, null]);
+    expect(report.unmapped.users).toEqual(["ghost"]);
+  });
+
   it("keeps a due day, refuses one that is not a calendar day and says so, and never clears one on a re-run", async () => {
     const { db, writes } = fakeDb({ existing: [{ id: "3" }] });
     const report = await run(db, [
       { id: "1", title: "a", dueDate: "2027-02-28" },
       { id: "2", title: "b", dueDate: "2027-02-31" },
       { id: "3", title: "c" },
+      { id: "4", title: "d", dueDate: "2027-02-28T10:00" },
     ]);
-    expect(writes.tasks.map((t) => t.dueDate)).toEqual([new Date("2027-02-28T00:00:00.000Z"), null]);
-    expect(report.dropped).toEqual([{ id: "2", field: "dueDate", value: "2027-02-31", reason: "not a day, YYYY-MM-DD" }]);
+    expect(writes.tasks.map((t) => t.dueDate)).toEqual([new Date("2027-02-28T00:00:00.000Z"), null, null]);
+    expect(report.dropped.map((d) => [d.id, d.value])).toEqual([
+      ["2", "2027-02-31"],
+      ["4", "2027-02-28T10:00"],
+    ]);
+    expect(report.dropped[0]).toEqual({ id: "2", field: "dueDate", value: "2027-02-31", reason: "not a day, YYYY-MM-DD" });
     expect(writes.updates[0].update.$set).not.toHaveProperty("dueDate");
   });
 
@@ -185,10 +197,10 @@ describe("runImport", () => {
     ]);
   });
 
-  it("keeps the line breaks of a description and a comment, and takes them out of a title", async () => {
+  it("keeps the line breaks of a description and a comment, and turns a title's into a space", async () => {
     const { db, writes } = fakeDb();
     await run(db, [{ id: "1", title: "a\nb", description: "one\r\ntwo\n\tthree\u202e", comments: [{ id: "c", author: "maya", body: "x\ry" }] }]);
-    expect(writes.tasks[0]).toMatchObject({ title: "ab", description: "one\ntwo\n\tthree" });
+    expect(writes.tasks[0]).toMatchObject({ title: "a b", description: "one\ntwo\n\tthree" });
     expect(writes.comments[0].body).toBe("x\ny");
   });
 
@@ -265,6 +277,25 @@ describe("runImport", () => {
     expect(writes.updates[0].update.$set).not.toHaveProperty("status");
     expect(report.notImported).toEqual([{ id: "1", what: "its column: a machine is running it" }]);
     expect(logActivities.mock.calls.at(-1)![1]).toEqual([]);
+  });
+
+  it("leaves a description, category or priority the file does not carry as the board has it on a re-run", async () => {
+    const { db, writes } = fakeDb({ existing: [{ id: "1" }, { id: "2" }] });
+    await run(db, [
+      { id: "1", title: "a" },
+      { id: "2", title: "b", description: "new", type: "bug", priority: "high" },
+    ]);
+    expect(writes.updates[0].update.$set).not.toHaveProperty("description");
+    expect(writes.updates[0].update.$set).not.toHaveProperty("category");
+    expect(writes.updates[0].update.$set).not.toHaveProperty("priority");
+    expect(writes.updates[1].update.$set).toMatchObject({ description: "new", category: "bug", priority: "high" });
+  });
+
+  it("reads only ISO dates for a creation or finish time, so a day-first date is never read month-first", async () => {
+    const { db, writes } = fakeDb();
+    const report = await run(db, [{ id: "1", title: "a", createdAt: "05/10/2026" }]);
+    expect(writes.tasks[0].createdAt).not.toEqual(new Date("2026-05-10"));
+    expect(report.dropped).toEqual([{ id: "1", field: "createdAt", value: "05/10/2026", reason: "not a date in the past" }]);
   });
 
   it("never unassigns: somebody it cannot name leaves the board's assignee as it is", async () => {

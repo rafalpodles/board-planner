@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/Select";
 import type { ImportBundle, ImportMapping } from "@/lib/import/bundle";
 import { MAX_IMPORT_TASKS } from "@/lib/import/limits";
 import { type CsvTable, type CsvTarget, csvToBundle, distinctValues, guessTargets, shapeKey } from "@/lib/import/csv";
+import { defaultStatusFor, effectiveColumns, MAX_COLUMN_LABEL } from "@/lib/columns";
 import { COLUMN_ROLES, type ApiProject, type ApiProjectColumn, type ColumnRole, ROLE_LABELS } from "@/types";
 
 export interface CsvPayload {
@@ -24,6 +25,11 @@ interface Saved {
 
 const AUTOMATIC = "";
 const UNASSIGNED = "\u0000unassigned";
+const LISTED_VALUES = 100;
+const SOURCE_MAX = 30;
+
+const sourceFrom = (fileName: string) =>
+  fileName.replace(/\.[^.]+$/, "").replace(/\s*\(\d+\)$/, "").trim().slice(0, SOURCE_MAX) || "CSV";
 
 const BUILT_IN: { value: CsvTarget; label: string }[] = [
   { value: "ignore", label: "Leave out" },
@@ -56,6 +62,14 @@ export function rememberCsvMapping(projectId: string, headers: string[], saved: 
   } catch {}
 }
 
+function headerLabels(headers: string[]): string[] {
+  const shown = headers.map((h, i) => {
+    const text = h || `Column ${i + 1}`;
+    return text.length > 40 ? `${text.slice(0, 40)}…` : text;
+  });
+  return shown.map((label, i) => (shown.indexOf(label) !== shown.lastIndexOf(label) ? `${label} (column ${i + 1})` : label));
+}
+
 function columnFor(columns: ApiProjectColumn[], value: string): string {
   const wanted = value.trim().toLowerCase();
   return columns.find((c) => c.id.toLowerCase() === wanted || c.label.trim().toLowerCase() === wanted)?.id ?? AUTOMATIC;
@@ -65,6 +79,7 @@ export function CsvMapping({
   projectId,
   project,
   table,
+  fileName,
   disabled,
   onColumns,
   onChange,
@@ -72,80 +87,113 @@ export function CsvMapping({
   projectId: string;
   project: ApiProject;
   table: CsvTable;
+  fileName: string;
   disabled: boolean;
   onColumns: (columns: ApiProjectColumn[]) => void;
   onChange: (payload: CsvPayload | null, remember: Saved) => void;
 }) {
   const api = useApi();
-  const columns = useMemo(() => project.columns ?? [], [project.columns]);
+  const columns = useMemo(() => effectiveColumns(project.columns) as ApiProjectColumn[], [project.columns]);
+  const defaultColumn = defaultStatusFor(project as Parameters<typeof defaultStatusFor>[0]);
   const fields = useMemo(() => project.customFields.filter((f) => !f.archived), [project.customFields]);
   const fieldShapes = useMemo(() => fields.map((f) => ({ name: f.name, fieldType: f.fieldType })), [fields]);
+  const targetOptions = useMemo(
+    () => [...BUILT_IN, ...fields.map((f) => ({ value: `field:${f.name}` as CsvTarget, label: `Field: ${f.name}` }))],
+    [fields]
+  );
   const remembered = useMemo(() => recall(projectId, table.headers), [projectId, table.headers]);
+  const upload = useMemo(() => Math.random().toString(36).slice(2, 10), [table]);
 
   const [targets, setTargets] = useState<CsvTarget[]>(() => remembered?.targets ?? guessTargets(table.headers, fieldShapes));
   const [statuses, setStatuses] = useState<Record<string, string>>(remembered?.statuses ?? {});
   const [users, setUsers] = useState<Record<string, string | null>>(remembered?.users ?? {});
-  const [source, setSource] = useState(remembered?.source ?? "CSV");
-  const [members, setMembers] = useState<{ username: string; fullName?: string }[]>([]);
+  const [source, setSource] = useState(remembered?.source ?? sourceFrom(fileName));
+  const [members, setMembers] = useState<{ username: string; fullName?: string }[] | null>(null);
+  const [membersFailed, setMembersFailed] = useState(false);
   const [roles, setRoles] = useState<Record<string, ColumnRole>>({});
   const [adding, setAdding] = useState<string | null>(null);
-  const [addError, setAddError] = useState("");
+  const [addError, setAddError] = useState<{ value: string; message: string } | null>(null);
 
   useEffect(() => {
     api
       .get(`/api/projects/${projectId}/assignable-users`)
       .then((list: { username: string; fullName?: string }[]) => setMembers(list))
-      .catch(() => setMembers([]));
+      .catch(() => {
+        setMembers([]);
+        setMembersFailed(true);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   const statusValues = useMemo(() => distinctValues(table, targets.indexOf("status")), [table, targets]);
   const userValues = useMemo(() => distinctValues(table, targets.indexOf("assignee")), [table, targets]);
-  const statusOf = (value: string) => statuses[value] ?? columnFor(columns, value);
+  // A recalled choice that no longer names something on this board falls back to the automatic one
+  const liveTargets = useMemo(
+    () => targets.map((t) => (targetOptions.some((o) => o.value === t) ? t : "ignore")),
+    [targets, targetOptions]
+  );
+  const statusOf = (value: string) => {
+    const chosen = statuses[value];
+    if (chosen === AUTOMATIC || (chosen && columns.some((c) => c.id === chosen))) return chosen;
+    return columnFor(columns, value);
+  };
+  const userOf = (value: string): string | null | undefined => {
+    if (!Object.hasOwn(users, value)) return undefined;
+    const chosen = users[value];
+    return chosen === null || members?.some((m) => m.username === chosen) ? chosen : undefined;
+  };
+  const columnsKey = columns.map((c) => `${c.id}\u0001${c.label}`).join("\u0002");
+  const fieldsKey = fieldShapes.map((f) => `${f.name}\u0001${f.fieldType}`).join("\u0002");
+  const membersKey = members?.map((m) => m.username).join("\u0001") ?? "";
 
-  const hasTitle = targets.includes("title");
-  const hasId = targets.includes("id");
+  const hasTitle = liveTargets.includes("title");
+  const hasId = liveTargets.includes("id");
   const tooMany = table.rows.length > MAX_IMPORT_TASKS;
   const trimmedSource = source.trim();
 
   useEffect(() => {
-    const remember = { targets, statuses, users, source: trimmedSource };
-    if (!hasTitle || tooMany || !trimmedSource) return onChange(null, remember);
-    const mappedStatuses = Object.fromEntries(statusValues.map((v) => [v, statusOf(v)]).filter(([, id]) => id));
-    const mappedUsers = Object.fromEntries(
-      userValues.filter((v) => Object.hasOwn(users, v)).map((v) => [v, users[v]])
-    );
+    const remember = { targets: liveTargets, statuses, users, source: trimmedSource };
+    if (!hasTitle || tooMany || !trimmedSource || adding !== null || members === null) return onChange(null, remember);
+    const mappedStatuses: Record<string, string> = {};
+    for (const value of statusValues) {
+      const id = statusOf(value);
+      if (id) mappedStatuses[value] = id;
+      // Chosen on purpose, so it goes there even when its name matches another column
+      else if (Object.hasOwn(statuses, value)) mappedStatuses[value] = defaultColumn;
+    }
+    const mappedUsers: Record<string, string | null> = {};
+    for (const value of userValues) {
+      const chosen = userOf(value);
+      if (chosen !== undefined) mappedUsers[value] = chosen;
+    }
     // With no id column a row is known only by its line, so each upload stands on its own
-    const name = hasId ? trimmedSource : `${trimmedSource} ${new Date().toISOString().slice(0, 16)}`.slice(0, 50);
+    const name = hasId ? trimmedSource : `${trimmedSource} ${upload}`;
     onChange(
-      { bundle: csvToBundle(table, targets, name, fieldShapes), mapping: { statuses: mappedStatuses, users: mappedUsers } },
+      { bundle: csvToBundle(table, liveTargets, name, fieldShapes, upload), mapping: { statuses: mappedStatuses, users: mappedUsers } },
       remember
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targets, statuses, users, trimmedSource, columns, table]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the keys stand for the arrays they are built from
+  }, [liveTargets, statuses, users, trimmedSource, columnsKey, fieldsKey, membersKey, table, adding, upload]);
 
   async function addColumn(value: string) {
     setAdding(value);
-    setAddError("");
+    setAddError(null);
     try {
       const next: ApiProjectColumn[] = await api.post(`/api/projects/${projectId}/columns`, {
-        label: value.slice(0, 50),
+        label: value.trim().slice(0, MAX_COLUMN_LABEL),
         role: roles[value] ?? "active",
       });
       onColumns(next);
       const made = next.find((c) => !columns.some((old) => old.id === c.id));
       if (made) setStatuses((s) => ({ ...s, [value]: made.id }));
     } catch (e) {
-      setAddError(e instanceof Error ? e.message : "The column could not be added");
+      setAddError({ value, message: e instanceof Error ? e.message : "The column could not be added" });
     } finally {
       setAdding(null);
     }
   }
 
-  const targetOptions = [
-    ...BUILT_IN,
-    ...fields.map((f) => ({ value: `field:${f.name}` as CsvTarget, label: `Field: ${f.name}` })),
-  ];
+  const labels = headerLabels(table.headers);
   const columnOptions = [
     { value: AUTOMATIC, label: "Where new tasks go" },
     ...columns.map((c) => ({ value: c.id, label: c.label })),
@@ -153,7 +201,7 @@ export function CsvMapping({
   const userOptions = [
     { value: AUTOMATIC, label: "By username or e-mail" },
     { value: UNASSIGNED, label: "Leave unassigned" },
-    ...members.map((m) => ({ value: m.username, label: m.fullName ? `${m.fullName} (${m.username})` : m.username })),
+    ...(members ?? []).map((m) => ({ value: m.username, label: m.fullName ? `${m.fullName} (${m.username})` : m.username })),
   ];
 
   return (
@@ -173,23 +221,26 @@ export function CsvMapping({
           {table.headers.map((header, i) => (
             <div key={i} className="min-w-0">
               <Select
-                label={header || `Column ${i + 1}`}
-                value={targets[i]}
+                label={labels[i]}
+                aria-describedby={table.rows[0]?.[i] ? `csv-example-${i}` : undefined}
+                value={liveTargets[i]}
                 options={targetOptions}
                 onChange={(e) => {
                   const value = e.target.value as CsvTarget;
-                  setTargets((all) => all.map((t, j) => (j === i ? value : value !== "ignore" && t === value ? "ignore" : t)));
+                  setTargets(liveTargets.map((t, j) => (j === i ? value : value !== "ignore" && t === value ? "ignore" : t)));
                 }}
               />
               {table.rows[0]?.[i] && (
-                <p className="mt-0.5 truncate text-xs text-text-muted" title={table.rows[0][i]}>
+                <p id={`csv-example-${i}`} className="mt-0.5 truncate text-xs text-text-muted" title={table.rows[0][i]}>
                   e.g. {table.rows[0][i]}
                 </p>
               )}
             </div>
           ))}
         </div>
-        {!hasTitle && <p className="text-sm text-danger">Choose the column that holds each task&apos;s title.</p>}
+        <p role="status" className="text-sm text-danger empty:hidden">
+          {hasTitle ? "" : "Choose the column that holds each task's title."}
+        </p>
         {!hasId && (
           <p className="text-sm text-text-muted">
             No ID column: uploading this file again will add its tasks again rather than update them.
@@ -200,12 +251,7 @@ export function CsvMapping({
       {statusValues.length > 0 && (
         <fieldset className="space-y-2" disabled={disabled}>
           <legend className="mb-1 text-sm font-medium">Statuses</legend>
-          {addError && (
-            <p role="alert" className="text-sm text-danger">
-              {addError}
-            </p>
-          )}
-          {statusValues.map((value) => (
+          {statusValues.slice(0, LISTED_VALUES).map((value) => (
             <div key={value} className="grid items-end gap-2 sm:grid-cols-[1fr_auto]">
               <Select
                 label={`Status “${value}”`}
@@ -226,26 +272,38 @@ export function CsvMapping({
                     size="sm"
                     className="min-h-[44px] shrink-0"
                     disabled={adding !== null}
+                    aria-label={`Add column “${value}”`}
                     onClick={() => addColumn(value)}
                   >
                     {adding === value ? "Adding…" : "Add column"}
                   </Button>
                 </div>
               )}
+              {addError?.value === value && (
+                <p role="alert" className="text-sm text-danger sm:col-span-2">
+                  {addError.message}
+                </p>
+              )}
             </div>
           ))}
+          {statusValues.length > LISTED_VALUES && (
+            <p className="text-sm text-text-muted">
+              And {statusValues.length - LISTED_VALUES} more, each matched to a column of its own name or put where new tasks go.
+            </p>
+          )}
         </fieldset>
       )}
 
       {userValues.length > 0 && (
         <fieldset className="space-y-2" disabled={disabled}>
           <legend className="mb-1 text-sm font-medium">People</legend>
+          {membersFailed && <p className="text-sm text-danger">The board&apos;s members could not be loaded, so none can be picked here.</p>}
           <div className="grid gap-2 sm:grid-cols-2">
-            {userValues.map((value) => (
+            {userValues.slice(0, LISTED_VALUES).map((value) => (
               <Select
                 key={value}
                 label={`Assignee “${value}”`}
-                value={Object.hasOwn(users, value) ? (users[value] ?? UNASSIGNED) : AUTOMATIC}
+                value={((chosen) => (chosen === undefined ? AUTOMATIC : (chosen ?? UNASSIGNED)))(userOf(value))}
                 options={userOptions}
                 onChange={(e) => {
                   const picked = e.target.value;
@@ -259,6 +317,11 @@ export function CsvMapping({
               />
             ))}
           </div>
+          {userValues.length > LISTED_VALUES && (
+            <p className="text-sm text-text-muted">
+              And {userValues.length - LISTED_VALUES} more, each matched by username or e-mail.
+            </p>
+          )}
         </fieldset>
       )}
 
@@ -266,12 +329,12 @@ export function CsvMapping({
         <Input
           label="Source name"
           value={source}
-          maxLength={30}
+          maxLength={SOURCE_MAX}
           disabled={disabled}
           onChange={(e) => setSource(e.target.value)}
           error={trimmedSource ? undefined : "Name where these tasks come from"}
         />
-        <p className="mt-1 text-xs text-text-muted">A re-upload under the same name updates the tasks it made.</p>
+        {hasId && <p className="mt-1 text-xs text-text-muted">A re-upload under the same name updates the tasks it made.</p>}
       </div>
     </div>
   );

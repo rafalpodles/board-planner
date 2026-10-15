@@ -57,6 +57,7 @@ interface Resolved {
   createdAt: Date | null;
   completedAt: Date | null;
   dueDate: Date | null;
+  given: { description: boolean; category: boolean; priority: boolean };
   customFieldValues: Record<string, unknown>;
   comments: { ref: string; body: string; author: Types.ObjectId; createdAt: Date | null }[];
 }
@@ -75,7 +76,7 @@ function keepLines(text: string): string {
 }
 
 function clip(report: ImportReport, id: string, field: string, text: string, max: number, { lines = false } = {}): string {
-  const clean = (lines ? keepLines(text) : stripControlCharacters(text)).trim();
+  const clean = (lines ? keepLines(text) : stripControlCharacters(text.replace(/\s*[\r\n]+\s*/g, " "))).trim();
   if (clean.length <= max) return clean;
   report.truncated.push({ id, field });
   return clean.slice(0, max);
@@ -84,7 +85,7 @@ function clip(report: ImportReport, id: string, field: string, text: string, max
 function instant(report: ImportReport, id: string, field: string, raw: string | undefined): Date | null {
   if (!raw) return null;
   const at = new Date(raw);
-  if (Number.isNaN(at.getTime()) || at.getTime() > Date.now()) {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(raw) || Number.isNaN(at.getTime()) || at.getTime() > Date.now()) {
     report.dropped.push({ id, field, value: shown(raw), reason: "not a date in the past" });
     return null;
   }
@@ -191,24 +192,27 @@ function resolveTask(
   }
 
   let category = board.defaultCategory;
+  let categoryGiven = false;
   if (task.type) {
     const mapped = mapping.types?.[task.type];
     const found = (mapped && board.categories.includes(mapped) ? mapped : undefined) ?? byName(board.categories, task.type);
-    if (found) category = found;
+    if (found) [category, categoryGiven] = [found, true];
     else noteUnmapped(report.unmapped.types, task.type);
   }
 
   let priority: Priority = "medium";
+  let priorityGiven = false;
   if (task.priority) {
     const found = byName(PRIORITIES, task.priority);
-    if (found) priority = found;
+    if (found) [priority, priorityGiven] = [found, true];
     else report.dropped.push({ id: task.id, field: "priority", value: shown(task.priority), reason: "not low, medium, high or urgent" });
   }
 
   let assignee: Types.ObjectId | null = null;
   if (task.assignee) {
     assignee = users.get(task.assignee) ?? null;
-    if (!assignee) noteUnmapped(report.unmapped.users, task.assignee);
+    const leftUnassigned = mapping.users?.[task.assignee] === null && Object.hasOwn(mapping.users, task.assignee);
+    if (!assignee && !leftUnassigned) noteUnmapped(report.unmapped.users, task.assignee);
   }
 
   const createdAt = instant(report, task.id, "createdAt", task.createdAt);
@@ -242,6 +246,7 @@ function resolveTask(
     createdAt,
     completedAt,
     dueDate: calendarDay(report, task.id, task.dueDate),
+    given: { description: task.description !== undefined && task.description !== null, category: categoryGiven, priority: priorityGiven },
     customFieldValues: resolveFields(report, task, board),
     comments: (task.comments ?? []).flatMap((comment) => resolveComment(report, task.id, comment, users, importer)),
   };
@@ -413,9 +418,10 @@ async function writeChunk(
             update: {
               $set: {
                 title: t.title,
-                description: t.description,
-                category: t.category,
-                priority: t.priority,
+                // What the file does not carry stays as the board has it
+                ...(t.given.description && { description: t.description }),
+                ...(t.given.category && { category: t.category }),
+                ...(t.given.priority && { priority: t.priority }),
                 // An import never unassigns: somebody it cannot name is left as the board has it
                 ...(t.assignee && { assignee: t.assignee, assignedBy: importer }),
                 ...(t.dueDate && { dueDate: t.dueDate }),

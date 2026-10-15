@@ -68,12 +68,14 @@ function Report({ report }: { report: ImportReport }) {
   );
 }
 
-const isCsv = (file: File) => /\.(csv|tsv|txt)$/i.test(file.name) || /csv|tab-separated/.test(file.type);
+const isJson = (file: File) => /\.json$/i.test(file.name) || file.type === "application/json";
+const signature = (payload: Payload | null) => (payload ? JSON.stringify(payload) : "");
 
 export function ImportSection({ projectId, project, patchProject }: Pick<SectionProps, "projectId" | "project" | "patchProject">) {
   const api = useApi();
   const [payload, setPayload] = useState<Payload | null>(null);
-  const [table, setTable] = useState<CsvTable | null>(null);
+  const [table, setTable] = useState<{ rows: CsvTable; fileName: string } | null>(null);
+  const sent = useRef("");
   const remembered = useRef<Parameters<typeof rememberCsvMapping>[2] | null>(null);
   const [fileError, setFileError] = useState("");
   const [report, setReport] = useState<ImportReport | null>(null);
@@ -85,6 +87,8 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
   async function choose(event: ChangeEvent<HTMLInputElement>) {
     seq.current += 1;
     const file = event.target.files?.[0];
+    const mine = seq.current;
+    sent.current = "";
     setPayload(null);
     setTable(null);
     setReport(null);
@@ -93,14 +97,17 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
     setFileError("");
     if (!file) return;
     if (file.size > MAX_FILE_BYTES) return setFileError("The file is larger than the 20 MB an import takes.");
-    if (isCsv(file)) {
-      const read = readCsvTable(decodeCsv(new Uint8Array(await file.arrayBuffer())));
+    const text = decodeCsv(new Uint8Array(await file.arrayBuffer()));
+    if (mine !== seq.current) return;
+    if (!isJson(file) && !/^\s*[{[]/.test(text)) {
+      const read = readCsvTable(text);
       if (read.headers.length === 0 || read.rows.length === 0) return setFileError("This file holds no rows under a header line.");
-      return setTable(read);
+      return setTable({ rows: read, fileName: file.name });
     }
     try {
-      const next = payloadOf(JSON.parse(await file.text()));
+      const next = payloadOf(JSON.parse(text));
       if (!next) return setFileError("This file holds no import bundle: it needs a list of tasks.");
+      sent.current = signature(next);
       setPayload(next);
     } catch {
       setFileError("This file is not JSON.");
@@ -110,6 +117,7 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
   async function send(dryRun: boolean) {
     if (!payload) return;
     const mine = ++seq.current;
+    const asked = sent.current;
     setBusy(dryRun ? "checking" : "importing");
     setChecked(false);
     setError("");
@@ -117,8 +125,10 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
       const answer: ImportReport = await api.post(`/api/projects/${projectId}/import`, { ...payload, dryRun });
       if (mine !== seq.current) return;
       setReport(answer);
-      setChecked(dryRun && !answer.error);
-      if (dryRun && table && remembered.current) rememberCsvMapping(projectId, table.headers, remembered.current);
+      // The mapping may have moved on while this was answered; then this check is not of what is on screen
+      const current = asked === sent.current;
+      setChecked(dryRun && !answer.error && current);
+      if (dryRun && current && table && remembered.current) rememberCsvMapping(projectId, table.rows.headers, remembered.current);
     } catch (e) {
       if (mine === seq.current) setError(e instanceof Error ? e.message : "The import could not run");
     } finally {
@@ -127,12 +137,13 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
   }
 
   const csvChanged = useCallback((next: CsvPayload | null, remember: Parameters<typeof rememberCsvMapping>[2]) => {
-    seq.current += 1;
     remembered.current = remember;
+    const now = signature(next);
+    if (now === sent.current) return;
+    sent.current = now;
     setPayload(next);
     setChecked(false);
     setReport(null);
-    setBusy(null);
   }, []);
 
   const columnsAdded = useCallback((columns: ApiProjectColumn[]) => patchProject({ columns }), [patchProject]);
@@ -155,7 +166,8 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
           <CsvMapping
             projectId={projectId}
             project={project}
-            table={table}
+            table={table.rows}
+            fileName={table.fileName}
             disabled={busy !== null}
             onColumns={columnsAdded}
             onChange={csvChanged}

@@ -11,6 +11,8 @@ import { signIn } from "./session";
  */
 
 const MEMBER_EMAIL = "member.csv@example.com";
+// The source is named after the file unless changed, so two unrelated sheets do not update each other
+const SOURCE = "eksport";
 
 async function db() {
   if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
@@ -18,12 +20,13 @@ async function db() {
 }
 
 const CSV = [
-  "Klucz;Tytuł;Status;Przypisany;Termin;Difficulty;Opis",
+  '"Klucz";Tytuł;Status;Przypisany;Termin;Difficulty;Opis',
   `X-1;Zażółć gęślą jaźń;Do zrobienia;${MEMBER_EMAIL};15.10.2027;L;"Pierwsza linia`,
   `druga; ze średnikiem"`,
   "X-2;Second task;Done;ghost@example.com;;S;",
   "X-3;Waiting on a vendor;Czeka na dostawcę;;;;",
-  "X-4;=HYPERLINK(\"http://evil.example\",\"x\");Done;;;;",
+  "X-4;=HYPERLINK(\"http://evil.example\",\"x\");Done;Jan Nowak;;;",
+  "X-5;Parked;Odłożone;Old Colleague;;;",
 ].join("\r\n");
 
 const file = (text: string) => ({
@@ -35,7 +38,7 @@ const file = (text: string) => ({
 async function tasks() {
   return (await db())
     .collection("tasks")
-    .find({ project: PROJECT_ID, "externalRef.source": "CSV" })
+    .find({ project: PROJECT_ID, "externalRef.source": SOURCE })
     .sort({ "externalRef.id": 1 })
     .toArray();
 }
@@ -70,7 +73,7 @@ test("a semicolon Excel file maps its columns, statuses and people, imports, and
   await page.getByLabel("Import file (CSV or JSON)").setInputFiles(file(CSV));
 
   const mapping = page.getByTestId("csv-mapping");
-  await expect(mapping).toContainText("4 rows, 7 columns.");
+  await expect(mapping).toContainText("5 rows, 7 columns.");
   // Guessed from Polish headers and the board's own field names
   await expect(mapping.getByLabel("Klucz", { exact: true })).toHaveValue("id");
   await expect(mapping.getByLabel("Tytuł", { exact: true })).toHaveValue("title");
@@ -84,21 +87,36 @@ test("a semicolon Excel file maps its columns, statuses and people, imports, and
   // A status with no column is offered one, never made silently
   await mapping.getByLabel("Kind of column for “Czeka na dostawcę”").selectOption("blocked");
   const added = page.waitForResponse((r) => r.url().endsWith("/columns") && r.request().method() === "POST");
-  await mapping.getByRole("button", { name: "Add column" }).click();
+  await mapping.getByRole("button", { name: "Add column “Czeka na dostawcę”" }).click();
   expect((await added).status()).toBe(201);
   const column = await (await db()).collection("projects").findOne({ _id: PROJECT_ID });
   const vendor = column!.columns.find((c: { label: string }) => c.label === "Czeka na dostawcę");
   expect(vendor).toMatchObject({ role: "blocked" });
   await expect(mapping.getByLabel("Status “Czeka na dostawcę”")).toHaveValue(vendor.id);
+  // The rest of the page knows the new column too: saving Board afterwards must not drop it
+  await page.getByRole("button", { name: /^Board\b/ }).first().click();
+  await expect
+    .poll(() => page.locator("input:visible").evaluateAll((inputs) => inputs.map((i) => (i as HTMLInputElement).value)))
+    .toContain("Czeka na dostawcę");
+  await page.getByRole("button", { name: /^Import\b/ }).first().click();
+
+  // People: one picked from the members, one deliberately left unassigned, one found by e-mail
+  await mapping.getByLabel("Assignee “Jan Nowak”").selectOption(MEMBER_USERNAME);
+  await mapping.getByLabel("Assignee “Old Colleague”").selectOption({ label: "Leave unassigned" });
 
   await check(page);
   const report = page.getByTestId("import-report");
-  await expect(report).toContainText("Would create 4 and would update 0 of 4 tasks from CSV");
-  await expect(report).toContainText("ghost@example.com");
+  await expect(report).toContainText("Would create 5 and would update 0 of 5 tasks from eksport");
+  const nobody = report.locator("details", { hasText: "People with no account here" });
+  await expect(nobody).toContainText("ghost@example.com");
+  await expect(nobody).not.toContainText("Old Colleague");
+  await expect(nobody).not.toContainText("Jan Nowak");
+  await expect(report.locator("details", { hasText: "Statuses with no column" })).toContainText("Odłożone");
   expect(await tasks()).toHaveLength(0);
 
   await importIt(page);
-  await expect(report).toContainText("Created 4 and updated 0 of 4 tasks");
+  await expect(report).toContainText("Created 5 and updated 0 of 5 tasks");
+  await expect(report.locator("details", { hasText: "Statuses with no column" })).toContainText("Odłożone");
   const imported = await tasks();
   const member = await (await db()).collection("users").findOne({ username: MEMBER_USERNAME });
   expect(
@@ -107,7 +125,8 @@ test("a semicolon Excel file maps its columns, statuses and people, imports, and
     ["X-1", "Zażółć gęślą jaźń", "todo", String(member!._id), "2027-10-15T00:00:00.000Z"],
     ["X-2", "Second task", "done", "null", null],
     ["X-3", "Waiting on a vendor", vendor.id, "null", null],
-    ["X-4", '=HYPERLINK("http://evil.example","x")', "done", "null", null],
+    ["X-4", '=HYPERLINK("http://evil.example","x")', "done", String(member!._id), null],
+    ["X-5", "Parked", "planned", "null", null],
   ]);
   expect(imported[0].description).toBe("Pierwsza linia\ndruga; ze średnikiem");
   expect(imported[0].customFieldValues[String(FIELDS.difficulty._id)]).toBe("aa-large");
@@ -117,18 +136,18 @@ test("a semicolon Excel file maps its columns, statuses and people, imports, and
   await page.getByLabel("Import file (CSV or JSON)").setInputFiles(file(CSV.replace("Second task", "Second task, renamed")));
   await expect(mapping.getByLabel("Status “Do zrobienia”")).toHaveValue("todo");
   await check(page);
-  await expect(report).toContainText("Would create 0 and would update 4 of 4 tasks from CSV");
+  await expect(report).toContainText("Would create 0 and would update 5 of 5 tasks from eksport");
   await importIt(page);
-  await expect(report).toContainText("Created 0 and updated 4 of 4 tasks");
+  await expect(report).toContainText("Created 0 and updated 5 of 5 tasks");
   const again = await tasks();
-  expect(again).toHaveLength(4);
+  expect(again).toHaveLength(5);
   expect(again[1].title).toBe("Second task, renamed");
 
   await page.goto(`/projects/${PROJECT_KEY}`);
   await expect(page.getByText("Zażółć gęślą jaźń").first()).toBeVisible();
 });
 
-test("a file with no title column cannot be checked, and one with no id column says a re-upload adds again", async ({ page }) => {
+test("a file with no title column cannot be checked, and one with no id column is added again by a re-upload", async ({ page }) => {
   await signIn(page, "owner");
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
   await page.getByLabel("Import file (CSV or JSON)").setInputFiles(file("Name,Owner\nOne,someone\n"));
@@ -142,4 +161,27 @@ test("a file with no title column cannot be checked, and one with no id column s
   await mapping.getByLabel("Name", { exact: true }).selectOption("title");
   await check(page);
   await expect(page.getByTestId("import-report")).toContainText("Would create 1 and would update 0 of 1 tasks");
+  await importIt(page);
+  await expect(page.getByTestId("import-report")).toContainText("Created 1 and updated 0 of 1 tasks");
+
+  await page.getByLabel("Import file (CSV or JSON)").setInputFiles(file("Name,Owner\nOne,someone\n"));
+  await check(page);
+  await expect(page.getByTestId("import-report")).toContainText("Would create 1 and would update 0 of 1 tasks");
+});
+
+test("a status put where new tasks go on purpose goes there, even though a column has its name", async ({ page }) => {
+  await signIn(page, "owner");
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
+  await page.getByLabel("Import file (CSV or JSON)").setInputFiles(file("ID,Title,Status\nP-1,Parked on purpose,Done\n"));
+  const mapping = page.getByTestId("csv-mapping");
+  await expect(mapping.getByLabel("Status “Done”")).toHaveValue("done");
+  await mapping.getByLabel("Status “Done”").selectOption({ label: "Where new tasks go" });
+
+  await check(page);
+  const report = page.getByTestId("import-report");
+  await expect(report).toContainText("Would create 1");
+  await expect(report).not.toContainText("Statuses with no column");
+  await importIt(page);
+  await expect(report).toContainText("Created 1");
+  expect((await tasks()).map((t) => t.status)).toEqual(["planned"]);
 });
