@@ -374,9 +374,10 @@ async function writeChunk(
       again.map((t) => {
         const before = stored.get(t.ref)!;
         noteHeld(report, t, before);
+        // Dated now, not at the source's finish: the board may have moved it since the last import
         const moved = !before.held && before.status !== t.status;
         if (moved) {
-          moves.push({ projectId, taskId: before._id, userId: importer, action: "status_changed", field: "status", oldValue: before.status, newValue: t.status, at: t.completedAt ?? now });
+          moves.push({ projectId, taskId: before._id, userId: importer, action: "status_changed", field: "status", oldValue: before.status, newValue: t.status, at: now });
         }
         return {
           updateOne: {
@@ -388,7 +389,7 @@ async function writeChunk(
                 category: t.category,
                 priority: t.priority,
                 // An import never unassigns: somebody it cannot name is left as the board has it
-                ...(t.assignee && { assignee: t.assignee }),
+                ...(t.assignee && { assignee: t.assignee, assignedBy: importer }),
                 ...(moved && { status: t.status }),
                 ...Object.fromEntries(Object.entries(t.customFieldValues).map(([k, v]) => [`customFieldValues.${k}`, v])),
               },

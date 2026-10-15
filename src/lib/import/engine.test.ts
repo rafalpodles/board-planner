@@ -216,8 +216,11 @@ describe("runImport", () => {
     await run(db, [{ id: "1", title: "a", status: "done", createdAt: "2025-01-01T00:00:00Z", completedAt: "2025-02-01T00:00:00Z" }]);
     expect(writes.updates[0].update.$set.status).toBe("done");
     expect(logActivities.mock.calls.at(-1)![1]).toEqual([
-      expect.objectContaining({ taskId: rows[0]._id, action: "status_changed", oldValue: "backlog", newValue: "done", at: new Date("2025-02-01T00:00:00Z") }),
+      expect.objectContaining({ taskId: rows[0]._id, action: "status_changed", oldValue: "backlog", newValue: "done" }),
     ]);
+    // After whatever the board did since the first import, never before it
+    const at = (logActivities.mock.calls.at(-1)![1] as { at: Date }[])[0].at;
+    expect(Date.now() - at.getTime()).toBeLessThan(5_000);
   });
 
   it("leaves a task a machine is running in its column, and says so", async () => {
@@ -234,7 +237,10 @@ describe("runImport", () => {
       { id: "1", title: "a", assignee: "ghost" },
       { id: "2", title: "b", assignee: "maya" },
     ]);
-    expect(writes.updates.map((u) => u.update.$set.assignee)).toEqual([undefined, MEMBER]);
+    expect(writes.updates.map((u) => [u.update.$set.assignee, u.update.$set.assignedBy])).toEqual([
+      [undefined, undefined],
+      [MEMBER, IMPORTER],
+    ]);
   });
 
   it("writes a comment whose author has no account under the importer, keeping the author's name", async () => {
