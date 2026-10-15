@@ -37,14 +37,14 @@ function MachineRow({ machine }: { machine: ApiFleetMachine }) {
   const detail = task
     ? `${task.key}${task.phase ? ` · ${task.phase}` : ""}`
     : machine.task
-      ? "On a project you cannot open"
+      ? "on a board you cannot open"
       : LABELS[machine.state];
   const body = (
     <>
       <span aria-hidden="true" className={`mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full ${dotOf(machine.state)}`} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[13px] text-text">{machine.name}</span>
-        <span className="block truncate text-[11px] text-text-muted" title={task?.title}>
+        <span className="block truncate text-[11px] text-text-muted" title={task?.title ?? (machine.task ? "On a board you cannot open" : undefined)}>
           {task || machine.task ? `${LABELS[machine.state]} · ${detail}` : detail}
         </span>
       </span>

@@ -141,7 +141,7 @@ test("a member sees only their own machines, and nothing of a board they cannot 
 
   await expect(row(page, WORKER_NAME)).toContainText(`Working · ${HELD_TASK_KEY}`);
   await expect(row(page, "idle-mac")).toContainText("Idle");
-  await expect(row(page, "busy-elsewhere")).toContainText("Working · On a project you cannot open");
+  await expect(row(page, "busy-elsewhere")).toContainText("Working · on a board you cannot open");
   await expect(row(page, "busy-elsewhere").getByRole("link")).toHaveCount(0);
   await expect(panel(page).getByTestId("fleet-machine")).toHaveCount(3);
   await expect(row(page, "quiet-mac")).toHaveCount(0);

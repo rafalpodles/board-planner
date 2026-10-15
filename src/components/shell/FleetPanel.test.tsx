@@ -44,7 +44,7 @@ describe("FleetPanel", () => {
 
   it("names nothing about a task on a project the reader cannot open, and links nowhere", async () => {
     await showing([machine({ state: "running", task: { hidden: true } })]);
-    expect(screen.getByText("Working · On a project you cannot open")).toBeTruthy();
+    expect(screen.getByText("Working · on a board you cannot open")).toBeTruthy();
     expect(screen.queryByRole("link")).toBeNull();
   });
 
