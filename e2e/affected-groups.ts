@@ -97,7 +97,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   { prefix: "src/app/api/projects/[projectId]/categories/", groups: ["tasks", "project"] },
   { prefix: "src/app/api/projects/[projectId]/agent/", groups: ["project"] },
   { prefix: "src/app/api/projects/[projectId]/audit/", groups: ["project"] },
-  { prefix: "src/app/api/projects/[projectId]/github/", groups: ["project"] },
+  { prefix: "src/app/api/projects/[projectId]/github/", groups: ["project", "people"] },
   { prefix: "src/app/api/projects/[projectId]/gitlab/", groups: ["project"] },
   { prefix: "src/app/api/projects/[projectId]/coda/", groups: ["project"] },
   { prefix: "src/app/api/projects/[projectId]/webhooks/", groups: ["project"] },

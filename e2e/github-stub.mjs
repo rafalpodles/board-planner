@@ -14,6 +14,9 @@ import { readBody, serve } from "./stub-guard.mjs";
  *
  *   pulls  — the array `GET /repos/:owner/:repo/pulls` answers, in GitHub's own shape
  *   checks — `{ [sha]: { check_runs: [...], status: {...} } }`, what each commit's checks say
+ *   deployments — `[{ id, sha, ref, environment, created_at, statuses: [...] }]`, what the
+ *                  deployments listing and each deployment's statuses answer (BP-878)
+ *   deploymentsLimited — answer the deployments listing with GitHub's primary rate limit
  *
  * `GET /asked` returns every path the app has requested since the last reset, which is how a spec
  * asserts what was *not* asked about — the rate-limit rule, and the one about finished work.
@@ -40,6 +43,8 @@ const PORT = Number(process.env.GITHUB_STUB_PORT ?? 3995);
 
 let pulls = [];
 let checks = {};
+let deployments = [];
+let deploymentsLimited = false;
 let asked = [];
 let bearers = [];
 /** The one repository this stub is GitHub for, as `owner/repo`. */
@@ -86,6 +91,8 @@ serve({
       const body = JSON.parse((await readBody(req)) || "{}");
       pulls = body.pulls ?? [];
       checks = body.checks ?? {};
+      deployments = body.deployments ?? [];
+      deploymentsLimited = body.deploymentsLimited === true;
       repository = body.repository ?? "example/board";
       asked = [];
       bearers = [];
@@ -152,6 +159,8 @@ serve({
     if (pathname === "/reset") {
       pulls = [];
       checks = {};
+      deployments = [];
+      deploymentsLimited = false;
       asked = [];
       bearers = [];
       json(res, { ok: true });
@@ -177,6 +186,39 @@ serve({
     const addressed = /^\/repos\/([^/]+\/[^/]+)\//.exec(`${pathname}/`);
     if (addressed && addressed[1] !== repository) {
       json(res, { message: `github stub is not ${addressed[1]}` }, 404);
+      return;
+    }
+
+    // GET /repos/:owner/:repo/deployments — one environment, newest first, 100 a page, as GitHub pages it
+    if (/^\/repos\/[^/]+\/[^/]+\/deployments$/.test(pathname)) {
+      if (deploymentsLimited) {
+        res.writeHead(403, {
+          "Content-Type": "application/json",
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 3600),
+        });
+        res.end(JSON.stringify({ message: "API rate limit exceeded" }));
+        return;
+      }
+      const environment = searchParams.get("environment");
+      const page = Number(searchParams.get("page") ?? 1);
+      const listed = deployments
+        .filter((d) => !environment || d.environment === environment)
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .slice((page - 1) * 100, page * 100)
+        .map(({ statuses: _statuses, ...deployment }) => deployment);
+      json(res, listed);
+      return;
+    }
+
+    const deploymentStatuses = /^\/repos\/[^/]+\/[^/]+\/deployments\/(\d+)\/statuses$/.exec(pathname);
+    if (deploymentStatuses) {
+      const deployment = deployments.find((d) => String(d.id) === deploymentStatuses[1]);
+      if (!deployment) {
+        json(res, { message: "Not Found" }, 404);
+        return;
+      }
+      json(res, [...(deployment.statuses ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)));
       return;
     }
 
