@@ -183,6 +183,14 @@ const platformPort = (domain: string) => {
   return port ? `:${port}` : "";
 };
 
+export function originOfHost(host: string | null): string | null {
+  const domain = organisationDomain();
+  if (!domain) return selfOrigin();
+  const name = hostName(host);
+  if (name !== defaultOrganisationHost() && classifyHost(name, domain).kind === "unknown") return selfOrigin();
+  return `${platformScheme(domain)}//${name}${platformPort(domain)}`;
+}
+
 export const originFor = (db: ScopedDb): Promise<string | null> => organisationOrigin(db.organisation);
 
 export function platformSignInOrigin(): string | null {

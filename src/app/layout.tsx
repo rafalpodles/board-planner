@@ -4,13 +4,18 @@ import { AuthProvider } from "@/components/AuthProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 import { APP_NAME } from "@/lib/brand";
+import { linkPreviewMetadata } from "@/lib/link-preview";
 import { NONCE_HEADER } from "@/lib/csp";
+import { originOfHost } from "@/lib/organisation-host";
 
-export const metadata: Metadata = {
-  title: APP_NAME,
-  description: "A project board small teams can run — and coding agents can use.",
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const origin = originOfHost((await headers()).get("host"));
+  return {
+    ...(origin ? { metadataBase: new URL(origin) } : {}),
+    ...linkPreviewMetadata(APP_NAME),
+    robots: { index: false, follow: false },
+  };
+}
 
 export default async function RootLayout({
   children,
