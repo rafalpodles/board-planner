@@ -249,6 +249,20 @@ const projectSchema = new Schema<IProject>(
       type: String,
       default: "",
     },
+    deploymentEnvironment: {
+      type: String,
+      default: "production",
+      trim: true,
+    },
+    deploymentSync: {
+      type: {
+        syncedThrough: { type: Date, default: null },
+        blockedUntil: { type: Date, default: null },
+        lastError: { type: String, default: "" },
+      },
+      default: () => ({ syncedThrough: null, blockedUntil: null, lastError: "" }),
+      _id: false,
+    },
     gitlabRepo: {
       type: String,
       default: "",

@@ -5,6 +5,8 @@ const getAuthUser = vi.fn();
 const check = vi.fn();
 const projectFindOne = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
+const projectUpdateOne = vi.fn();
+const deploymentDeleteMany = vi.fn();
 const taskFind = vi.fn();
 const taskDeleteMany = vi.fn();
 const commentDeleteMany = vi.fn();
@@ -56,7 +58,12 @@ vi.mock("@/models/project", () => ({
     findOne: projectFindOne,
     findOneAndDelete: projectFindOneAndDelete,
     findOneAndUpdate: projectFindOneAndUpdate,
+    updateOne: projectUpdateOne,
   },
+}));
+vi.mock("@/models/deployment", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/models/deployment")>()),
+  Deployment: { deleteMany: deploymentDeleteMany },
 }));
 vi.mock("@/models/task", () => ({
   Task: {
@@ -147,6 +154,7 @@ beforeEach(() => {
     distinct: () => Promise.resolve([]),
   });
   projectFindOneAndDelete.mockResolvedValue({ _id: PROJECT_ID });
+  deploymentDeleteMany.mockResolvedValue({ deletedCount: 0 });
   commentDeleteMany.mockResolvedValue({ deletedCount: 0 });
   activityLogDeleteMany.mockResolvedValue({ deletedCount: 0 });
   taskDeleteMany.mockResolvedValue({ deletedCount: 0 });
@@ -209,6 +217,14 @@ describe("DELETE /api/projects/[projectId]", () => {
     expect(dropProjectReferences).not.toHaveBeenCalled();
   });
 
+  it("drops the project's deployments", async () => {
+    check.mockResolvedValue(true);
+
+    await DELETE(request(), ctx());
+
+    expect(deploymentDeleteMany.mock.calls[0][0]).toMatchObject({ project: PROJECT_ID });
+  });
+
   it("drops what other collections hold about the project, by the project's own id", async () => {
     check.mockResolvedValue(true);
     const _id = { toString: () => PROJECT_ID };
@@ -267,6 +283,77 @@ describe("PUT /api/projects/[projectId] key immutability", () => {
       expect.objectContaining({ name: "Renamed" }),
       expect.anything()
     );
+  });
+});
+
+describe("PUT /api/projects/[projectId] deploymentEnvironment", () => {
+  beforeEach(() => {
+    check.mockResolvedValue(true);
+    projectUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+  });
+
+  const sent = () => projectFindOneAndUpdate.mock.calls[0][1] as Record<string, unknown>;
+
+  it("stores a trimmed name and restarts the deployment cursor when it changes", async () => {
+    const res = await PUT(putRequest({ deploymentEnvironment: "  live  " }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(sent()).toMatchObject({ deploymentEnvironment: "live" });
+    expect(projectUpdateOne.mock.calls[0][1]).toEqual({
+      $set: { "deploymentSync.syncedThrough": null, "deploymentSync.lastError": "", "deploymentSync.blockedUntil": null },
+    });
+    expect(deploymentDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("an empty name means production again", async () => {
+    await PUT(putRequest({ deploymentEnvironment: "" }), ctx());
+
+    expect(sent()).toMatchObject({ deploymentEnvironment: "production" });
+  });
+
+  it("keeps the cursor when the name does not change", async () => {
+    projectFindOneAndUpdate.mockReturnValue({
+      lean: () => Promise.resolve({ _id: PROJECT_ID, name: "Test Project", deploymentEnvironment: "production" }),
+    });
+
+    await PUT(putRequest({ deploymentEnvironment: "production" }), ctx());
+
+    expect(projectUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("refuses a name longer than GitHub would ever send", async () => {
+    const res = await PUT(putRequest({ deploymentEnvironment: "x".repeat(256) }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("a repository that moves drops the old one's deployments and restarts the cursor", async () => {
+    projectFindOneAndUpdate.mockReturnValue({
+      lean: () => Promise.resolve({ _id: PROJECT_ID, name: "Test Project", repositoryUrl: "https://github.com/old/repo" }),
+    });
+
+    await PUT(putRequest({ repositoryUrl: "https://github.com/new/repo" }), ctx());
+
+    expect(deploymentDeleteMany.mock.calls[0][0]).toMatchObject({ project: PROJECT_ID });
+    expect(projectUpdateOne.mock.calls[0][1].$set["deploymentSync.syncedThrough"]).toBeNull();
+  });
+
+  it("the same repository written another way is not a move", async () => {
+    projectFindOneAndUpdate.mockReturnValue({
+      lean: () => Promise.resolve({ _id: PROJECT_ID, name: "Test Project", repositoryUrl: "https://github.com/Old/Repo" }),
+    });
+
+    await PUT(putRequest({ repositoryUrl: "https://github.com/old/repo/" }), ctx());
+
+    expect(deploymentDeleteMany).not.toHaveBeenCalled();
+    expect(projectUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("refuses a name that is not text", async () => {
+    const res = await PUT(putRequest({ deploymentEnvironment: { $ne: "" } }), ctx());
+
+    expect(res.status).toBe(400);
   });
 });
 

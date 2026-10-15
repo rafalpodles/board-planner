@@ -19,6 +19,9 @@ import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import type { RepositoryFields } from "@/lib/repository";
 import type { CiState, ILinkedPR, IProjectColumn } from "@/types";
 import { type ScopedDb } from "@/lib/db-scope";
+import { getOrganisation } from "@/lib/organisation";
+import { can } from "@/lib/entitlements";
+import { syncGithubDeployments } from "@/lib/github-deployments";
 
 /**
  * What a sync needs to know about a project — no more, so a `.lean()` projection satisfies it and
@@ -446,6 +449,12 @@ export async function syncGithubPullRequests(
  *
  * Two further things the number assumes and nothing enforces: one replica, and no overlapping
  * ticks. The second is guarded below; the first is not, so N replicas cost N times this.
+ *
+ * Deployments (BP-878), only for an organisation with `reports.insights`: one listing request a tick
+ * once the cursor has caught up (up to `DEPLOYMENT_PAGES_PER_TICK` on the first), plus one per
+ * unfinished deployment up to `STATUS_CHECKS_PER_TICK` — at most 13, ordinarily 1 or 2, on top of
+ * the figures above. A rate limit pauses deployments until GitHub's reset; pull requests keep
+ * their own handling.
  */
 export async function githubSyncTick(): Promise<void> {
   await connectDB();
@@ -457,8 +466,9 @@ async function githubSyncTickFor(db: ScopedDb): Promise<void> {
     { githubToken: { $nin: [null, ""] } },
     // `gitlabHost` because `repositoryProvider` reads it for a self-hosted GitLab; a projection
     // that omits a field the shared helper consults is a bug waiting for that helper to change
-    "key formerKeys githubRepo repositoryUrl gitlabRepo gitlabHost githubToken columns"
+    "key formerKeys githubRepo repositoryUrl gitlabRepo gitlabHost githubToken columns deploymentEnvironment deploymentSync"
   ).lean();
+  const readsDeployments = can(await getOrganisation(db.organisation), "reports.insights");
 
   for (const project of projects) {
     if (!(await stillServed(db.organisation))) return;
@@ -477,6 +487,15 @@ async function githubSyncTickFor(db: ScopedDb): Promise<void> {
     } catch (err) {
       // One unreachable repository must not stop the others
       console.error(`GitHub sync failed for ${project.key}:`, err);
+    }
+    if (!readsDeployments) continue;
+    try {
+      const deployments = await syncGithubDeployments(db, project);
+      if (!deployments.ran && deployments.reason === "rate limited") {
+        console.warn(`GitHub deployments for ${project.key} wait for the rate limit to reset`);
+      }
+    } catch (err) {
+      console.error(`GitHub deployment sync failed for ${project.key}:`, err);
     }
   }
 }

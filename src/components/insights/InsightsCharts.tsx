@@ -3,6 +3,7 @@
 import { createContext, useContext, useId } from "react";
 import Link from "next/link";
 import type { AgingTask, FinishedPoint, Insights, Spread } from "@/lib/insights";
+import type { Dora } from "@/lib/dora";
 import { formatDuration, formatWeek, niceCeiling } from "@/lib/insights-format";
 import { taskPath } from "@/lib/urls";
 
@@ -19,6 +20,7 @@ const PAD = { top: 14, right: 8, bottom: 26, left: 56 };
 const PLOT_W = WIDTH - PAD.left - PAD.right;
 const PLOT_H = HEIGHT - PAD.top - PAD.bottom;
 const DAY = 86_400_000;
+const DORA_ROWS_SHOWN = "5,000";
 const NO_START = "No finished task has a recorded start in an In Progress column, so there is no cycle time.";
 
 export function emptyTimeMessage(insights: Insights, measure: Measure, otherwise: string): string {
@@ -424,10 +426,141 @@ export function agingNote(percent: number): string {
   return `Running longer than ${percent}% of finished tasks took`;
 }
 
-export function DeploymentsPanel() {
+function doraEmptyMessage(dora: Dora | null): string | null {
+  if (!dora) {
+    return "Deployments are read from GitHub. Set this board's GitHub repository and token in Settings → Integrations to measure them.";
+  }
+  if (dora.deployments > 0) return null;
+  if (dora.lastError) {
+    return `GitHub refused to list this board's deployments (${dora.lastError}). The token needs read access to deployments.`;
+  }
+  if (dora.rateLimitedUntil) {
+    return `GitHub's rate limit was reached, so deployments are read again after ${new Date(dora.rateLimitedUntil).toLocaleString()}.`;
+  }
+  if (!dora.syncedThrough) {
+    return `No deployments to “${dora.environment}” have been read yet. They are read on the next sync with GitHub.`;
+  }
+  return `No deployment to “${dora.environment}” finished in this window.`;
+}
+
+export function DeploymentsPanel({ dora }: { dora: Dora | null }) {
+  const title = "Deployments (DORA)";
+  const empty = doraEmptyMessage(dora);
+  if (empty || !dora) {
+    return (
+      <Panel title={title} testId="insights-dora" showsData={false}>
+        <EmptyPanel message={empty ?? ""} />
+      </Panel>
+    );
+  }
+  const figure = (label: string, value: string, note: string) => (
+    <div className="rounded border border-border p-3">
+      <p className="text-xs text-text-muted">{label}</p>
+      <p className="text-lg font-bold tabular-nums">{value}</p>
+      <p className="text-xs text-text-muted">{note}</p>
+    </div>
+  );
+  const max = niceCeiling(Math.max(...dora.weekly.map((w) => w.successes + w.failures), 1));
+  const slot = PLOT_W / dora.weekly.length;
+  const barWidth = Math.max(4, slot - 6);
+  const y = (n: number) => (n / max) * PLOT_H;
+  const description = `Deployments to ${dora.environment} per week, successful and failed, over the last ${dora.weekly.length} weeks.`;
   return (
-    <Panel title="Deployments (DORA)" testId="insights-dora" showsData={false}>
-      <EmptyPanel message="Deployment frequency and lead time for changes are not measured yet. Board Planner does not read deployments for this board." />
+    <Panel title={title} testId="insights-dora">
+      <div className="mb-3 grid grid-cols-2 gap-2" data-testid="insights-dora-figures">
+        {figure(
+          "Deployment frequency",
+          dora.deploymentsPerWeek === null ? "—" : `${dora.deploymentsPerWeek} / week`,
+          `${dora.successes} succeeded of ${dora.deployments} finished`
+        )}
+        {figure(
+          "Lead time for changes",
+          formatDuration(dora.leadTimeForChanges?.medianMs),
+          dora.leadTimeForChanges
+            ? `median of ${dora.leadTimeForChanges.count} merged ${dora.leadTimeForChanges.count === 1 ? "change" : "changes"}`
+            : "No deployed change was linked to a task"
+        )}
+        {figure(
+          "Change failure rate",
+          dora.changeFailureRate === null ? "—" : `${Math.round(dora.changeFailureRate * 100)}%`,
+          `${dora.deployments - dora.successes} of ${dora.deployments} finished deployments failed`
+        )}
+        {figure(
+          "Time to restore",
+          formatDuration(dora.timeToRestore?.medianMs),
+          dora.unrestored > 0
+            ? dora.timeToRestore
+              ? `median of ${dora.restored} restored; ${dora.unrestored} not yet`
+              : `${dora.unrestored} not restored yet`
+            : dora.timeToRestore
+              ? "median, failure to next success"
+              : "No failure to restore from"
+        )}
+      </div>
+      <div className="mb-2 flex gap-4 text-xs text-text-muted">
+        <span className="flex items-center gap-1">
+          <span aria-hidden className="h-3 w-3 rounded-sm bg-primary" />
+          Succeeded
+        </span>
+        <span className="flex items-center gap-1">
+          <span aria-hidden className="h-3 w-3 rounded-sm bg-danger" />
+          Failed
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="h-auto w-full" role="img" aria-label={description}>
+        <YAxis max={max} format={(v) => String(v)} ticks={max % 2 === 0 ? [0, 0.5, 1] : [0, 1]} />
+        {dora.weekly.map((w, i) => {
+          const x = PAD.left + i * slot + (slot - barWidth) / 2;
+          const base = PAD.top + PLOT_H;
+          return (
+            <g key={w.weekStart}>
+              {w.successes > 0 && (
+                <rect x={x} y={base - y(w.successes)} width={barWidth} height={y(w.successes)} className="fill-primary">
+                  <title>{`Week of ${formatWeek(w.weekStart)}: ${w.successes} succeeded`}</title>
+                </rect>
+              )}
+              {w.failures > 0 && (
+                <rect
+                  x={x}
+                  y={base - y(w.successes) - y(w.failures) - (w.successes > 0 ? 2 : 0)}
+                  width={barWidth}
+                  height={y(w.failures)}
+                  className="fill-danger"
+                >
+                  <title>{`Week of ${formatWeek(w.weekStart)}: ${w.failures} failed`}</title>
+                </rect>
+              )}
+              {i % Math.ceil(dora.weekly.length / 4) === 0 && (
+                <text x={x + barWidth / 2} y={HEIGHT - 6} textAnchor="middle" className="fill-text-muted text-[15px]">
+                  {formatWeek(w.weekStart)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      {dora.capped && (
+        <p className="mt-2 text-xs text-text-muted">
+          Only the latest {DORA_ROWS_SHOWN} deployments and linked changes are counted, so the oldest weeks may read low.
+        </p>
+      )}
+      {dora.lastError && (
+        <p className="mt-2 text-xs text-warning" data-testid="insights-dora-error">
+          ⚠ The latest read failed: GitHub refused to list this board&apos;s deployments ({dora.lastError}), so these
+          figures may be out of date. The token needs read access to deployments.
+        </p>
+      )}
+      {dora.rateLimitedUntil && (
+        <p className="mt-2 text-xs text-text-muted">
+          GitHub&apos;s rate limit was reached; deployments are read again after{" "}
+          {new Date(dora.rateLimitedUntil).toLocaleString()}.
+        </p>
+      )}
+      <AsTable
+        caption={description}
+        head={["Week of", "Succeeded", "Failed"]}
+        rows={dora.weekly.map((w) => [formatWeek(w.weekStart), w.successes, w.failures])}
+      />
     </Panel>
   );
 }

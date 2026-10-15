@@ -63,6 +63,16 @@ describe("sanitizeProjectSecrets", () => {
     expect(sanitized).not.toHaveProperty("codaToken");
   });
 
+  it("keeps the deployment cursor to itself: when the newest deployment went out is Insights' to say, on Pro", () => {
+    const sanitized = sanitizeProjectSecrets(
+      { name: "Test", deploymentEnvironment: "production", deploymentSync: { syncedThrough: new Date(), blockedUntil: null } },
+      TEST_ORGANISATION
+    );
+
+    expect(sanitized).not.toHaveProperty("deploymentSync");
+    expect(sanitized).toHaveProperty("deploymentEnvironment", "production");
+  });
+
   it("removes the group mapping, which is the owners' to read on their own route (BP-862)", () => {
     const sanitized = sanitizeProjectSecrets({ name: "Test", groupRoleMap: [{ group: "staff", role: "member" }] }, TEST_ORGANISATION);
 

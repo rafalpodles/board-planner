@@ -1033,6 +1033,8 @@ export interface IProject {
   /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   githubRepo: string;
   githubToken: string;
+  deploymentEnvironment: string;
+  deploymentSync: { syncedThrough: Date | null; blockedUntil: Date | null; lastError?: string };
   /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   gitlabRepo: string;
   gitlabHost: string;
@@ -1339,6 +1341,7 @@ export interface ApiProject {
   // This instance's GitHub web origin, so a draft URL is classified the way the server will
   githubWebBase?: string;
   githubTokenSet: boolean;
+  deploymentEnvironment?: string;
   gitlabHost?: string;
   gitlabTokenSet?: boolean;
   codaHost?: string;

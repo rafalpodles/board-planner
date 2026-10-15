@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from "vitest";
 import { render, cleanup } from "@testing-library/react";
-import { agingNote, emptyTimeMessage, ScatterChart } from "./InsightsCharts";
+import { agingNote, DeploymentsPanel, emptyTimeMessage, ScatterChart } from "./InsightsCharts";
 import { sampleInsights } from "./sample";
 
 afterEach(cleanup);
@@ -40,5 +40,64 @@ describe("emptyTimeMessage", () => {
     const nothing = { ...base, summary: { throughput: 0, leadTime: null, cycleTime: null } };
 
     expect(emptyTimeMessage(nothing, "cycleTime", "fallback")).toBe("fallback");
+  });
+});
+
+describe("DeploymentsPanel", () => {
+  const dora = sampleInsights(Date.UTC(2026, 9, 14)).dora;
+
+  it("points to the GitHub settings when the board does not deploy from GitHub", () => {
+    const { getByTestId } = render(<DeploymentsPanel dora={null} />);
+    expect(getByTestId("insights-dora").textContent).toContain("Settings → Integrations");
+  });
+
+  it("says nothing was read yet before the first sync, and nothing finished after it", () => {
+    const none = { ...dora, deployments: 0 };
+    const first = render(<DeploymentsPanel dora={{ ...none, syncedThrough: null }} />);
+    expect(first.getByTestId("insights-dora").textContent).toContain("have been read yet");
+    cleanup();
+    const later = render(<DeploymentsPanel dora={none} />);
+    expect(later.getByTestId("insights-dora").textContent).toContain("No deployment to “production” finished in this window");
+  });
+
+  it("says when GitHub refused the listing or a rate limit holds, rather than that it is still asking", () => {
+    const none = { ...dora, deployments: 0, syncedThrough: null };
+    const refused = render(<DeploymentsPanel dora={{ ...none, lastError: "GitHub answered 403" }} />);
+    expect(refused.getByTestId("insights-dora").textContent).toContain("needs read access to deployments");
+    cleanup();
+    const limited = render(<DeploymentsPanel dora={{ ...none, rateLimitedUntil: new Date(Date.UTC(2026, 9, 14, 13)).toISOString() }} />);
+    expect(limited.getByTestId("insights-dora").textContent).toContain("rate limit was reached");
+  });
+
+  it("warns under figures it already has when the latest read was refused", () => {
+    const { getByTestId } = render(<DeploymentsPanel dora={{ ...dora, lastError: "GitHub answered 403" }} />);
+    expect(getByTestId("insights-dora-error").textContent).toContain("GitHub answered 403");
+  });
+
+  it("shows the four figures and a table of each week", () => {
+    const { getByTestId } = render(
+      <DeploymentsPanel
+        dora={{
+          ...dora,
+          deployments: 4,
+          deploymentsPerWeek: 1.5,
+          changeFailureRate: 0.25,
+          leadTimeForChanges: { count: 2, medianMs: 2 * 86_400_000, p85Ms: 3 * 86_400_000 },
+          timeToRestore: { count: 1, medianMs: 5 * 3_600_000, p85Ms: 5 * 3_600_000 },
+          unrestored: 1,
+          successes: 3,
+          restored: 1,
+        }}
+      />
+    );
+    const text = getByTestId("insights-dora-figures").textContent;
+    expect(text).toContain("1.5 / week");
+    expect(text).toContain("3 succeeded of 4 finished");
+    expect(text).toContain("1 of 4 finished deployments failed");
+    expect(text).toContain("median of 1 restored; 1 not yet");
+    expect(text).toContain("2 d");
+    expect(text).toContain("25%");
+    expect(text).toContain("5 h");
+
   });
 });

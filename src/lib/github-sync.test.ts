@@ -28,6 +28,12 @@ vi.mock("@/lib/organisation-jobs", async () => {
   };
 });
 
+const plan = vi.hoisted(() => ({ value: "free" as "free" | "pro" }));
+const syncGithubDeployments = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/organisation", () => ({
+  getOrganisation: async () => ({ _id: "o1", entitlements: { plan: plan.value, features: [] } }),
+}));
+vi.mock("@/lib/github-deployments", () => ({ syncGithubDeployments }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
@@ -118,6 +124,7 @@ const mergedPR = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  plan.value = "free";
   taskUpdateOne.mockResolvedValue({ modifiedCount: 1 });
   taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "in_review" });
   taskFind.mockResolvedValue([]);
@@ -213,6 +220,39 @@ describe("the background tick", () => {
     await githubSyncTick();
 
     expect(fetchPullRequests).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads deployments only for an organisation with Insights, and after a project's pull requests failed too", async () => {
+    projectFind.mockReturnValue({
+      lean: () => Promise.resolve([project({ _id: "p1", key: "AA" }), project({ _id: "p2", key: "BB" })]),
+    });
+    fetchPullRequests.mockRejectedValueOnce(new Error("502 from GitHub"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    syncGithubDeployments.mockResolvedValue({ ran: true, requests: 1, inserted: 0, finished: 0 });
+
+    plan.value = "free";
+    await githubSyncTick();
+    expect(syncGithubDeployments).not.toHaveBeenCalled();
+
+    plan.value = "pro";
+    await githubSyncTick();
+    expect(syncGithubDeployments.mock.calls.map(([, p]) => (p as { key: string }).key)).toEqual(["AA", "BB"]);
+    for (const field of ["deploymentSync", "deploymentEnvironment", "repositoryUrl", "githubToken"]) {
+      expect(String(projectFind.mock.calls.at(-1)?.[1]).split(" ")).toContain(field);
+    }
+  });
+
+  it("keeps going after one project's deployments fail", async () => {
+    projectFind.mockReturnValue({
+      lean: () => Promise.resolve([project({ _id: "p1", key: "AA" }), project({ _id: "p2", key: "BB" })]),
+    });
+    plan.value = "pro";
+    syncGithubDeployments.mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce({ ran: true, requests: 1, inserted: 0, finished: 0 });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await githubSyncTick();
+
+    expect(syncGithubDeployments).toHaveBeenCalledTimes(2);
   });
 });
 

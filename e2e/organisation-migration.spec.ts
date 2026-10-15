@@ -167,7 +167,7 @@ const declaredPerOrganisationUniques: Spec[] = scopedModelNames().flatMap((model
 );
 
 // A model born scoped has no global twin to keep beside its unique or to retire: nothing existed before it (AiBudget, BP-680)
-const BORN_SCOPED = new Set(["AiBudget"]);
+const BORN_SCOPED = new Set(["AiBudget", "Deployment"]);
 const uniquesWithGlobalTwin = declaredPerOrganisationUniques.filter((u) => !BORN_SCOPED.has(u.model));
 
 test("the per-organisation uniques build beside the old ones on data that has blank e-mails and answered invitations", async () => {
@@ -253,8 +253,8 @@ const insertOutcome = (promise: Promise<unknown>) =>
     (err) => ({ refused: duplicateKeyField(err) })
   );
 
-test("eight per-organisation uniques are declared, seven of them beside a global one that was retired, so none can drop out of the checks below", () => {
-  expect(declaredPerOrganisationUniques).toHaveLength(8);
+test("nine per-organisation uniques are declared, seven of them beside a global one that was retired, so none can drop out of the checks below", () => {
+  expect(declaredPerOrganisationUniques).toHaveLength(9);
   expect(uniquesWithGlobalTwin).toHaveLength(7);
 });
 

@@ -6,6 +6,7 @@ import "./agentBlock";
 import "./agentRun";
 import "./apiToken";
 import "./comment";
+import "./deployment";
 import "./deviceEnrolment";
 import "./emailChangeToken";
 import "./enrolmentToken";

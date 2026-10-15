@@ -7,6 +7,7 @@ import { useEntitlement } from "@/hooks/use-entitlement";
 import { boardRefusal } from "@/lib/board-load-failure";
 import { columnIdsWithRole } from "@/lib/columns";
 import type { Insights } from "@/lib/insights";
+import type { Dora } from "@/lib/dora";
 import { ApiProject, ApiSprint } from "@/types";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -34,6 +35,7 @@ function tasks(count: number): string {
 }
 
 interface InsightsResponse extends Insights {
+  dora: Dora | null;
   sprint: { id: string; name: string } | null;
   category: string | null;
 }
@@ -226,7 +228,7 @@ export default function InsightsPage() {
               <ScatterChart insights={shown} measure={measure} projectRef={onSample ? SAMPLE_KEY : projectRef} />
               <ThroughputChart insights={shown} noDoneColumn={noDoneColumn && !onSample} />
               <AgingList insights={shown} projectRef={onSample ? SAMPLE_KEY : projectRef} linkTasks={!onSample} />
-              <DeploymentsPanel />
+              <DeploymentsPanel dora={shown.dora} />
             </div>
           </div>
         </SampleContext.Provider>

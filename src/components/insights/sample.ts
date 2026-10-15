@@ -1,4 +1,5 @@
 import { WEEK_MS, type Insights } from "@/lib/insights";
+import { computeDora, type Dora, type DoraDeployment } from "@/lib/dora";
 
 const DAY = 86_400_000;
 const WEEKS = 12;
@@ -22,7 +23,7 @@ function spread(values: number[]) {
 }
 
 /** What the page would show for a healthy small team, for an organisation without the key. */
-export function sampleInsights(now: number): Insights {
+export function sampleInsights(now: number): Insights & { dora: Dora } {
   const from = now - WEEKS * WEEK_MS;
   const points = Array.from({ length: 46 }, (_, i) => {
     const finishedAt = from + ((i * 7919) % (WEEKS * 7)) * DAY + DAY / 2;
@@ -79,5 +80,26 @@ export function sampleInsights(now: number): Insights {
     },
     finished: { points, truncated: false },
     byCategory: {},
+    dora: sampleDora(now, points),
   };
+}
+
+function sampleDora(now: number, points: { finishedAt: string; leadMs: number }[]): Dora {
+  const deployments: DoraDeployment[] = Array.from({ length: 30 }, (_, i) => {
+    const startedAt = new Date(now - (WEEKS * 7 * DAY * (i + 0.5)) / 30);
+    const state = i % 9 === 4 ? "failure" : "success";
+    return { sha: `demo${i}`, state, startedAt, finishedAt: new Date(startedAt.getTime() + DAY / 24) };
+  });
+  const changes = points.map((p, i) => ({
+    url: `demo/${i}`,
+    headSha: null,
+    mergedAt: new Date(Date.parse(p.finishedAt) - DAY / 2),
+  }));
+  return computeDora(deployments, changes, {
+    now,
+    weeks: WEEKS,
+    environment: "production",
+    syncedThrough: new Date(now),
+    rateLimitedUntil: null,
+  });
 }

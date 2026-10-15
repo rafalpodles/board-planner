@@ -166,8 +166,37 @@ async function refusal(res: Response, perCommit = false): Promise<Error> {
   // "account", not "token": the limit is counted per GitHub account, so the branch that burnt it
   // is often a different board using the same person's credential. Saying "this token" sends the
   // reader to check the one in front of them, which is the mistake CLAUDE.md was corrected for.
-  if (limited) return new Error(`GitHub rate limit reached for this GitHub account; ${limited}`);
-  return new Error(`GitHub answered ${res.status}`);
+  if (limited) {
+    return new GitHubRateLimited(`GitHub rate limit reached for this GitHub account; ${limited}`, rateLimitedUntil(res));
+  }
+  return new GitHubRefused(res.status);
+}
+
+/** GitHub itself answered no, as opposed to the request failing on the way. */
+export class GitHubRefused extends Error {
+  constructor(readonly status: number) {
+    super(`GitHub answered ${status}`);
+  }
+}
+
+export class GitHubRateLimited extends Error {
+  constructor(
+    message: string,
+    readonly until: Date
+  ) {
+    super(message);
+  }
+}
+
+const RATE_LIMIT_FALLBACK_MS = 60_000;
+
+function rateLimitedUntil(res: Response, now = Date.now()): Date {
+  const retryAfter = res.headers.get("retry-after")?.trim();
+  if (retryAfter && /^\d+$/.test(retryAfter)) return new Date(now + Number(retryAfter) * 1000);
+  if (retryAfter && !Number.isNaN(Date.parse(retryAfter))) return new Date(Date.parse(retryAfter));
+  const resets = Number(res.headers.get("x-ratelimit-reset"));
+  if (resets > 0) return new Date(resets * 1000);
+  return new Date(now + RATE_LIMIT_FALLBACK_MS);
 }
 
 /**
@@ -494,4 +523,57 @@ export async function withChecks(
       ciLabel: null,
     }),
   }));
+}
+
+export interface GitHubDeployment {
+  id: number;
+  sha: string;
+  ref: string;
+  environment: string;
+  created_at: string;
+}
+
+export interface GitHubDeploymentStatus {
+  state: string;
+  created_at: string;
+  environment_url?: string;
+  log_url?: string;
+}
+
+function headersFor(token: string): Record<string, string> {
+  return { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}` };
+}
+
+/** One page of a repository's deployments to one environment, newest first, as GitHub orders them. */
+export async function fetchDeployments(
+  owner: string,
+  repo: string,
+  token: string,
+  environment: string,
+  page: number
+): Promise<GitHubDeployment[]> {
+  const query = new URLSearchParams({ environment, per_page: "100", page: String(page) });
+  const res = await safeFetch(
+    `${API_BASE()}/repos/${owner}/${repo}/deployments?${query}`,
+    { headers: headersFor(token), signal: AbortSignal.timeout(15000) },
+    GITHUB_DESTINATION
+  );
+  if (!res.ok) throw await refusal(res);
+  return readBoundedJson(res, MAX_RESPONSE_BYTES);
+}
+
+/** A deployment's latest statuses, newest first. */
+export async function fetchDeploymentStatuses(
+  owner: string,
+  repo: string,
+  token: string,
+  deploymentId: number
+): Promise<GitHubDeploymentStatus[]> {
+  const res = await safeFetch(
+    `${API_BASE()}/repos/${owner}/${repo}/deployments/${deploymentId}/statuses?per_page=30`,
+    { headers: headersFor(token), signal: AbortSignal.timeout(15000) },
+    GITHUB_DESTINATION
+  );
+  if (!res.ok) throw await refusal(res, true);
+  return readBoundedJson(res, MAX_RESPONSE_BYTES);
 }
