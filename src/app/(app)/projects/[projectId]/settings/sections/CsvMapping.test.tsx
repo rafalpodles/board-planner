@@ -122,4 +122,29 @@ describe("CsvMapping", () => {
     render(<CsvMapping projectId="p1" project={project} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
     await waitFor(() => expect((onChange.mock.calls.at(-1)?.[0] as CsvPayload | null)?.bundle.tasks[0].comments).toEqual([{ id: "c1", body: "a" }]));
   });
+
+  it("never applies a full list to another layout of the same runs, and keeps the people when the columns do not fit", async () => {
+    rememberCsvMapping("p1", ["Title", "Note", "Note", "Tag"], {
+      targets: ["title", "comment", "ignore", "assignee"],
+      statuses: {},
+      users: { a: "maya" },
+    });
+    const sheet = readCsvTable("Title,Note,Tag,Tag\nOne,x,a,b\n");
+    const onChange = vi.fn();
+    render(<CsvMapping projectId="p1" project={project} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
+    await waitFor(() => expect(onChange.mock.calls.at(-1)?.[0]).not.toBeNull());
+    // The guess, not the other layout's list: Note is guessed as nothing
+    expect((screen.getByLabelText("Note") as HTMLSelectElement).value).toBe("ignore");
+  });
+
+  it("keeps the people chosen before when the columns no longer fit", async () => {
+    window.localStorage.setItem(
+      `bp:csv-import:p1:${["title", "owner"].join("\u0001")}`,
+      JSON.stringify({ targets: ["title", "assignee", "ignore"], shape: "title\u0001owner\u0001other", statuses: {}, users: { "old.friend": "maya" } })
+    );
+    const sheet = readCsvTable("Title,Owner\nOne,old.friend\n");
+    const onChange = vi.fn();
+    render(<CsvMapping projectId="p1" project={project} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
+    await waitFor(() => expect((onChange.mock.calls.at(-1)?.[0] as CsvPayload | null)?.mapping.users).toEqual({ "old.friend": "maya" }));
+  });
 });

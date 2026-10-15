@@ -48,15 +48,31 @@ const BUILT_IN: { value: CsvTarget; label: string }[] = [
 
 const storageKey = (projectId: string, headers: string[]) => `bp:csv-import:${projectId}:${shapeKey(headers)}`;
 
-function recall(projectId: string, headers: string[]): Saved | null {
+const exactShape = (headers: string[]) => headers.map((h) => h.trim().toLowerCase()).join("\u0001");
+
+interface Stored {
+  // One choice per run of a repeated header, kept when every column of the run agreed
+  runs?: CsvTarget[];
+  // Every column's choice, for exactly this layout
+  targets?: CsvTarget[];
+  shape?: string;
+  statuses?: Record<string, string>;
+  users?: Record<string, string | null>;
+}
+
+// Targets that fit no longer leave the status and people choices behind: those are the slow ones to redo
+function recall(projectId: string, headers: string[]): { targets?: CsvTarget[]; statuses: Record<string, string>; users: Record<string, string | null> } | null {
   try {
-    const saved = JSON.parse(window.localStorage.getItem(storageKey(projectId, headers)) ?? "null") as Saved | null;
-    if (!saved || !Array.isArray(saved.targets)) return null;
-    if (saved.targets.length === headers.length) return saved;
-    // Stored one per run of a repeated header: each column of the run takes its run's choice
+    const saved = JSON.parse(window.localStorage.getItem(storageKey(projectId, headers)) ?? "null") as Stored | null;
+    if (!saved || typeof saved !== "object") return null;
     const runs = headerRuns(headers);
-    if (saved.targets.length !== runs.length) return null;
-    return { ...saved, targets: headers.map((_, i) => saved.targets[runs.filter((start) => start <= i).length - 1]) };
+    const expand = (perRun: CsvTarget[]) => headers.map((_, i) => perRun[runs.filter((start) => start <= i).length - 1]);
+    let targets: CsvTarget[] | undefined;
+    if (Array.isArray(saved.targets) && saved.targets.length === headers.length && (saved.shape ?? exactShape(headers)) === exactShape(headers)) {
+      targets = saved.targets;
+    } else if (Array.isArray(saved.runs) && saved.runs.length === runs.length) targets = expand(saved.runs);
+    else if (!saved.shape && Array.isArray(saved.targets) && saved.targets.length === runs.length) targets = expand(saved.targets);
+    return { targets, statuses: saved.statuses ?? {}, users: saved.users ?? {} };
   } catch {
     return null;
   }
@@ -65,10 +81,15 @@ function recall(projectId: string, headers: string[]): Saved | null {
 export function rememberCsvMapping(projectId: string, headers: string[], saved: Saved) {
   try {
     const runs = headerRuns(headers);
-    // One choice per run only when the run agrees, so a column deliberately left out of it stays out
     const uniform = runs.every((start, r) => saved.targets.slice(start, runs[r + 1] ?? headers.length).every((t) => t === saved.targets[start]));
-    const targets = uniform ? runs.map((start) => saved.targets[start]) : saved.targets;
-    window.localStorage.setItem(storageKey(projectId, headers), JSON.stringify({ ...saved, targets }));
+    const stored: Stored = {
+      ...(uniform && { runs: runs.map((start) => saved.targets[start]) }),
+      targets: saved.targets,
+      shape: exactShape(headers),
+      statuses: saved.statuses,
+      users: saved.users,
+    };
+    window.localStorage.setItem(storageKey(projectId, headers), JSON.stringify(stored));
   } catch {}
 }
 
@@ -225,7 +246,9 @@ export function CsvMapping({
       <p className="text-sm text-text-muted">
         {table.rows.length} rows, {table.headers.length} columns.
         {isJiraExport(table.headers) && " Recognised as a Jira export."}
-        {table.comments && ` Its ${table.comments.reduce((n, c) => n + c.length, 0)} comments come with it.`}
+        {((n) => (n > 0 ? ` Its ${n} ${n === 1 ? "comment comes" : "comments come"} with it.` : ""))(
+          table.comments?.reduce((total, c) => total + c.length, 0) ?? 0
+        )}
       </p>
       {tooMany && (
         <p role="alert" className="text-sm text-danger">

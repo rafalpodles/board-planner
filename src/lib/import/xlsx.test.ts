@@ -64,12 +64,12 @@ line</t></is></c></row>
     const bytes = zip({
       "xl/workbook.xml": workbook('<sheet name="S" sheetId="1" r:id="rId1"/>'),
       "xl/_rels/workbook.xml.rels": rels([["rId1", "worksheets/sheet1.xml"]]),
-      "xl/styles.xml": `<styleSheet ${NS}><numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy\\ hh:mm"/></numFmts><cellXfs count="4"><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="164"/><xf numFmtId="2"/></cellXfs></styleSheet>`,
+      "xl/styles.xml": `<styleSheet ${NS}><numFmts count="2"><numFmt numFmtId="164" formatCode="dd/mm/yyyy\\ hh:mm"/><numFmt numFmtId="165" formatCode="[h]:mm"/></numFmts><cellXfs count="6"><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="164"/><xf numFmtId="2"/><xf numFmtId="20"/><xf numFmtId="165"/></cellXfs></styleSheet>`,
       "xl/worksheets/sheet1.xml": `<worksheet ${NS}><sheetData>
-        <row r="1"><c r="A1" t="inlineStr"><is><t>Due</t></is></c><c r="B1" t="inlineStr"><is><t>Created</t></is></c><c r="C1" t="inlineStr"><is><t>Points</t></is></c></row>
-        <row r="2"><c r="A2" s="1"><v>46310</v></c><c r="B2" s="2"><v>46252.5</v></c><c r="C2" s="3"><v>46252.5</v></c></row>
+        <row r="1"><c r="A1" t="inlineStr"><is><t>Due</t></is></c><c r="B1" t="inlineStr"><is><t>Created</t></is></c><c r="C1" t="inlineStr"><is><t>Points</t></is></c><c r="D1" t="inlineStr"><is><t>Time</t></is></c><c r="E1" t="inlineStr"><is><t>Spent</t></is></c><c r="F1" t="inlineStr"><is><t>Typed</t></is></c></row>
+        <row r="2"><c r="A2" s="1"><v>46310</v></c><c r="B2" s="2"><v>46252.5</v></c><c r="C2" s="3"><v>46252.5</v></c><c r="D2" s="4"><v>0.5</v></c><c r="E2" s="5"><v>1.25</v></c><c r="F2" s="1" t="n"><v>46310</v></c></row>
       </sheetData></worksheet>`,
     });
-    expect((await readXlsxTable(bytes, new DOMParser())).rows).toEqual([["2026-10-15", "2026-08-18T12:00:00Z", "46252.5"]]);
+    expect((await readXlsxTable(bytes, new DOMParser())).rows).toEqual([["2026-10-15", "2026-08-18T12:00:00Z", "46252.5", "0.5", "1.25", "2026-10-15"]]);
   });
 });
