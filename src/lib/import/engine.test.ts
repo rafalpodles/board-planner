@@ -4,16 +4,10 @@ import { Types } from "mongoose";
 const recipientsWithAccess = vi.fn();
 const logActivities = vi.fn();
 const logProjectAudit = vi.fn();
-const dispatchWebhooks = vi.fn();
-const dispatchNotifications = vi.fn();
-const createNotifications = vi.fn();
 
 vi.mock("@/lib/grants", () => ({ recipientsWithAccess: (...a: unknown[]) => recipientsWithAccess(...a) }));
 vi.mock("@/lib/activity", () => ({ logActivities: (...a: unknown[]) => logActivities(...a) }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit: (...a: unknown[]) => logProjectAudit(...a) }));
-vi.mock("@/lib/webhooks", () => ({ dispatchWebhooks }));
-vi.mock("@/lib/notifications", () => ({ dispatchNotifications }));
-vi.mock("@/lib/in-app-notifications", () => ({ createNotifications }));
 
 const { runImport, IMPORT_CHUNK } = await import("./engine");
 const { currentProvenance } = await import("@/lib/activity-source");
@@ -35,11 +29,20 @@ const project = {
   ],
 };
 
-function fakeDb({ existing = [] as { id: string }[], failOn = 0 } = {}) {
+type Existing = { id: string; status?: string; held?: boolean; comments?: string[] };
+
+function fakeDb({ existing = [] as Existing[], failOn = 0, landBeforeFailing = 0 } = {}) {
   let counter = 10;
   let inserts = 0;
-  const writes = { tasks: [] as Record<string, unknown>[], updates: 0, comments: [] as Record<string, unknown>[], sources: [] as string[] };
-  const lean = <T>(value: T) => ({ select: () => ({ lean: async () => value }), lean: async () => value });
+  const writes = {
+    tasks: [] as Record<string, unknown>[],
+    updates: [] as { filter: unknown; update: { $set: Record<string, unknown> } }[],
+    comments: [] as Record<string, unknown>[],
+    sources: [] as string[],
+    taskQueries: [] as Record<string, unknown>[],
+  };
+  const rows = existing.map((e) => ({ _id: new Types.ObjectId(), status: e.status ?? "backlog", externalRef: { id: e.id }, execution: e.held ? { runId: "r1" } : {}, comments: e.comments ?? [] }));
+  const chain = <T>(value: () => T) => ({ select: () => ({ lean: async () => value() }), lean: async () => value() });
   const db = {
     Project: {
       findById: () => ({ lean: async () => project }),
@@ -49,26 +52,46 @@ function fakeDb({ existing = [] as { id: string }[], failOn = 0 } = {}) {
       },
     },
     User: {
-      find: () => lean([{ _id: MEMBER, username: "maya" }]),
+      find: () => chain(() => [{ _id: MEMBER, username: "maya" }]),
     },
     Task: {
-      find: () => lean(existing.map((e) => ({ _id: new Types.ObjectId(), externalRef: { id: e.id } }))),
-      countDocuments: async () => existing.length,
+      find: (filter: Record<string, unknown>) => {
+        writes.taskQueries.push(filter);
+        const ids = (filter["externalRef.id"] as { $in: string[] }).$in;
+        return chain(() => [
+          ...rows.filter((r) => ids.includes(r.externalRef.id)),
+          ...writes.tasks.filter((t) => ids.includes((t.externalRef as { id: string }).id)),
+        ]);
+      },
       insertMany: async (docs: Record<string, unknown>[]) => {
         inserts += 1;
-        if (failOn && inserts === failOn) throw new Error("connection reset");
+        if (failOn && inserts === failOn) {
+          writes.tasks.push(...docs.slice(0, landBeforeFailing));
+          throw Object.assign(new Error("E11000 duplicate key error collection: tasks index: project_1_externalRef"), { code: 11000 });
+        }
         writes.sources.push(currentProvenance().source);
         writes.tasks.push(...docs);
       },
-      bulkWrite: async (ops: unknown[]) => void (writes.updates += ops.length),
+      bulkWrite: async (ops: { updateOne: { filter: unknown; update: { $set: Record<string, unknown> } } }[]) =>
+        void writes.updates.push(...ops.map((o) => o.updateOne)),
     },
     Comment: {
-      find: () => lean([]),
+      find: (filter: Record<string, unknown>) =>
+        chain(() =>
+          rows
+            .filter((r) => {
+              const task = filter.task as { $in?: unknown[] } | unknown;
+              return task && typeof task === "object" && "$in" in (task as object)
+                ? ((task as { $in: unknown[] }).$in as unknown[]).includes(r._id)
+                : task === r._id;
+            })
+            .flatMap((r) => r.comments.map((id) => ({ _id: new Types.ObjectId(), task: r._id, externalRef: { id } })))
+        ),
       insertMany: async (docs: Record<string, unknown>[]) => void writes.comments.push(...docs),
       bulkWrite: async () => undefined,
     },
   };
-  return { db: db as never, writes };
+  return { db: db as never, writes, rows };
 }
 
 const run = (db: never, tasks: Record<string, unknown>[], mapping = {}, dryRun = false) =>
@@ -162,7 +185,21 @@ describe("runImport", () => {
     ]);
   });
 
-  it("updates a task it imported before instead of making a second one", async () => {
+  // Insights counts a finish against its creation; with no creation, or one after it, a lead time of zero
+  it("keeps no finish it cannot measure, and says why", async () => {
+    const { db } = fakeDb();
+    const report = await run(db, [
+      { id: "1", title: "a", status: "done", completedAt: "2025-02-01T00:00:00Z" },
+      { id: "2", title: "b", status: "done", createdAt: "2025-03-01T00:00:00Z", completedAt: "2025-02-01T00:00:00Z" },
+    ]);
+    expect(report.dropped.map((d) => [d.id, d.reason])).toEqual([
+      ["1", "the task has no creation time to measure it from"],
+      ["2", "it is before the task was created"],
+    ]);
+    expect((logActivities.mock.calls[0][1] as { action: string }[]).map((r) => r.action)).toEqual(["created", "created"]);
+  });
+
+  it("updates a task it imported before instead of making a second one, looking it up by source and id", async () => {
     const { db, writes } = fakeDb({ existing: [{ id: "1" }] });
     const report = await run(db, [
       { id: "1", title: "again" },
@@ -170,7 +207,34 @@ describe("runImport", () => {
     ]);
     expect(report).toMatchObject({ created: 1, updated: 1 });
     expect(writes.tasks.map((t) => t.title)).toEqual(["new"]);
-    expect(writes.updates).toBe(1);
+    expect(writes.updates.map((u) => u.update.$set.title)).toEqual(["again"]);
+    expect(writes.taskQueries[0]).toEqual({ project: "p1", "externalRef.source": "jira", "externalRef.id": { $in: ["1", "2"] } });
+  });
+
+  it("records a re-run's move between columns in the history, as any other move is", async () => {
+    const { db, writes, rows } = fakeDb({ existing: [{ id: "1", status: "backlog" }] });
+    await run(db, [{ id: "1", title: "a", status: "done", createdAt: "2025-01-01T00:00:00Z", completedAt: "2025-02-01T00:00:00Z" }]);
+    expect(writes.updates[0].update.$set.status).toBe("done");
+    expect(logActivities.mock.calls.at(-1)![1]).toEqual([
+      expect.objectContaining({ taskId: rows[0]._id, action: "status_changed", oldValue: "backlog", newValue: "done", at: new Date("2025-02-01T00:00:00Z") }),
+    ]);
+  });
+
+  it("leaves a task a machine is running in its column, and says so", async () => {
+    const { db, writes } = fakeDb({ existing: [{ id: "1", status: "doing", held: true }] });
+    const report = await run(db, [{ id: "1", title: "a", status: "done" }]);
+    expect(writes.updates[0].update.$set).not.toHaveProperty("status");
+    expect(report.notImported).toEqual([{ id: "1", what: "its column: a machine is running it" }]);
+    expect(logActivities.mock.calls.at(-1)![1]).toEqual([]);
+  });
+
+  it("never unassigns: somebody it cannot name leaves the board's assignee as it is", async () => {
+    const { db, writes } = fakeDb({ existing: [{ id: "1" }, { id: "2" }] });
+    await run(db, [
+      { id: "1", title: "a", assignee: "ghost" },
+      { id: "2", title: "b", assignee: "maya" },
+    ]);
+    expect(writes.updates.map((u) => u.update.$set.assignee)).toEqual([undefined, MEMBER]);
   });
 
   it("writes a comment whose author has no account under the importer, keeping the author's name", async () => {
@@ -180,6 +244,12 @@ describe("runImport", () => {
       [IMPORTER, "*Originally by Old Name*\n\nhello", "import"],
       [MEMBER, "hi", "import"],
     ]);
+  });
+
+  it("counts a dry run's comments the way the real run will", async () => {
+    const { db } = fakeDb({ existing: [{ id: "1", comments: ["c1"] }] });
+    const tasks = [{ id: "1", title: "a", comments: [{ id: "c1", body: "x" }, { id: "c2", body: "y" }] }];
+    expect((await run(db, tasks, {}, true)).comments).toEqual({ created: 1, updated: 1 });
   });
 
   it("writes nothing on a dry run, and reports what the real run would", async () => {
@@ -192,23 +262,25 @@ describe("runImport", () => {
     expect(dry.dropped).toHaveLength(1);
   });
 
-  it("tells nobody: no webhook, no notification, one audit row, and its rows say they came from the import", async () => {
+  // That nobody is told is the e2e's to prove, against the real senders
+  it("writes one audit row, and its rows say they came from the import", async () => {
     const { db, writes } = fakeDb();
     await run(db, [{ id: "1", title: "a", assignee: "maya" }]);
-    expect(dispatchWebhooks).not.toHaveBeenCalled();
-    expect(dispatchNotifications).not.toHaveBeenCalled();
-    expect(createNotifications).not.toHaveBeenCalled();
     expect(logProjectAudit).toHaveBeenCalledTimes(1);
     expect(logProjectAudit.mock.calls[0][3]).toBe("tasks_imported");
     expect(writes.sources).toEqual(["import"]);
   });
 
-  it("stops at a chunk that fails, keeps what came before, and says how far it got", async () => {
-    const { db, writes } = fakeDb({ failOn: 2 });
+  it("stops at a chunk that fails, keeps what came before with its history, and says how far it got", async () => {
+    const { db, writes } = fakeDb({ failOn: 2, landBeforeFailing: 3 });
     const tasks = Array.from({ length: IMPORT_CHUNK * 2 + 5 }, (_, i) => ({ id: String(i), title: `t${i}` }));
     const report = await run(db, tasks);
-    expect(report).toMatchObject({ complete: false, processed: IMPORT_CHUNK, created: IMPORT_CHUNK, error: "connection reset" });
-    expect(writes.tasks).toHaveLength(IMPORT_CHUNK);
-    expect(logProjectAudit.mock.calls[0][4]).toContain(`Stopped after ${IMPORT_CHUNK} of ${IMPORT_CHUNK * 2 + 5}: connection reset`);
+    const error = "another import of the same tasks ran at the same time";
+    expect(report).toMatchObject({ complete: false, processed: IMPORT_CHUNK + 3, created: IMPORT_CHUNK + 3, error });
+    expect(writes.tasks).toHaveLength(IMPORT_CHUNK + 3);
+    // The three the failing insert kept still get their history, so a re-run does not leave them bare
+    const created = logActivities.mock.calls.flatMap((c) => c[1] as { action: string }[]).filter((r) => r.action === "created");
+    expect(created).toHaveLength(IMPORT_CHUNK + 3);
+    expect(logProjectAudit.mock.calls[0][4]).toContain(`Stopped after ${IMPORT_CHUNK + 3} of ${IMPORT_CHUNK * 2 + 5}: ${error}`);
   });
 });

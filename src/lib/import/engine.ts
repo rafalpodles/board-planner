@@ -185,10 +185,20 @@ function resolveTask(
     if (!assignee) noteUnmapped(report.unmapped.users, task.assignee);
   }
 
-  const completedAt = instant(report, task.id, "completedAt", task.completedAt);
   const createdAt = instant(report, task.id, "createdAt", task.createdAt);
-  if (completedAt && board.columns.find((c) => c.id === status)?.role !== "done") {
-    report.dropped.push({ id: task.id, field: "completedAt", value: shown(task.completedAt), reason: "the task is not in a done column" });
+  let completedAt = instant(report, task.id, "completedAt", task.completedAt);
+  // A finish with nothing to measure it from would count in Insights as a lead time of zero
+  const finishRefusal =
+    completedAt && board.columns.find((c) => c.id === status)?.role !== "done"
+      ? "the task is not in a done column"
+      : completedAt && !createdAt
+        ? "the task has no creation time to measure it from"
+        : completedAt && createdAt && completedAt < createdAt
+          ? "it is before the task was created"
+          : null;
+  if (finishRefusal) {
+    report.dropped.push({ id: task.id, field: "completedAt", value: shown(task.completedAt), reason: finishRefusal });
+    completedAt = null;
   }
 
   for (const relation of [task.parent ? "parent" : null, task.blockedBy?.length ? "blocked by" : null]) {
@@ -204,7 +214,7 @@ function resolveTask(
     priority,
     assignee,
     createdAt,
-    completedAt: board.columns.find((c) => c.id === status)?.role === "done" ? completedAt : null,
+    completedAt,
     customFieldValues: resolveFields(report, task, board),
     comments: (task.comments ?? []).flatMap((comment) => resolveComment(report, task.id, comment, users, importer)),
   };
@@ -255,6 +265,41 @@ const emptyReport = (dryRun: boolean, bundle: ImportBundle): ImportReport => ({
   complete: false,
 });
 
+interface Stored {
+  _id: Types.ObjectId;
+  status: string;
+  held: boolean;
+}
+
+async function storedTasks(db: ScopedDb, projectId: string, source: string, refs: string[]): Promise<Map<string, Stored>> {
+  const rows = await db.Task.find({ project: projectId, "externalRef.source": source, "externalRef.id": { $in: refs } })
+    .select("_id status externalRef execution.runId")
+    .lean<{ _id: Types.ObjectId; status: string; externalRef: { id: string }; execution?: { runId?: string } }[]>();
+  return new Map(rows.map((t) => [t.externalRef.id, { _id: t._id, status: t.status, held: !!t.execution?.runId }]));
+}
+
+// A run's task refuses to leave its column through every writer, an import included
+function noteHeld(report: ImportReport, t: Resolved, stored: Stored) {
+  if (stored.held && stored.status !== t.status) report.notImported.push({ id: t.ref, what: "its column: a machine is running it" });
+}
+
+async function storedComments(db: ScopedDb, source: string, taskIds: Types.ObjectId[]): Promise<Set<string>> {
+  if (taskIds.length === 0) return new Set();
+  const rows = await db.Comment.find({ task: { $in: taskIds }, "externalRef.source": source })
+    .select("task externalRef")
+    .lean<{ task: Types.ObjectId; externalRef: { id: string } }[]>();
+  return new Set(rows.map((c) => `${c.task}:${c.externalRef.id}`));
+}
+
+const DUPLICATE_KEY = 11000;
+
+function stoppedBecause(err: unknown): Error {
+  if ((err as { code?: number })?.code === DUPLICATE_KEY) {
+    return new Error("another import of the same tasks ran at the same time");
+  }
+  return err instanceof Error ? err : new Error("The import stopped");
+}
+
 async function writeChunk(
   db: ScopedDb,
   projectId: string,
@@ -264,10 +309,8 @@ async function writeChunk(
   report: ImportReport,
   createdIn: string
 ): Promise<void> {
-  const existing = await db.Task.find({ project: projectId, "externalRef.source": source, "externalRef.id": { $in: chunk.map((t) => t.ref) } })
-    .select("_id externalRef")
-    .lean<{ _id: Types.ObjectId; externalRef: { id: string } }[]>();
-  const known = new Map(existing.map((t) => [t.externalRef.id, t._id]));
+  const stored = await storedTasks(db, projectId, source, chunk.map((t) => t.ref));
+  const known = new Map([...stored].map(([ref, t]) => [ref, t._id]));
   const fresh = chunk.filter((t) => !known.has(t.ref));
   const now = new Date();
 
@@ -297,10 +340,19 @@ async function writeChunk(
         updatedAt: t.completedAt ?? createdAt,
       };
     });
-    await db.Task.insertMany(docs);
+    let written = fresh;
+    let failure: Error | null = null;
+    try {
+      await db.Task.insertMany(docs);
+    } catch (err) {
+      // An ordered insert keeps what it wrote before the failure; those still get their history
+      failure = stoppedBecause(err);
+      const landed = await storedTasks(db, projectId, source, fresh.map((t) => t.ref));
+      written = fresh.filter((t) => landed.get(t.ref)?._id.equals(known.get(t.ref)!));
+    }
     await logActivities(
       db,
-      fresh.flatMap((t) => [
+      written.flatMap((t) => [
         { projectId, taskId: known.get(t.ref)!, userId: importer, action: "created" as const, at: t.createdAt ?? now },
         // Insights reads a finish from the move into a done column, so a finished task gets one
         ...(t.completedAt
@@ -308,39 +360,54 @@ async function writeChunk(
           : []),
       ])
     );
-    report.created += fresh.length;
+    report.created += written.length;
+    if (failure) {
+      report.processed += written.length;
+      throw failure;
+    }
   }
 
   const again = chunk.filter((t) => !fresh.includes(t));
   if (again.length > 0) {
+    const moves: Parameters<typeof logActivities>[1] = [];
     await db.Task.bulkWrite(
-      again.map((t) => ({
-        updateOne: {
-          filter: { _id: known.get(t.ref) },
-          update: {
-            $set: {
-              title: t.title,
-              description: t.description,
-              status: t.status,
-              category: t.category,
-              priority: t.priority,
-              assignee: t.assignee,
-              ...Object.fromEntries(Object.entries(t.customFieldValues).map(([k, v]) => [`customFieldValues.${k}`, v])),
+      again.map((t) => {
+        const before = stored.get(t.ref)!;
+        noteHeld(report, t, before);
+        const moved = !before.held && before.status !== t.status;
+        if (moved) {
+          moves.push({ projectId, taskId: before._id, userId: importer, action: "status_changed", field: "status", oldValue: before.status, newValue: t.status, at: t.completedAt ?? now });
+        }
+        return {
+          updateOne: {
+            filter: { _id: before._id },
+            update: {
+              $set: {
+                title: t.title,
+                description: t.description,
+                category: t.category,
+                priority: t.priority,
+                // An import never unassigns: somebody it cannot name is left as the board has it
+                ...(t.assignee && { assignee: t.assignee }),
+                ...(moved && { status: t.status }),
+                ...Object.fromEntries(Object.entries(t.customFieldValues).map(([k, v]) => [`customFieldValues.${k}`, v])),
+              },
             },
           },
-        },
-      }))
+        };
+      })
     );
+    await logActivities(db, moves);
     report.updated += again.length;
   }
 
   for (const t of chunk) {
     if (t.comments.length === 0) continue;
     const taskId = known.get(t.ref)!;
-    const stored = await db.Comment.find({ task: taskId, "externalRef.source": source, "externalRef.id": { $in: t.comments.map((c) => c.ref) } })
+    const prior = await db.Comment.find({ task: taskId, "externalRef.source": source, "externalRef.id": { $in: t.comments.map((c) => c.ref) } })
       .select("_id externalRef")
       .lean<{ _id: Types.ObjectId; externalRef: { id: string } }[]>();
-    const storedIds = new Map(stored.map((c) => [c.externalRef.id, c._id]));
+    const storedIds = new Map(prior.map((c) => [c.externalRef.id, c._id]));
     const newComments = t.comments.filter((c) => !storedIds.has(c.ref));
     if (newComments.length) {
       await db.Comment.insertMany(
@@ -390,11 +457,18 @@ export async function runImport(
     return r ? [r] : [];
   });
   if (dryRun) {
-    report.created = resolved.length;
-    report.comments.created = resolved.reduce((n, t) => n + t.comments.length, 0);
-    const existing = await db.Task.countDocuments({ project: projectId, "externalRef.source": bundle.source, "externalRef.id": { $in: resolved.map((t) => t.ref) } });
-    report.updated = existing;
-    report.created -= existing;
+    const stored = await storedTasks(db, projectId, bundle.source, resolved.map((t) => t.ref));
+    const comments = await storedComments(db, bundle.source, [...stored.values()].map((t) => t._id));
+    for (const t of resolved) {
+      const before = stored.get(t.ref);
+      if (before) noteHeld(report, t, before);
+      for (const c of t.comments) {
+        if (before && comments.has(`${before._id}:${c.ref}`)) report.comments.updated += 1;
+        else report.comments.created += 1;
+      }
+    }
+    report.updated = stored.size;
+    report.created = resolved.length - stored.size;
     report.processed = resolved.length;
     report.complete = true;
     return report;
@@ -407,7 +481,7 @@ export async function runImport(
       }
       report.complete = true;
     } catch (err) {
-      report.error = err instanceof Error ? err.message : "The import stopped";
+      report.error = stoppedBecause(err).message;
     }
   });
 

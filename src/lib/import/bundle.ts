@@ -1,8 +1,6 @@
-import { EXTERNAL_ID_MAX_LENGTH, EXTERNAL_SOURCE_MAX_LENGTH } from "./external-ref";
+import { EXTERNAL_ID_MAX_LENGTH, EXTERNAL_SOURCE_MAX_LENGTH, MAX_IMPORT_COMMENTS, MAX_IMPORT_TASKS } from "./limits";
 
-export const MAX_IMPORT_TASKS = 5_000;
-export const MAX_IMPORT_COMMENTS = 50_000;
-export const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
+export { MAX_IMPORT_BYTES, MAX_IMPORT_TASKS } from "./limits";
 
 export interface ImportComment {
   id: string;

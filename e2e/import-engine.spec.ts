@@ -114,10 +114,22 @@ test("2,000 tasks import with no notification, no webhook delivery and one audit
   // A comment stamped "now" on the way in would read as edited since it was written
   expect(comment!.updatedAt).toEqual(comment!.createdAt);
 
-  // Again: the same tasks, updated, never doubled
-  const again = await importAs(page, { bundle: bundle(2000), mapping: MAPPING, dryRun: false });
+  // Again: the same tasks, updated, never doubled. Two moved to Closed in the source since; a
+  // machine is running one of them, which keeps it in its column
+  await handle.collection("tasks").updateOne({ project: PROJECT_ID, "externalRef.id": "SRC-1" }, { $set: { "execution.runId": "e2e-held-run" } });
+  const later = bundle(2000);
+  for (const id of ["SRC-1", "SRC-3"]) Object.assign(later.tasks.find((t) => t.id === id)!, { status: "Closed" });
+  const dryAgain = await importAs(page, { bundle: later, mapping: MAPPING });
+  const again = await importAs(page, { bundle: later, mapping: MAPPING, dryRun: false });
   expect(again).toMatchObject({ created: 0, updated: 2000, comments: { created: 0, updated: 5 } });
+  expect(again.notImported).toEqual([{ id: "SRC-1", what: "its column: a machine is running it" }]);
+  expect({ ...dryAgain, dryRun: false }).toEqual(again);
   expect(await counts()).toEqual({ ...after, audits: 2 });
+  const held = await handle.collection("tasks").findOne({ project: PROJECT_ID, "externalRef.id": "SRC-1" });
+  const moved = await handle.collection("tasks").findOne({ project: PROJECT_ID, "externalRef.id": "SRC-3" });
+  expect([held!.status, moved!.status]).toEqual(["todo", "done"]);
+  const movedRows = await handle.collection("activitylogs").find({ task: moved!._id, action: "status_changed" }).toArray();
+  expect(movedRows.map((r) => [r.oldValue, r.newValue, r.source])).toEqual([["todo", "done", "import"]]);
 
   // The control: an ordinary task made afterwards still announces itself, and gets today's date
   const ordinary = await request.post(`/api/projects/${PROJECT_KEY}/tasks`, {

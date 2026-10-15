@@ -1,12 +1,14 @@
 "use client";
 
-import { ChangeEvent, useState } from "react";
+import { ChangeEvent, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { Button } from "@/components/ui/Button";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import type { ImportReport } from "@/lib/import/engine";
+import { MAX_IMPORT_BYTES } from "@/lib/import/limits";
 
-const MAX_FILE_BYTES = 20 * 1024 * 1024;
+// The request wraps the file in a little JSON of its own
+const MAX_FILE_BYTES = MAX_IMPORT_BYTES - 64 * 1024;
 const LISTED = 50;
 
 type Payload = { bundle: unknown; mapping?: unknown };
@@ -68,10 +70,12 @@ export function ImportSection({ projectId }: { projectId: string }) {
   const [fileError, setFileError] = useState("");
   const [report, setReport] = useState<ImportReport | null>(null);
   const [checked, setChecked] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"checking" | "importing" | null>(null);
+  const seq = useRef(0);
   const [error, setError] = useState("");
 
   async function choose(event: ChangeEvent<HTMLInputElement>) {
+    seq.current += 1;
     const file = event.target.files?.[0];
     setPayload(null);
     setReport(null);
@@ -79,7 +83,7 @@ export function ImportSection({ projectId }: { projectId: string }) {
     setError("");
     setFileError("");
     if (!file) return;
-    if (file.size > MAX_FILE_BYTES) return setFileError("The file is larger than 20 MB.");
+    if (file.size > MAX_FILE_BYTES) return setFileError("The file is larger than the 20 MB an import takes.");
     try {
       const next = payloadOf(JSON.parse(await file.text()));
       if (!next) return setFileError("This file holds no import bundle: it needs a list of tasks.");
@@ -91,17 +95,19 @@ export function ImportSection({ projectId }: { projectId: string }) {
 
   async function send(dryRun: boolean) {
     if (!payload) return;
-    setBusy(true);
+    const mine = ++seq.current;
+    setBusy(dryRun ? "checking" : "importing");
+    setChecked(false);
     setError("");
     try {
       const answer: ImportReport = await api.post(`/api/projects/${projectId}/import`, { ...payload, dryRun });
+      if (mine !== seq.current) return;
       setReport(answer);
       setChecked(dryRun && !answer.error);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "The import could not run");
-      setChecked(false);
+      if (mine === seq.current) setError(e instanceof Error ? e.message : "The import could not run");
     } finally {
-      setBusy(false);
+      if (mine === seq.current) setBusy(null);
     }
   }
 
@@ -114,16 +120,17 @@ export function ImportSection({ projectId }: { projectId: string }) {
             type="file"
             accept="application/json,.json"
             onChange={choose}
+            disabled={busy !== null}
             className="block w-full text-sm file:mr-3 file:rounded-lg file:border file:border-border file:bg-bg-input file:px-3 file:py-1.5 file:text-text"
           />
         </label>
         {fileError && <p className="text-sm text-danger">{fileError}</p>}
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" size="sm" disabled={!payload || busy} onClick={() => send(true)}>
-            {busy && !checked ? "Checking…" : "Check"}
+          <Button variant="secondary" size="sm" disabled={!payload || busy !== null} onClick={() => send(true)}>
+            {busy === "checking" ? "Checking…" : "Check"}
           </Button>
-          <Button size="sm" disabled={!checked || busy} onClick={() => send(false)}>
-            {busy && checked ? "Importing…" : "Import"}
+          <Button size="sm" disabled={!checked || busy !== null} onClick={() => send(false)}>
+            {busy === "importing" ? "Importing…" : "Import"}
           </Button>
         </div>
         {error && (

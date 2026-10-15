@@ -1,8 +1,7 @@
 import { Schema } from "mongoose";
 import type { ExternalRef } from "@/types";
+import { EXTERNAL_ID_MAX_LENGTH, EXTERNAL_SOURCE_MAX_LENGTH } from "./limits";
 
-export const EXTERNAL_SOURCE_MAX_LENGTH = 50;
-export const EXTERNAL_ID_MAX_LENGTH = 200;
 
 export const externalRefSchema = new Schema<ExternalRef>(
   {
