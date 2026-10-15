@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
+import crypto from "crypto";
 import mongoose from "mongoose";
-import { E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
+import { E2E_ENCRYPTION_KEY, E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 import { signIn } from "./session";
 
 /**
@@ -40,7 +41,17 @@ async function storedChannel(name: string) {
   return channel as { name: string; webhookUrl: string };
 }
 
-async function seedLegacyPlaintextChannel(name: string) {
+// The envelope the releases before BP-898 wrote: the instance key itself, no organisation in it
+function sealedUnderTheInstanceKey(plaintext: string): string {
+  const material = Buffer.from(E2E_ENCRYPTION_KEY, "hex");
+  const id = crypto.createHash("sha256").update(material).digest("hex").slice(0, 8);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", material, iv);
+  const enc = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  return `enc:v2:${id}:${Buffer.concat([iv, cipher.getAuthTag(), enc]).toString("base64")}`;
+}
+
+async function seedLegacyPlaintextChannel(name: string, webhookUrl = LEGACY_URL) {
   await (await db()).collection("projects").updateOne(
     { _id: PROJECT_ID },
     {
@@ -51,7 +62,7 @@ async function seedLegacyPlaintextChannel(name: string) {
             type: "slack",
             name,
             // Exactly the shape every row written before BP-372 has: no envelope, no key id
-            webhookUrl: LEGACY_URL,
+            webhookUrl,
             events: ["task_created"],
             enabled: true,
           },
@@ -168,17 +179,17 @@ test.describe("a project's chat webhook URL", () => {
     await expect(page.getByText("https://hooks.slack.com/••••eRow")).toBeVisible();
   });
 
-  test("survives in a row written before BP-372, and is migrated by the next save", async ({
+  test("in a row written before BP-372 is not read, and is sealed by the next save", async ({
     page,
   }) => {
     await seedLegacyPlaintextChannel("Legacy");
     await signIn(page);
     await openTeamChannels(page);
 
-    // The premise, measured rather than assumed: the row really is stored in the clear, and the
-    // screen renders it as well as any other — a plaintext URL must not become unreadable
+    // The premise, measured rather than assumed: the row really is stored in the clear, and since
+    // BP-900 nothing opens it, so the screen shows no host for it until a save seals it
     expect((await storedChannel("Legacy")).webhookUrl).toBe(LEGACY_URL);
-    await expect(page.getByText("https://hooks.slack.com/••••p372")).toBeVisible();
+    await expect(page.getByText("https://hooks.slack.com/••••p372")).toHaveCount(0);
 
     // Renaming it touches no URL, and that is the point: an ordinary edit carries the row over
     await page.getByRole("button", { name: "task created for Legacy" }).click();
@@ -192,12 +203,23 @@ test.describe("a project's chat webhook URL", () => {
     expect(stored.webhookUrl).not.toContain("hooks.slack.com");
     expect(stored.webhookUrl).toMatch(/^enc:v3:[0-9a-f]{8}:/);
 
-    // Reloaded before reading the screen. The same masked string was already on it before the save
-    // — `decryptSecret` passes plaintext through, so both states mask identically — and asserting
-    // it in place would be satisfied by the DOM the trigger had not yet replaced.
+    // Reloaded before reading the screen, so what is asserted is the sealed row and not the DOM
+    // the trigger had not yet replaced.
     await openTeamChannels(page);
     await expect(page.getByText("https://hooks.slack.com/••••p372")).toBeVisible();
     await expect(page.getByText(/^enc:v\d:/)).toHaveCount(0);
     await expect(page.getByText("null/••••")).toHaveCount(0);
+  });
+
+  // BP-900. The instance key opens any organisation's v2 value, so a copy of one lifted from a
+  // backup onto another board would have read there; it reads as nothing instead
+  test("sealed under the instance key itself is not read, and shows no host", async ({ page }) => {
+    await seedLegacyPlaintextChannel("Old", sealedUnderTheInstanceKey(LEGACY_URL));
+    await signIn(page);
+    await openTeamChannels(page);
+
+    await expect(page.getByText("https://hooks.slack.com/••••p372")).toHaveCount(0);
+    await expect(page.getByText("••••", { exact: true })).toBeVisible();
+    expect((await storedChannel("Old")).webhookUrl).toMatch(/^enc:v2:/);
   });
 });

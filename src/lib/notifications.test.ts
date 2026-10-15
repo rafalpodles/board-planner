@@ -21,7 +21,7 @@ vi.mock("./safe-fetch", () => ({ safeFetch }));
 
 const { dispatchNotifications } = await import("./notifications");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
-const { encryptSecret } = await import("./encryption");
+const { encryptSecret, isEncryptedSecret } = await import("./encryption");
 const { WEBHOOK_DESTINATION } = await import("./url-validation");
 
 const PAYLOAD = { project: { key: "BP", name: "Board" }, task: { taskKey: "BP-1", title: "T", status: "todo" } };
@@ -31,6 +31,10 @@ function projectWith(...urls: string[]) {
 }
 
 function channelsOf(type: "slack" | "discord", events: string[], ...urls: string[]) {
+  storedChannels(type, events, ...urls.map((url) => (isEncryptedSecret(url) ? url : encryptSecret(url, TEST_ORGANISATION))));
+}
+
+function storedChannels(type: "slack" | "discord", events: string[], ...urls: string[]) {
   findOne.mockReturnValue({
     lean: () =>
       Promise.resolve({
@@ -74,14 +78,12 @@ describe("dispatchNotifications", () => {
     expect(safeFetch.mock.calls[0][0]).toBe("https://hooks.slack.com/services/T/B/secret");
   });
 
-  // Rows written before BP-372 carry no envelope and must keep working with no migration
-  it("posts to a legacy plaintext URL unchanged", async () => {
-    projectWith("https://hooks.slack.com/services/T/B/legacy");
+  it("posts nothing to a plaintext URL, which is no longer a stored secret", async () => {
+    storedChannels("slack", ["task_created"], "https://hooks.slack.com/services/T/B/legacy");
 
     await dispatchNotifications(scopedToDefaultOrganisation(), "p1", "task_created", PAYLOAD);
 
-    expect(safeFetch).toHaveBeenCalledTimes(1);
-    expect(safeFetch.mock.calls[0][0]).toBe("https://hooks.slack.com/services/T/B/legacy");
+    expect(safeFetch).not.toHaveBeenCalled();
   });
 
   it("reads a value written by a retired key", async () => {

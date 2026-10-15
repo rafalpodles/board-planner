@@ -87,7 +87,7 @@ describe("sanitizeProjectSecrets", () => {
           _id: "c1",
           type: "slack",
           name: "Releases",
-          webhookUrl: "https://hooks.slack.com/services/T000/B111/abcdef123456",
+          webhookUrl: encryptSecret("https://hooks.slack.com/services/T000/B111/abcdef123456", TEST_ORGANISATION),
           events: ["task_created"],
           enabled: true,
         },

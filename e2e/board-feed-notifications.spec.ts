@@ -261,7 +261,7 @@ async function seedMembers(people: SeededMember[]) {
   );
 }
 
-/** The id a v2 envelope names its key by — derived the way `encryption.ts` derives it. */
+/** The id an envelope names its key by — derived the way `encryption.ts` derives it. */
 const keyIdOf = (hexKey: string) =>
   createHash("sha256").update(Buffer.from(hexKey, "hex")).digest("hex").slice(0, 8);
 const CURRENT_KEY_ID = keyIdOf(E2E_ENCRYPTION_KEY);
@@ -312,7 +312,25 @@ const TRAPS: { name: string; person: (_id: mongoose.Types.ObjectId) => SeededMem
     person: (_id) => ({
       _id,
       defaults: cell({ chat: true }),
-      chat: { kind: "slack", webhookUrl: `enc:v2:${LOST_KEY_ID}:AAAA` },
+      chat: { kind: "slack", webhookUrl: `enc:v3:${LOST_KEY_ID}:AAAA` },
+    }),
+  },
+  // BP-900. Opening a value stored under the instance key itself, or in the clear, is refused, so
+  // the query that finds who can be told must leave both out
+  {
+    name: "a chat tick whose webhook is sealed under the instance key itself",
+    person: (_id) => ({
+      _id,
+      defaults: cell({ chat: true }),
+      chat: { kind: "slack", webhookUrl: `enc:v2:${CURRENT_KEY_ID}:AAAA` },
+    }),
+  },
+  {
+    name: "a chat tick whose webhook is stored in plain",
+    person: (_id) => ({
+      _id,
+      defaults: cell({ chat: true }),
+      chat: { kind: "discord", webhookUrl: "https://hooks.example.invalid/e2e" },
     }),
   },
 ];
@@ -358,21 +376,15 @@ for (const trap of TRAPS) {
 
 // The control for the trap above: the same query has to go on admitting a webhook it can read, or
 // a pattern that matched nothing at all would pass it too
-test("a chat tick sealed with the key the instance holds, or stored in plain, still counts", async ({
+test("a chat tick sealed with a key the instance holds still counts", async ({
   browser,
 }) => {
   const sealed = behindTheMember(1);
-  const plain = behindTheMember(2);
   await seedMembers([
     {
       _id: sealed,
       defaults: cell({ chat: true }),
-      chat: { kind: "slack", webhookUrl: `enc:v2:${CURRENT_KEY_ID}:AAAA` },
-    },
-    {
-      _id: plain,
-      defaults: cell({ chat: true }),
-      chat: { kind: "discord", webhookUrl: "https://hooks.example.invalid/e2e" },
+      chat: { kind: "slack", webhookUrl: `enc:v3:${CURRENT_KEY_ID}:AAAA` },
     },
   ]);
 
@@ -384,7 +396,7 @@ test("a chat tick sealed with the key the instance holds, or stored in plain, st
 
   await expect
     .poll(() => announcedTo(title), { timeout: 30_000 })
-    .toEqual([String(sealed), String(plain)].sort());
+    .toEqual([String(sealed)]);
 
   await adminContext.close();
 });

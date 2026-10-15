@@ -162,6 +162,7 @@ beforeEach(() => {
   stored = [];
   granted = [];
   mailConfigured = true;
+  process.env.ENCRYPTION_KEY = "a".repeat(64);
 });
 
 describe("who hears that a task was created", () => {
@@ -244,7 +245,7 @@ describe("who hears that a task was created", () => {
     stored = [
       member(1, {
         defaults: { task_created: row({ chat: true }) },
-        chat: { kind: "slack", webhookUrl: "https://hooks.example.com/x" },
+        chat: { kind: "slack", webhookUrl: encryptSecret("https://hooks.example.com/x", TEST_ORGANISATION) },
       }),
     ];
     expect(await boardFeedSubscribers(db, PROJECT)).toEqual([id(1)]);
@@ -537,7 +538,7 @@ describe("a board with more subscribers than the cap", () => {
       stored = [
         member(1, {
           projects: [{ project: PROJECT, matrix: { task_created: row({ chat: true }) } }],
-          chat: { kind: "discord", webhookUrl: "enc:abc" },
+          chat: { kind: "discord", webhookUrl: encryptSecret("https://discord.com/api/webhooks/1/x", TEST_ORGANISATION) },
         }),
       ];
       granted = [id(1)];

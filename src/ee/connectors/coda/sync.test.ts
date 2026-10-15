@@ -76,6 +76,18 @@ describe("POST .../coda/sync — configuration", () => {
     expect(decryptSecret).toHaveBeenCalledWith("enc-token", expect.anything());
     expect(fetchTableColumns).toHaveBeenCalledWith("https://coda.io", "doc1", "table1", "plain:enc-token");
   });
+
+  it("answers 502 with a sentence, and calls Coda with nothing, when the stored token can no longer be read", async () => {
+    decryptSecret.mockImplementation(() => {
+      throw new Error("This secret was stored before secrets were sealed per organisation and can no longer be read. Re-enter it.");
+    });
+
+    const res = await syncProjectToCoda(scopedToDefaultOrganisation(), "p1");
+
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toContain("can no longer be read");
+    expect(fetchTableColumns).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST .../coda/sync — the column check", () => {

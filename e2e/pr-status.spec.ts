@@ -30,7 +30,6 @@ import { signIn as arriveSignedIn } from "./session";
 const signIn = arriveSignedIn;
 
 const REPO = "https://github.com/example/board";
-/** Planted in the clear; `decryptSecret` passes such a value through unchanged. */
 const SEEDED_TOKEN = "e2e-token-passed-through";
 const HEAD = "c0ffee1";
 

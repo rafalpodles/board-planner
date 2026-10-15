@@ -138,8 +138,9 @@ describe("rotation", () => {
     expect(() => after.decryptSecret(sealed, TEST_ORGANISATION)).toThrowError(new RegExp(`key matches id ${id}`));
   });
 
-  it("still reads a v1 envelope written before key ids existed", async () => {
+  it("refuses a v1 envelope, which carries no key id, whatever keys are configured", async () => {
     process.env.ENCRYPTION_KEY = KEY_A;
+    process.env.ENCRYPTION_KEYS_OLD = KEY_B;
     const { decryptSecret } = await load();
 
     const material = Buffer.from(KEY_A, "hex");
@@ -148,33 +149,16 @@ describe("rotation", () => {
     const enc = Buffer.concat([cipher.update("legacy", "utf8"), cipher.final()]);
     const v1 = "enc:v1:" + Buffer.concat([iv, cipher.getAuthTag(), enc]).toString("base64");
 
-    expect(decryptSecret(v1, TEST_ORGANISATION)).toBe("legacy");
-  });
-
-  it("tries every configured key against a v1 envelope, which carries no id", async () => {
-    process.env.ENCRYPTION_KEY = KEY_A;
-    const { decryptSecret } = await load();
-
-    const material = Buffer.from(KEY_B, "base64");
-    const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv("aes-256-gcm", material, iv);
-    const enc = Buffer.concat([cipher.update("legacy", "utf8"), cipher.final()]);
-    const v1 = "enc:v1:" + Buffer.concat([iv, cipher.getAuthTag(), enc]).toString("base64");
-
-    expect(() => decryptSecret(v1, TEST_ORGANISATION)).toThrowError(/No configured encryption key can read/);
-
-    process.env.ENCRYPTION_KEYS_OLD = KEY_B;
-    const after = await load();
-    expect(after.decryptSecret(v1, TEST_ORGANISATION)).toBe("legacy");
+    expect(() => decryptSecret(v1, TEST_ORGANISATION)).toThrowError(/can no longer be read/);
   });
 });
 
 describe("decryptSecret", () => {
-  it("passes a value that was never encrypted straight through", async () => {
+  it("refuses a value that was never encrypted, and still passes nothing through", async () => {
     process.env.ENCRYPTION_KEY = KEY_A;
     const { decryptSecret } = await load();
 
-    expect(decryptSecret("plain-legacy-token", TEST_ORGANISATION)).toBe("plain-legacy-token");
+    expect(() => decryptSecret("plain-legacy-token", TEST_ORGANISATION)).toThrowError(/can no longer be read/);
     expect(decryptSecret("", TEST_ORGANISATION)).toBe("");
   });
 });
@@ -211,7 +195,7 @@ describe("isEncryptedSecret", () => {
 describe("readableSecretPatterns", () => {
   const readable = (patterns: RegExp[], value: string) => patterns.some((p) => p.test(value));
 
-  it("agrees with decryptSecret on plaintext, the current key's envelope and a lost key's", async () => {
+  it("agrees with decryptSecret on the current key's envelope, a lost key's and plaintext", async () => {
     process.env.ENCRYPTION_KEY = KEY_B;
     const lost = (await load()).encryptSecret("https://hooks.example.com/lost", TEST_ORGANISATION);
     process.env.ENCRYPTION_KEY = KEY_A;
@@ -250,7 +234,7 @@ describe("readableSecretPatterns", () => {
 
     expect(readable(patterns, sealed)).toBe(false);
     expect(readable(patterns, "enc:v1:abc")).toBe(false);
-    expect(readable(patterns, "https://hooks.example.com/plain")).toBe(true);
+    expect(readable(patterns, "https://hooks.example.com/plain")).toBe(false);
   });
 });
 
@@ -278,11 +262,10 @@ describe("a data key per organisation (BP-898)", () => {
 
   it("is not the instance key: a secret seals as v3, which a v2 reader of the instance key cannot open", async () => {
     process.env.ENCRYPTION_KEY = KEY_A;
-    const { encryptSecret, isInstanceKeySecret } = await load();
+    const { encryptSecret } = await load();
 
     const sealed = encryptSecret("ghp", TEST_ORGANISATION);
     expect(sealed.startsWith("enc:v3:")).toBe(true);
-    expect(isInstanceKeySecret(sealed)).toBe(false);
     const [, , , payload] = sealed.split(":");
     const raw = Buffer.from(payload, "base64");
     const decipher = crypto.createDecipheriv("aes-256-gcm", Buffer.from(KEY_A, "hex"), raw.subarray(0, 12));
@@ -290,14 +273,14 @@ describe("a data key per organisation (BP-898)", () => {
     expect(() => Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()])).toThrow();
   });
 
-  it("still reads a secret written under the instance key before, for any organisation", async () => {
+  it("refuses a secret written under the instance key, for any organisation, though the key that wrote it is configured", async () => {
     process.env.ENCRYPTION_KEY = KEY_A;
-    const { decryptSecret, isInstanceKeySecret } = await load();
+    const { decryptSecret, readableSecretPatterns } = await load();
     const old = legacyV2("ghp_old", KEY_A);
 
-    expect(isInstanceKeySecret(old)).toBe(true);
-    expect(decryptSecret(old, TEST_ORGANISATION)).toBe("ghp_old");
-    expect(decryptSecret(old, OTHER)).toBe("ghp_old");
+    expect(() => decryptSecret(old, TEST_ORGANISATION)).toThrow(/can no longer be read/);
+    expect(() => decryptSecret(old, OTHER)).toThrow(/can no longer be read/);
+    expect(readableSecretPatterns().some((pattern) => pattern.test(old))).toBe(false);
   });
 
   it("survives a rotation: a v3 secret written under a retired key opens once that key is in ENCRYPTION_KEYS_OLD", async () => {

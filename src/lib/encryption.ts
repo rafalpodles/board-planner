@@ -6,14 +6,13 @@ import type { Types } from "mongoose";
 // is a comma-separated list of retired keys kept so a rotation can still read
 // what they wrote. Both are 32 bytes, hex or base64.
 //
-// The v2 envelope carries a key id, so a value names the key that wrote it.
-// v1 values carry no id and are tried against every configured key.
-// v3 (BP-898) is v2 under the organisation's own data key, derived from the instance key and the
-// organisation's id: a secret copied onto another organisation's row does not decrypt there.
+// The envelope carries a key id, so a value names the key that wrote it. It is sealed under the
+// organisation's own data key, derived from the instance key and the organisation's id: a secret
+// copied onto another organisation's row does not decrypt there. Values written under the instance
+// key itself (v1, v2) or in the clear are refused (BP-900).
 
-const PREFIX_V1 = "enc:v1:";
-const PREFIX_V2 = "enc:v2:";
 const PREFIX_V3 = "enc:v3:";
+const ENVELOPE = /^enc:v[123]:/;
 
 interface EncryptionKey {
   id: string;
@@ -95,27 +94,15 @@ export function isEncryptionConfigured(): boolean {
 }
 
 /**
- * Stored values whose envelope names a key configured now, as patterns a query can match:
- * plaintext, a v2 value by its key id, and any v1 value once some key exists, since v1 carries no
- * id. A match is not a promise that `decryptSecret` succeeds — a corrupt payload matches too.
+ * Stored values whose envelope names a key configured now, as patterns a query can match. A match
+ * is not a promise that `decryptSecret` succeeds — a corrupt payload matches too.
  */
 export function readableSecretPatterns(): RegExp[] {
-  const keys = allKeys();
-  return [
-    new RegExp(`^(?!${PREFIX_V1}|${PREFIX_V2}|${PREFIX_V3})`),
-    ...(keys.length > 0 ? [new RegExp(`^${PREFIX_V1}`)] : []),
-    ...keys.map((key) => new RegExp(`^${PREFIX_V2}${key.id}:`)),
-    ...keys.map((key) => new RegExp(`^${PREFIX_V3}${key.id}:`)),
-  ];
+  return allKeys().map((key) => new RegExp(`^${PREFIX_V3}${key.id}:`));
 }
 
 export function isEncryptedSecret(value: string | undefined | null): boolean {
-  return !!value && (value.startsWith(PREFIX_V1) || value.startsWith(PREFIX_V2) || value.startsWith(PREFIX_V3));
-}
-
-// Written before BP-898 under the instance key itself, and so readable for any organisation
-export function isInstanceKeySecret(value: string | undefined | null): boolean {
-  return !!value && (value.startsWith(PREFIX_V1) || value.startsWith(PREFIX_V2));
+  return !!value && ENVELOPE.test(value);
 }
 
 function organisationKey(material: Buffer, organisation: Types.ObjectId): Buffer {
@@ -147,51 +134,22 @@ function open(payload: string, material: Buffer): string {
 export function decryptSecret(value: string, organisation: Types.ObjectId): string {
   if (!value) return value;
 
-  if (value.startsWith(PREFIX_V3)) {
-    const rest = value.slice(PREFIX_V3.length);
-    const separator = rest.indexOf(":");
-    const id = rest.slice(0, separator);
-    const key = allKeys().find((k) => k.id === id);
-    if (!key) {
-      throw new Error(
-        `No configured encryption key matches id ${id}. Add the key that wrote this secret to ENCRYPTION_KEYS_OLD, or re-enter the secret.`
-      );
-    }
-    try {
-      return open(rest.slice(separator + 1), organisationKey(key.material, organisation));
-    } catch {
-      throw new Error("This secret belongs to another organisation, or was altered. Re-enter it.");
-    }
+  if (!value.startsWith(PREFIX_V3)) {
+    throw new Error("This secret was stored before secrets were sealed per organisation and can no longer be read. Re-enter it.");
   }
 
-  if (value.startsWith(PREFIX_V2)) {
-    const rest = value.slice(PREFIX_V2.length);
-    const separator = rest.indexOf(":");
-    const id = rest.slice(0, separator);
-    const key = allKeys().find((k) => k.id === id);
-    if (!key) {
-      throw new Error(
-        `No configured encryption key matches id ${id}. Add the key that wrote this secret to ENCRYPTION_KEYS_OLD, or re-enter the secret.`
-      );
-    }
-    return open(rest.slice(separator + 1), key.material);
+  const rest = value.slice(PREFIX_V3.length);
+  const separator = rest.indexOf(":");
+  const id = rest.slice(0, separator);
+  const key = allKeys().find((k) => k.id === id);
+  if (!key) {
+    throw new Error(
+      `No configured encryption key matches id ${id}. Add the key that wrote this secret to ENCRYPTION_KEYS_OLD, or re-enter the secret.`
+    );
   }
-
-  if (!value.startsWith(PREFIX_V1)) return value; // legacy plaintext
-
-  // v1 carries no key id, so every configured key is a candidate
-  const keys = allKeys();
-  if (keys.length === 0) {
-    throw new Error("ENCRYPTION_KEY is required to decrypt a stored secret");
+  try {
+    return open(rest.slice(separator + 1), organisationKey(key.material, organisation));
+  } catch {
+    throw new Error("This secret belongs to another organisation, or was altered. Re-enter it.");
   }
-  for (const key of keys) {
-    try {
-      return open(value.slice(PREFIX_V1.length), key.material);
-    } catch {
-      // GCM rejected this key — try the next
-    }
-  }
-  throw new Error(
-    "No configured encryption key can read this secret. Add the key that wrote it to ENCRYPTION_KEYS_OLD, or re-enter the secret."
-  );
 }

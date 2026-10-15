@@ -251,8 +251,8 @@ ENCRYPTION_KEY=           # 32 bytes (hex or base64) — without it integration 
                           # URLs (project team channels, personal) cannot be saved; a wrong-length
                           # key stops the app from starting. Each organisation seals under its own data
                           # key, HKDF(this key, its id) — `enc:v3`, so a secret copied onto another
-                          # organisation's row does not open; v1/v2 (the key itself) still read, and
-                          # scripts/reseal-organisation-secrets.ts moves them to v3 (BP-898)
+                          # organisation's row does not open; a value stored under the key itself
+                          # (v1, v2) or in the clear is refused, not read (BP-898, BP-900)
 ENCRYPTION_KEYS_OLD=      # Optional — comma-separated retired keys, so a rotation can still decrypt
 LICENCE_KEY=              # Optional — a Pro licence, Ed25519-signed, verified against the public keys
                           # in src/lib/licence-keys.ts on every getOrganisation(); nothing is stored. A bad
