@@ -151,7 +151,7 @@ test("an owner checks a file in the browser, sees what will be left out, and imp
     bundle: {
       source: SOURCE,
       tasks: [
-        { id: "A-1", title: "Carried over", status: "Open", priority: "Blocker", fields: { "No such field": "x" } },
+        { id: "A-1", title: "Carried over", status: "Open", priority: "Showstopper", fields: { "No such field": "x" } },
         { id: "A-2", title: "   ", status: "Open" },
         { id: "A-3", title: "Lands where new tasks go", status: "Somewhere else", assignee: "nobody-here" },
       ],
@@ -171,7 +171,7 @@ test("an owner checks a file in the browser, sees what will be left out, and imp
   const report = page.getByTestId("import-report");
   await expect(report).toContainText("Would create 2 and would update 0 of 3 tasks from e2e-tracker");
   await expect(report).toContainText("A-2: no title");
-  await expect(report).toContainText("A-1 · priority “Blocker”: not low, medium, high or urgent");
+  await expect(report).toContainText("A-1 · priority “Showstopper”: not low, medium, high or urgent");
   await expect(report).toContainText("A-1 · No such field “x”: no field of that name on this board");
   await expect(report).toContainText("Somewhere else");
   await expect(report).toContainText("nobody-here");

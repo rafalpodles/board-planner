@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { csvToBundle, decodeCsv, detectDelimiter, guessTargets, normaliseDay, normaliseInstant, parseCsv, readCsvTable } from "./csv";
+import { csvToBundle, decodeCsv, detectDelimiter, guessTargets, isJiraExport, normaliseDay, normaliseInstant, parseCsv, readCsvTable } from "./csv";
 import { parseBundle } from "./bundle";
 
 const FIELDS = [
@@ -149,4 +149,63 @@ describe("csvToBundle", () => {
     const bundle = csvToBundle(table, targets.map((t) => (t === "id" ? "ignore" : t)), "CSV", FIELDS, "u1");
     expect(bundle.tasks.map((t) => t.id)).toEqual(["row-2", "row-3"]);
   });
+});
+
+describe("a Jira export", () => {
+  const JIRA = [
+    "Summary,Issue key,Issue id,Issue Type,Status,Priority,Assignee,Created,Resolved,Due date,Labels,Labels,Description,Comment,Comment,Parent",
+    'Export invoices,ORB-12,10012,Bug,Done,Highest,Maya Kowalska,15/Oct/25 9:30 AM,16/Oct/25 1:05 PM,20/paź/26,billing,urgent-fix,"Line 1\nLine 2","15/Oct/25 9:45 AM;712020:abc;First comment","16/Oct/25 12:05 AM;712020:def;Second; with a semicolon",10010',
+    "Plain one,ORB-13,10013,Story,To Do,Medium,,01/Jan/26 12:00 PM,,,,,,just text with no date,,",
+  ].join("\n");
+  const fields = [{ name: "Labels", fieldType: "multiselect" }];
+  const table = readCsvTable(JIRA);
+  const targets = guessTargets(table.headers, fields);
+
+  it("is recognised by its headers, and its columns are guessed with repeats kept", () => {
+    expect(isJiraExport(table.headers)).toBe(true);
+    expect(isJiraExport(["Title", "Status"])).toBe(false);
+    expect(targets).toEqual([
+      "title", "id", "ignore", "category", "status", "priority", "assignee", "createdAt", "completedAt", "dueDate",
+      "field:Labels", "field:Labels", "description", "comment", "comment", "parent",
+    ]);
+  });
+
+  it("carries Jira's dates, both label columns, every comment with its time and author, and the parent", () => {
+    const bundle = csvToBundle(table, targets, "Jira", fields, "u1");
+    expect(parseBundle(bundle).ok).toBe(true);
+    expect(bundle.tasks[0]).toEqual({
+      id: "ORB-12",
+      title: "Export invoices",
+      description: "Line 1\nLine 2",
+      status: "Done",
+      assignee: "Maya Kowalska",
+      priority: "Highest",
+      type: "Bug",
+      dueDate: "2026-10-20",
+      createdAt: "2025-10-15T09:30:00Z",
+      completedAt: "2025-10-16T13:05:00Z",
+      parent: "10010",
+      fields: { Labels: ["billing", "urgent-fix"] },
+      comments: [
+        { id: "c1", createdAt: "2025-10-15T09:45:00Z", author: "712020:abc", body: "First comment" },
+        { id: "c2", createdAt: "2025-10-16T00:05:00Z", author: "712020:def", body: "Second; with a semicolon" },
+      ],
+    });
+    expect(bundle.tasks[1].comments).toEqual([{ id: "c1", body: "just text with no date" }]);
+    expect(bundle.tasks[1].createdAt).toBe("2026-01-01T12:00:00Z");
+  });
+
+  it.each([
+    ["15/Oct/26", "2026-10-15"],
+    ["5/maj/2026", "2026-05-05"],
+    ["31/Feb/26", "31/Feb/26"],
+    ["15/Foo/26", "15/Foo/26"],
+  ])("reads the day %s as %s", (raw, day) => expect(normaliseDay(raw)).toBe(day));
+
+  it.each([
+    ["15/Oct/26 12:00 AM", "2026-10-15T00:00:00Z"],
+    ["15/Oct/26 12:30 PM", "2026-10-15T12:30:00Z"],
+    ["15/Oct/26 17:30", "2026-10-15T17:30:00Z"],
+    ["15/Oct/26 13:00 PM", "15/Oct/26 13:00 PM"],
+  ])("reads the time %s as %s", (raw, at) => expect(normaliseInstant(raw)).toBe(at));
 });

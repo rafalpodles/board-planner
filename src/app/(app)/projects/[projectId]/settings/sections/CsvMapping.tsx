@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import type { ImportBundle, ImportMapping } from "@/lib/import/bundle";
 import { MAX_IMPORT_TASKS } from "@/lib/import/limits";
-import { type CsvTable, type CsvTarget, csvToBundle, distinctValues, guessTargets, shapeKey } from "@/lib/import/csv";
+import { type CsvTable, type CsvTarget, csvToBundle, distinctValues, guessTargets, isJiraExport, repeatable, shapeKey } from "@/lib/import/csv";
 import { effectiveColumns, MAX_COLUMN_LABEL } from "@/lib/columns";
 import { COLUMN_ROLES, type ApiProject, type ApiProjectColumn, type ColumnRole, ROLE_LABELS } from "@/types";
 
@@ -42,6 +42,8 @@ const BUILT_IN: { value: CsvTarget; label: string }[] = [
   { value: "dueDate", label: "Due date" },
   { value: "createdAt", label: "Created" },
   { value: "completedAt", label: "Completed" },
+  { value: "comment", label: "Comment (one per column)" },
+  { value: "parent", label: "Parent (listed, not linked)" },
 ];
 
 const storageKey = (projectId: string, headers: string[]) => `bp:csv-import:${projectId}:${shapeKey(headers)}`;
@@ -208,6 +210,7 @@ export function CsvMapping({
     <div data-testid="csv-mapping" className="space-y-5">
       <p className="text-sm text-text-muted">
         {table.rows.length} rows, {table.headers.length} columns.
+        {isJiraExport(table.headers) && " Recognised as a Jira export: its usual columns and its comments are mapped already."}
       </p>
       {tooMany && (
         <p role="alert" className="text-sm text-danger">
@@ -227,7 +230,11 @@ export function CsvMapping({
                 options={targetOptions}
                 onChange={(e) => {
                   const value = e.target.value as CsvTarget;
-                  setTargets(liveTargets.map((t, j) => (j === i ? value : value !== "ignore" && t === value ? "ignore" : t)));
+                  setTargets(
+                    liveTargets.map((t, j) =>
+                      j === i ? value : value !== "ignore" && t === value && !repeatable(value, fieldShapes) ? "ignore" : t
+                    )
+                  );
                 }}
               />
               {table.rows[0]?.[i] && (

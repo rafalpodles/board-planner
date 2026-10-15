@@ -130,14 +130,21 @@ describe("runImport", () => {
     const { db, writes } = fakeDb();
     const report = await run(db, [
       { id: "1", title: "a", type: "Bug", priority: "HIGH", assignee: "maya" },
-      { id: "2", title: "b", type: "Epic", priority: "Blocker", assignee: "ghost" },
+      { id: "2", title: "b", type: "Epic", priority: "Showstopper", assignee: "ghost" },
     ]);
     expect(writes.tasks.map((t) => [t.category, t.priority, t.assignee])).toEqual([
       ["bug", "high", MEMBER],
       ["user-story", "medium", null],
     ]);
     expect(report.unmapped).toEqual({ statuses: [], users: ["ghost"], types: ["Epic"] });
-    expect(report.dropped).toContainEqual({ id: "2", field: "priority", value: "Blocker", reason: "not low, medium, high or urgent" });
+    expect(report.dropped).toContainEqual({ id: "2", field: "priority", value: "Showstopper", reason: "not low, medium, high or urgent" });
+  });
+
+  it("reads the priority scales Jira and Linear ship with, and takes No priority as none given", async () => {
+    const { db, writes } = fakeDb();
+    const report = await run(db, ["Highest", "Blocker", "Critical", "Major", "Normal", "Lowest", "Minor", "Trivial", "No priority"].map((priority, i) => ({ id: String(i), title: "t", priority })));
+    expect(writes.tasks.map((t) => t.priority)).toEqual(["urgent", "urgent", "urgent", "high", "medium", "low", "low", "low", "medium"]);
+    expect(report.dropped).toEqual([]);
   });
 
   it("leaves a person unassigned who has an account but no access to the board", async () => {

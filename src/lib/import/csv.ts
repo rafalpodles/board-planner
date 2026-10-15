@@ -1,4 +1,4 @@
-import type { ImportBundle, ImportTask } from "./bundle";
+import type { ImportBundle, ImportComment, ImportTask } from "./bundle";
 import { normaliseDay, normaliseInstant } from "./dates";
 
 export { normaliseDay, normaliseInstant } from "./dates";
@@ -15,6 +15,8 @@ export type CsvTarget =
   | "dueDate"
   | "createdAt"
   | "completedAt"
+  | "parent"
+  | "comment"
   | `field:${string}`;
 
 export interface CsvField {
@@ -113,7 +115,20 @@ const GUESSES: [CsvTarget, RegExp][] = [
   ["dueDate", /^(due|due date|due on|deadline|termin)$/],
   ["createdAt", /^(created|created at|created on|date created|utworzono)$/],
   ["completedAt", /^(completed|completed at|resolved|resolution date|done at|closed|zakończono|zakonczono)$/],
+  ["parent", /^(parent|parent key|parent id|parent issue|epic link|nadrzędne|nadrzedne)$/],
+  ["comment", /^(comment|comments|komentarz|komentarze)$/],
 ];
+
+// Jira writes one column per comment and per label, all under the same header
+export function repeatable(target: CsvTarget, fields: CsvField[]): boolean {
+  if (target === "comment") return true;
+  return target.startsWith("field:") && fields.find((f) => `field:${f.name}` === target)?.fieldType === "multiselect";
+}
+
+export function isJiraExport(headers: string[]): boolean {
+  const lower = new Set(headers.map((h) => h.trim().toLowerCase()));
+  return lower.has("issue key") && lower.has("summary") && lower.has("issue type");
+}
 
 export function guessTargets(headers: string[], fields: CsvField[]): CsvTarget[] {
   const taken = new Set<CsvTarget>();
@@ -123,7 +138,7 @@ export function guessTargets(headers: string[], fields: CsvField[]): CsvTarget[]
     const target: CsvTarget | undefined = field
       ? `field:${field.name}`
       : GUESSES.find(([, pattern]) => pattern.test(wanted))?.[0];
-    if (!target || taken.has(target)) return "ignore";
+    if (!target || (taken.has(target) && !repeatable(target, fields))) return "ignore";
     taken.add(target);
     return target;
   });
@@ -166,6 +181,16 @@ function fieldValue(raw: string, field: CsvField | undefined): unknown {
 
 export const NO_ID_PREFIX = "row-";
 
+// Jira writes a comment as "15/Oct/26 9:30 AM;author;text"; anything else is the text alone
+function commentFrom(cell: string, ordinal: number): ImportComment {
+  const parts = /^([^;\n]+);([^;\n]*);([\s\S]*)$/.exec(cell);
+  const at = parts && normaliseInstant(parts[1]);
+  if (parts && at && /^\d{4}-\d{2}-\d{2}T/.test(at)) {
+    return { id: `c${ordinal}`, createdAt: at, ...(parts[2].trim() && { author: parts[2].trim() }), body: parts[3] };
+  }
+  return { id: `c${ordinal}`, body: cell };
+}
+
 // `upload` names this upload alone: a row with no id of its own can then never match a task from another one
 export function csvToBundle(table: CsvTable, targets: CsvTarget[], source: string, fields: CsvField[], upload: string): ImportBundle {
   const at = (target: CsvTarget) => targets.indexOf(target);
@@ -185,14 +210,21 @@ export function csvToBundle(table: CsvTable, targets: CsvTarget[], source: strin
       createdAt: text("createdAt") && normaliseInstant(text("createdAt")!),
       completedAt: text("completedAt") && normaliseInstant(text("completedAt")!),
     };
+    const parent = text("parent");
+    if (parent) task.parent = parent;
     const values: Record<string, unknown> = {};
+    const comments: ImportComment[] = [];
     targets.forEach((target, column) => {
+      if (cell(column).trim() === "") return;
+      if (target === "comment") return comments.push(commentFrom(cell(column), comments.length + 1));
       if (!target.startsWith("field:")) return;
       const name = target.slice("field:".length);
-      if (cell(column).trim() === "") return;
-      values[name] = fieldValue(cell(column), fields.find((f) => f.name === name));
+      const value = fieldValue(cell(column), fields.find((f) => f.name === name));
+      const before = values[name];
+      values[name] = Array.isArray(before) && Array.isArray(value) ? [...new Set([...before, ...value])] : value;
     });
     if (Object.keys(values).length) task.fields = values;
+    if (comments.length) task.comments = comments;
     return Object.fromEntries(Object.entries(task).filter(([, v]) => v !== undefined)) as unknown as ImportTask;
   });
   return { source, tasks };

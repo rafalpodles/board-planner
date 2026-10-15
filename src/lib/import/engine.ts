@@ -19,6 +19,14 @@ import { normaliseInstant } from "./dates";
 
 export const IMPORT_CHUNK = 200;
 const PRIORITIES: readonly Priority[] = ["low", "medium", "high", "urgent"];
+const NO_PRIORITY = new Set(["no priority", "none", "-"]);
+// The scales other trackers ship with: Jira's current and classic ones, and Linear's
+const PRIORITY_NAMES: Record<string, Priority> = {
+  highest: "urgent", blocker: "urgent", critical: "urgent",
+  major: "high",
+  normal: "medium",
+  lowest: "low", minor: "low", trivial: "low",
+};
 
 export type SkipReason = "no title";
 
@@ -209,8 +217,8 @@ function resolveTask(
 
   let priority: Priority = "medium";
   let priorityGiven = false;
-  if (task.priority) {
-    const found = byName(PRIORITIES, task.priority);
+  if (task.priority && !NO_PRIORITY.has(task.priority.trim().toLowerCase())) {
+    const found = byName(PRIORITIES, task.priority) ?? PRIORITY_NAMES[task.priority.trim().toLowerCase()];
     if (found) [priority, priorityGiven] = [found, true];
     else report.dropped.push({ id: task.id, field: "priority", value: shown(task.priority), reason: "not low, medium, high or urgent" });
   }
