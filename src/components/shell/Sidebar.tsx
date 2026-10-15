@@ -445,7 +445,9 @@ export function Sidebar({
           />
         )}
 
-        {!compact && <FleetPanel />}
+        <div hidden={compact}>
+          <FleetPanel />
+        </div>
       </nav>
       )}
 

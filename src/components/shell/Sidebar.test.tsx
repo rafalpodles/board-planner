@@ -128,14 +128,15 @@ describe("Sidebar", () => {
     expect(screen.getByText("Notifications")).toBeTruthy();
   });
 
-  it("lists the machines in the open sidebar and leaves them off the collapsed rail", async () => {
+  it("shows the machines in the open sidebar and hides them on the collapsed rail", async () => {
     renderSidebar();
-    expect(await screen.findByTestId("fleet-panel")).toBeTruthy();
+    expect((await screen.findByTestId("fleet-panel")).parentElement!.hidden).toBe(false);
     cleanup();
     localStorage.setItem("sidebar-collapsed", "1");
     renderSidebar({ mobileOpen: false });
     await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
-    expect(screen.queryByTestId("fleet-panel")).toBeNull();
+    // Kept mounted and hidden, so a hover over the rail neither refetches nor forgets the fold
+    expect(screen.getByTestId("fleet-panel").parentElement!.hidden).toBe(true);
   });
 
   it("shows labels when not collapsed", async () => {

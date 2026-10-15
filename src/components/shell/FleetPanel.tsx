@@ -100,7 +100,7 @@ export function FleetPanel() {
           type="button"
           id="fleet-heading"
           aria-expanded={open}
-          aria-controls="fleet-list"
+          aria-controls={open ? "fleet-list" : undefined}
           onClick={() => setOpen((o) => !o)}
           className="focus-ring inline-flex min-h-[44px] items-center gap-1.5 rounded text-[10.5px] font-bold uppercase tracking-wider text-text-muted transition-colors hover:text-text md:min-h-0"
         >

@@ -12,6 +12,7 @@ const ADMIN = { _id: "a1", role: "admin" } as never;
 const seen = () => new Date(Date.now() - 1_000);
 
 let workerFilter: unknown;
+let taskQuery: { filter?: unknown; sort?: unknown } = {};
 function dbWith(workers: Record<string, unknown>[], tasks: Record<string, unknown>[]) {
   return {
     Worker: {
@@ -21,8 +22,14 @@ function dbWith(workers: Record<string, unknown>[], tasks: Record<string, unknow
       },
     },
     Task: {
-      find: () => {
-        const chain = { sort: () => chain, select: () => chain, populate: () => chain, lean: async () => tasks };
+      find: (filter: unknown) => {
+        taskQuery = { filter };
+        const chain = {
+          sort: (order: unknown) => ((taskQuery.sort = order), chain),
+          select: () => chain,
+          populate: () => chain,
+          lean: async () => tasks,
+        };
         return chain;
       },
     },
@@ -84,6 +91,21 @@ describe("fleetFor", () => {
     expect(workerFilter).toEqual({ owner: "u1" });
     await fleetFor(dbWith([], []), ADMIN);
     expect(workerFilter).toEqual({});
+  });
+});
+
+describe("the tasks it reads", () => {
+  // A finished run keeps workerId as history; only runId says a run still holds the task
+  it("asks only for tasks a run still holds, the newest claim first", async () => {
+    await fleetFor(dbWith([worker()], []), ME);
+    expect(taskQuery.filter).toEqual({ "execution.workerId": { $in: ["w1"] }, "execution.runId": { $nin: [null, ""] } });
+    expect(taskQuery.sort).toEqual({ "execution.startedAt": -1 });
+  });
+
+  it("takes the newest claim when a machine still holds an abandoned task beside its live one", async () => {
+    const abandoned = held({ _id: "t0", taskNumber: 3, execution: { workerId: "w1", runId: "r0", startedAt: new Date(0) } });
+    const [row] = await fleetFor(dbWith([worker()], [held(), abandoned]), ME);
+    expect(row.task).toMatchObject({ key: "BP-7" });
   });
 });
 
