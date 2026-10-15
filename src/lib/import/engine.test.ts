@@ -29,6 +29,8 @@ const project = {
   ],
 };
 
+const ACCOUNTS = [{ _id: MEMBER, username: "maya", email: "maya.k@example.com" }];
+
 type Existing = { id: string; status?: string; held?: boolean; comments?: string[] };
 
 function fakeDb({ existing = [] as Existing[], failOn = 0, landBeforeFailing = 0 } = {}) {
@@ -52,7 +54,12 @@ function fakeDb({ existing = [] as Existing[], failOn = 0, landBeforeFailing = 0
       },
     },
     User: {
-      find: () => chain(() => [{ _id: MEMBER, username: "maya" }]),
+      find: (filter: { $or: { username?: { $in: string[] }; email?: { $in: string[] } }[] }) =>
+        chain(() =>
+          ACCOUNTS.filter((u) =>
+            filter.$or.some((clause) => clause.username?.$in.includes(u.username) || clause.email?.$in.includes(u.email))
+          )
+        ),
     },
     Task: {
       find: (filter: Record<string, unknown>) => {
@@ -139,6 +146,28 @@ describe("runImport", () => {
     const report = await run(db, [{ id: "1", title: "a", assignee: "maya" }]);
     expect(writes.tasks[0].assignee).toBeNull();
     expect(report.unmapped.users).toEqual(["maya"]);
+  });
+
+  it("finds a person by e-mail as well as by username, whatever the case", async () => {
+    const { db, writes } = fakeDb();
+    const report = await run(db, [
+      { id: "1", title: "a", assignee: "Maya.K@Example.com" },
+      { id: "2", title: "b", assignee: "nobody@example.com" },
+    ]);
+    expect(writes.tasks.map((t) => t.assignee)).toEqual([MEMBER, null]);
+    expect(report.unmapped.users).toEqual(["nobody@example.com"]);
+  });
+
+  it("keeps a due day, refuses one that is not a calendar day and says so, and never clears one on a re-run", async () => {
+    const { db, writes } = fakeDb({ existing: [{ id: "3" }] });
+    const report = await run(db, [
+      { id: "1", title: "a", dueDate: "2027-02-28" },
+      { id: "2", title: "b", dueDate: "2027-02-31" },
+      { id: "3", title: "c" },
+    ]);
+    expect(writes.tasks.map((t) => t.dueDate)).toEqual([new Date("2027-02-28T00:00:00.000Z"), null]);
+    expect(report.dropped).toEqual([{ id: "2", field: "dueDate", value: "2027-02-31", reason: "not a day, YYYY-MM-DD" }]);
+    expect(writes.updates[0].update.$set).not.toHaveProperty("dueDate");
   });
 
   it("validates every field value and reports each one it drops, instead of dropping it silently", async () => {

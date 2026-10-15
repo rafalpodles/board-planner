@@ -55,6 +55,7 @@ interface Resolved {
   assignee: Types.ObjectId | null;
   createdAt: Date | null;
   completedAt: Date | null;
+  dueDate: Date | null;
   customFieldValues: Record<string, unknown>;
   comments: { ref: string; body: string; author: Types.ObjectId; createdAt: Date | null }[];
 }
@@ -85,6 +86,16 @@ function instant(report: ImportReport, id: string, field: string, raw: string | 
 function byName<T extends string>(candidates: readonly T[], name: string): T | undefined {
   const wanted = name.trim().toLowerCase();
   return candidates.find((c) => c.toLowerCase() === wanted);
+}
+
+function calendarDay(report: ImportReport, id: string, raw: string | undefined): Date | null {
+  if (!raw) return null;
+  const at = new Date(`${raw}T00:00:00.000Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw) || Number.isNaN(at.getTime()) || at.toISOString().slice(0, 10) !== raw) {
+    report.dropped.push({ id, field: "dueDate", value: shown(raw), reason: "not a day, YYYY-MM-DD" });
+    return null;
+  }
+  return at;
 }
 
 function noteUnmapped(list: string[], value: string) {
@@ -132,11 +143,17 @@ async function resolveUsers(
   }
   const usernames = [...new Set([...wanted.values()].filter((v): v is string => !!v))];
   const accounts = usernames.length
-    ? await db.User.find({ username: { $in: usernames }, deactivatedAt: null }).select("_id username").lean<{ _id: Types.ObjectId; username: string }[]>()
+    ? await db.User.find({ $or: [{ username: { $in: usernames } }, { email: { $in: usernames } }], deactivatedAt: null })
+        .select("_id username email")
+        .lean<{ _id: Types.ObjectId; username: string; email?: string }[]>()
     : [];
   const members = new Set(await recipientsWithAccess(db, accounts.map((a) => String(a._id)), projectId));
-  const byUsername = new Map(accounts.filter((a) => members.has(String(a._id))).map((a) => [a.username, a._id]));
-  return new Map([...wanted].map(([name, username]) => [name, username ? byUsername.get(username) ?? null : null]));
+  const reachable = accounts.filter((a) => members.has(String(a._id)));
+  const byUsername = new Map(reachable.map((a) => [a.username, a._id]));
+  const byEmail = new Map(reachable.filter((a) => a.email).map((a) => [a.email!, a._id]));
+  return new Map(
+    [...wanted].map(([name, wantedName]) => [name, wantedName ? (byUsername.get(wantedName) ?? byEmail.get(wantedName) ?? null) : null])
+  );
 }
 
 function resolveTask(
@@ -215,6 +232,7 @@ function resolveTask(
     assignee,
     createdAt,
     completedAt,
+    dueDate: calendarDay(report, task.id, task.dueDate),
     customFieldValues: resolveFields(report, task, board),
     comments: (task.comments ?? []).flatMap((comment) => resolveComment(report, task.id, comment, users, importer)),
   };
@@ -333,6 +351,7 @@ async function writeChunk(
         priority: t.priority,
         assignee: t.assignee,
         assignedBy: t.assignee ? importer : null,
+        dueDate: t.dueDate,
         customFieldValues: t.customFieldValues,
         externalRef: { source, id: t.ref },
         createdBy: importer,
@@ -390,6 +409,7 @@ async function writeChunk(
                 priority: t.priority,
                 // An import never unassigns: somebody it cannot name is left as the board has it
                 ...(t.assignee && { assignee: t.assignee, assignedBy: importer }),
+                ...(t.dueDate && { dueDate: t.dueDate }),
                 ...(moved && { status: t.status }),
                 ...Object.fromEntries(Object.entries(t.customFieldValues).map(([k, v]) => [`customFieldValues.${k}`, v])),
               },

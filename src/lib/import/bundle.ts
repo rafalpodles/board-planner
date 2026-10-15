@@ -19,6 +19,7 @@ export interface ImportTask {
   assignee?: string;
   createdAt?: string;
   completedAt?: string;
+  dueDate?: string;
   fields?: Record<string, unknown>;
   comments?: ImportComment[];
   parent?: string;
@@ -92,7 +93,7 @@ export function parseBundle(raw: unknown): Parsed<ImportBundle> {
     if (seen.has(task.id)) return { ok: false, error: `${at}.id "${task.id.slice(0, 50)}" appears twice` };
     seen.add(task.id);
     if (typeof task.title !== "string") return { ok: false, error: `${at}.title must be a string` };
-    for (const key of ["description", "status", "type", "priority", "assignee", "createdAt", "completedAt", "parent"]) {
+    for (const key of ["description", "status", "type", "priority", "assignee", "createdAt", "completedAt", "dueDate", "parent"]) {
       if (!optionalString(task[key])) return { ok: false, error: `${at}.${key} must be a string` };
     }
     if (task.fields !== undefined && !isRecord(task.fields)) return { ok: false, error: `${at}.fields must be an object` };
