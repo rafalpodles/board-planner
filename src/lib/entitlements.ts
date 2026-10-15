@@ -5,7 +5,6 @@ export const FEATURE_KEYS = [
   "ai.managed",
   "integrations.coda",
   "integrations.jira",
-  "audit.export",
   "workers.multiple",
   "identity.sso",
   "reports.insights",

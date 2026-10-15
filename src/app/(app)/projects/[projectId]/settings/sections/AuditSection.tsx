@@ -1,66 +1,54 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useApi } from "@/hooks/use-api";
-import { useToast } from "@/components/ui/Toast";
+import { useEffect, useRef } from "react";
 import { LoadFailed } from "@/components/ui/LoadFailed";
-import { ApiProjectAuditLog } from "@/types";
+import { Button } from "@/components/ui/Button";
+import { AuditFilters } from "@/components/audit/AuditFilters";
+import { useAuditLog } from "@/hooks/use-audit-log";
+import { PROJECT_AUDIT_PAGE } from "@/lib/audit-page-size";
+import { ApiProjectAuditLog, PROJECT_AUDIT_ACTIONS } from "@/types";
 import { SettingsCard, EmptyState } from "@/components/settings/SettingsCard";
 
-export function AuditSection({ projectId, active }: { projectId: string; active: boolean }) {
-  const api = useApi();
-  const { toast } = useToast();
-  const [logs, setLogs] = useState<ApiProjectAuditLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState(false);
-  const started = useRef(false);
-  const loadSeq = useRef(0);
+const ACTION_OPTIONS = PROJECT_AUDIT_ACTIONS.map((action) => ({ value: action, label: action.replace(/_/g, " ") }));
 
-  const load = useCallback(() => {
-    // Single-flight is the render's doing today: the spinner takes the branch before the Retry
-    // button that could ask for a second read. This keeps a late answer harmless regardless.
-    const seq = ++loadSeq.current;
-    setLoading(true);
-    api
-      .get(`/api/projects/${projectId}/audit`)
-      .then((rows: ApiProjectAuditLog[]) => {
-        if (seq !== loadSeq.current) return;
-        setLogs(rows);
-        setFailed(false);
-      })
-      .catch(() => {
-        if (seq !== loadSeq.current) return;
-        setFailed(true);
-        toast("Failed to load audit log", "error");
-      })
-      .finally(() => {
-        if (seq === loadSeq.current) setLoading(false);
-      });
-  }, [api, projectId, toast]);
+export function AuditSection({ projectId, active }: { projectId: string; active: boolean }) {
+  const { rows, more, loading, failed, filters, apply, reload, loadMore } = useAuditLog<ApiProjectAuditLog>(
+    `/api/projects/${projectId}/audit`,
+    PROJECT_AUDIT_PAGE
+  );
+  const logs = rows ?? [];
+  const started = useRef(false);
 
   useEffect(() => {
     if (!active || started.current) return;
     started.current = true;
-    load();
-  }, [active, load]);
+    reload();
+  }, [active, reload]);
 
   return (
     <SettingsCard title="Recent changes">
-      {loading ? (
+      <AuditFilters
+        actions={ACTION_OPTIONS}
+        applied={filters}
+        onApply={apply}
+        exportUrl={`/api/projects/${projectId}/audit/export`}
+      />
+      {rows === null && !failed ? (
         <div className="flex justify-center py-8" role="status" aria-label="Loading the audit log">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         </div>
-      ) : failed ? (
+      ) : rows === null ? (
         // Not the empty state: "nothing was ever changed here" is a claim about this board's
-        // history, and a read that never answered supports no claim about it at all. The toast
-        // fades; this stays until somebody has an answer
+        // history, and a read that never answered supports no claim about it at all
         <LoadFailed
           testId="project-audit-error"
           message="Failed to load the audit log."
-          onRetry={load}
+          onRetry={reload}
         />
       ) : logs.length === 0 ? (
-        <EmptyState>No settings changes recorded yet.</EmptyState>
+        <EmptyState>
+          {Object.values(filters).some(Boolean) ? "No entries match these filters." : "No settings changes recorded yet."}
+        </EmptyState>
       ) : (
         // A table, so the columns line up across rows: separate flex rows each sized
         // themselves, which is why "settings updated" wrapped in one row and not the next.
@@ -96,6 +84,22 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {rows !== null && failed && (
+        <LoadFailed
+          testId="project-audit-more-error"
+          variant="row"
+          className="mt-3"
+          message="Failed to load more of the audit log."
+          onRetry={loadMore}
+        />
+      )}
+      {rows !== null && more && !failed && (
+        <div className="mt-3 flex justify-center">
+          <Button variant="secondary" size="sm" onClick={loadMore} disabled={loading}>
+            {loading ? "Loading…" : "Load more"}
+          </Button>
         </div>
       )}
     </SettingsCard>

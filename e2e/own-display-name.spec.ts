@@ -315,7 +315,7 @@ test("the change leaves an audit row naming the account itself", async ({ page }
     .toBe(`${SEEDED_NAME} → ${NEW_NAME}`);
 
   await page.goto("/settings/audit");
-  await expect(page.getByText("Name changed by the account itself")).toBeVisible();
+  await expect(page.locator("tbody").getByText("Name changed by the account itself")).toBeVisible();
 });
 
 // The address keeps its password gate. A name arriving in the same request must not acquire one,

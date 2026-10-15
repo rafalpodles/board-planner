@@ -86,8 +86,8 @@ describe("can", () => {
   });
 
   it("a plan is a named set of keys, not a mode: a free organisation with pro's own feature list stays granted only what it lists", () => {
-    const withOneFeature = organisation({ plan: "free", features: ["audit.export"] });
-    expect(can(withOneFeature, "audit.export")).toBe(true);
-    expect(FEATURE_KEYS.filter((f) => can(withOneFeature, f))).toEqual(["audit.export"]);
+    const withOneFeature = organisation({ plan: "free", features: ["integrations.coda"] });
+    expect(can(withOneFeature, "integrations.coda")).toBe(true);
+    expect(FEATURE_KEYS.filter((f) => can(withOneFeature, f))).toEqual(["integrations.coda"]);
   });
 });

@@ -93,6 +93,7 @@ const RECIPES: Record<string, Recipe> = {
     handled: { status: 400, body: /icon must be empty or one of the supported project icons/ },
   },
   "GET /api/projects/[projectId]/audit": { send: get, handled: { status: 200, body: JSON_ARRAY } },
+  "GET /api/projects/[projectId]/audit/export": { send: get, handled: { status: 200, body: /^createdAt,actor,action,detail\r\n/ } },
   // The check the settings page makes before the download: it answers without exporting or recording anything (BP-1011)
   "GET /api/projects/[projectId]/export": {
     send: (request, path) => request.get(`${path}?check=1`),
