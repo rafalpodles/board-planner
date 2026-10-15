@@ -1,5 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
-import { allowLoopbackIn, fetchPullRequests, matchPRsToTasks, reduceChecks } from "./github";
+import {
+  allowLoopbackIn,
+  fetchDeployments,
+  fetchDeploymentStatuses,
+  fetchPullRequests,
+  GitHubRateLimited,
+  matchPRsToTasks,
+  reduceChecks,
+} from "./github";
 
 /**
  * BP-472 found `coda.ts` calling `safeFetch` with no `DestinationOptions` at all — a silent
@@ -243,5 +251,51 @@ describe("reduceChecks", () => {
         }).ci
       ).toBe("failure");
     });
+  });
+});
+
+describe("deployments and the rate limit they can hit (BP-878)", () => {
+  const refused = (headers: Record<string, string>) =>
+    safeFetch.mockResolvedValueOnce(new Response("{}", { status: 403, headers }));
+
+  it("asks for one environment, a page at a time, and a deployment's statuses", async () => {
+    safeFetch.mockClear();
+    await fetchDeployments("o", "r", "tok", "production", 2);
+    await fetchDeploymentStatuses("o", "r", "tok", 7);
+
+    expect(safeFetch.mock.calls[0][0]).toMatch(/\/repos\/o\/r\/deployments\?environment=production&per_page=100&page=2$/);
+    expect(safeFetch.mock.calls[1][0]).toMatch(/\/repos\/o\/r\/deployments\/7\/statuses\?per_page=10$/);
+  });
+
+  it("a primary limit says when it resets", async () => {
+    refused({ "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1789000000" });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const err = await fetchDeployments("o", "r", "tok", "production", 1).catch((e) => e);
+
+    expect(err).toBeInstanceOf(GitHubRateLimited);
+    expect(err.until).toEqual(new Date(1789000000 * 1000));
+  });
+
+  it("a secondary limit waits as long as retry-after says", async () => {
+    refused({ "retry-after": "120" });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const before = Date.now();
+
+    const err = await fetchDeployments("o", "r", "tok", "production", 1).catch((e) => e);
+
+    expect(err).toBeInstanceOf(GitHubRateLimited);
+    expect(err.until.getTime()).toBeGreaterThanOrEqual(before + 120_000);
+    expect(err.until.getTime()).toBeLessThan(before + 125_000);
+  });
+
+  it("any other refusal is an ordinary error", async () => {
+    refused({ "x-ratelimit-remaining": "4999" });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const err = await fetchDeployments("o", "r", "tok", "production", 1).catch((e) => e);
+
+    expect(err).not.toBeInstanceOf(GitHubRateLimited);
+    expect(err.message).toBe("GitHub answered 403");
   });
 });
