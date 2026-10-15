@@ -173,6 +173,18 @@ test("a Jira Excel export imports through the same mapping, its wiki text turned
   });
 });
 
+test("an old binary .xls is refused with a way forward, not read as text", async ({ page }) => {
+  await signIn(page, "owner");
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
+  await page.getByLabel("Import file (CSV, Excel, Jira XML or JSON)").setInputFiles({
+    name: "old.xls",
+    mimeType: "application/vnd.ms-excel",
+    buffer: Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0, 0, 0, 0x3e, 0]),
+  });
+  await expect(card(page)).toContainText("This is not a text file. Save it as .xlsx or .csv and try again.");
+  await expect(page.getByTestId("csv-mapping")).toHaveCount(0);
+});
+
 test("a Jira XML export imports with its comments named by their authors and its HTML turned into Markdown", async ({ page }) => {
   const html = (text: string) => xmlEscape(text);
   const xml = `<?xml version="1.0" encoding="utf-8"?>
