@@ -14,11 +14,17 @@ const MONTHS: Record<string, number> = {
 // Jira's default format, e.g. "15/Oct/26 9:30 AM", with English or Polish month names
 const JIRA = /^(\d{1,2})\/([a-ząćęłńóśźż]{3,4})\/(\d{2}|\d{4})(?:\s+(\d{1,2}):(\d{2})(?:\s*([ap])\.?m\.?)?)?$/i;
 
+function pivot(yy: number): number {
+  const year = 2000 + yy;
+  return year > new Date().getUTCFullYear() + 20 ? year - 100 : year;
+}
+
 function jira(value: string): { date: string; time: string | null } | null {
   const m = JIRA.exec(value);
   if (!m) return null;
   const month = MONTHS[m[2].toLowerCase().slice(0, 3)] ?? MONTHS[m[2].toLowerCase()];
-  const year = m[3].length === 2 ? 2000 + +m[3] : +m[3];
+  // Two digits are read the way Java writes them: within twenty years ahead of now, else the century before
+  const year = m[3].length === 2 ? pivot(+m[3]) : +m[3];
   const date = month ? day(year, month, +m[1]) : null;
   if (!date) return null;
   if (m[4] === undefined) return { date, time: null };

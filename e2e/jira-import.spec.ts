@@ -26,7 +26,7 @@ async function imported() {
   return (await db()).collection("tasks").find({ project: PROJECT_ID, "externalRef.source": "Jira" }).sort({ "externalRef.id": 1 }).toArray();
 }
 
-const card = (page: Page) => page.locator("section").filter({ has: page.getByLabel("Import file (CSV or JSON)") });
+const card = (page: Page) => page.locator("section").filter({ has: page.getByLabel("Import file (CSV, Excel, Jira XML or JSON)") });
 
 async function press(page: Page, name: string) {
   const answered = page.waitForResponse((r) => r.url().endsWith("/import") && r.request().method() === "POST");
@@ -69,7 +69,7 @@ test.afterEach(async () => {
 test("a Jira export imports with comments, labels, dates and priorities, and a second export updates it", async ({ page }) => {
   await signIn(page, "owner");
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
-  await page.getByLabel("Import file (CSV or JSON)").setInputFiles({ name: "Jira.csv", mimeType: "text/csv", buffer: Buffer.from(JIRA) });
+  await page.getByLabel("Import file (CSV, Excel, Jira XML or JSON)").setInputFiles({ name: "Jira.csv", mimeType: "text/csv", buffer: Buffer.from(JIRA) });
 
   const mapping = page.getByTestId("csv-mapping");
   await expect(mapping).toContainText("Recognised as a Jira export");
@@ -117,7 +117,7 @@ test("a Jira export imports with comments, labels, dates and priorities, and a s
   // Exported again a week later: Jira names the file "Jira (1).csv", and nothing is made twice
   await page.reload();
   await page
-    .getByLabel("Import file (CSV or JSON)")
+    .getByLabel("Import file (CSV, Excel, Jira XML or JSON)")
     .setInputFiles({ name: "Jira (1).csv", mimeType: "text/csv", buffer: Buffer.from(JIRA.replace("Sign in with Google", "Sign in with Google and GitHub")) });
   await expect(page.getByLabel("Source name")).toHaveValue("Jira");
   await expect(mapping.getByLabel("Assignee “Maya Kowalska”")).toHaveValue(MEMBER_USERNAME);

@@ -137,7 +137,17 @@ function resolveFields(report: ImportReport, task: ImportTask, board: Board): Re
     if (raw === null || raw === undefined || raw === "") continue;
     let value: unknown = raw;
     if (field.fieldType === "dropdown") value = matchOptionValue(field, raw) ?? raw;
-    if (field.fieldType === "multiselect" && Array.isArray(raw)) value = raw.map((v) => matchOptionValue(field, v) ?? v);
+    if (field.fieldType === "multiselect" && Array.isArray(raw)) {
+      // Labels are free-form in most trackers: the ones this board offers come across, each other one is listed
+      const known: string[] = [];
+      for (const v of raw) {
+        const id = matchOptionValue(field, v);
+        if (id) known.push(id);
+        else report.dropped.push({ id: task.id, field: field.name, value: shown(v), reason: `${field.name} has no such option` });
+      }
+      if (known.length === 0) continue;
+      value = [...new Set(known)];
+    }
     if (field.fieldType === "number" && typeof raw === "string" && raw.trim() && !Number.isNaN(Number(raw))) value = Number(raw);
     const verdict = validateCustomFieldValues({ [String(field._id)]: value }, [{ ...field, required: false }]);
     if (!verdict.valid) {
