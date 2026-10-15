@@ -1,8 +1,8 @@
 import { ImageResponse } from "next/og";
 import { APP_DESCRIPTION, APP_NAME } from "@/lib/brand";
+import { LINK_PREVIEW_IMAGE_SIZE } from "@/lib/link-preview";
 
-export const alt = APP_NAME;
-export const size = { width: 1200, height: 630 };
+export const size = LINK_PREVIEW_IMAGE_SIZE;
 export const contentType = "image/png";
 
 const CARDS: { x: number; y: number; opacity: number }[] = [

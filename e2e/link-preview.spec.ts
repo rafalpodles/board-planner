@@ -10,12 +10,14 @@ import { APP_NAME } from "../src/lib/brand";
 
 test.beforeEach(seed);
 
+// Next streams metadata into <body> for a browser and puts it in <head> only for the crawlers it knows
+const TEAMS_UNFURLER = "Mozilla/5.0 (Windows NT 6.1; WOW64) SkypeUriPreview Preview/0.5";
 const TASK = `/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`;
 
 async function head(request: APIRequestContext, path: string) {
-  const response = await request.get(path, { maxRedirects: 0 });
+  const response = await request.get(path, { maxRedirects: 0, headers: { "user-agent": TEAMS_UNFURLER } });
   expect(response.status()).toBe(200);
-  const html = await response.text();
+  const html = (await response.text()).split("</head>")[0];
   const meta = (property: string) =>
     html.match(new RegExp(`<meta (?:property|name)="${property}" content="([^"]*)"`))?.[1] ?? null;
   const count = (property: string) => html.match(new RegExp(`<meta (?:property|name)="${property}"`, "g"))?.length ?? 0;
@@ -32,6 +34,7 @@ test("a task link unfurls with its key and the branded image, without a session"
   const image = meta("og:image");
   expect(image).not.toBeNull();
   expect(count("og:image")).toBe(1);
+  // The origin itself is pinned by organisations-addresses.spec.ts: here Next's localhost fallback would equal baseURL
   expect(new URL(image!).origin).toBe(new URL(baseURL!).origin);
   expect(meta("og:image:width")).toBe("1200");
   expect(meta("og:image:height")).toBe("630");

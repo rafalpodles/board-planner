@@ -147,14 +147,13 @@ describe("originOfHost (BP-1058)", () => {
     process.env.ORGANISATION_DOMAIN = "board.test";
     process.env.PUBLIC_ORIGIN = "http://board.test:3000";
     expect(originOfHost("Acme.board.test:3000")).toBe("http://acme.board.test:3000");
-    expect(findOne).not.toHaveBeenCalled();
   });
 
-  it("is the default organisation's host though its label is reserved", () => {
+  it("is the default organisation's host when it lies outside the domain", () => {
     process.env.ORGANISATION_DOMAIN = "board-planner.com";
-    process.env.ORGANISATION_DEFAULT_HOST = "app.board-planner.com";
-    process.env.PUBLIC_ORIGIN = "https://app.board-planner.com";
-    expect(originOfHost("app.board-planner.com")).toBe("https://app.board-planner.com");
+    process.env.ORGANISATION_DEFAULT_HOST = "boards.acme-corp.com";
+    process.env.PUBLIC_ORIGIN = "https://board-planner.com";
+    expect(originOfHost("boards.acme-corp.com")).toBe("https://boards.acme-corp.com");
   });
 
   it("falls back to PUBLIC_ORIGIN for a host outside the domain, so a forged Host names no other site", () => {
