@@ -155,7 +155,7 @@ function day(year: number, month: number, date: number): string | null {
 // Day first with dots (Polish and German Excel); with slashes only when one part cannot be a month
 export function normaliseDay(raw: string): string {
   const value = raw.trim();
-  const iso = /^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/.exec(value);
+  const iso = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]\d.*)?$/.exec(value);
   if (iso) return day(+iso[1], +iso[2], +iso[3]) ?? value;
   const dotted = /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s.*)?$/.exec(value);
   if (dotted) return day(+dotted[3], +dotted[2], +dotted[1]) ?? value;
@@ -168,15 +168,11 @@ export function normaliseDay(raw: string): string {
   return value;
 }
 
-const ZONED = /(?:Z|[+-]\d{2}:?\d{2})$/i;
-
 // A time with no zone is read as UTC, so the same sheet means the same instant on every server
 export function normaliseInstant(raw: string): string {
   const value = raw.trim();
-  if (/^\d{4}-\d{2}-\d{2}[T ]\d{1,2}:\d{2}/.test(value)) {
-    const iso = value.replace(" ", "T");
-    return ZONED.test(iso) ? iso : `${iso}Z`;
-  }
+  const iso = /^(\d{4}-\d{2}-\d{2})[T ](\d{1,2}):(\d{2})(:\d{2}(?:\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?$/i.exec(value);
+  if (iso) return `${iso[1]}T${pad(+iso[2])}:${iso[3]}${iso[4] ?? ":00"}${iso[5] ?? "Z"}`;
   const parts = /^(\S+)(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(value);
   if (!parts) return value;
   const date = normaliseDay(parts[1]);

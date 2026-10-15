@@ -20,7 +20,6 @@ interface Saved {
   targets: CsvTarget[];
   statuses: Record<string, string>;
   users: Record<string, string | null>;
-  source: string;
 }
 
 const AUTOMATIC = "";
@@ -90,7 +89,7 @@ export function CsvMapping({
   fileName: string;
   disabled: boolean;
   onColumns: (columns: ApiProjectColumn[]) => void;
-  onChange: (payload: CsvPayload | null, remember: Saved) => void;
+  onChange: (payload: CsvPayload | null, remember: Saved, key: string) => void;
 }) {
   const api = useApi();
   const columns = useMemo(() => effectiveColumns(project.columns) as ApiProjectColumn[], [project.columns]);
@@ -102,12 +101,13 @@ export function CsvMapping({
     [fields]
   );
   const remembered = useMemo(() => recall(projectId, table.headers), [projectId, table.headers]);
-  const upload = useMemo(() => Math.random().toString(36).slice(2, 10), [table]);
+  const [upload] = useState(() => Math.random().toString(36).slice(2, 10));
 
   const [targets, setTargets] = useState<CsvTarget[]>(() => remembered?.targets ?? guessTargets(table.headers, fieldShapes));
   const [statuses, setStatuses] = useState<Record<string, string>>(remembered?.statuses ?? {});
   const [users, setUsers] = useState<Record<string, string | null>>(remembered?.users ?? {});
-  const [source, setSource] = useState(remembered?.source ?? sourceFrom(fileName));
+  // Not remembered: a source name carried over to another file of the same shape would update that file's tasks
+  const [source, setSource] = useState(() => sourceFrom(fileName));
   const [members, setMembers] = useState<{ username: string; fullName?: string }[] | null>(null);
   const [membersFailed, setMembersFailed] = useState(false);
   const [roles, setRoles] = useState<Record<string, ColumnRole>>({});
@@ -152,8 +152,8 @@ export function CsvMapping({
   const trimmedSource = source.trim();
 
   useEffect(() => {
-    const remember = { targets: liveTargets, statuses, users, source: trimmedSource };
-    if (!hasTitle || tooMany || !trimmedSource || adding !== null || members === null) return onChange(null, remember);
+    const remember = { targets: liveTargets, statuses, users };
+    if (!hasTitle || tooMany || !trimmedSource || adding !== null || members === null) return onChange(null, remember, "");
     const mappedStatuses: Record<string, string> = {};
     for (const value of statusValues) {
       const id = statusOf(value);
@@ -168,9 +168,12 @@ export function CsvMapping({
     }
     // With no id column a row is known only by its line, so each upload stands on its own
     const name = hasId ? trimmedSource : `${trimmedSource} ${upload}`;
+    // What decides the payload, cheaper to compare than the payload itself
+    const key = JSON.stringify([upload, liveTargets, mappedStatuses, mappedUsers, name, fieldsKey]);
     onChange(
       { bundle: csvToBundle(table, liveTargets, name, fieldShapes, upload), mapping: { statuses: mappedStatuses, users: mappedUsers } },
-      remember
+      remember,
+      key
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the keys stand for the arrays they are built from
   }, [liveTargets, statuses, users, trimmedSource, columnsKey, fieldsKey, membersKey, table, adding, upload]);
@@ -323,6 +326,10 @@ export function CsvMapping({
             </p>
           )}
         </fieldset>
+      )}
+
+      {(liveTargets.includes("createdAt") || liveTargets.includes("completedAt")) && (
+        <p className="text-sm text-text-muted">A time with no zone is read as UTC.</p>
       )}
 
       <div className="max-w-xs">

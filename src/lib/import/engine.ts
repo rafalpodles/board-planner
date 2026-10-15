@@ -101,7 +101,7 @@ function byName<T extends string>(candidates: readonly T[], name: string): T | u
 function calendarDay(report: ImportReport, id: string, raw: string | undefined): Date | null {
   if (!raw) return null;
   const at = new Date(`${raw}T00:00:00.000Z`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw) || Number.isNaN(at.getTime()) || at.toISOString().slice(0, 10) !== raw) {
+  if (Number.isNaN(at.getTime()) || at.toISOString().slice(0, 10) !== raw) {
     report.dropped.push({ id, field: "dueDate", value: shown(raw), reason: "not a day, YYYY-MM-DD" });
     return null;
   }

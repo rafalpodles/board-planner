@@ -69,11 +69,11 @@ function Report({ report }: { report: ImportReport }) {
 }
 
 const isJson = (file: File) => /\.json$/i.test(file.name) || file.type === "application/json";
-const signature = (payload: Payload | null) => (payload ? JSON.stringify(payload) : "");
 
 export function ImportSection({ projectId, project, patchProject }: Pick<SectionProps, "projectId" | "project" | "patchProject">) {
   const api = useApi();
-  const [payload, setPayload] = useState<Payload | null>(null);
+  // The key travels with the payload, so a check is recorded against exactly what it sent
+  const [{ payload, key }, setPayload] = useState<{ payload: Payload | null; key: string }>({ payload: null, key: "" });
   const [table, setTable] = useState<{ rows: CsvTable; fileName: string } | null>(null);
   const sent = useRef("");
   const remembered = useRef<Parameters<typeof rememberCsvMapping>[2] | null>(null);
@@ -89,7 +89,7 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
     const file = event.target.files?.[0];
     const mine = seq.current;
     sent.current = "";
-    setPayload(null);
+    setPayload({ payload: null, key: "" });
     setTable(null);
     setReport(null);
     setChecked(false);
@@ -99,7 +99,7 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
     if (file.size > MAX_FILE_BYTES) return setFileError("The file is larger than the 20 MB an import takes.");
     const text = decodeCsv(new Uint8Array(await file.arrayBuffer()));
     if (mine !== seq.current) return;
-    if (!isJson(file) && !/^\s*[{[]/.test(text)) {
+    if (!isJson(file) && !/^\s*\{/.test(text)) {
       const read = readCsvTable(text);
       if (read.headers.length === 0 || read.rows.length === 0) return setFileError("This file holds no rows under a header line.");
       return setTable({ rows: read, fileName: file.name });
@@ -107,8 +107,8 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
     try {
       const next = payloadOf(JSON.parse(text));
       if (!next) return setFileError("This file holds no import bundle: it needs a list of tasks.");
-      sent.current = signature(next);
-      setPayload(next);
+      sent.current = `file:${mine}`;
+      setPayload({ payload: next, key: sent.current });
     } catch {
       setFileError("This file is not JSON.");
     }
@@ -117,16 +117,16 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
   async function send(dryRun: boolean) {
     if (!payload) return;
     const mine = ++seq.current;
-    const asked = sent.current;
+    const asked = key;
     setBusy(dryRun ? "checking" : "importing");
     setChecked(false);
     setError("");
     try {
       const answer: ImportReport = await api.post(`/api/projects/${projectId}/import`, { ...payload, dryRun });
-      if (mine !== seq.current) return;
-      setReport(answer);
       // The mapping may have moved on while this was answered; then this check is not of what is on screen
       const current = asked === sent.current;
+      if (mine !== seq.current || (dryRun && !current)) return;
+      setReport(answer);
       setChecked(dryRun && !answer.error && current);
       if (dryRun && current && table && remembered.current) rememberCsvMapping(projectId, table.rows.headers, remembered.current);
     } catch (e) {
@@ -136,12 +136,11 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
     }
   }
 
-  const csvChanged = useCallback((next: CsvPayload | null, remember: Parameters<typeof rememberCsvMapping>[2]) => {
+  const csvChanged = useCallback((next: CsvPayload | null, remember: Parameters<typeof rememberCsvMapping>[2], now: string) => {
     remembered.current = remember;
-    const now = signature(next);
     if (now === sent.current) return;
     sent.current = now;
-    setPayload(next);
+    setPayload({ payload: next, key: now });
     setChecked(false);
     setReport(null);
   }, []);

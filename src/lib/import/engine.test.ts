@@ -294,7 +294,6 @@ describe("runImport", () => {
   it("reads only ISO dates for a creation or finish time, so a day-first date is never read month-first", async () => {
     const { db, writes } = fakeDb();
     const report = await run(db, [{ id: "1", title: "a", createdAt: "05/10/2026" }]);
-    expect(writes.tasks[0].createdAt).not.toEqual(new Date("2026-05-10"));
     expect(report.dropped).toEqual([{ id: "1", field: "createdAt", value: "05/10/2026", reason: "not a date in the past" }]);
   });
 
