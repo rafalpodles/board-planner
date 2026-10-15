@@ -104,6 +104,7 @@ export const GROUPS = {
     "import-engine.spec.ts",
     "csv-import.spec.ts",
     "jira-import.spec.ts",
+    "import-links.spec.ts",
     "project-owner-persona.spec.ts",
     "project-owner-gate.spec.ts",
     "owner-manages-workers.spec.ts",

@@ -43,7 +43,8 @@ const BUILT_IN: { value: CsvTarget; label: string }[] = [
   { value: "createdAt", label: "Created" },
   { value: "completedAt", label: "Completed" },
   { value: "comment", label: "Comment (one per column)" },
-  { value: "parent", label: "Parent (listed, not linked)" },
+  { value: "parent", label: "Parent" },
+  { value: "blockedBy", label: "Blocked by (IDs)" },
 ];
 
 const storageKey = (projectId: string, headers: string[]) => `bp:csv-import:${projectId}:${shapeKey(headers)}`;

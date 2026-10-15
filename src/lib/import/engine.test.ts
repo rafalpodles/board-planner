@@ -29,6 +29,8 @@ const project = {
   ],
 };
 
+let linkFailure: Error | null = null;
+
 const ACCOUNTS = [{ _id: MEMBER, username: "maya", email: "maya.k@example.com" }];
 
 type Existing = { id: string; status?: string; held?: boolean; comments?: string[] };
@@ -64,6 +66,7 @@ function fakeDb({ existing = [] as Existing[], failOn = 0, landBeforeFailing = 0
     Task: {
       find: (filter: Record<string, unknown>) => {
         writes.taskQueries.push(filter);
+        if (!filter["externalRef.id"]) return chain(() => (linkFailure ? (() => { throw linkFailure; })() : []));
         const ids = (filter["externalRef.id"] as { $in: string[] }).$in;
         return chain(() => [
           ...rows.filter((r) => ids.includes(r.externalRef.id)),
@@ -399,8 +402,10 @@ describe("runImport", () => {
 
   it("stops at a chunk that fails, keeps what came before with its history, and says how far it got", async () => {
     const { db, writes } = fakeDb({ failOn: 2, landBeforeFailing: 3 });
-    const tasks = Array.from({ length: IMPORT_CHUNK * 2 + 5 }, (_, i) => ({ id: String(i), title: `t${i}` }));
+    const tasks = Array.from({ length: IMPORT_CHUNK * 2 + 5 }, (_, i) => ({ id: String(i), title: `t${i}`, ...(i === IMPORT_CHUNK * 2 && { parent: "0" }) }));
     const report = await run(db, tasks);
+    // A task the stop never reached says so, rather than going unmentioned
+    expect(report.notImported).toContainEqual({ id: String(IMPORT_CHUNK * 2), what: "parent “0”: this task was not imported: the import stopped" });
     const error = "another import of the same tasks ran at the same time";
     expect(report).toMatchObject({ complete: false, processed: IMPORT_CHUNK + 3, created: IMPORT_CHUNK + 3, error });
     expect(writes.tasks).toHaveLength(IMPORT_CHUNK + 3);
@@ -408,5 +413,23 @@ describe("runImport", () => {
     const created = logActivities.mock.calls.flatMap((c) => c[1] as { action: string }[]).filter((r) => r.action === "created");
     expect(created).toHaveLength(IMPORT_CHUNK + 3);
     expect(logProjectAudit.mock.calls[0][4]).toContain(`Stopped after ${IMPORT_CHUNK + 3} of ${IMPORT_CHUNK * 2 + 5}: ${error}`);
+  });
+
+  it("says a link names a task of the file that was skipped, rather than no task at all", async () => {
+    const { db } = fakeDb();
+    const report = await run(db, [{ id: "1", title: "a", parent: "2" }, { id: "2", title: "  " }], {}, true);
+    expect(report.notImported).toContainEqual({ id: "1", what: "parent “2”: that task was skipped: no title" });
+  });
+
+  it("keeps its report and its audit row when making the links fails", async () => {
+    linkFailure = new Error("the database went away");
+    try {
+      const { db } = fakeDb();
+      const report = await run(db, [{ id: "1", title: "a", parent: "2" }, { id: "2", title: "b" }]);
+      expect(report).toMatchObject({ created: 2, complete: false, error: "the links between tasks were not made: the database went away" });
+      expect(logProjectAudit).toHaveBeenCalledTimes(1);
+    } finally {
+      linkFailure = null;
+    }
   });
 });

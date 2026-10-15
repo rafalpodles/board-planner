@@ -37,6 +37,8 @@ export interface ImportMapping {
   types?: Record<string, string>;
 }
 
+const MAX_BLOCKERS = 100;
+
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -97,8 +99,16 @@ export function parseBundle(raw: unknown): Parsed<ImportBundle> {
       if (!optionalString(task[key])) return { ok: false, error: `${at}.${key} must be a string` };
     }
     if (task.fields !== undefined && !isRecord(task.fields)) return { ok: false, error: `${at}.fields must be an object` };
-    if (task.blockedBy !== undefined && (!Array.isArray(task.blockedBy) || task.blockedBy.some((b) => typeof b !== "string"))) {
-      return { ok: false, error: `${at}.blockedBy must be a list of ids` };
+    if (typeof task.parent === "string" && task.parent.length > EXTERNAL_ID_MAX_LENGTH) {
+      return { ok: false, error: `${at}.parent must be an id of at most ${EXTERNAL_ID_MAX_LENGTH} characters` };
+    }
+    if (
+      task.blockedBy !== undefined &&
+      (!Array.isArray(task.blockedBy) ||
+        task.blockedBy.length > MAX_BLOCKERS ||
+        task.blockedBy.some((b) => typeof b !== "string" || b.length > EXTERNAL_ID_MAX_LENGTH))
+    ) {
+      return { ok: false, error: `${at}.blockedBy must be a list of at most ${MAX_BLOCKERS} ids` };
     }
     if (task.comments !== undefined) {
       if (!Array.isArray(task.comments)) return { ok: false, error: `${at}.comments must be a list` };

@@ -35,4 +35,12 @@ describe("parseMapping", () => {
     expect(parseMapping({ users: { a: null, b: "maya" } })).toMatchObject({ ok: true, value: { users: { a: null, b: "maya" } } });
     expect(parseMapping({ statuses: { a: 1 } })).toEqual({ ok: false, error: 'mapping.statuses["a"] must be a string' });
   });
+
+  it("refuses a parent or blocker that is not an id, and more blockers than a task takes", () => {
+    const long = "x".repeat(201);
+    expect(parseBundle({ source: "s", tasks: [{ id: "1", title: "t", parent: long }] }).ok).toBe(false);
+    expect(parseBundle({ source: "s", tasks: [{ id: "1", title: "t", blockedBy: [long] }] }).ok).toBe(false);
+    expect(parseBundle({ source: "s", tasks: [{ id: "1", title: "t", blockedBy: Array.from({ length: 101 }, (_, i) => String(i)) }] }).ok).toBe(false);
+    expect(parseBundle({ source: "s", tasks: [{ id: "1", title: "t", parent: "2", blockedBy: ["3"] }] }).ok).toBe(true);
+  });
 });
