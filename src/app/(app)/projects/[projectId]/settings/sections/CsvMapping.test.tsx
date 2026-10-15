@@ -41,10 +41,12 @@ describe("CsvMapping", () => {
     // As an older version stored it, with the source name
     window.localStorage.setItem(
       `bp:csv-import:p1:${table.headers.map((h) => h.toLowerCase()).join("\u0001")}`,
-      JSON.stringify({ targets: ["id", "title", "status", "assignee", "ignore"], statuses: {}, users: {}, source: "q1" })
+      JSON.stringify({ targets: ["id", "title", "status", "assignee", "ignore"], statuses: { Open: "done" }, users: {}, source: "q1" })
     );
     const { last } = mount("q2 (3).csv");
     await waitFor(() => expect(last()?.bundle.source).toBe("q2"));
+    // The remembered entry was read: its status choice came through
+    expect(last()!.mapping.statuses).toEqual({ Open: "done" });
   });
 
   it("drops a remembered choice that no longer names a field, a column or a member", async () => {
@@ -55,9 +57,7 @@ describe("CsvMapping", () => {
     });
     const { last } = mount();
     await waitFor(() => expect(last()).not.toBeNull());
-    expect((screen.getByLabelText("Size") as HTMLSelectElement).value).toBe("ignore");
-    expect((screen.getByLabelText("Status “Open”") as HTMLSelectElement).value).toBe("");
-    expect((screen.getByLabelText("Assignee “old.friend”") as HTMLSelectElement).value).toBe("");
+    expect(last()!.mapping.statuses).toEqual({ Open: "todo" });
     expect(last()!.bundle.tasks[0]).not.toHaveProperty("fields");
     expect(last()!.mapping.users).toEqual({});
   });

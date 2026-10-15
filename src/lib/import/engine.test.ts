@@ -291,6 +291,16 @@ describe("runImport", () => {
     expect(writes.updates[1].update.$set).toMatchObject({ description: "new", category: "bug", priority: "high" });
   });
 
+  it("refuses a day that does not exist rather than rolling it into the next month, and reads a time with no zone as UTC", async () => {
+    const { db, writes } = fakeDb();
+    const report = await run(db, [
+      { id: "1", title: "a", createdAt: "2026-02-31T08:00:00Z" },
+      { id: "2", title: "b", createdAt: "2026-01-15T08:00" },
+    ]);
+    expect(report.dropped.map((d) => [d.id, d.field])).toEqual([["1", "createdAt"]]);
+    expect(writes.tasks[1].createdAt).toEqual(new Date("2026-01-15T08:00:00.000Z"));
+  });
+
   it("reads only ISO dates for a creation or finish time, so a day-first date is never read month-first", async () => {
     const { db, writes } = fakeDb();
     const report = await run(db, [{ id: "1", title: "a", createdAt: "05/10/2026" }]);

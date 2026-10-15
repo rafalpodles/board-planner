@@ -84,8 +84,9 @@ function clip(report: ImportReport, id: string, field: string, text: string, max
 
 function instant(report: ImportReport, id: string, field: string, raw: string | undefined): Date | null {
   if (!raw) return null;
-  const at = new Date(raw);
-  if (!/^\d{4}-\d{2}-\d{2}/.test(raw) || Number.isNaN(at.getTime()) || at.getTime() > Date.now()) {
+  // A time with no zone is read as UTC, so the same file means the same instant on every server
+  const at = new Date(/T\d[^Z+-]*$/i.test(raw) ? `${raw}Z` : raw);
+  if (!isCalendarDay(raw.slice(0, 10)) || Number.isNaN(at.getTime()) || at.getTime() > Date.now()) {
     report.dropped.push({ id, field, value: shown(raw), reason: "not a date in the past" });
     return null;
   }
@@ -98,14 +99,18 @@ function byName<T extends string>(candidates: readonly T[], name: string): T | u
   return candidates.find((c) => c.toLowerCase() === wanted);
 }
 
+function isCalendarDay(text: string): boolean {
+  const at = new Date(`${text}T00:00:00.000Z`);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) && !Number.isNaN(at.getTime()) && at.toISOString().slice(0, 10) === text;
+}
+
 function calendarDay(report: ImportReport, id: string, raw: string | undefined): Date | null {
   if (!raw) return null;
-  const at = new Date(`${raw}T00:00:00.000Z`);
-  if (Number.isNaN(at.getTime()) || at.toISOString().slice(0, 10) !== raw) {
+  if (!isCalendarDay(raw)) {
     report.dropped.push({ id, field: "dueDate", value: shown(raw), reason: "not a day, YYYY-MM-DD" });
     return null;
   }
-  return at;
+  return new Date(`${raw}T00:00:00.000Z`);
 }
 
 function noteUnmapped(list: string[], value: string) {

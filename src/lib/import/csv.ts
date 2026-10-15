@@ -171,10 +171,16 @@ export function normaliseDay(raw: string): string {
 // A time with no zone is read as UTC, so the same sheet means the same instant on every server
 export function normaliseInstant(raw: string): string {
   const value = raw.trim();
-  const iso = /^(\d{4}-\d{2}-\d{2})[T ](\d{1,2}):(\d{2})(:\d{2}(?:\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?$/i.exec(value);
-  if (iso) return `${iso[1]}T${pad(+iso[2])}:${iso[3]}${iso[4] ?? ":00"}${iso[5] ?? "Z"}`;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?\s*(Z|[+-]\d{2}(?::?\d{2})?)?$/i.exec(value);
+  if (iso) {
+    const date = day(+iso[1], +iso[2], +iso[3]);
+    if (!date) return value;
+    const zone = !iso[8] ? "Z" : /^[+-]\d{2}$/.test(iso[8]) ? `${iso[8]}:00` : iso[8].toUpperCase();
+    return `${date}T${pad(+iso[4])}:${iso[5]}:${iso[6] ?? "00"}${iso[7] ? `.${iso[7]}` : ""}${zone}`;
+  }
   const parts = /^(\S+)(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(value);
-  if (!parts) return value;
+  // Anything else carrying a time is left for the import to refuse and report, not read as midnight
+  if (!parts || /[T:]/i.test(parts[1])) return value;
   const date = normaliseDay(parts[1]);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return value;
   return `${date}T${pad(+(parts[2] ?? 0))}:${parts[3] ?? "00"}:${parts[4] ?? "00"}Z`;
