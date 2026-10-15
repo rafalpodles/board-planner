@@ -64,7 +64,10 @@ function recall(projectId: string, headers: string[]): Saved | null {
 
 export function rememberCsvMapping(projectId: string, headers: string[], saved: Saved) {
   try {
-    const targets = headerRuns(headers).map((start) => saved.targets[start]);
+    const runs = headerRuns(headers);
+    // One choice per run only when the run agrees, so a column deliberately left out of it stays out
+    const uniform = runs.every((start, r) => saved.targets.slice(start, runs[r + 1] ?? headers.length).every((t) => t === saved.targets[start]));
+    const targets = uniform ? runs.map((start) => saved.targets[start]) : saved.targets;
     window.localStorage.setItem(storageKey(projectId, headers), JSON.stringify({ ...saved, targets }));
   } catch {}
 }
@@ -222,6 +225,7 @@ export function CsvMapping({
       <p className="text-sm text-text-muted">
         {table.rows.length} rows, {table.headers.length} columns.
         {isJiraExport(table.headers) && " Recognised as a Jira export."}
+        {table.comments && ` Its ${table.comments.reduce((n, c) => n + c.length, 0)} comments come with it.`}
       </p>
       {tooMany && (
         <p role="alert" className="text-sm text-danger">

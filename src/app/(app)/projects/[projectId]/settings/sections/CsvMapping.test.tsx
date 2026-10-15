@@ -105,4 +105,20 @@ describe("CsvMapping", () => {
     expect((onChange.mock.calls.at(-1)![0] as CsvPayload).bundle.tasks[0].fields).toEqual({ Tag: "a" });
     expect((screen.getByLabelText("Tag (column 3)") as HTMLSelectElement).value).toBe("ignore");
   });
+
+  it("recalls a mapping when the next export has one more comment column", async () => {
+    rememberCsvMapping("p1", ["Title", "Comment", "Comment"], { targets: ["title", "comment", "comment"], statuses: {}, users: {} });
+    const sheet = readCsvTable("Title,Comment,Comment,Comment\nOne,a,b,c\n");
+    const onChange = vi.fn();
+    render(<CsvMapping projectId="p1" project={project} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
+    await waitFor(() => expect((onChange.mock.calls.at(-1)?.[0] as CsvPayload | null)?.bundle.tasks[0].comments).toHaveLength(3));
+  });
+
+  it("keeps a column deliberately left out of a run, at the same shape", async () => {
+    rememberCsvMapping("p1", ["Title", "Comment", "Comment"], { targets: ["title", "comment", "ignore"], statuses: {}, users: {} });
+    const sheet = readCsvTable("Title,Comment,Comment\nOne,a,b\n");
+    const onChange = vi.fn();
+    render(<CsvMapping projectId="p1" project={project} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
+    await waitFor(() => expect((onChange.mock.calls.at(-1)?.[0] as CsvPayload | null)?.bundle.tasks[0].comments).toEqual([{ id: "c1", body: "a" }]));
+  });
 });

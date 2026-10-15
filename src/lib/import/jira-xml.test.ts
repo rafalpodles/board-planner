@@ -115,3 +115,10 @@ describe("a re-export", () => {
     expect(ids(again)).toEqual([["jira-501", "712020:bbb"], ["jira-502", "712020:zzz"]]);
   });
 });
+
+describe("Jira Server and Data Center", () => {
+  it("reads their unassigned marker, written under username", () => {
+    const dc = XML.replace('<assignee accountid="-1">Unassigned</assignee>', '<assignee username="-1">Unassigned</assignee>');
+    expect(jiraXmlToTable(dc, new DOMParser())!.rows[1][5]).toBe("");
+  });
+});
