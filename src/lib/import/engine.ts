@@ -505,7 +505,11 @@ async function carryLinks(
   opts: { dryRun: boolean; pending: Set<string> }
 ) {
   const kept = new Set(resolved.map((t) => t.ref));
-  const outcome = await linkImported(db, projectId, importer, bundle.source, bundle.tasks.filter((t) => kept.has(t.id)), opts);
+  // A task of this file that has no task on the board to link: skipped, or after a stop never written
+  const absent = new Map<string, string>();
+  for (const s of report.skipped) absent.set(s.id, `was skipped: ${s.reason}`);
+  if (!opts.dryRun && !report.complete) for (const t of resolved) absent.set(t.ref, "was not imported: the import stopped");
+  const outcome = await linkImported(db, projectId, importer, bundle.source, bundle.tasks.filter((t) => kept.has(t.id)), { ...opts, absent });
   report.links = outcome.created;
   report.notImported.push(...outcome.unlinked);
 }
@@ -562,7 +566,12 @@ export async function runImport(
       report.error = stoppedBecause(err).message;
     }
     // What was written is linked even when the run stopped part-way; the rest is listed
-    await carryLinks(db, projectId, importer, bundle, resolved, report, { dryRun: false, pending: new Set() });
+    try {
+      await carryLinks(db, projectId, importer, bundle, resolved, report, { dryRun: false, pending: new Set() });
+    } catch (err) {
+      report.error ??= `the links between tasks were not made: ${stoppedBecause(err).message}`;
+      report.complete = false;
+    }
   });
 
   await logProjectAudit(db, projectId, importer, "tasks_imported", [

@@ -123,4 +123,34 @@ describe("linkImported", () => {
     expect(writes).toEqual([]);
     expect(logActivities).not.toHaveBeenCalled();
   });
+
+  it("refuses a task as its own parent", async () => {
+    const { db } = board([{ ref: "A" }]);
+    expect((await run(db, [{ id: "A", parent: "A" }])).unlinked).toEqual([{ id: "A", what: "parent: names the task itself" }]);
+  });
+
+  it("names why a task of the file has nothing to link: skipped, or not reached before a stop", async () => {
+    const { db } = board([{ ref: "A" }]);
+    const outcome = await linkImported(
+      db,
+      "p1",
+      IMPORTER,
+      "jira",
+      [{ id: "A", title: "t", parent: "S" }, { id: "L", title: "t", parent: "A" }],
+      { dryRun: false, pending: new Set(), absent: new Map([["S", "was skipped: no title"], ["L", "was not imported: the import stopped"]]) }
+    );
+    expect(outcome.unlinked).toEqual([
+      { id: "A", what: "parent “S”: that task was skipped: no title" },
+      { id: "L", what: "parent “A”: this task was not imported: the import stopped" },
+    ]);
+  });
+
+  it("counts and records only a link that landed", async () => {
+    const { db, tasks } = board([{ ref: "P" }, { ref: "C" }]);
+    (db as unknown as { Task: { bulkWrite: () => Promise<void> } }).Task.bulkWrite = async () => {};
+    const outcome = await run(db, [{ id: "C", parent: "P" }]);
+    expect(outcome.created).toBe(0);
+    expect(tasks[0].relations).toEqual([]);
+    expect(logActivities.mock.calls[0]?.[1] ?? []).toEqual([]);
+  });
 });

@@ -32,7 +32,7 @@ export async function linkImported(
   importer: Types.ObjectId,
   source: string,
   tasks: ImportTask[],
-  { dryRun, pending }: { dryRun: boolean; pending: Set<string> }
+  { dryRun, pending, absent = new Map() }: { dryRun: boolean; pending: Set<string>; absent?: Map<string, string> }
 ): Promise<LinkOutcome> {
   const outcome: LinkOutcome = { created: 0, unlinked: [] };
   const pairs: Pair[] = [];
@@ -98,9 +98,13 @@ export async function linkImported(
     const holder = idOf.get(holderRef);
     const other = idOf.get(otherRef);
     const what = pair.kind === "parent" ? "parent" : "blocked by";
-    if (!holder) continue;
+    if (!holder) {
+      outcome.unlinked.push({ id: holderRef, what: `${what} ${shownRef(otherRef)}: this task ${absent.get(holderRef) ?? "is not on the board"}` });
+      continue;
+    }
     if (!other) {
-      outcome.unlinked.push({ id: holderRef, what: `${what} ${shownRef(otherRef)}: no such task in this file or an earlier import` });
+      const why = absent.has(otherRef) ? `that task ${absent.get(otherRef)}` : "no such task in this file or an earlier import";
+      outcome.unlinked.push({ id: holderRef, what: `${what} ${shownRef(otherRef)}: ${why}` });
       continue;
     }
     if (holder === other) {
@@ -145,7 +149,7 @@ export async function linkImported(
   await db.Task.bulkWrite([
     ...parents.map((p) => ({
       updateOne: {
-        // The filter repeats the checks, so a link the board made in the meantime is not doubled
+        // A parent the board gave this child in the meantime is not doubled
         filter: { _id: p.parent, project: projectId, "relations.task": { $ne: new Types.ObjectId(p.child) } },
         update: { $push: { relations: { task: new Types.ObjectId(p.child), type: "parent_of" as const } } },
       },
@@ -158,10 +162,19 @@ export async function linkImported(
     })),
   ]);
 
-  const numbers = new Map(
-    (await db.Task.find({ _id: { $in: [...new Set([...parents.flatMap((p) => [p.parent, p.child]), ...blocked.flatMap((b) => [b.blocked, b.blocker])])] } }, "_id taskNumber")
-      .lean<{ _id: Types.ObjectId; taskNumber: number }[]>()).map((t) => [String(t._id), t.taskNumber])
+  // Counted and written into History from what the board holds now, not from the plan: a task deleted
+  // in between, or a link that did not land, is not announced
+  const after = await db.Task.find(
+    { project: projectId, _id: { $in: [...new Set([...parents.flatMap((p) => [p.parent, p.child]), ...blocked.flatMap((b) => [b.blocked, b.blocker])])] } },
+    "_id taskNumber relations blockedBy"
+  ).lean<Stored[]>();
+  const now = new Map(after.map((t) => [String(t._id), t]));
+  const landedParents = parents.filter(
+    (p) => now.has(p.child) && (now.get(p.parent)?.relations ?? []).some((r) => String(r.task) === p.child && r.type === "parent_of")
   );
+  const landedBlocked = blocked.filter((b) => now.has(b.blocker) && (now.get(b.blocked)?.blockedBy ?? []).some((id) => String(id) === b.blocker));
+  outcome.created = landedParents.length + landedBlocked.length;
+  const numbers = new Map(after.map((t) => [String(t._id), t.taskNumber]));
   const key = (id: string) => taskKeyOf(project?.key, numbers.get(id) ?? byId.get(id)?.taskNumber ?? 0);
   const row = (taskId: string, field: string, other: string) => ({
     projectId,
@@ -173,8 +186,8 @@ export async function linkImported(
     newValue: key(other),
   });
   await logActivities(db, [
-    ...parents.flatMap((p) => [row(p.parent, "parent_of", p.child), row(p.child, "child_of", p.parent)]),
-    ...blocked.flatMap((b) => [row(b.blocked, "blocked_by", b.blocker), row(b.blocker, "blocks", b.blocked)]),
+    ...landedParents.flatMap((p) => [row(p.parent, "parent_of", p.child), row(p.child, "child_of", p.parent)]),
+    ...landedBlocked.flatMap((b) => [row(b.blocked, "blocked_by", b.blocker), row(b.blocker, "blocks", b.blocked)]),
   ]);
   return outcome;
 }

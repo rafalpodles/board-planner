@@ -127,12 +127,12 @@ const GUESSES: [CsvTarget, RegExp][] = [
   ["completedAt", /^(completed|completed at|resolved|resolution date|done at|closed|zakończono|zakonczono|rozwiązane|rozwiazane)$/],
   ["parent", /^(parent|parent key|parent id|parent issue|epic link|nadrzędne|nadrzedne)$/],
   ["comment", /^(comment|comments|komentarz|komentarze)$/],
-  ["blockedBy", /^(blocked by|blockers|depends on|dependencies|blokowane przez|zależy od)$/],
+  ["blockedBy", /^(blocked by|blockers|depends on|dependencies|inward issue link \(blocks\)|blokowane przez|zależy od)$/],
 ];
 
 // Jira writes one column per comment and per label, all under the same header
 export function repeatable(target: CsvTarget, fields: CsvField[]): boolean {
-  if (target === "comment") return true;
+  if (target === "comment" || target === "blockedBy") return true;
   return target.startsWith("field:") && fields.find((f) => `field:${f.name}` === target)?.fieldType === "multiselect";
 }
 
@@ -278,7 +278,7 @@ export function csvToBundle(table: CsvTable, targets: CsvTarget[], source: strin
     };
     const parent = text("parent");
     if (parent) task.parent = keyOf.get(parent) ?? parent;
-    const blockers = (text("blockedBy") ?? "").split(/[,;\s]+/).filter(Boolean);
+    const blockers = targets.flatMap((t, column) => (t === "blockedBy" ? cell(column).split(/[,;\s]+/).filter(Boolean) : []));
     if (blockers.length) task.blockedBy = [...new Set(blockers.map((b) => keyOf.get(b) ?? b))];
     const values: Record<string, unknown> = {};
     const comments: ImportComment[] = [];

@@ -268,4 +268,13 @@ describe("Jira's own conventions", () => {
     expect(isJiraExport(["Summary", "Issue Type"])).toBe(false);
     expect(isJiraExport(["Klucz zgłoszenia", "Podsumowanie", "Typ zgłoszenia"])).toBe(true);
   });
+
+  it("gathers blockers from every Blocked by column, Jira's included, as keys", () => {
+    const table = readCsvTable(
+      "Issue key,Issue id,Summary,Issue Type,Inward issue link (Blocks),Inward issue link (Blocks)\nX-1,101,a,Bug,,\nX-2,102,b,Bug,101,X-9\nX-3,103,c,Bug,\"X-1, X-1;X-2\","
+    );
+    const targets = guessTargets(table.headers, []);
+    expect(targets.slice(4)).toEqual(["blockedBy", "blockedBy"]);
+    expect(csvToBundle(table, targets, "Jira", [], "u1").tasks.map((t) => t.blockedBy)).toEqual([undefined, ["X-1", "X-9"], ["X-1", "X-2"]]);
+  });
 });
