@@ -138,7 +138,7 @@ export function CsvMapping({
   const [statuses, setStatuses] = useState<Record<string, string>>(remembered?.statuses ?? {});
   const [users, setUsers] = useState<Record<string, string | null>>(remembered?.users ?? {});
   // Not remembered: a source name carried over to another file of the same shape would update that file's tasks
-  // Every Jira export, whatever its kind or file name, is one source, so changing kind updates rather than adds
+  // Every Jira export, whatever its kind or file name, is one source, so its tasks update whichever kind comes next
   const [source, setSource] = useState(() => (isJiraExport(table.headers) ? "Jira" : sourceFrom(fileName)));
   const [members, setMembers] = useState<{ username: string; fullName?: string }[] | null>(null);
   const [membersFailed, setMembersFailed] = useState(false);
@@ -241,7 +241,7 @@ export function CsvMapping({
   ];
   const userOptions = [
     { value: AUTOMATIC, label: "By username or e-mail" },
-    { value: UNASSIGNED, label: "Leave unassigned" },
+    { value: UNASSIGNED, label: "Not on this board (left unassigned, named in comments)" },
     ...(members ?? []).map((m) => ({ value: m.username, label: m.fullName ? `${m.fullName} (${m.username})` : m.username })),
   ];
 

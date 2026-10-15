@@ -26,7 +26,7 @@ const PRIORITY_NAMES: Record<string, Priority> = {
   major: "high",
   normal: "medium",
   lowest: "low", minor: "low", trivial: "low",
-  najwyższy: "urgent", krytyczny: "urgent", wysoki: "high", średni: "medium", normalny: "medium", niski: "low", najniższy: "low",
+  najwyższy: "urgent", krytyczny: "urgent", blokujący: "urgent", poważny: "high", drobny: "low", trywialny: "low", wysoki: "high", średni: "medium", normalny: "medium", niski: "low", najniższy: "low",
 };
 
 export type SkipReason = "no title";

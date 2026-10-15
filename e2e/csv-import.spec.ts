@@ -102,7 +102,7 @@ test("a semicolon Excel file maps its columns, statuses and people, imports, and
 
   // People: one picked from the members, one deliberately left unassigned, one found by e-mail
   await mapping.getByLabel("Person “Jan Nowak”").selectOption(MEMBER_USERNAME);
-  await mapping.getByLabel("Person “Old Colleague”").selectOption({ label: "Leave unassigned" });
+  await mapping.getByLabel("Person “Old Colleague”").selectOption({ label: "Not on this board (left unassigned, named in comments)" });
 
   await check(page);
   const report = page.getByTestId("import-report");
@@ -186,4 +186,15 @@ test("a status mapped to another column goes there, even though a column has its
   await importIt(page);
   await expect(report).toContainText("Created 1");
   expect((await tasks()).map((t) => t.status)).toEqual(["planned"]);
+});
+
+test("a sheet whose text holds an HTML table is read as the sheet it is", async ({ page }) => {
+  await signIn(page, "owner");
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
+  await page
+    .getByLabel("Import file (CSV, Excel, Jira XML or JSON)")
+    .setInputFiles(file('ID,Title,Description\nH-1,Has a table,"<table><tr><td>cell</td></tr></table>"\n'));
+  await expect(page.getByTestId("csv-mapping")).toContainText("1 rows, 3 columns.");
+  await check(page);
+  await expect(page.getByTestId("import-report")).toContainText("Would create 1");
 });
