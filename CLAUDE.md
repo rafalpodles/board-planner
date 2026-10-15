@@ -307,7 +307,8 @@ ORGANISATION_STORAGE_MB=  # Optional — uploaded files one organisation may kee
                           # set here holds for every plan and offers no upgrade; 0 is off. Over the ceiling
                           # after a downgrade nothing is deleted, so new uploads stay refused until files
                           # are deleted (an instance admin's list of the largest, from an interactive
-                          # session only, under Settings → Organisation, BP-1025) or the plan gives room. A Pro
+                          # session only, under Settings → Organisation, BP-1025; or the deletion of the
+                          # task, comment or board that named them, BP-1054) or the plan gives room. A Pro
                           # organisation at 20480 is told to write to contact@board-planner.com about Enterprise
                           # Settings → Organisation shows an admin the usage (`/api/organisation/storage`)
 LEGAL_TERMS_VERSION=      # Optional, with ORGANISATION_DOMAIN only — the date (YYYY-MM-DD) the cloud's Terms of

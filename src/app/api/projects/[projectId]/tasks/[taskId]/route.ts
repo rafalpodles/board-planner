@@ -15,6 +15,7 @@ import {
 } from "@/lib/task-service";
 import { severLinksToDeletedTask } from "@/lib/task-links";
 import { epicProgressFor } from "@/lib/epics";
+import { releaseUploads, uploadIdsIn } from "@/lib/upload-cleanup";
 import { ITaskExecution } from "@/types";
 import { withApiExecution } from "@/lib/task-execution-view";
 import {
@@ -170,7 +171,7 @@ export const DELETE = withProjectAccess(async (request, { params, user, db }) =>
   // and it reaches a strictly stronger outcome than the three that do, since the task is not moved
   // but gone, with the comments the run was writing into it (BP-337).
   const task = await db.Task.findOne({ _id: taskId, project: projectId })
-    .select("execution taskNumber title status")
+    .select("execution taskNumber title status description checklist")
     .lean();
 
   if (!task) {
@@ -188,6 +189,12 @@ export const DELETE = withProjectAccess(async (request, { params, user, db }) =>
     }
   }
 
+  const quoted = uploadIdsIn(
+    task.description,
+    ...(task.checklist ?? []).map((item: { text: string }) => item.text),
+    ...(await db.Comment.find({ task: taskId }).select("body").lean()).map((comment: { body: string }) => comment.body)
+  );
+
   await db.Task.deleteOne({ _id: taskId, project: projectId });
 
   await Promise.all([
@@ -202,6 +209,8 @@ export const DELETE = withProjectAccess(async (request, { params, user, db }) =>
       String(user._id)
     ),
   ]);
+
+  await releaseUploads(db, projectId, quoted);
 
   return NextResponse.json({ message: "Task deleted" });
 });

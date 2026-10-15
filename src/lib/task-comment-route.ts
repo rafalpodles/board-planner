@@ -5,6 +5,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { logActivity } from "@/lib/activity";
 import { provenanceFields } from "@/lib/activity-source";
+import { releaseUploads, uploadIdsIn } from "@/lib/upload-cleanup";
 
 export const PUT = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId, taskId, commentId } = await params;
@@ -116,6 +117,7 @@ export const DELETE = withProjectAccess(async (_request, { params, user, db }) =
   }
 
   await comment.deleteOne();
+  await releaseUploads(db, projectId, uploadIdsIn(comment.body));
 
   await logActivity(db, projectId, taskId, user._id, "comment_deleted");
 
