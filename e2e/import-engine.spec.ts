@@ -98,7 +98,12 @@ test("2,000 tasks import with no notification, no webhook delivery and one audit
   // Original times survive: creation on the task, completion on the move into the done column
   const handle = await db();
   const closed = await handle.collection("tasks").findOne({ project: PROJECT_ID, "externalRef.id": "SRC-2" });
-  expect(closed).toMatchObject({ status: "done", createdAt: new Date(created(1)), title: "Imported task 2" });
+  expect(closed).toMatchObject({
+    status: "done",
+    createdAt: new Date(created(1)),
+    updatedAt: new Date(finished(1)),
+    title: "Imported task 2",
+  });
   const moves = await handle.collection("activitylogs").find({ task: closed!._id }).sort({ createdAt: 1 }).toArray();
   expect(moves.map((m) => [m.action, m.newValue, m.createdAt.toISOString(), m.source])).toEqual([
     ["created", "", created(1), "import"],
@@ -106,6 +111,8 @@ test("2,000 tasks import with no notification, no webhook delivery and one audit
   ]);
   const comment = await handle.collection("comments").findOne({ "externalRef.id": "C-0" });
   expect(comment!.body).toMatch(/^\*Originally by old-person\*/);
+  // A comment stamped "now" on the way in would read as edited since it was written
+  expect(comment!.updatedAt).toEqual(comment!.createdAt);
 
   // Again: the same tasks, updated, never doubled
   const again = await importAs(page, { bundle: bundle(2000), mapping: MAPPING, dryRun: false });
