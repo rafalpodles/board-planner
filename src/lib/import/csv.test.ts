@@ -348,6 +348,7 @@ describe("presets for other trackers' CSV exports", () => {
     expect(knownSource(["ID", "Subject", "Type", "Status"])).toBeNull();
     expect(knownSource(["Title", "URL", "Status"])).toBeNull();
     expect(knownSource(["Task ID", "Name", "Status"])).toBeNull();
+    expect(knownSource(["ID", "Type", "Subject", "Status", "Author", "Updated on"])?.name).toBe("OpenProject");
   });
 
   it("leaves an ordinary sheet's names and #references as they are", () => {
