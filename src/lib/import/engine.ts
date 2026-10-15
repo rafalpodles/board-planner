@@ -8,6 +8,7 @@ import {
   COMMENT_BODY_MAX_LENGTH,
   TASK_DESCRIPTION_MAX_LENGTH,
   TASK_TITLE_MAX_LENGTH,
+  isControlCodePoint,
   stripControlCharacters,
 } from "@/lib/identifiers";
 import { logActivities } from "@/lib/activity";
@@ -65,8 +66,16 @@ const shown = (value: unknown) => {
   return text.length > 80 ? `${text.slice(0, 80)}…` : text;
 };
 
-function clip(report: ImportReport, id: string, field: string, text: string, max: number): string {
-  const clean = stripControlCharacters(text).trim();
+function keepLines(text: string): string {
+  let out = "";
+  for (const character of text.replace(/\r\n?/g, "\n")) {
+    if (character === "\n" || character === "\t" || !isControlCodePoint(character.codePointAt(0) ?? 0)) out += character;
+  }
+  return out;
+}
+
+function clip(report: ImportReport, id: string, field: string, text: string, max: number, { lines = false } = {}): string {
+  const clean = (lines ? keepLines(text) : stripControlCharacters(text)).trim();
   if (clean.length <= max) return clean;
   report.truncated.push({ id, field });
   return clean.slice(0, max);
@@ -225,7 +234,7 @@ function resolveTask(
   return {
     ref: task.id,
     title,
-    description: clip(report, task.id, "description", task.description ?? "", TASK_DESCRIPTION_MAX_LENGTH),
+    description: clip(report, task.id, "description", task.description ?? "", TASK_DESCRIPTION_MAX_LENGTH, { lines: true }),
     status,
     category,
     priority,
@@ -249,7 +258,7 @@ function resolveComment(
   const createdAt = instant(report, `${taskId}#${comment.id}`, "createdAt", comment.createdAt);
   // When the writer has no account here, their name stays in the text rather than being lost
   const byline = author ? "" : `*Originally by ${stripControlCharacters(comment.author ?? "an unknown author").trim() || "an unknown author"}*\n\n`;
-  const body = byline + clip(report, `${taskId}#${comment.id}`, "body", comment.body, COMMENT_BODY_MAX_LENGTH - byline.length);
+  const body = byline + clip(report, `${taskId}#${comment.id}`, "body", comment.body, COMMENT_BODY_MAX_LENGTH - byline.length, { lines: true });
   if (!body.trim()) return [];
   return [{ ref: comment.id, body, author: author ?? importer, createdAt }];
 }

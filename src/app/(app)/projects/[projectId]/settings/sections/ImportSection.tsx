@@ -1,11 +1,15 @@
 "use client";
 
-import { ChangeEvent, useRef, useState } from "react";
+import { ChangeEvent, useCallback, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { Button } from "@/components/ui/Button";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import type { ImportReport } from "@/lib/import/engine";
 import { MAX_IMPORT_BYTES } from "@/lib/import/limits";
+import { type CsvTable, decodeCsv, readCsvTable } from "@/lib/import/csv";
+import type { ApiProjectColumn } from "@/types";
+import { CsvMapping, type CsvPayload, rememberCsvMapping } from "./CsvMapping";
+import type { SectionProps } from "./types";
 
 // The request wraps the file in a little JSON of its own
 const MAX_FILE_BYTES = MAX_IMPORT_BYTES - 64 * 1024;
@@ -64,9 +68,13 @@ function Report({ report }: { report: ImportReport }) {
   );
 }
 
-export function ImportSection({ projectId }: { projectId: string }) {
+const isCsv = (file: File) => /\.(csv|tsv|txt)$/i.test(file.name) || /csv|tab-separated/.test(file.type);
+
+export function ImportSection({ projectId, project, patchProject }: Pick<SectionProps, "projectId" | "project" | "patchProject">) {
   const api = useApi();
   const [payload, setPayload] = useState<Payload | null>(null);
+  const [table, setTable] = useState<CsvTable | null>(null);
+  const remembered = useRef<Parameters<typeof rememberCsvMapping>[2] | null>(null);
   const [fileError, setFileError] = useState("");
   const [report, setReport] = useState<ImportReport | null>(null);
   const [checked, setChecked] = useState(false);
@@ -78,12 +86,18 @@ export function ImportSection({ projectId }: { projectId: string }) {
     seq.current += 1;
     const file = event.target.files?.[0];
     setPayload(null);
+    setTable(null);
     setReport(null);
     setChecked(false);
     setError("");
     setFileError("");
     if (!file) return;
     if (file.size > MAX_FILE_BYTES) return setFileError("The file is larger than the 20 MB an import takes.");
+    if (isCsv(file)) {
+      const read = readCsvTable(decodeCsv(new Uint8Array(await file.arrayBuffer())));
+      if (read.headers.length === 0 || read.rows.length === 0) return setFileError("This file holds no rows under a header line.");
+      return setTable(read);
+    }
     try {
       const next = payloadOf(JSON.parse(await file.text()));
       if (!next) return setFileError("This file holds no import bundle: it needs a list of tasks.");
@@ -104,6 +118,7 @@ export function ImportSection({ projectId }: { projectId: string }) {
       if (mine !== seq.current) return;
       setReport(answer);
       setChecked(dryRun && !answer.error);
+      if (dryRun && table && remembered.current) rememberCsvMapping(projectId, table.headers, remembered.current);
     } catch (e) {
       if (mine === seq.current) setError(e instanceof Error ? e.message : "The import could not run");
     } finally {
@@ -111,20 +126,41 @@ export function ImportSection({ projectId }: { projectId: string }) {
     }
   }
 
+  const csvChanged = useCallback((next: CsvPayload | null, remember: Parameters<typeof rememberCsvMapping>[2]) => {
+    seq.current += 1;
+    remembered.current = remember;
+    setPayload(next);
+    setChecked(false);
+    setReport(null);
+    setBusy(null);
+  }, []);
+
+  const columnsAdded = useCallback((columns: ApiProjectColumn[]) => patchProject({ columns }), [patchProject]);
+
   return (
     <SettingsCard title="Import tasks">
       <div className="space-y-4">
         <label className="block text-sm">
-          <span className="mb-1 block font-medium text-text-muted">Import file (JSON)</span>
+          <span className="mb-1 block font-medium text-text-muted">Import file (CSV or JSON)</span>
           <input
             type="file"
-            accept="application/json,.json"
+            accept="application/json,.json,text/csv,.csv,.tsv,.txt"
             onChange={choose}
             disabled={busy !== null}
             className="block w-full text-sm file:mr-3 file:rounded-lg file:border file:border-border file:bg-bg-input file:px-3 file:py-1.5 file:text-text"
           />
         </label>
         {fileError && <p className="text-sm text-danger">{fileError}</p>}
+        {table && (
+          <CsvMapping
+            projectId={projectId}
+            project={project}
+            table={table}
+            disabled={busy !== null}
+            onColumns={columnsAdded}
+            onChange={csvChanged}
+          />
+        )}
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" size="sm" disabled={!payload || busy !== null} onClick={() => send(true)}>
             {busy === "checking" ? "Checking…" : "Check"}

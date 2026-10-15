@@ -185,6 +185,13 @@ describe("runImport", () => {
     ]);
   });
 
+  it("keeps the line breaks of a description and a comment, and takes them out of a title", async () => {
+    const { db, writes } = fakeDb();
+    await run(db, [{ id: "1", title: "a\nb", description: "one\r\ntwo\n\tthree\u202e", comments: [{ id: "c", author: "maya", body: "x\ry" }] }]);
+    expect(writes.tasks[0]).toMatchObject({ title: "ab", description: "one\ntwo\n\tthree" });
+    expect(writes.comments[0].body).toBe("x\ny");
+  });
+
   it("skips a task with no title, shortens what is too long, and says so", async () => {
     const { db, writes } = fakeDb();
     const report = await run(db, [

@@ -158,8 +158,8 @@ test("an owner checks a file in the browser, sees what will be left out, and imp
     },
     mapping: MAPPING,
   };
-  const card = page.locator("section").filter({ has: page.getByLabel("Import file (JSON)") });
-  await page.getByLabel("Import file (JSON)").setInputFiles({
+  const card = page.locator("section").filter({ has: page.getByLabel("Import file (CSV or JSON)") });
+  await page.getByLabel("Import file (CSV or JSON)").setInputFiles({
     name: "export.json",
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(file)),

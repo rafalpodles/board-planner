@@ -102,6 +102,7 @@ export const GROUPS = {
     "project-audit-log.spec.ts",
     "audit-export.spec.ts",
     "import-engine.spec.ts",
+    "csv-import.spec.ts",
     "project-owner-persona.spec.ts",
     "project-owner-gate.spec.ts",
     "owner-manages-workers.spec.ts",
