@@ -40,6 +40,7 @@
     "src/lib/fleet.ts": "the tasks a run holds: an archived task is never held, and a held one cannot be archived without force",
     "src/lib/github-sync.ts": "a pull request is linked to its task by key, archived or not",
     "src/lib/import/engine.ts": "by the source's id: a task imported before is updated in place, archived or not, rather than made twice",
+    "src/lib/import/links.ts": "by the source's id, as the engine finds them, archived or not; and every link on the board, as task-links reads them, so no loop is closed through an archived task",
     "src/lib/middleware.ts": "resolves a task key to an id, and a worker's run to its task",
     "src/lib/pm/triggers.ts": "by id",
     "src/lib/pr-links.ts": "writes the links of one task by id, archived or not",
