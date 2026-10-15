@@ -29,7 +29,7 @@ async function askThePm(page: Page, prompt: string, call: Record<string, unknown
   await page.goto(`/projects/${PROJECT_KEY}/pm`);
   const box = page.getByPlaceholder(/Message the PM/);
   await expect(box).toBeVisible();
-  const chips = page.getByRole("link", { name: new RegExp(`${PROJECT_KEY}-\\d+`) });
+  const chips = page.locator("#main-content").getByRole("link", { name: new RegExp(`${PROJECT_KEY}-\\d+`) });
   const before = await chips.count();
   await box.fill(`${prompt} <<${JSON.stringify(call)}>>`);
   await page.getByRole("button", { name: "Send", exact: true }).click();
