@@ -23,6 +23,7 @@ import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { PROJECT_ICONS, type IPmMcpServer } from "@/types";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import { githubWebBase } from "@/lib/github-host";
+import { releaseProjectUploads } from "@/lib/upload-cleanup";
 import { DEFAULT_DEPLOYMENT_ENVIRONMENT } from "@/lib/github-deployments";
 import { parseRepoString } from "@/lib/github";
 
@@ -472,6 +473,7 @@ export const DELETE = withProjectOwner(async (_request, { params, db }) => {
   await db.Project.findByIdAndDelete(projectId);
   await db.Grant.deleteMany({ objectType: "project", object: projectId });
   await dropProjectReferences(db, project._id);
+  await releaseProjectUploads(db, String(project._id));
 
   return NextResponse.json({ message: "Project deleted" });
 });

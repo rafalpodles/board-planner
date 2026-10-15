@@ -156,6 +156,7 @@ export const GROUPS = {
     "insights-page.spec.ts",
     "insights-dora.spec.ts",
     "organisation-uploads.spec.ts",
+    "upload-cleanup.spec.ts",
     "db-scope.spec.ts",
     "organisation-wall.spec.ts",
     "organisation-wall-values.spec.ts",

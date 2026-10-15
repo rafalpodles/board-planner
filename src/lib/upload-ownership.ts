@@ -15,6 +15,11 @@ export async function ensureUploadIndexes(): Promise<void> {
   await mongoose.connection.db?.collection(`${UPLOAD_BUCKET}.files`).createIndex({ "metadata.organisation": 1, _id: 1 });
 }
 
+// An upload records its board as the id or as its hex string
+const recordedAgainst = (project: string) => ({
+  "metadata.project": { $in: [new mongoose.Types.ObjectId(project), project] },
+});
+
 /**
  * The bucket as one organisation sees it. GridFS is the driver's, so the organisation wall under
  * the models never sees it: every read here names the organisation in its filter, every file
@@ -90,6 +95,25 @@ export function organisationUploads(db: ScopedDb) {
       // Two administrators on one file: only the one whose delete removed the row reports it
       const { deletedCount } = await files.deleteOne({ _id: id });
       return deletedCount === 1 ? file : null;
+    },
+    // The files named that were uploaded to this board: a task may quote another board's file id, which is not its to remove
+    ofProject: (ids: mongoose.Types.ObjectId[], project: string): Promise<UploadedFile[]> =>
+      mongoose.connection
+        .db!.collection<UploadedFile>(`${UPLOAD_BUCKET}.files`)
+        .find({ _id: { $in: ids }, "metadata.organisation": db.organisation, ...recordedAgainst(project) })
+        .toArray(),
+    // Every file this board holds, for the board's own deletion; how many went
+    discardProject: async (project: string): Promise<number> => {
+      const files = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.files`);
+      const chunks = mongoose.connection.db!.collection(`${UPLOAD_BUCKET}.chunks`);
+      const ids = await files
+        .find({ "metadata.organisation": db.organisation, ...recordedAgainst(project) }, { projection: { _id: 1 } })
+        .toArray();
+      for (const { _id } of ids) {
+        await chunks.deleteMany({ files_id: _id });
+        await files.deleteOne({ _id });
+      }
+      return ids.length;
     },
     // Chunks before their file row, so an interrupted run leaves a row it can find again
     deleteAll: async (): Promise<number> => {

@@ -38,7 +38,9 @@ vi.mock("@/models/task", () => ({
   Task: { findOne: taskFindOne, find: taskFind, updateMany: taskUpdateMany, deleteOne: taskDeleteOne, findOneAndDelete: vi.fn() },
 }));
 vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
-vi.mock("@/models/comment", () => ({ Comment: { deleteMany: commentDeleteMany } }));
+vi.mock("@/models/comment", () => ({
+  Comment: { deleteMany: commentDeleteMany, find: () => ({ select: () => ({ lean: () => Promise.resolve([]) }) }) },
+}));
 vi.mock("@/models/activityLog", () => ({ ActivityLog: { deleteMany: activityDeleteMany } }));
 vi.mock("@/models/notification", () => ({ Notification: { deleteMany: notificationDeleteMany } }));
 vi.mock("@/models/worker", () => ({ Worker: { find: vi.fn(), findOne: workerFindOne } }));
