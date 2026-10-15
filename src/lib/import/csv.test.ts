@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { csvToBundle, decodeCsv, detectDelimiter, guessTargets, isJiraExport, normaliseDay, normaliseInstant, parseCsv, readCsvTable } from "./csv";
+import { commentAuthors, csvToBundle, decodeCsv, detectDelimiter, guessTargets, isJiraExport, normaliseDay, normaliseInstant, parseCsv, readCsvTable } from "./csv";
 import { parseBundle } from "./bundle";
 
 const FIELDS = [
@@ -219,6 +219,12 @@ describe("a Jira export", () => {
 });
 
 describe("Jira's own conventions", () => {
+  it("lists every comment author, from comment columns and from comments kept apart", () => {
+    const table = readCsvTable('Issue key,Summary,Comment,Comment\nX-1,t,"01/Jan/26 9:00 AM;u1;a","just text"\nX-2,t,"02/Jan/26 9:00 AM;u2;b",');
+    expect(commentAuthors(table, ["id", "title", "comment", "comment"])).toEqual(["u1", "u2"]);
+    expect(commentAuthors({ ...table, comments: [[{ id: "1", body: "x", author: "Ann" }], []] }, ["id", "title", "ignore", "ignore"])).toEqual(["Ann"]);
+  });
+
   it("takes Parent key over the numeric Parent, and turns a numeric Parent into a key when the parent is in the file", () => {
     expect(guessTargets(["Issue key", "Summary", "Parent", "Parent key"], [])).toEqual(["id", "title", "ignore", "parent"]);
     const table = readCsvTable("Issue key,Issue id,Summary,Issue Type,Parent\nX-1,101,Epic,Epic,\nX-2,102,Child,Story,101\nX-3,103,Orphan,Story,999");

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import type { ImportBundle, ImportMapping } from "@/lib/import/bundle";
 import { MAX_IMPORT_TASKS } from "@/lib/import/limits";
-import { type CsvTable, type CsvTarget, csvToBundle, distinctValues, guessTargets, headerRuns, isJiraExport, repeatable, shapeKey } from "@/lib/import/csv";
+import { type CsvTable, type CsvTarget, commentAuthors, csvToBundle, distinctValues, guessTargets, headerRuns, isJiraExport, repeatable, shapeKey } from "@/lib/import/csv";
 import { effectiveColumns, MAX_COLUMN_LABEL } from "@/lib/columns";
 import { COLUMN_ROLES, type ApiProject, type ApiProjectColumn, type ColumnRole, ROLE_LABELS } from "@/types";
 
@@ -138,7 +138,8 @@ export function CsvMapping({
   const [statuses, setStatuses] = useState<Record<string, string>>(remembered?.statuses ?? {});
   const [users, setUsers] = useState<Record<string, string | null>>(remembered?.users ?? {});
   // Not remembered: a source name carried over to another file of the same shape would update that file's tasks
-  const [source, setSource] = useState(() => sourceFrom(fileName));
+  // Every Jira export, whatever its kind or file name, is one source, so changing kind updates rather than adds
+  const [source, setSource] = useState(() => (isJiraExport(table.headers) ? "Jira" : sourceFrom(fileName)));
   const [members, setMembers] = useState<{ username: string; fullName?: string }[] | null>(null);
   const [membersFailed, setMembersFailed] = useState(false);
   const [roles, setRoles] = useState<Record<string, ColumnRole>>({});
@@ -157,7 +158,10 @@ export function CsvMapping({
   }, [projectId]);
 
   const statusValues = useMemo(() => distinctValues(table, targets.indexOf("status")), [table, targets]);
-  const userValues = useMemo(() => distinctValues(table, targets.indexOf("assignee")), [table, targets]);
+  const userValues = useMemo(
+    () => [...new Set([...distinctValues(table, targets.indexOf("assignee")), ...commentAuthors(table, targets)])],
+    [table, targets]
+  );
   // A recalled choice that no longer names something on this board falls back to the automatic one
   const liveTargets = useMemo(
     () =>
@@ -355,7 +359,7 @@ export function CsvMapping({
             {userValues.slice(0, LISTED_VALUES).map((value) => (
               <Select
                 key={value}
-                label={`Assignee “${value}”`}
+                label={`Person “${value}”`}
                 value={((chosen) => (chosen === undefined ? AUTOMATIC : (chosen ?? UNASSIGNED)))(userOf(value))}
                 options={userOptions}
                 onChange={(e) => {

@@ -216,14 +216,33 @@ function fnv(text: string): string {
 }
 
 // Known by its time and author where it has them, so a comment deleted in Jira does not shift the rest
-function commentFrom(cell: string, ordinal: number, taken: ImportComment[], prose: (text: string) => string): ImportComment {
+function commentParts(cell: string): { at: string; author: string; body: string } | null {
   const parts = /^([^;\n]+);([^;\n]*);([\s\S]*)$/.exec(cell);
   const at = parts && normaliseInstant(parts[1]);
-  if (parts && at && /^\d{4}-\d{2}-\d{2}T/.test(at)) {
-    const author = parts[2].trim();
+  return parts && at && /^\d{4}-\d{2}-\d{2}T/.test(at) ? { at, author: parts[2].trim(), body: parts[3] } : null;
+}
+
+// Everyone who wrote a comment, so each can be matched to a member like an assignee
+export function commentAuthors(table: CsvTable, targets: CsvTarget[]): string[] {
+  const seen = new Set<string>();
+  targets.forEach((target, column) => {
+    if (target !== "comment") return;
+    for (const row of table.rows) {
+      const author = commentParts(row[column] ?? "")?.author;
+      if (author) seen.add(author);
+    }
+  });
+  for (const list of table.comments ?? []) for (const c of list) if (c.author) seen.add(c.author);
+  return [...seen];
+}
+
+function commentFrom(cell: string, ordinal: number, taken: ImportComment[], prose: (text: string) => string): ImportComment {
+  const parts = commentParts(cell);
+  if (parts) {
+    const { at, author } = parts;
     const base = `${at}|${author.length > 60 ? `${author.slice(0, 50)}~${fnv(author)}` : author}`;
     const same = taken.filter((c) => c.id === base || c.id.startsWith(`${base}#`)).length;
-    return { id: same ? `${base}#${same + 1}` : base, createdAt: at, ...(author && { author }), body: prose(parts[3]) };
+    return { id: same ? `${base}#${same + 1}` : base, createdAt: at, ...(author && { author }), body: prose(parts.body) };
   }
   return { id: `c${ordinal}`, body: prose(cell) };
 }

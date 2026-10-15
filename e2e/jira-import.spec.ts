@@ -82,7 +82,9 @@ test("a Jira export imports with comments, labels, dates and priorities, and a s
   await expect(mapping.getByLabel("Labels (column 14)")).toHaveValue("field:Labels");
   await expect(page.getByLabel("Source name")).toHaveValue("Jira");
   // Jira exports a display name, so the person is matched by hand
-  await mapping.getByLabel("Assignee “Maya Kowalska”").selectOption(MEMBER_USERNAME);
+  await mapping.getByLabel("Person “Maya Kowalska”").selectOption(MEMBER_USERNAME);
+  // A comment's author is in the People list too, by the account id Jira's CSV gives
+  await mapping.getByLabel("Person “712020:abc”").selectOption(MEMBER_USERNAME);
 
   await press(page, "Check");
   const report = page.getByTestId("import-report");
@@ -109,7 +111,7 @@ test("a Jira export imports with comments, labels, dates and priorities, and a s
 
   const comments = await (await db()).collection("comments").find({ task: invoices._id }).sort({ createdAt: 1 }).toArray();
   expect(comments.map((c) => [c.body, c.createdAt.toISOString()])).toEqual([
-    ["*Originally by 712020:abc*\n\nFirst comment", "2025-10-15T09:45:00.000Z"],
+    ["First comment", "2025-10-15T09:45:00.000Z"],
     ["*Originally by 712020:def*\n\nSecond; with a semicolon", "2025-10-16T12:05:00.000Z"],
   ]);
   const finish = await (await db()).collection("activitylogs").findOne({ task: invoices._id, action: "status_changed" });
@@ -121,7 +123,7 @@ test("a Jira export imports with comments, labels, dates and priorities, and a s
     .getByLabel("Import file (CSV, Excel, Jira XML or JSON)")
     .setInputFiles({ name: "Jira (1).csv", mimeType: "text/csv", buffer: Buffer.from(JIRA.replace("Sign in with Google", "Sign in with Google and GitHub")) });
   await expect(page.getByLabel("Source name")).toHaveValue("Jira");
-  await expect(mapping.getByLabel("Assignee “Maya Kowalska”")).toHaveValue(MEMBER_USERNAME);
+  await expect(mapping.getByLabel("Person “Maya Kowalska”")).toHaveValue(MEMBER_USERNAME);
   await expect(mapping.getByLabel("Comment (column 17)")).toHaveValue("comment");
   await expect(mapping.getByLabel("Labels (column 14)")).toHaveValue("field:Labels");
   await press(page, "Check");
@@ -157,6 +159,8 @@ test("a Jira Excel export imports through the same mapping, its wiki text turned
   await expect(mapping).toContainText("1 rows, 10 columns. Recognised as a Jira export.");
   await expect(mapping.getByLabel("Parent key", { exact: true })).toHaveValue("parent");
   await expect(mapping.getByLabel("Parent", { exact: true })).toHaveValue("ignore");
+  // Named "Jira" whatever the file, so a CSV or XML export of the same issues later updates them
+  await expect(page.getByLabel("Source name")).toHaveValue("Jira");
 
   await press(page, "Check");
   const report = page.getByTestId("import-report");
@@ -182,6 +186,14 @@ test("an old binary .xls is refused with a way forward, not read as text", async
     buffer: Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0, 0, 0, 0x3e, 0]),
   });
   await expect(card(page)).toContainText("This is not a text file. Save it as .xlsx or .csv and try again.");
+
+  // Older Jira's "Excel" export is a web page named .xls
+  await page.getByLabel("Import file (CSV, Excel, Jira XML or JSON)").setInputFiles({
+    name: "Jira.xls",
+    mimeType: "application/vnd.ms-excel",
+    buffer: Buffer.from("<html><body><table><tr><th>Summary</th></tr><tr><td>x</td></tr></table></body></html>"),
+  });
+  await expect(card(page)).toContainText("This is a web page saved under a spreadsheet's name.");
   await expect(page.getByTestId("csv-mapping")).toHaveCount(0);
 });
 
@@ -214,7 +226,7 @@ test("a Jira XML export imports with its comments named by their authors and its
   const mapping = page.getByTestId("csv-mapping");
   await expect(mapping).toContainText("Recognised as a Jira export.");
   await expect(page.getByLabel("Source name")).toHaveValue("Jira");
-  await mapping.getByLabel("Assignee “Maya Kowalska”").selectOption(MEMBER_USERNAME);
+  await mapping.getByLabel("Person “Maya Kowalska”").selectOption(MEMBER_USERNAME);
 
   await press(page, "Check");
   await press(page, "Import");

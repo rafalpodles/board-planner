@@ -101,8 +101,8 @@ test("a semicolon Excel file maps its columns, statuses and people, imports, and
   await page.getByRole("button", { name: /^Import\b/ }).first().click();
 
   // People: one picked from the members, one deliberately left unassigned, one found by e-mail
-  await mapping.getByLabel("Assignee “Jan Nowak”").selectOption(MEMBER_USERNAME);
-  await mapping.getByLabel("Assignee “Old Colleague”").selectOption({ label: "Leave unassigned" });
+  await mapping.getByLabel("Person “Jan Nowak”").selectOption(MEMBER_USERNAME);
+  await mapping.getByLabel("Person “Old Colleague”").selectOption({ label: "Leave unassigned" });
 
   await check(page);
   const report = page.getByTestId("import-report");
