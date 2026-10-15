@@ -181,7 +181,8 @@ GITHUB_SYNC_TICK_MS=      # Optional — how often every project with a GitHub t
                           # in project settings and the one on a task still work. A tick refreshes
                           # links only — it never moves a task between columns, because that write
                           # needs an author and a tick has none. Costs up to 82 GitHub requests per
-                          # project per tick (42 in the ordinary case) against a 5,000/hour limit
+                          # project per tick (42 in the ordinary case), plus 1–13 for deployments on an
+                          # organisation with reports.insights (BP-878), against a 5,000/hour limit
                           # that is **per GitHub account**, not per project — so raise this, or use
                           # a token per board, if one account's token is pasted into several
                           # projects (BP-443)
