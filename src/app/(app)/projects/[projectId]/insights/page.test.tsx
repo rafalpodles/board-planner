@@ -58,6 +58,7 @@ describe("InsightsPage", () => {
     expect(insightsCalls()).toEqual(["/api/projects/p1/insights?weeks=12"]);
     expect(screen.queryByText("Sample data")).toBeNull();
     expect(screen.queryByTestId("insights-upsell")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Dashboard" })).toBeNull();
   });
 
   it("asks again for a category and for a sprint", async () => {

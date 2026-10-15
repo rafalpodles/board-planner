@@ -1,14 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useEntitlement } from "@/hooks/use-entitlement";
 import { boardRefusal } from "@/lib/board-load-failure";
 import { columnIdsWithRole } from "@/lib/columns";
 import type { Insights } from "@/lib/insights";
-import { projectPath } from "@/lib/urls";
 import { ApiProject, ApiSprint } from "@/types";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -117,17 +115,7 @@ export default function InsightsPage() {
 
   if (refused) return <div data-testid="insights-not-found"><NotFoundExperience /></div>;
 
-  const header = (
-    <PageHeader
-      title="Insights"
-      subtitle={project?.name ?? ""}
-      actions={
-        <Link href={`${projectPath(projectRef)}/dashboard`} className="focus-ring rounded text-sm text-primary underline">
-          Dashboard
-        </Link>
-      }
-    />
-  );
+  const header = <PageHeader title="Insights" subtitle={project?.name ?? ""} />;
 
   if (entitlement.loading) {
     return (
