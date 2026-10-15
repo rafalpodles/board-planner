@@ -2,6 +2,7 @@ import mongoose, { Schema, Model } from "mongoose";
 import { ACTIVITY_SOURCES, IComment } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
 import { generatedBySchema } from "@/lib/ai-generated";
+import { externalRefSchema } from "@/lib/import/external-ref";
 import { SOURCE_DETAIL_MAX_LENGTH } from "@/lib/activity-source";
 
 const reactionSchema = new Schema(
@@ -36,6 +37,7 @@ const commentSchema = new Schema<IComment>(
       default: [],
     },
     generatedBy: { type: generatedBySchema, default: undefined },
+    externalRef: { type: externalRefSchema, default: undefined },
     source: { type: String, enum: ACTIVITY_SOURCES, immutable: true },
     sourceDetail: { type: String, maxlength: SOURCE_DETAIL_MAX_LENGTH, immutable: true },
     editedSource: { type: String, enum: ACTIVITY_SOURCES },
@@ -45,6 +47,10 @@ const commentSchema = new Schema<IComment>(
 );
 
 commentSchema.index({ task: 1, createdAt: 1 });
+commentSchema.index(
+  { task: 1, "externalRef.source": 1, "externalRef.id": 1 },
+  { unique: true, partialFilterExpression: { "externalRef.id": { $exists: true } } }
+);
 
 withOrganisation(commentSchema);
 

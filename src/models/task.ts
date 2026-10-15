@@ -1,6 +1,7 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { ITask, PRIORITIES, DEFAULT_PRIORITY, RECURRENCE_FREQUENCIES, TASK_DECISION_STATES } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
+import { externalRefSchema } from "@/lib/import/external-ref";
 import { generatedBySchema } from "@/lib/ai-generated";
 
 const taskSchema = new Schema<ITask>(
@@ -238,6 +239,7 @@ const taskSchema = new Schema<ITask>(
       default: null,
     },
     generatedBy: { type: generatedBySchema, default: undefined },
+    externalRef: { type: externalRefSchema, default: undefined },
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
@@ -270,6 +272,12 @@ taskSchema.index({ recurringParentId: 1 });
 // than on the child, because a type predicate on an array cannot be covered alongside one on its
 // `task`. Holds while `parent_of` stays the epic relation.
 taskSchema.index({ project: 1, "relations.type": 1 });
+
+// An import names its source's task, so running the same file again updates rather than duplicates
+taskSchema.index(
+  { project: 1, "externalRef.source": 1, "externalRef.id": 1 },
+  { unique: true, partialFilterExpression: { "externalRef.id": { $exists: true } } }
+);
 
 withOrganisation(taskSchema);
 
