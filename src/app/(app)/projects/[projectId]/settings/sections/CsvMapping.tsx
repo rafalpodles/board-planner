@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import type { ImportBundle, ImportMapping } from "@/lib/import/bundle";
 import { MAX_IMPORT_TASKS } from "@/lib/import/limits";
-import { type CsvTable, type CsvTarget, commentAuthors, csvToBundle, distinctValues, guessTargets, headerRuns, isJiraExport, repeatable, shapeKey } from "@/lib/import/csv";
+import { type CsvTable, type CsvTarget, assigneesIn, commentAuthors, csvToBundle, distinctValues, guessTargets, headerRuns, knownSource, repeatable, shapeKey } from "@/lib/import/csv";
 import { effectiveColumns, MAX_COLUMN_LABEL } from "@/lib/columns";
 import { COLUMN_ROLES, type ApiProject, type ApiProjectColumn, type ColumnRole, ROLE_LABELS } from "@/types";
 
@@ -140,7 +140,8 @@ export function CsvMapping({
   const [users, setUsers] = useState<Record<string, string | null>>(remembered?.users ?? {});
   // Not remembered: a source name carried over to another file of the same shape would update that file's tasks
   // Every Jira export, whatever its kind or file name, is one source, so its tasks update whichever kind comes next
-  const [source, setSource] = useState(() => (isJiraExport(table.headers) ? "Jira" : sourceFrom(fileName)));
+  const known = useMemo(() => knownSource(table.headers), [table.headers]);
+  const [source, setSource] = useState(() => known?.name ?? sourceFrom(fileName));
   const [members, setMembers] = useState<{ username: string; fullName?: string }[] | null>(null);
   const [membersFailed, setMembersFailed] = useState(false);
   const [roles, setRoles] = useState<Record<string, ColumnRole>>({});
@@ -160,7 +161,7 @@ export function CsvMapping({
 
   const statusValues = useMemo(() => distinctValues(table, targets.indexOf("status")), [table, targets]);
   const userValues = useMemo(
-    () => [...new Set([...distinctValues(table, targets.indexOf("assignee")), ...commentAuthors(table, targets)])],
+    () => [...new Set([...assigneesIn(table, targets.indexOf("assignee")), ...commentAuthors(table, targets)])],
     [table, targets]
   );
   // A recalled choice that no longer names something on this board falls back to the automatic one
@@ -250,7 +251,7 @@ export function CsvMapping({
     <div data-testid="csv-mapping" className="space-y-5">
       <p className="text-sm text-text-muted">
         {table.rows.length} rows, {table.headers.length} columns.
-        {isJiraExport(table.headers) && " Recognised as a Jira export."}
+        {known && ` Recognised as ${/^[AEIOU]/.test(known.name) ? "an" : "a"} ${known.name} export.`}
         {((n) => (n > 0 ? ` Its ${n} ${n === 1 ? "comment comes" : "comments come"} with it.` : ""))(
           table.comments?.reduce((total, c) => total + c.length, 0) ?? 0
         )}
