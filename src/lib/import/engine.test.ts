@@ -402,8 +402,10 @@ describe("runImport", () => {
 
   it("stops at a chunk that fails, keeps what came before with its history, and says how far it got", async () => {
     const { db, writes } = fakeDb({ failOn: 2, landBeforeFailing: 3 });
-    const tasks = Array.from({ length: IMPORT_CHUNK * 2 + 5 }, (_, i) => ({ id: String(i), title: `t${i}` }));
+    const tasks = Array.from({ length: IMPORT_CHUNK * 2 + 5 }, (_, i) => ({ id: String(i), title: `t${i}`, ...(i === IMPORT_CHUNK * 2 && { parent: "0" }) }));
     const report = await run(db, tasks);
+    // A task the stop never reached says so, rather than going unmentioned
+    expect(report.notImported).toContainEqual({ id: String(IMPORT_CHUNK * 2), what: "parent “0”: this task was not imported: the import stopped" });
     const error = "another import of the same tasks ran at the same time";
     expect(report).toMatchObject({ complete: false, processed: IMPORT_CHUNK + 3, created: IMPORT_CHUNK + 3, error });
     expect(writes.tasks).toHaveLength(IMPORT_CHUNK + 3);
