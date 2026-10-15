@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
 import { CsvMapping, rememberCsvMapping, type CsvPayload } from "./CsvMapping";
 import { readCsvTable } from "@/lib/import/csv";
 import type { ApiProject } from "@/types";
@@ -57,7 +57,7 @@ describe("CsvMapping", () => {
     });
     const { last } = mount();
     await waitFor(() => expect(last()).not.toBeNull());
-    expect(last()!.mapping.statuses).toEqual({ Open: "todo" });
+    expect(last()!.mapping.statuses).toEqual({});
     expect(last()!.bundle.tasks[0]).not.toHaveProperty("fields");
     expect(last()!.mapping.users).toEqual({});
   });
@@ -70,5 +70,16 @@ describe("CsvMapping", () => {
     });
     const { last } = mount();
     await waitFor(() => expect(last()?.mapping.users).toEqual({ "old.friend": "maya" }));
+  });
+
+  // Back on the automatic option is no choice at all, so a re-run leaves those tasks where they are
+  it("sends nothing for a status put back on No column after picking one", async () => {
+    const { last } = mount();
+    await waitFor(() => expect(last()).not.toBeNull());
+    const select = screen.getByLabelText("Status “Open”");
+    fireEvent.change(select, { target: { value: "done" } });
+    await waitFor(() => expect(last()!.mapping.statuses).toEqual({ Open: "done" }));
+    fireEvent.change(select, { target: { value: "" } });
+    await waitFor(() => expect(last()!.mapping.statuses).toEqual({}));
   });
 });

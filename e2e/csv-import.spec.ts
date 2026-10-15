@@ -171,13 +171,13 @@ test("a file with no title column cannot be checked, and one with no id column i
   await expect(page.getByTestId("import-report")).toContainText("Would create 1 and would update 0 of 1 tasks");
 });
 
-test("a status put where new tasks go on purpose goes there, even though a column has its name", async ({ page }) => {
+test("a status mapped to another column goes there, even though a column has its name", async ({ page }) => {
   await signIn(page, "owner");
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
   await page.getByLabel("Import file (CSV or JSON)").setInputFiles(file("ID,Title,Status\nP-1,Parked on purpose,Done\n"));
   const mapping = page.getByTestId("csv-mapping");
   await expect(mapping.getByLabel("Status “Done”")).toHaveValue("done");
-  await mapping.getByLabel("Status “Done”").selectOption({ label: "Where new tasks go" });
+  await mapping.getByLabel("Status “Done”").selectOption({ label: "Planned" });
 
   await check(page);
   const report = page.getByTestId("import-report");

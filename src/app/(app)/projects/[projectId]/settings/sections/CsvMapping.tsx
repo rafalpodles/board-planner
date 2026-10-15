@@ -8,7 +8,7 @@ import { Select } from "@/components/ui/Select";
 import type { ImportBundle, ImportMapping } from "@/lib/import/bundle";
 import { MAX_IMPORT_TASKS } from "@/lib/import/limits";
 import { type CsvTable, type CsvTarget, csvToBundle, distinctValues, guessTargets, shapeKey } from "@/lib/import/csv";
-import { defaultStatusFor, effectiveColumns, MAX_COLUMN_LABEL } from "@/lib/columns";
+import { effectiveColumns, MAX_COLUMN_LABEL } from "@/lib/columns";
 import { COLUMN_ROLES, type ApiProject, type ApiProjectColumn, type ColumnRole, ROLE_LABELS } from "@/types";
 
 export interface CsvPayload {
@@ -93,7 +93,6 @@ export function CsvMapping({
 }) {
   const api = useApi();
   const columns = useMemo(() => effectiveColumns(project.columns) as ApiProjectColumn[], [project.columns]);
-  const defaultColumn = defaultStatusFor(project as Parameters<typeof defaultStatusFor>[0]);
   const fields = useMemo(() => project.customFields.filter((f) => !f.archived), [project.customFields]);
   const fieldShapes = useMemo(() => fields.map((f) => ({ name: f.name, fieldType: f.fieldType })), [fields]);
   const targetOptions = useMemo(
@@ -134,7 +133,7 @@ export function CsvMapping({
   );
   const statusOf = (value: string) => {
     const chosen = statuses[value];
-    if (chosen === AUTOMATIC || (chosen && columns.some((c) => c.id === chosen))) return chosen;
+    if (chosen && columns.some((c) => c.id === chosen)) return chosen;
     return columnFor(columns, value);
   };
   const userOf = (value: string): string | null | undefined => {
@@ -158,8 +157,6 @@ export function CsvMapping({
     for (const value of statusValues) {
       const id = statusOf(value);
       if (id) mappedStatuses[value] = id;
-      // Chosen on purpose, so it goes there even when its name matches another column
-      else if (Object.hasOwn(statuses, value)) mappedStatuses[value] = defaultColumn;
     }
     const mappedUsers: Record<string, string | null> = {};
     for (const value of userValues) {
@@ -198,7 +195,7 @@ export function CsvMapping({
 
   const labels = headerLabels(table.headers);
   const columnOptions = [
-    { value: AUTOMATIC, label: "Where new tasks go" },
+    { value: AUTOMATIC, label: "No column (listed in the report)" },
     ...columns.map((c) => ({ value: c.id, label: c.label })),
   ];
   const userOptions = [
@@ -260,7 +257,15 @@ export function CsvMapping({
                 label={`Status “${value}”`}
                 value={statusOf(value)}
                 options={columnOptions}
-                onChange={(e) => setStatuses((s) => ({ ...s, [value]: e.target.value }))}
+                onChange={(e) => {
+                  const picked = e.target.value;
+                  setStatuses((s) => {
+                    const next = { ...s };
+                    if (picked === AUTOMATIC) delete next[value];
+                    else next[value] = picked;
+                    return next;
+                  });
+                }}
               />
               {!statusOf(value) && (
                 <div className="flex items-end gap-2">
