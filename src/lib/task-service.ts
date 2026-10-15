@@ -57,6 +57,7 @@ import { populateWithin, type ScopedDb } from "@/lib/db-scope";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
 import { withAiMark } from "@/lib/pm/username";
 import { currentGeneratedBy } from "@/lib/ai-generated";
+import { actingThrough, provenanceFields } from "@/lib/activity-source";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
 
@@ -1464,6 +1465,7 @@ export async function addComment(
     author: actor.id,
     body: bodyText.trim(),
     ...(generatedBy && { generatedBy }),
+    ...provenanceFields(),
   });
 
   const populated = await db.Comment.findById(comment._id).populate({
@@ -1649,7 +1651,12 @@ async function logRunMove(
   await logActivity(db, projectId, String(task._id), actorId ?? null, "status_changed", "status", from, task.status);
 }
 
-export async function releaseExpiredTasks(db: ScopedDb, projectId: string, now = new Date()): Promise<number> {
+// Swept on another machine's claim, but no machine decided it: the lease ran out
+export function releaseExpiredTasks(db: ScopedDb, projectId: string, now = new Date()): Promise<number> {
+  return actingThrough({ source: "system" }, () => sweepExpiredTasks(db, projectId, now));
+}
+
+async function sweepExpiredTasks(db: ScopedDb, projectId: string, now: Date): Promise<number> {
   await connectDB();
 
   const project = await db.Project.findById(projectId, "columns key name").lean();

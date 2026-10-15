@@ -1376,7 +1376,7 @@ describe("comments and history", () => {
     const last = parse(await run("list_comments", { limit: 2, offset: 4 }));
     expect(last.comments.map((c: { id: string }) => c.id)).toEqual(["c5"]);
     expect(last.nextOffset).toBeNull();
-    expect(Object.keys(first.comments[0]).sort()).toEqual(["author", "body", "createdAt", "id", "reactions"]);
+    expect(Object.keys(first.comments[0]).sort()).toEqual(["author", "body", "createdAt", "id", "reactions", "source"]);
   });
 
   it("list_comments refuses a page bigger than it will build", () => {
@@ -1425,7 +1425,7 @@ describe("comments and history", () => {
     const answer = parse(await run("get_task_activity"));
     expect(answer.total).toBe(40);
     expect(answer.entries).toHaveLength(30);
-    expect(answer.entries[0]).toEqual({ at: "2026-10-05T10:00:00.000Z", by: "rafal", action: "updated", field: "title", from: "v0", to: "v1" });
+    expect(answer.entries[0]).toEqual({ at: "2026-10-05T10:00:00.000Z", by: "rafal", action: "updated", field: "title", from: "v0", to: "v1", source: "legacy" });
 
     expect(parse(await run("get_task_activity", { limit: 5 })).entries).toHaveLength(5);
     expect(registered().get("get_task_activity")!.schema.safeParse({ taskKey: "BP-1", limit: 101 }).success).toBe(false);

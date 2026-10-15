@@ -4,6 +4,7 @@ import type { ScopedDb } from "@/lib/db-scope";
 import { withProjectAccess } from "@/lib/middleware";
 import { editSessions, presentSessions, type ActivityHeader } from "@/lib/activity";
 import { DELETED_AGENT, type IActivityLog } from "@/types";
+import { withShownSource } from "@/lib/activity-source";
 
 const SHOWN = 100;
 const SCANNED = 1000;
@@ -22,7 +23,7 @@ export const GET = withProjectAccess(async (_request, { params, db }) => {
   const headers = await db.ActivityLog.find({ task: taskId })
     .sort({ createdAt: -1, _id: -1 })
     .limit(SCANNED)
-    .select("user action field customField fieldType createdAt")
+    .select("user action field customField fieldType source createdAt")
     .lean<ActivityHeader[]>();
 
   const all = editSessions(headers);
@@ -35,7 +36,7 @@ export const GET = withProjectAccess(async (_request, { params, db }) => {
     .lean<IActivityLog[]>();
   const logs = await withAgentNames(db, presentSessions(sessions, rows));
 
-  return NextResponse.json(logs);
+  return NextResponse.json(logs.map(withShownSource));
 });
 
 const OBJECT_ID = /^[a-f\d]{24}$/i;

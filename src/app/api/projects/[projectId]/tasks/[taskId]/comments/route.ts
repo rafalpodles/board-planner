@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess, withProjectAccessOrWorker } from "@/lib/middleware";
 import { addComment } from "@/lib/task-service";
+import { withShownSource } from "@/lib/activity-source";
 
 export const GET = withProjectAccess(async (_request, { params, db }) => {
   const { projectId, taskId } = await params;
@@ -17,9 +18,10 @@ export const GET = withProjectAccess(async (_request, { params, db }) => {
   const comments = await db.Comment.find({ task: taskId })
     .sort({ createdAt: 1 })
     .populate("author", "username fullName")
-    .populate("reactions.user", "username fullName");
+    .populate("reactions.user", "username fullName")
+    .lean();
 
-  return NextResponse.json(comments);
+  return NextResponse.json(comments.map(withShownSource));
 });
 
 export const POST = withProjectAccessOrWorker(async (request, { params, user, db }) => {

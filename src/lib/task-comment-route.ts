@@ -4,6 +4,7 @@ import { COMMENT_BODY_MAX_LENGTH, COMMENT_BODY_RULE } from "@/lib/identifiers";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { logActivity } from "@/lib/activity";
+import { provenanceFields } from "@/lib/activity-source";
 
 export const PUT = withProjectAccess(async (request, { params, user, db }) => {
   const { projectId, taskId, commentId } = await params;
@@ -37,7 +38,10 @@ export const PUT = withProjectAccess(async (request, { params, user, db }) => {
     return NextResponse.json({ error: COMMENT_BODY_RULE }, { status: 400 });
   }
 
+  const edit = provenanceFields();
   comment.body = body.trim();
+  comment.editedSource = edit.source;
+  comment.editedSourceDetail = edit.sourceDetail;
   await comment.save();
 
   const populated = await db.Comment.findById(comment._id).populate({

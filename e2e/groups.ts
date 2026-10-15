@@ -38,6 +38,7 @@ export const GROUPS = {
     "due-date-in-the-viewers-day.spec.ts",
     "task-tab-title.spec.ts",
     "comment-shown-once.spec.ts",
+    "activity-source.spec.ts",
     "archive-and-delete.spec.ts",
   ],
   "task-fields": [

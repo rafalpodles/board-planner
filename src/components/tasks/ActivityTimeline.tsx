@@ -8,6 +8,7 @@ import { ApiActivityLog, DELETED_AGENT, LinkDirection, STATUS_LABELS, TaskStatus
 import { timeAgo } from "@/lib/time";
 import { describeLinkChange } from "@/lib/link-phrasing";
 import { withAiMark } from "@/lib/pm/username";
+import { SourceBadge } from "@/components/ui/SourceBadge";
 
 interface ActivityTimelineProps {
   projectId: string;
@@ -333,6 +334,7 @@ export function ActivityTimeline({
                 </details>
               )}
             </div>
+            <SourceBadge source={log.source} detail={log.sourceDetail} />
             <time
               dateTime={log.createdAt}
               title={new Date(log.createdAt).toLocaleString()}

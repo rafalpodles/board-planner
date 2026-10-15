@@ -18,6 +18,8 @@ import { SuggestionList } from "@/components/ui/SuggestionList";
 import { useEditorTriggers } from "@/hooks/use-editor-triggers";
 import { COMMENT_BODY_MAX_LENGTH } from "@/lib/identifiers";
 import { AiBadge } from "@/components/ui/AiBadge";
+import { SourceBadge } from "@/components/ui/SourceBadge";
+import { sourceOf } from "@/lib/activity-source-label";
 import { PM_USERNAME } from "@/lib/pm/username";
 
 interface CommentsProps {
@@ -234,21 +236,27 @@ export function Comments({
             key={comment._id}
             className="bg-bg-input rounded-lg p-3 border border-border group"
           >
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-sm font-medium">
-                {comment.author && typeof comment.author === "object"
-                  ? comment.author.fullName
-                  : "Deleted user"}
-              </span>
-              {comment.author && typeof comment.author === "object" && comment.author.username === PM_USERNAME && <AiBadge />}
-              <span className="text-xs text-text-muted">
-                {formatDate(comment.createdAt)}
-              </span>
-              {comment.updatedAt !== comment.createdAt && (
-                <span className="text-xs text-text-muted italic">
-                  (edited)
+            <div className="flex items-start gap-2 mb-1">
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="text-sm font-medium">
+                  {comment.author && typeof comment.author === "object"
+                    ? comment.author.fullName
+                    : "Deleted user"}
                 </span>
-              )}
+                {comment.author && typeof comment.author === "object" && comment.author.username === PM_USERNAME && <AiBadge />}
+                <SourceBadge source={comment.source} detail={comment.sourceDetail} />
+                <span className="whitespace-nowrap text-xs text-text-muted">
+                  {formatDate(comment.createdAt)}
+                </span>
+                {comment.updatedAt !== comment.createdAt && (
+                  <span className="text-xs text-text-muted italic">
+                    (edited)
+                  </span>
+                )}
+                {comment.editedSource && comment.editedSource !== sourceOf(comment.source) && (
+                  <SourceBadge source={comment.editedSource} detail={comment.editedSourceDetail} edited />
+                )}
+              </div>
               {isOwnComment(comment) && editingId !== comment._id && (
                 <div className="ml-auto flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button

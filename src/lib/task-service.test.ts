@@ -232,6 +232,7 @@ const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 const db = scopedToDefaultOrganisation();
 
 const { logActivity, logActivities } = await import("@/lib/activity");
+const { actingThrough, currentProvenance } = await import("@/lib/activity-source");
 const { dispatchWebhooks } = await import("@/lib/webhooks");
 const { dispatchNotifications } = await import("@/lib/notifications");
 
@@ -965,6 +966,17 @@ describe("releaseExpiredTasks", () => {
     projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     userFindOne.mockReturnValue({ lean: async () => ({ _id: "worker-user-1" }) });
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
+  });
+
+  // Swept during another machine's claim, which is not that machine's doing (BP-824)
+  it("records the expiry as the system's, not the machine whose claim swept it", async () => {
+    expired(expiredTask());
+    const sources: string[] = [];
+    vi.mocked(logActivity).mockImplementation(async () => void sources.push(currentProvenance().source));
+
+    await actingThrough({ source: "worker", detail: "other-mac" }, () => releaseExpiredTasks(db, "p1", now));
+
+    expect(sources).toEqual(["system"]);
   });
 
   it("only touches tasks whose lease has actually run out", async () => {

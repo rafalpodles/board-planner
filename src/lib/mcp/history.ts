@@ -1,4 +1,5 @@
 import type { GeneratedBy } from "@/types";
+import { shownSource } from "@/lib/activity-source";
 
 const SHOWN_VALUE = 300;
 
@@ -11,6 +12,10 @@ type Comment = {
   createdAt?: string;
   reactions?: { emoji: string }[];
   generatedBy?: GeneratedBy;
+  source?: string;
+  sourceDetail?: string;
+  editedSource?: string;
+  editedSourceDetail?: string;
 };
 
 const nameOf = (person: Person) => (person && typeof person === "object" ? (person.username ?? null) : null);
@@ -30,6 +35,10 @@ export function commentLines(comments: Comment[]) {
       createdAt: comment.createdAt ?? null,
       reactions: [...counts].map(([emoji, count]) => ({ emoji, count })),
       ...(comment.generatedBy ? { generatedBy: comment.generatedBy } : {}),
+      source: shownSource(comment.source),
+      ...(comment.sourceDetail ? { sourceDetail: comment.sourceDetail } : {}),
+      ...(comment.editedSource ? { editedSource: comment.editedSource } : {}),
+      ...(comment.editedSourceDetail ? { editedSourceDetail: comment.editedSourceDetail } : {}),
     };
   });
 }
@@ -44,6 +53,8 @@ type Activity = {
   createdAt?: string;
   cleared?: boolean;
   generatedBy?: GeneratedBy;
+  source?: string;
+  sourceDetail?: string;
 };
 
 const clip = (value: string) => (value.length > SHOWN_VALUE ? `${value.slice(0, SHOWN_VALUE)}…` : value);
@@ -70,6 +81,8 @@ export function activityLines(logs: Activity[], limit: number) {
       from: description ? "" : clip(log.oldValue ?? ""),
       to: description ? describedChange(log) : clip(log.newValue ?? ""),
       ...(log.generatedBy ? { generatedBy: log.generatedBy } : {}),
+      source: shownSource(log.source),
+      ...(log.sourceDetail ? { sourceDetail: log.sourceDetail } : {}),
     };
   });
 }

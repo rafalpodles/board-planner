@@ -362,3 +362,14 @@ describe("PlannerClient board setup", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+// BP-824: the app records what an MCP tool writes as MCP, not as a bare API call
+describe("PlannerClient says it is the MCP server", () => {
+  it("on every request", async () => {
+    await new PlannerClient("https://board.example.com", "cp_token").addComment(PROJECT, TASK, "hi");
+
+    const headers = fetchMock.mock.calls.at(-1)![1].headers as Record<string, string>;
+    expect(headers["x-bp-client"]).toBe("mcp");
+    expect(headers.Authorization).toBe("Bearer cp_token");
+  });
+});

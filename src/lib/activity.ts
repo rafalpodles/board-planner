@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import { ActivityAction } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
 import { currentGeneratedBy } from "@/lib/ai-generated";
+import { provenanceFields } from "@/lib/activity-source";
 
 /**
  * Several rows from one act, in one write.
@@ -33,6 +34,7 @@ export async function logActivities(
 ): Promise<void> {
   if (rows.length === 0) return;
   const generatedBy = currentGeneratedBy();
+  const provenance = provenanceFields();
   try {
     await db.ActivityLog.insertMany(
       rows.map((row) => ({
@@ -46,6 +48,7 @@ export async function logActivities(
         ...(row.customField && { customField: true }),
         ...(row.fieldType && { fieldType: row.fieldType }),
         ...(generatedBy && { generatedBy }),
+        ...provenance,
       }))
     );
   } catch (err) {
@@ -81,6 +84,7 @@ export async function logActivity(
       oldValue: oldValue || "",
       newValue: newValue || "",
       ...(generatedBy && { generatedBy }),
+      ...provenanceFields(),
     });
   } catch {
     // Activity logging should never break the main operation
@@ -100,6 +104,7 @@ export interface ActivityHeader {
   field: string;
   customField?: boolean;
   fieldType?: string;
+  source?: string;
   createdAt: Date;
 }
 
@@ -120,6 +125,7 @@ function sameEdit(a: ActivityHeader, b: ActivityHeader) {
     a.field === b.field &&
     !!a.customField === !!b.customField &&
     String(a.user) === String(b.user) &&
+    a.source === b.source &&
     Math.abs(a.createdAt.getTime() - b.createdAt.getTime()) < EDIT_SESSION_MS
   );
 }

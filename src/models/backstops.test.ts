@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import mongoose from "mongoose";
 import { Task } from "./task";
 import { Comment } from "./comment";
+import { ActivityLog } from "./activityLog";
 import { Project } from "./project";
 import { Worker } from "./worker";
 import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
@@ -66,5 +67,25 @@ describe("schema backstops", () => {
       repos: Array.from({ length: 1_001 }, () => ({ remote: "r", path: "/p" })),
     });
     expect(errorsOf(many)).toContain("repos");
+  });
+});
+
+// BP-824: where an entry came from is evidence, so nothing rewrites it once it is stored
+describe("source is immutable", () => {
+  it.each([
+    ["a comment", () => new Comment({ organisation: DEFAULT_ORGANISATION_ID, task: id(), author: id(), body: "b", source: "worker" })],
+    ["an activity row", () => new ActivityLog({ organisation: DEFAULT_ORGANISATION_ID, task: id(), project: id(), action: "created", source: "worker" })],
+  ])("on %s", (_label, build) => {
+    const doc = build() as mongoose.Document & { source?: string; sourceDetail?: string };
+    doc.isNew = false;
+    doc.set({ source: "web-ui", sourceDetail: "forged" });
+
+    expect(doc.source).toBe("worker");
+    expect(doc.sourceDetail).toBeUndefined();
+  });
+
+  it("refuses a source it does not know", () => {
+    const doc = new Comment({ organisation: DEFAULT_ORGANISATION_ID, task: id(), author: id(), body: "b", source: "human" });
+    expect(errorsOf(doc)).toContain("source");
   });
 });
