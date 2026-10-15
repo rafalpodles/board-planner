@@ -80,7 +80,7 @@ describe("InsightsPage", () => {
     await screen.findByTestId("insights-sample");
     expect(screen.getByTestId("insights-upsell").textContent).toContain("sample data");
     expect(screen.queryByTestId("insights-filters")).toBeNull();
-    expect(screen.getAllByText("Sample data")).toHaveLength(4);
+    expect(screen.getAllByText("Sample data")).toHaveLength(5);
     expect(screen.getByTestId("insights-aging").textContent).toContain("DEMO-151");
     expect(screen.getByTestId("insights-aging").textContent).not.toContain("INS-");
     await new Promise((resolve) => setTimeout(resolve, 50));
