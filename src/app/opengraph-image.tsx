@@ -47,7 +47,7 @@ export default function OpenGraphImage() {
             />
           ))}
         </div>
-        <div style={{ marginTop: 36, fontSize: 84, fontWeight: 700, letterSpacing: -2 }}>{APP_NAME}</div>
+        <div style={{ marginTop: 36, fontSize: 84, letterSpacing: -2 }}>{APP_NAME}</div>
         <div style={{ marginTop: 12, fontSize: 32, opacity: 0.85 }}>{APP_DESCRIPTION}</div>
       </div>
     ),
