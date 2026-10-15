@@ -26,6 +26,7 @@ const PRIORITY_NAMES: Record<string, Priority> = {
   highest: "urgent", blocker: "urgent", critical: "urgent",
   major: "high",
   normal: "medium",
+  immediate: "urgent",
   lowest: "low", minor: "low", trivial: "low",
   najwyższy: "urgent", krytyczny: "urgent", blokujący: "urgent", poważny: "high", drobny: "low", trywialny: "low", wysoki: "high", średni: "medium", normalny: "medium", niski: "low", najniższy: "low",
 };

@@ -161,8 +161,8 @@ describe("runImport", () => {
 
   it("reads the priority scales Jira and Linear ship with, and takes No priority as none given", async () => {
     const { db, writes } = fakeDb();
-    const report = await run(db, ["Highest", "Blocker", "Critical", "Major", "Normal", "Lowest", "Minor", "Trivial", "No priority", "none", "-", "Najwyższy", "Niski", "Blokujący", "Drobny"].map((priority, i) => ({ id: String(i), title: "t", priority })));
-    expect(writes.tasks.map((t) => t.priority)).toEqual(["urgent", "urgent", "urgent", "high", "medium", "low", "low", "low", "medium", "medium", "medium", "urgent", "low", "urgent", "low"]);
+    const report = await run(db, ["Highest", "Blocker", "Critical", "Major", "Normal", "Lowest", "Minor", "Trivial", "No priority", "none", "-", "Najwyższy", "Niski", "Blokujący", "Drobny", "Immediate"].map((priority, i) => ({ id: String(i), title: "t", priority })));
+    expect(writes.tasks.map((t) => t.priority)).toEqual(["urgent", "urgent", "urgent", "high", "medium", "low", "low", "low", "medium", "medium", "medium", "urgent", "low", "urgent", "low", "urgent"]);
     expect(report.dropped).toEqual([]);
   });
 

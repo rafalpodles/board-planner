@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { commentAuthors, csvToBundle, decodeCsv, detectDelimiter, guessTargets, isJiraExport, normaliseDay, normaliseInstant, parseCsv, readCsvTable } from "./csv";
+import { commentAuthors, csvToBundle, decodeCsv, knownSource, detectDelimiter, guessTargets, isJiraExport, normaliseDay, normaliseInstant, parseCsv, readCsvTable } from "./csv";
 import { parseBundle } from "./bundle";
 
 const FIELDS = [
@@ -276,5 +276,75 @@ describe("Jira's own conventions", () => {
     const targets = guessTargets(table.headers, []);
     expect(targets.slice(4)).toEqual(["blockedBy", "blockedBy"]);
     expect(csvToBundle(table, targets, "Jira", [], "u1").tasks.map((t) => t.blockedBy)).toEqual([undefined, ["X-1", "X-9"], ["X-1", "X-2"]]);
+  });
+});
+
+describe("presets for other trackers' CSV exports", () => {
+  const labels = [{ name: "Labels", fieldType: "multiselect" }];
+
+  it("maps Asana's export: task id, section, assignee e-mail, tags and its dependencies", () => {
+    const table = readCsvTable(
+      [
+        "Task ID,Created At,Completed At,Last Modified,Name,Section/Column,Assignee,Assignee Email,Start Date,Due Date,Tags,Notes,Projects,Parent task,Blocked By (Dependencies),Blocking (Dependencies)",
+        '1201,2026-01-05,,2026-01-06,Write the brief,Doing,Ann Lee,ann@example.com,,2026-02-01,"q1, web",Some notes,Launch,,1200,',
+      ].join("\n")
+    );
+    expect(knownSource(table.headers)?.name).toBe("Asana");
+    const targets = guessTargets(table.headers, labels);
+    expect(Object.fromEntries(table.headers.map((h, i) => [h, targets[i]]).filter(([, t]) => t !== "ignore"))).toEqual({
+      "Task ID": "id",
+      "Created At": "createdAt",
+      "Completed At": "completedAt",
+      Name: "title",
+      "Section/Column": "status",
+      "Assignee Email": "assignee",
+      "Due Date": "dueDate",
+      Tags: "field:Labels",
+      Notes: "description",
+      "Blocked By (Dependencies)": "blockedBy",
+    });
+    expect(csvToBundle(table, targets, "Asana", labels, "u1").tasks[0]).toMatchObject({
+      id: "1201",
+      status: "Doing",
+      assignee: "ann@example.com",
+      fields: { Labels: ["q1", "web"] },
+      blockedBy: ["1200"],
+    });
+  });
+
+  it("maps GitHub Projects' export: the item's URL as its id, the first of its assignees, its labels", () => {
+    const table = readCsvTable(
+      ["Title,URL,Assignees,Status,Labels,Repository,Milestone", 'Fix login,https://github.com/o/r/issues/7,"octo, cat",In Progress,bug,o/r,v1'].join("\n")
+    );
+    expect(knownSource(table.headers)?.name).toBe("GitHub Projects");
+    const targets = guessTargets(table.headers, labels);
+    expect(csvToBundle(table, targets, "GitHub Projects", labels, "u1").tasks[0]).toMatchObject({
+      id: "https://github.com/o/r/issues/7",
+      title: "Fix login",
+      assignee: "octo",
+      status: "In Progress",
+      fields: { Labels: ["bug"] },
+    });
+  });
+
+  it("maps OpenProject's export, reading its #123 references", () => {
+    const table = readCsvTable(
+      ["ID,Type,Subject,Status,Priority,Assignee,Parent,Start date,Finish date,Created on", "12,Task,Wire it,New,Immediate,ann,#10 The epic,2026-01-01,2026-01-20,2026-01-01 09:00"].join("\n")
+    );
+    expect(knownSource(table.headers)?.name).toBe("OpenProject");
+    const targets = guessTargets(table.headers, []);
+    expect(csvToBundle(table, targets, "OpenProject", [], "u1").tasks[0]).toMatchObject({
+      id: "12",
+      type: "Task",
+      title: "Wire it",
+      priority: "Immediate",
+      parent: "10",
+      dueDate: "2026-01-20",
+      createdAt: "2026-01-01T09:00:00Z",
+    });
+  });
+
+  it("recognises nothing in an ordinary sheet", () => {
+    expect(knownSource(["Title", "Status", "Owner"])).toBeNull();
   });
 });

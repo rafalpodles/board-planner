@@ -136,6 +136,47 @@ export function repeatable(target: CsvTarget, fields: CsvField[]): boolean {
   return target.startsWith("field:") && fields.find((f) => `field:${f.name}` === target)?.fieldType === "multiselect";
 }
 
+export interface KnownSource {
+  name: string;
+  // Headers this source names its own way, read before the general guesses
+  columns: Record<string, CsvTarget>;
+}
+
+const PRESETS: { source: KnownSource; recognised: (headers: Set<string>) => boolean }[] = [
+  {
+    source: {
+      name: "Asana",
+      columns: {
+        "task id": "id",
+        "section/column": "status",
+        "assignee email": "assignee",
+        assignee: "ignore",
+        notes: "description",
+        "blocked by (dependencies)": "blockedBy",
+        "parent task": "ignore",
+      },
+    },
+    recognised: (h) => h.has("task id") && h.has("name") && h.has("section/column"),
+  },
+  {
+    source: { name: "GitHub Projects", columns: { url: "id", assignees: "assignee" } },
+    recognised: (h) => h.has("title") && h.has("url") && h.has("status") && (h.has("assignees") || h.has("repository")),
+  },
+  {
+    source: { name: "OpenProject", columns: { id: "id", subject: "title", "finish date": "dueDate", "created on": "createdAt" } },
+    recognised: (h) => h.has("subject") && h.has("type") && h.has("status") && (h.has("id") || h.has("#")),
+  },
+];
+
+// The tools whose export is known well enough to be mapped already
+export function knownSource(headers: string[]): KnownSource | null {
+  if (isJiraExport(headers)) return { name: "Jira", columns: {} };
+  const lower = new Set(headers.map((h) => h.trim().toLowerCase()));
+  return PRESETS.find((p) => p.recognised(lower))?.source ?? null;
+}
+
+const LABEL_HEADERS = /^(labels|tags|etykiety|tagi)$/;
+
 export function isJiraExport(headers: string[]): boolean {
   const lower = new Set(headers.map((h) => h.trim().toLowerCase()));
   return (
@@ -149,10 +190,19 @@ export function guessTargets(headers: string[], fields: CsvField[]): CsvTarget[]
   // Jira's Parent holds a numeric id; where its Parent key is there too, that is the one to show
   const parentKey = headers.findIndex((h) => h.trim().toLowerCase() === "parent key");
   if (parentKey >= 0) taken.add("parent");
+  const preset = knownSource(headers)?.columns ?? {};
+  // A Tags or Labels column fills the board's own Labels field, whatever the field is called in the file
+  const labels = fields.find((f) => f.fieldType === "multiselect" && LABEL_HEADERS.test(f.name.trim().toLowerCase()));
   return headers.map((header, index) => {
     if (index === parentKey) return "parent";
     const wanted = header.trim().toLowerCase();
-    const field = fields.find((f) => f.name.trim().toLowerCase() === wanted);
+    if (Object.hasOwn(preset, wanted)) {
+      const chosen = preset[wanted];
+      if (chosen === "ignore" || (taken.has(chosen) && !repeatable(chosen, fields))) return "ignore";
+      taken.add(chosen);
+      return chosen;
+    }
+    const field = fields.find((f) => f.name.trim().toLowerCase() === wanted) ?? (LABEL_HEADERS.test(wanted) ? labels : undefined);
     const target: CsvTarget | undefined = field
       ? `field:${field.name}`
       : GUESSES.find(([, pattern]) => pattern.test(wanted))?.[0];
@@ -209,6 +259,12 @@ function fieldValue(raw: string, field: CsvField | undefined): unknown {
 }
 
 export const NO_ID_PREFIX = "row-";
+
+// OpenProject writes a work package as "#123" or "#123 Its subject"
+function refOf(value: string | undefined): string | undefined {
+  if (!value) return value;
+  return /^#(\d+)(?:\s|$)/.exec(value.trim())?.[1] ?? value.trim();
+}
 
 // Jira writes a comment as "15/Oct/26 9:30 AM;author;text"; anything else is the text alone
 function fnv(text: string): string {
@@ -269,17 +325,18 @@ export function csvToBundle(table: CsvTable, targets: CsvTarget[], source: strin
       title: cell(at("title")),
       description: prose(cell(at("description"))) || undefined,
       status: text("status"),
-      assignee: text("assignee"),
+      // A list of several (GitHub's Assignees) gives the task its first
+      assignee: text("assignee")?.split(/\s*,\s*/)[0] || undefined,
       priority: text("priority"),
       type: text("category"),
       dueDate: text("dueDate") && normaliseDay(text("dueDate")!),
       createdAt: text("createdAt") && normaliseInstant(text("createdAt")!),
       completedAt: text("completedAt") && normaliseInstant(text("completedAt")!),
     };
-    const parent = text("parent");
+    const parent = refOf(text("parent"));
     if (parent) task.parent = keyOf.get(parent) ?? parent;
     const blockers = targets.flatMap((t, column) => (t === "blockedBy" ? cell(column).split(/[,;\s]+/).filter(Boolean) : []));
-    if (blockers.length) task.blockedBy = [...new Set(blockers.map((b) => keyOf.get(b) ?? b))];
+    if (blockers.length) task.blockedBy = [...new Set(blockers.map((b) => keyOf.get(refOf(b)!) ?? refOf(b)!))];
     const values: Record<string, unknown> = {};
     const comments: ImportComment[] = [];
     targets.forEach((target, column) => {
