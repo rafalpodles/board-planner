@@ -253,8 +253,8 @@ const insertOutcome = (promise: Promise<unknown>) =>
     (err) => ({ refused: duplicateKeyField(err) })
   );
 
-test("eight per-organisation uniques are declared, seven of them beside a global one that was retired, so none can drop out of the checks below", () => {
-  expect(declaredPerOrganisationUniques).toHaveLength(8);
+test("nine per-organisation uniques are declared, seven of them beside a global one that was retired, so none can drop out of the checks below", () => {
+  expect(declaredPerOrganisationUniques).toHaveLength(9);
   expect(uniquesWithGlobalTwin).toHaveLength(7);
 });
 

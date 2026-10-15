@@ -100,7 +100,7 @@ test("on Pro every panel draws the board's own figures, and the filters ask the 
   const aging = page.getByTestId("insights-aging");
   await expect(aging.getByRole("link", { name: "INS-4" })).toHaveAttribute("href", "/projects/INS/tasks/4");
   await expect(aging).toContainText("Still being built");
-  await expect(page.getByTestId("insights-dora")).toContainText("not measured yet");
+  await expect(page.getByTestId("insights-dora")).toContainText("Settings → Integrations");
   await expect(page.getByText("Sample data")).toHaveCount(0);
 
   await page.getByTestId("insights-throughput").getByText("Show as table").click();
@@ -151,7 +151,8 @@ test("on Free the page shows the sample and the upsell, and never asks for insig
   await expect(page.getByTestId("insights-aging")).toContainText("DEMO-151");
   await expect(page.getByTestId("insights-aging")).not.toContainText("FRE-");
   await expect(page.getByTestId("insights-trend").getByText("Sample data")).toBeVisible();
-  await expect(page.getByTestId("insights-dora").getByText("Sample data")).toHaveCount(0);
+  await expect(page.getByTestId("insights-dora").getByText("Sample data")).toBeVisible();
+  await expect(page.getByTestId("insights-dora-figures")).toContainText("/ week");
   await page.waitForTimeout(1_000);
   expect(asked).toEqual([]);
   await shot(page, "free-desktop");

@@ -1,8 +1,7 @@
 import mongoose, { Schema, Model, Types } from "mongoose";
 import { withOrganisation } from "@/lib/organisation-field";
 
-export const FINISHED_DEPLOYMENT_STATES = ["success", "failure", "error"] as const;
-export type DeploymentState = "pending" | (typeof FINISHED_DEPLOYMENT_STATES)[number];
+import { FINISHED_DEPLOYMENT_STATES, type DeploymentState } from "@/lib/deployment-state";
 
 export interface IDeployment {
   _id: Types.ObjectId;

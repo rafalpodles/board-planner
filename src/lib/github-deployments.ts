@@ -9,7 +9,7 @@ import {
 } from "@/lib/github";
 import { projectRepositoryUrl, repositoryProvider, type RepositoryFields } from "@/lib/repository";
 import type { ScopedDb } from "@/lib/db-scope";
-import { FINISHED_DEPLOYMENT_STATES, type DeploymentState } from "@/models/deployment";
+import { FINISHED_DEPLOYMENT_STATES, type DeploymentState } from "@/lib/deployment-state";
 
 export const DEFAULT_DEPLOYMENT_ENVIRONMENT = "production";
 export const DEPLOYMENT_PAGES_PER_TICK = 3;
