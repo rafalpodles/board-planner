@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import type { ImportBundle, ImportMapping } from "@/lib/import/bundle";
 import { MAX_IMPORT_TASKS } from "@/lib/import/limits";
-import { type CsvTable, type CsvTarget, commentAuthors, csvToBundle, distinctValues, guessTargets, headerRuns, knownSource, repeatable, shapeKey } from "@/lib/import/csv";
+import { type CsvTable, type CsvTarget, assigneesIn, commentAuthors, csvToBundle, distinctValues, guessTargets, headerRuns, knownSource, repeatable, shapeKey } from "@/lib/import/csv";
 import { effectiveColumns, MAX_COLUMN_LABEL } from "@/lib/columns";
 import { COLUMN_ROLES, type ApiProject, type ApiProjectColumn, type ColumnRole, ROLE_LABELS } from "@/types";
 
@@ -161,7 +161,7 @@ export function CsvMapping({
 
   const statusValues = useMemo(() => distinctValues(table, targets.indexOf("status")), [table, targets]);
   const userValues = useMemo(
-    () => [...new Set([...distinctValues(table, targets.indexOf("assignee")), ...commentAuthors(table, targets)])],
+    () => [...new Set([...assigneesIn(table, targets.indexOf("assignee")), ...commentAuthors(table, targets)])],
     [table, targets]
   );
   // A recalled choice that no longer names something on this board falls back to the automatic one

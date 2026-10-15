@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { commentAuthors, csvToBundle, decodeCsv, knownSource, detectDelimiter, guessTargets, isJiraExport, normaliseDay, normaliseInstant, parseCsv, readCsvTable } from "./csv";
+import { assigneesIn, commentAuthors, csvToBundle, decodeCsv, knownSource, detectDelimiter, guessTargets, isJiraExport, normaliseDay, normaliseInstant, parseCsv, readCsvTable } from "./csv";
 import { parseBundle } from "./bundle";
 
 const FIELDS = [
@@ -329,7 +329,7 @@ describe("presets for other trackers' CSV exports", () => {
 
   it("maps OpenProject's export, reading its #123 references", () => {
     const table = readCsvTable(
-      ["ID,Type,Subject,Status,Priority,Assignee,Parent,Start date,Finish date,Created on", "12,Task,Wire it,New,Immediate,ann,#10 The epic,2026-01-01,2026-01-20,2026-01-01 09:00"].join("\n")
+      ["ID,Type,Subject,Status,Priority,Assignee,Parent,Start date,Finish date,Created on", "12,Task,Wire it,New,Immediate,ann,Epic #10: The epic,2026-01-01,2026-01-20,2026-01-01 09:00"].join("\n")
     );
     expect(knownSource(table.headers)?.name).toBe("OpenProject");
     const targets = guessTargets(table.headers, []);
@@ -344,7 +344,33 @@ describe("presets for other trackers' CSV exports", () => {
     });
   });
 
-  it("recognises nothing in an ordinary sheet", () => {
-    expect(knownSource(["Title", "Status", "Owner"])).toBeNull();
+  it("recognises nothing in an ordinary sheet that only looks like one", () => {
+    expect(knownSource(["ID", "Subject", "Type", "Status"])).toBeNull();
+    expect(knownSource(["Title", "URL", "Status"])).toBeNull();
+    expect(knownSource(["Task ID", "Name", "Status"])).toBeNull();
+  });
+
+  it("leaves an ordinary sheet's names and #references as they are", () => {
+    const table = readCsvTable('ID,Title,Owner,Parent\n#5,a,"Lee, Ann",\n#6,b,,#5');
+    const bundle = csvToBundle(table, guessTargets(table.headers, []), "CSV", [], "u1");
+    expect(bundle.tasks.map((t) => [t.id, t.assignee, t.parent])).toEqual([
+      ["#5", "Lee, Ann", undefined],
+      ["#6", undefined, "#5"],
+    ]);
+    expect(assigneesIn(table, 2)).toEqual(["Lee, Ann"]);
+  });
+
+  it("lists GitHub's several assignees by the one the task takes, so a member picked for it applies", () => {
+    const table = readCsvTable('Title,URL,Assignees,Status\na,u1,"octo, cat",Todo\nb,u2,octo,Todo');
+    expect(assigneesIn(table, 2)).toEqual(["octo"]);
+  });
+
+  it("keeps Asana's assignee name when the export has no e-mail column", () => {
+    const table = readCsvTable("Task ID,Name,Section/Column,Assignee\n1,a,Doing,Ann Lee");
+    expect(guessTargets(table.headers, [])).toEqual(["id", "title", "status", "assignee"]);
+  });
+
+  it("knows a Jira export as one of them", () => {
+    expect(knownSource(["Issue key", "Summary", "Issue Type"])?.name).toBe("Jira");
   });
 });

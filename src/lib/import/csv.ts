@@ -140,31 +140,33 @@ export interface KnownSource {
   name: string;
   // Headers this source names its own way, read before the general guesses
   columns: Record<string, CsvTarget>;
+  // One cell may name several assignees, comma-separated; the task takes the first
+  severalAssignees?: boolean;
+  // Another task is written "#123", or "Epic #123: Its subject"
+  hashRefs?: boolean;
 }
 
-const PRESETS: { source: KnownSource; recognised: (headers: Set<string>) => boolean }[] = [
+const PRESETS: { source: (headers: Set<string>) => KnownSource; recognised: (headers: Set<string>) => boolean }[] = [
   {
-    source: {
+    source: (h) => ({
       name: "Asana",
       columns: {
-        "task id": "id",
         "section/column": "status",
         "assignee email": "assignee",
-        assignee: "ignore",
-        notes: "description",
+        // The e-mail matches a member; the name only when there is no e-mail column
+        ...(h.has("assignee email") && { assignee: "ignore" as const }),
         "blocked by (dependencies)": "blockedBy",
-        "parent task": "ignore",
       },
-    },
+    }),
     recognised: (h) => h.has("task id") && h.has("name") && h.has("section/column"),
   },
   {
-    source: { name: "GitHub Projects", columns: { url: "id", assignees: "assignee" } },
+    source: () => ({ name: "GitHub Projects", columns: { url: "id", assignees: "assignee" }, severalAssignees: true }),
     recognised: (h) => h.has("title") && h.has("url") && h.has("status") && (h.has("assignees") || h.has("repository")),
   },
   {
-    source: { name: "OpenProject", columns: { id: "id", subject: "title", "finish date": "dueDate", "created on": "createdAt" } },
-    recognised: (h) => h.has("subject") && h.has("type") && h.has("status") && (h.has("id") || h.has("#")),
+    source: () => ({ name: "OpenProject", columns: { "finish date": "dueDate" }, hashRefs: true }),
+    recognised: (h) => h.has("subject") && h.has("type") && h.has("status") && h.has("id") && (h.has("finish date") || (h.has("author") && h.has("updated on"))),
   },
 ];
 
@@ -172,7 +174,7 @@ const PRESETS: { source: KnownSource; recognised: (headers: Set<string>) => bool
 export function knownSource(headers: string[]): KnownSource | null {
   if (isJiraExport(headers)) return { name: "Jira", columns: {} };
   const lower = new Set(headers.map((h) => h.trim().toLowerCase()));
-  return PRESETS.find((p) => p.recognised(lower))?.source ?? null;
+  return PRESETS.find((p) => p.recognised(lower))?.source(lower) ?? null;
 }
 
 const LABEL_HEADERS = /^(labels|tags|etykiety|tagi)$/;
@@ -260,10 +262,14 @@ function fieldValue(raw: string, field: CsvField | undefined): unknown {
 
 export const NO_ID_PREFIX = "row-";
 
-// OpenProject writes a work package as "#123" or "#123 Its subject"
-function refOf(value: string | undefined): string | undefined {
-  if (!value) return value;
-  return /^#(\d+)(?:\s|$)/.exec(value.trim())?.[1] ?? value.trim();
+function hashRef(value: string): string {
+  return /(?:^|\s)#(\d+)(?::|\s|$)/.exec(value.trim())?.[1] ?? value.trim();
+}
+
+export function assigneesIn(table: CsvTable, column: number): string[] {
+  const values = distinctValues(table, column);
+  if (!knownSource(table.headers)?.severalAssignees) return values;
+  return [...new Set(values.map((v) => v.split(/\s*,\s*/)[0]).filter(Boolean))];
 }
 
 // Jira writes a comment as "15/Oct/26 9:30 AM;author;text"; anything else is the text alone
@@ -308,6 +314,9 @@ function commentFrom(cell: string, ordinal: number, taken: ImportComment[], pros
 // `upload` names this upload alone: a row with no id of its own can then never match a task from another one
 export function csvToBundle(table: CsvTable, targets: CsvTarget[], source: string, fields: CsvField[], upload: string): ImportBundle {
   const at = (target: CsvTarget) => targets.indexOf(target);
+  const known = knownSource(table.headers);
+  const several = known?.severalAssignees ?? false;
+  const refOf = (value: string) => (known?.hashRefs ? hashRef(value) : value.trim());
   const prose = (text: string) => (table.markup === "jira-wiki" && text ? jiraWikiToMarkdown(text) : text);
   const idColumn = at("id");
   // Jira's Parent column holds the parent's numeric Issue id; the key is what a person reads
@@ -325,18 +334,17 @@ export function csvToBundle(table: CsvTable, targets: CsvTarget[], source: strin
       title: cell(at("title")),
       description: prose(cell(at("description"))) || undefined,
       status: text("status"),
-      // A list of several (GitHub's Assignees) gives the task its first
-      assignee: text("assignee")?.split(/\s*,\s*/)[0] || undefined,
+      assignee: (several ? text("assignee")?.split(/\s*,\s*/)[0] : text("assignee")) || undefined,
       priority: text("priority"),
       type: text("category"),
       dueDate: text("dueDate") && normaliseDay(text("dueDate")!),
       createdAt: text("createdAt") && normaliseInstant(text("createdAt")!),
       completedAt: text("completedAt") && normaliseInstant(text("completedAt")!),
     };
-    const parent = refOf(text("parent"));
+    const parent = text("parent") && refOf(text("parent")!);
     if (parent) task.parent = keyOf.get(parent) ?? parent;
     const blockers = targets.flatMap((t, column) => (t === "blockedBy" ? cell(column).split(/[,;\s]+/).filter(Boolean) : []));
-    if (blockers.length) task.blockedBy = [...new Set(blockers.map((b) => keyOf.get(refOf(b)!) ?? refOf(b)!))];
+    if (blockers.length) task.blockedBy = [...new Set(blockers.map((b) => keyOf.get(refOf(b)) ?? refOf(b)))];
     const values: Record<string, unknown> = {};
     const comments: ImportComment[] = [];
     targets.forEach((target, column) => {
