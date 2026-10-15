@@ -6,6 +6,7 @@ export const STATIC_ROUTES_ALLOWED: Record<string, string> = {
   "/icon.svg": "an image, not a page",
   "/favicon.ico": "an image, not a page",
   "/apple-icon.png": "an image, not a page",
+  "/opengraph-image": "an image, not a page",
   "/robots.txt": "plain text, not a page",
 };
 
