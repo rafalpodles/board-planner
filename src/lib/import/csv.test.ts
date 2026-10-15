@@ -187,12 +187,20 @@ describe("a Jira export", () => {
       parent: "10010",
       fields: { Labels: ["billing", "urgent-fix"] },
       comments: [
-        { id: "c1", createdAt: "2025-10-15T09:45:00Z", author: "712020:abc", body: "First comment" },
-        { id: "c2", createdAt: "2025-10-16T00:05:00Z", author: "712020:def", body: "Second; with a semicolon" },
+        { id: "2025-10-15T09:45:00Z|712020:abc", createdAt: "2025-10-15T09:45:00Z", author: "712020:abc", body: "First comment" },
+        { id: "2025-10-16T00:05:00Z|712020:def", createdAt: "2025-10-16T00:05:00Z", author: "712020:def", body: "Second; with a semicolon" },
       ],
     });
     expect(bundle.tasks[1].comments).toEqual([{ id: "c1", body: "just text with no date" }]);
     expect(bundle.tasks[1].createdAt).toBe("2026-01-01T12:00:00Z");
+  });
+
+  it("keeps a comment's identity when an earlier one is deleted in Jira, and tells two in the same minute apart", () => {
+    const sheet = (cells: string[]) => readCsvTable(["Issue key,Summary,Comment,Comment,Comment", ["X-1", "t", ...cells].map((c) => `"${c}"`).join(",")].join("\n"));
+    const ids = (cells: string[]) => csvToBundle(sheet(cells), ["id", "title", "comment", "comment", "comment"], "Jira", [], "u1").tasks[0].comments!.map((c) => c.id);
+    const [a, b, c] = ["01/Jan/26 9:00 AM;u1;one", "01/Jan/26 9:00 AM;u1;two", "02/Jan/26 9:00 AM;u2;three"];
+    expect(ids([a, b, c])).toEqual(["2026-01-01T09:00:00Z|u1", "2026-01-01T09:00:00Z|u1#2", "2026-01-02T09:00:00Z|u2"]);
+    expect(ids([a, c, ""])).toEqual(["2026-01-01T09:00:00Z|u1", "2026-01-02T09:00:00Z|u2"]);
   });
 
   it.each([

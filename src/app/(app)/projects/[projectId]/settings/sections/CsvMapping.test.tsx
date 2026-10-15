@@ -82,4 +82,27 @@ describe("CsvMapping", () => {
     fireEvent.change(select, { target: { value: "" } });
     await waitFor(() => expect(last()!.mapping.statuses).toEqual({}));
   });
+
+  it("keeps a repeatable target on every column it is on, and moves any other off the column that had it", async () => {
+    const sheet = readCsvTable("Title,Note,Other\nOne,a,b\n");
+    const onChange = vi.fn();
+    render(<CsvMapping projectId="p1" project={project} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
+    await waitFor(() => expect(onChange.mock.calls.at(-1)![0]).not.toBeNull());
+    fireEvent.change(screen.getByLabelText("Note"), { target: { value: "comment" } });
+    fireEvent.change(screen.getByLabelText("Other"), { target: { value: "comment" } });
+    expect((screen.getByLabelText("Note") as HTMLSelectElement).value).toBe("comment");
+    fireEvent.change(screen.getByLabelText("Other"), { target: { value: "title" } });
+    expect((screen.getByLabelText("Title") as HTMLSelectElement).value).toBe("ignore");
+  });
+
+  it("keeps only the first of a remembered repeat whose field no longer takes one", async () => {
+    const sheet = readCsvTable("Title,Tag,Tag\nOne,a,b\n");
+    const withDropdown = { ...project, customFields: [{ _id: "f", name: "Tag", fieldType: "dropdown", options: [{ id: "a", value: "a" }, { id: "b", value: "b" }], archived: false }] } as unknown as ApiProject;
+    rememberCsvMapping("p1", sheet.headers, { targets: ["title", "field:Tag", "field:Tag"], statuses: {}, users: {} });
+    const onChange = vi.fn();
+    render(<CsvMapping projectId="p1" project={withDropdown} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={onChange} />);
+    await waitFor(() => expect(onChange.mock.calls.at(-1)![0]).not.toBeNull());
+    expect((onChange.mock.calls.at(-1)![0] as CsvPayload).bundle.tasks[0].fields).toEqual({ Tag: "a" });
+    expect((screen.getByLabelText("Tag (column 3)") as HTMLSelectElement).value).toBe("ignore");
+  });
 });

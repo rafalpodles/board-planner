@@ -130,8 +130,13 @@ export function CsvMapping({
   const userValues = useMemo(() => distinctValues(table, targets.indexOf("assignee")), [table, targets]);
   // A recalled choice that no longer names something on this board falls back to the automatic one
   const liveTargets = useMemo(
-    () => targets.map((t) => (targetOptions.some((o) => o.value === t) ? t : "ignore")),
-    [targets, targetOptions]
+    () =>
+      targets.map((t, i) => {
+        if (!targetOptions.some((o) => o.value === t)) return "ignore";
+        // A remembered repeat stays only while the target still takes one; otherwise the first column keeps it
+        return t !== "ignore" && targets.indexOf(t) < i && !repeatable(t, fieldShapes) ? "ignore" : t;
+      }),
+    [targets, targetOptions, fieldShapes]
   );
   const statusOf = (value: string) => {
     const chosen = statuses[value];
@@ -210,7 +215,7 @@ export function CsvMapping({
     <div data-testid="csv-mapping" className="space-y-5">
       <p className="text-sm text-text-muted">
         {table.rows.length} rows, {table.headers.length} columns.
-        {isJiraExport(table.headers) && " Recognised as a Jira export: its usual columns and its comments are mapped already."}
+        {isJiraExport(table.headers) && " Recognised as a Jira export."}
       </p>
       {tooMany && (
         <p role="alert" className="text-sm text-danger">

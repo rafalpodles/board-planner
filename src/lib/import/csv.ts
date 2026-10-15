@@ -182,11 +182,15 @@ function fieldValue(raw: string, field: CsvField | undefined): unknown {
 export const NO_ID_PREFIX = "row-";
 
 // Jira writes a comment as "15/Oct/26 9:30 AM;author;text"; anything else is the text alone
-function commentFrom(cell: string, ordinal: number): ImportComment {
+// Known by its time and author where it has them, so a comment deleted in Jira does not shift the rest
+function commentFrom(cell: string, ordinal: number, taken: ImportComment[]): ImportComment {
   const parts = /^([^;\n]+);([^;\n]*);([\s\S]*)$/.exec(cell);
   const at = parts && normaliseInstant(parts[1]);
   if (parts && at && /^\d{4}-\d{2}-\d{2}T/.test(at)) {
-    return { id: `c${ordinal}`, createdAt: at, ...(parts[2].trim() && { author: parts[2].trim() }), body: parts[3] };
+    const author = parts[2].trim();
+    const base = `${at}|${author}`;
+    const same = taken.filter((c) => c.id === base || c.id.startsWith(`${base}#`)).length;
+    return { id: same ? `${base}#${same + 1}` : base, createdAt: at, ...(author && { author }), body: parts[3] };
   }
   return { id: `c${ordinal}`, body: cell };
 }
@@ -216,7 +220,7 @@ export function csvToBundle(table: CsvTable, targets: CsvTarget[], source: strin
     const comments: ImportComment[] = [];
     targets.forEach((target, column) => {
       if (cell(column).trim() === "") return;
-      if (target === "comment") return comments.push(commentFrom(cell(column), comments.length + 1));
+      if (target === "comment") return comments.push(commentFrom(cell(column), comments.length + 1, comments));
       if (!target.startsWith("field:")) return;
       const name = target.slice("field:".length);
       const value = fieldValue(cell(column), fields.find((f) => f.name === name));

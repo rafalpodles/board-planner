@@ -121,8 +121,10 @@ test("a Jira export imports with comments, labels, dates and priorities, and a s
     .setInputFiles({ name: "Jira (1).csv", mimeType: "text/csv", buffer: Buffer.from(JIRA.replace("Sign in with Google", "Sign in with Google and GitHub")) });
   await expect(page.getByLabel("Source name")).toHaveValue("Jira");
   await expect(mapping.getByLabel("Assignee “Maya Kowalska”")).toHaveValue(MEMBER_USERNAME);
+  await expect(mapping.getByLabel("Comment (column 17)")).toHaveValue("comment");
+  await expect(mapping.getByLabel("Labels (column 14)")).toHaveValue("field:Labels");
   await press(page, "Check");
-  await expect(report).toContainText("Would create 0 and would update 2 of 2 tasks from Jira");
+  await expect(report).toContainText("Would create 0 and would update 2 of 2 tasks from Jira, with 2 comments.");
   await press(page, "Import");
   const again = await imported();
   expect(again.map((t) => t.title)).toEqual(["Export invoices as CSV", "Sign in with Google and GitHub"]);
