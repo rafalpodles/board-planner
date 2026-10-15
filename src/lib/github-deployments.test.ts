@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { fetchDeployments, fetchDeploymentStatuses, deploymentFind, deploymentInsertMany, deploymentUpdateOne, projectUpdateOne } =
+const { fetchDeployments, fetchDeploymentStatuses, deploymentFind, deploymentInsertMany, deploymentUpdateOne, projectUpdateOne, projectExists } =
   vi.hoisted(() => ({
     fetchDeployments: vi.fn(),
     fetchDeploymentStatuses: vi.fn(),
@@ -8,6 +8,7 @@ const { fetchDeployments, fetchDeploymentStatuses, deploymentFind, deploymentIns
     deploymentInsertMany: vi.fn(),
     deploymentUpdateOne: vi.fn(),
     projectUpdateOne: vi.fn(),
+    projectExists: vi.fn(),
   }));
 
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
@@ -15,7 +16,7 @@ vi.mock("@/models/deployment", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/models/deployment")>()),
   Deployment: { find: deploymentFind, insertMany: deploymentInsertMany, updateOne: deploymentUpdateOne },
 }));
-vi.mock("@/models/project", () => ({ Project: { updateOne: projectUpdateOne } }));
+vi.mock("@/models/project", () => ({ Project: { updateOne: projectUpdateOne, exists: projectExists } }));
 vi.mock("@/lib/github", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/github")>()),
   fetchDeployments,
@@ -25,7 +26,7 @@ vi.mock("@/lib/github", async (importOriginal) => ({
 const { syncGithubDeployments, outcomeOf, STATUS_CHECKS_PER_TICK, DEPLOYMENT_PAGES_PER_TICK, REFUSED_RETRY_MS } = await import(
   "./github-deployments"
 );
-const { GitHubRateLimited } = await import("@/lib/github");
+const { GitHubRateLimited, GitHubRefused } = await import("@/lib/github");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const db = scopedToDefaultOrganisation();
 
@@ -72,6 +73,7 @@ beforeEach(() => {
   deploymentInsertMany.mockResolvedValue([]);
   deploymentUpdateOne.mockResolvedValue({ modifiedCount: 1 });
   projectUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+  projectExists.mockResolvedValue({ _id: "p1" });
   fetchDeploymentStatuses.mockResolvedValue([]);
 });
 
@@ -166,13 +168,14 @@ describe("syncGithubDeployments", () => {
     expect(fetchDeploymentStatuses.mock.calls.map((c) => c[3])).toEqual([9, 8]);
     expect(deploymentUpdateOne.mock.calls[0][0]).toMatchObject({ _id: "d9", state: "pending" });
     expect(deploymentUpdateOne.mock.calls[0][1]).toEqual({
-      $set: { state: "failure", finishedAt: new Date(hoursAgo(1)), url: "https://ci.example/9", lastCheckedAt: NOW },
+      $set: { state: "failure", finishedAt: new Date(hoursAgo(1)), url: "https://ci.example/9", lastCheckedAt: NOW, answeredAt: NOW },
     });
-    expect(deploymentUpdateOne.mock.calls[1][1]).toEqual({ $set: { lastCheckedAt: NOW } });
+    expect(deploymentUpdateOne.mock.calls[1][1]).toEqual({ $set: { lastCheckedAt: NOW, answeredAt: NOW } });
     expect(result).toMatchObject({ ran: true, finished: 1, requests: 3 });
     const pendingQuery = deploymentFind.mock.calls.find(([f]) => f.state === "pending")![0];
+    expect(pendingQuery.failures).toEqual({ $not: { $gte: 5 } });
     expect(pendingQuery.$or).toEqual([
-      { lastCheckedAt: null },
+      { answeredAt: null },
       { startedAt: { $gte: new Date(NOW.getTime() - 3 * 86_400_000) } },
     ]);
     expect(pendingQuery.environment).toBe("production");
@@ -194,7 +197,7 @@ describe("syncGithubDeployments", () => {
   });
 
   it("a listing GitHub refuses is kept as the reason, waits an hour, and is let through so the tick logs it", async () => {
-    fetchDeployments.mockRejectedValueOnce(new Error("GitHub answered 403"));
+    fetchDeployments.mockRejectedValueOnce(new GitHubRefused(403));
 
     await expect(syncGithubDeployments(db, project(), NOW)).rejects.toThrow("GitHub answered 403");
     expect(projectUpdateOne.mock.calls[0][1]).toEqual({
@@ -203,6 +206,30 @@ describe("syncGithubDeployments", () => {
         "deploymentSync.blockedUntil": new Date(NOW.getTime() + REFUSED_RETRY_MS),
       },
     });
+  });
+
+  it("a failure on the way to GitHub, in the database, or GitHub's own outage is not a refusal and waits no hour", async () => {
+    fetchDeployments.mockRejectedValueOnce(new Error("timeout")).mockRejectedValueOnce(new GitHubRefused(502));
+
+    await expect(syncGithubDeployments(db, project(), NOW)).rejects.toThrow("timeout");
+    await expect(syncGithubDeployments(db, project(), NOW)).rejects.toThrow("GitHub answered 502");
+    expect(projectUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("stores nothing when the project no longer names what this pass listed", async () => {
+    fetchDeployments.mockResolvedValueOnce([deployment(5, 1)]);
+    projectExists.mockResolvedValueOnce(null);
+
+    expect(await syncGithubDeployments(db, project(), NOW)).toMatchObject({ ran: true, inserted: 0 });
+    expect(projectExists.mock.calls[0][0]).toMatchObject({ _id: "p1", deploymentEnvironment: "production", repositoryUrl: "https://github.com/example/board" });
+    expect(deploymentInsertMany).not.toHaveBeenCalled();
+  });
+
+  it("a bulk write error with no write errors in it, such as a write concern failure, is not a duplicate", async () => {
+    fetchDeployments.mockResolvedValueOnce([deployment(5, 1)]);
+    deploymentInsertMany.mockRejectedValueOnce(Object.assign(new Error("write concern"), { writeErrors: [] }));
+
+    await expect(syncGithubDeployments(db, project(), NOW)).rejects.toThrow("write concern");
   });
 
   it("a person pressing Sync may ask again after a refusal, but never past a rate limit", async () => {
@@ -231,7 +258,7 @@ describe("syncGithubDeployments", () => {
     const result = await syncGithubDeployments(db, project(), NOW);
 
     expect(result).toMatchObject({ ran: true, finished: 1 });
-    expect(deploymentUpdateOne.mock.calls[0][1]).toEqual({ $set: { lastCheckedAt: NOW } });
+    expect(deploymentUpdateOne.mock.calls[0][1]).toEqual({ $set: { lastCheckedAt: NOW }, $inc: { failures: 1 } });
   });
 
   it("a rate limit while asking for outcomes still stops the pass", async () => {

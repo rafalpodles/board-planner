@@ -4,6 +4,7 @@ import {
   fetchDeployments,
   fetchDeploymentStatuses,
   GitHubRateLimited,
+  GitHubRefused,
   parseRepoString,
   type GitHubDeploymentStatus,
 } from "@/lib/github";
@@ -18,6 +19,9 @@ export const STATUS_CHECKS_PER_TICK = 10;
 export const PENDING_GIVE_UP_MS = 3 * 86_400_000;
 /** How long a listing GitHub refused for any reason but a rate limit waits before the tick asks again. */
 export const REFUSED_RETRY_MS = 3_600_000;
+/** A deployment whose statuses could not be read this many times is not asked about again. */
+export const STATUS_FAILURE_LIMIT = 5;
+const REFUSAL_STATUSES = [401, 403, 404];
 
 export type DeploymentSyncProject = RepositoryFields & {
   _id: Types.ObjectId | string;
@@ -95,6 +99,8 @@ export async function syncGithubDeployments(
       if (batch.length < 100 || reachedCursor) break;
     }
 
+    if (!(await db.Project.exists(sameSource))) return { ran: true, requests, inserted: 0, finished: 0 };
+
     const known = new Set(
       (
         await db.Deployment.find({ project: project._id, githubId: { $in: listed.map((d) => d.id) } }, "githubId").lean()
@@ -114,7 +120,7 @@ export async function syncGithubDeployments(
         })),
         { ordered: false }
       ).catch((err: { code?: number; writeErrors?: { code?: number }[] }) => {
-        const errors = err?.writeErrors ?? [err];
+        const errors = err?.writeErrors?.length ? err.writeErrors : [err];
         if (!errors.every((e) => e?.code === 11000)) throw err;
       });
     }
@@ -132,7 +138,8 @@ export async function syncGithubDeployments(
         project: project._id,
         environment,
         state: "pending",
-        $or: [{ lastCheckedAt: null }, { startedAt: { $gte: new Date(now.getTime() - PENDING_GIVE_UP_MS) } }],
+        failures: { $not: { $gte: STATUS_FAILURE_LIMIT } },
+        $or: [{ answeredAt: null }, { startedAt: { $gte: new Date(now.getTime() - PENDING_GIVE_UP_MS) } }],
       },
       "githubId"
     )
@@ -143,20 +150,25 @@ export async function syncGithubDeployments(
     let finished = 0;
     for (const deployment of unfinished) {
       requests++;
-      let outcome;
+      let statuses;
       try {
-        outcome = outcomeOf(await fetchDeploymentStatuses(parsed.owner, parsed.repo, token, deployment.githubId));
+        statuses = await fetchDeploymentStatuses(parsed.owner, parsed.repo, token, deployment.githubId);
       } catch (err) {
         if (err instanceof GitHubRateLimited) throw err;
         console.warn(`GitHub deployment ${deployment.githubId} statuses could not be read: ${(err as Error).message}`);
-        outcome = null;
+        await db.Deployment.updateOne(
+          { _id: deployment._id, state: "pending" },
+          { $set: { lastCheckedAt: now }, $inc: { failures: 1 } }
+        );
+        continue;
       }
+      const outcome = outcomeOf(statuses);
       await db.Deployment.updateOne(
         { _id: deployment._id, state: "pending" },
         {
           $set: outcome
-            ? { state: outcome.state, finishedAt: outcome.at, url: outcome.url, lastCheckedAt: now }
-            : { lastCheckedAt: now },
+            ? { state: outcome.state, finishedAt: outcome.at, url: outcome.url, lastCheckedAt: now, answeredAt: now }
+            : { lastCheckedAt: now, answeredAt: now },
         }
       );
       if (outcome) finished++;
@@ -164,15 +176,16 @@ export async function syncGithubDeployments(
 
     return { ran: true, requests, inserted: fresh.length, finished };
   } catch (err) {
-    if (!(err instanceof GitHubRateLimited)) {
+    if (err instanceof GitHubRefused && REFUSAL_STATUSES.includes(err.status)) {
       await db.Project.updateOne(sameSource, {
         $set: {
-          "deploymentSync.lastError": (err as Error).message?.split("\n")[0].slice(0, 200) || "GitHub did not answer",
+          "deploymentSync.lastError": err.message,
           "deploymentSync.blockedUntil": new Date(now.getTime() + REFUSED_RETRY_MS),
         },
       });
       throw err;
     }
+    if (!(err instanceof GitHubRateLimited)) throw err;
     await db.Project.updateOne(sameSource, { $set: { "deploymentSync.blockedUntil": err.until, "deploymentSync.lastError": "" } });
     return { ran: false, reason: "rate limited", requests };
   }

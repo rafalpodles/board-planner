@@ -972,7 +972,8 @@ type DeploymentSyncAnswer =
 export function deploymentsNote(deployments: DeploymentSyncAnswer): string {
   if (!deployments) return "";
   if (deployments.ran) {
-    return deployments.inserted > 0 ? `; ${deployments.inserted} new deployments read` : "";
+    if (deployments.inserted === 0) return "";
+    return `; ${deployments.inserted} new ${deployments.inserted === 1 ? "deployment" : "deployments"} read`;
   }
   if (deployments.reason === "rate limited") return "; deployments wait for GitHub's rate limit";
   if (deployments.reason === "failed") return `; deployments could not be read: ${deployments.error ?? "GitHub did not answer"}`;

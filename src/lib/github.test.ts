@@ -5,6 +5,7 @@ import {
   fetchDeploymentStatuses,
   fetchPullRequests,
   GitHubRateLimited,
+  GitHubRefused,
   matchPRsToTasks,
   reduceChecks,
 } from "./github";
@@ -264,7 +265,7 @@ describe("deployments and the rate limit they can hit (BP-878)", () => {
     await fetchDeploymentStatuses("o", "r", "tok", 7);
 
     expect(safeFetch.mock.calls[0][0]).toMatch(/\/repos\/o\/r\/deployments\?environment=production&per_page=100&page=2$/);
-    expect(safeFetch.mock.calls[1][0]).toMatch(/\/repos\/o\/r\/deployments\/7\/statuses\?per_page=10$/);
+    expect(safeFetch.mock.calls[1][0]).toMatch(/\/repos\/o\/r\/deployments\/7\/statuses\?per_page=30$/);
   });
 
   it("a primary limit says when it resets", async () => {
@@ -296,6 +297,7 @@ describe("deployments and the rate limit they can hit (BP-878)", () => {
     const err = await fetchDeployments("o", "r", "tok", "production", 1).catch((e) => e);
 
     expect(err).not.toBeInstanceOf(GitHubRateLimited);
+    expect(err).toBeInstanceOf(GitHubRefused);
     expect(err.message).toBe("GitHub answered 403");
   });
 });

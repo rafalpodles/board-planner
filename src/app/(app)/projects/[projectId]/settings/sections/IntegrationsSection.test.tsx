@@ -176,6 +176,7 @@ describe("deploymentsNote", () => {
     expect(deploymentsNote(undefined)).toBe("");
     expect(deploymentsNote({ ran: true, inserted: 0, finished: 2 })).toBe("");
     expect(deploymentsNote({ ran: true, inserted: 3, finished: 0 })).toBe("; 3 new deployments read");
+    expect(deploymentsNote({ ran: true, inserted: 1, finished: 0 })).toBe("; 1 new deployment read");
     expect(deploymentsNote({ ran: false, reason: "rate limited" })).toBe("; deployments wait for GitHub's rate limit");
     expect(deploymentsNote({ ran: false, reason: "failed", error: "GitHub answered 403" })).toBe(
       "; deployments could not be read: GitHub answered 403"

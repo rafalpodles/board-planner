@@ -544,6 +544,12 @@ export function DeploymentsPanel({ dora }: { dora: Dora | null }) {
           Only the latest {DORA_ROWS_SHOWN} deployments and linked changes are counted, so the oldest weeks may read low.
         </p>
       )}
+      {dora.lastError && (
+        <p className="mt-2 text-xs text-warning" data-testid="insights-dora-error">
+          ⚠ The latest read failed: GitHub refused to list this board&apos;s deployments ({dora.lastError}), so these
+          figures may be out of date. The token needs read access to deployments.
+        </p>
+      )}
       {dora.rateLimitedUntil && (
         <p className="mt-2 text-xs text-text-muted">
           GitHub&apos;s rate limit was reached; deployments are read again after{" "}

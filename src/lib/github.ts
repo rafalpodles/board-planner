@@ -169,7 +169,14 @@ async function refusal(res: Response, perCommit = false): Promise<Error> {
   if (limited) {
     return new GitHubRateLimited(`GitHub rate limit reached for this GitHub account; ${limited}`, rateLimitedUntil(res));
   }
-  return new Error(`GitHub answered ${res.status}`);
+  return new GitHubRefused(res.status);
+}
+
+/** GitHub itself answered no, as opposed to the request failing on the way. */
+export class GitHubRefused extends Error {
+  constructor(readonly status: number) {
+    super(`GitHub answered ${status}`);
+  }
 }
 
 export class GitHubRateLimited extends Error {

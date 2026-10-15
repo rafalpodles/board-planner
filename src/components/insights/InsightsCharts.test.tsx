@@ -69,6 +69,11 @@ describe("DeploymentsPanel", () => {
     expect(limited.getByTestId("insights-dora").textContent).toContain("rate limit was reached");
   });
 
+  it("warns under figures it already has when the latest read was refused", () => {
+    const { getByTestId } = render(<DeploymentsPanel dora={{ ...dora, lastError: "GitHub answered 403" }} />);
+    expect(getByTestId("insights-dora-error").textContent).toContain("GitHub answered 403");
+  });
+
   it("shows the four figures and a table of each week", () => {
     const { getByTestId } = render(
       <DeploymentsPanel
