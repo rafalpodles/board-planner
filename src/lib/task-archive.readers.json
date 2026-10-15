@@ -36,6 +36,7 @@
     "src/lib/account-erasure.ts": "a deleted account's references are cleared from every task, archived or not",
     "src/lib/account-export.ts": "the tasks the person created, archived or not: an export that left some out would not be their data",
     "src/lib/checklist-item-route.ts": "by id",
+    "src/lib/fleet.ts": "the tasks a run holds: an archived task is never held, and a held one cannot be archived without force",
     "src/lib/github-sync.ts": "a pull request is linked to its task by key, archived or not",
     "src/lib/import/engine.ts": "by the source's id: a task imported before is updated in place, archived or not, rather than made twice",
     "src/lib/middleware.ts": "resolves a task key to an id, and a worker's run to its task",
