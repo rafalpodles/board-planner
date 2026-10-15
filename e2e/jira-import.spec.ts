@@ -227,6 +227,8 @@ test("a Jira XML export imports with its comments named by their authors and its
     createdAt: new Date("2026-08-18T08:16:16Z"),
   });
   expect(task.customFieldValues[String(LABELS_FIELD)]).toEqual(["lbl-billing"]);
+  const member = await (await db()).collection("users").findOne({ username: MEMBER_USERNAME });
+  expect(String(task.assignee)).toBe(String(member!._id));
   const [comment] = await (await db()).collection("comments").find({ task: task._id }).toArray();
   expect([comment.body, comment.createdAt.toISOString()]).toEqual(["*Originally by Jan Nowak*\n\nShip it", "2026-08-19T07:00:00.000Z"]);
 });

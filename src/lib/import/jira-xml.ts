@@ -1,3 +1,4 @@
+import type { ImportComment } from "./bundle";
 import type { CsvTable } from "./csv";
 
 const BLOCKS = new Set(["P", "DIV", "UL", "OL", "PRE", "BLOCKQUOTE", "TABLE", "H1", "H2", "H3", "H4", "H5", "H6"]);
@@ -105,9 +106,16 @@ export function jiraXmlToTable(text: string, parser: DOMParser): CsvTable | null
 
   const rows = items.map((item) => {
     const labels = [...(own(item, "labels")?.getElementsByTagName("label") ?? [])].map((l) => l.textContent?.trim() ?? "").filter(Boolean);
-    const comments = [...(own(item, "comments")?.getElementsByTagName("comment") ?? [])].map((c) => {
+    // Known by Jira's own comment id, so a re-export updates it however its author is named this time
+    const comments: ImportComment[] = [...(own(item, "comments")?.getElementsByTagName("comment") ?? [])].map((c, i) => {
       const author = c.getAttribute("author") ?? "";
-      return `${instant(c.getAttribute("created") ?? "")};${names.get(author) ?? author};${htmlToMarkdown(c.textContent ?? "", parser)}`;
+      const created = instant(c.getAttribute("created") ?? "");
+      return {
+        id: c.getAttribute("id") ? `jira-${c.getAttribute("id")}` : `xml-c${i + 1}`,
+        body: htmlToMarkdown(c.textContent ?? "", parser),
+        ...(created && { createdAt: created }),
+        ...((names.get(author) ?? author) && { author: names.get(author) ?? author }),
+      };
     });
     const assignee = own(item, "assignee");
     return {
@@ -117,7 +125,7 @@ export function jiraXmlToTable(text: string, parser: DOMParser): CsvTable | null
         textOf(item, "type"),
         textOf(item, "status"),
         textOf(item, "priority"),
-        assignee && assignee.textContent?.trim() !== "Unassigned" ? assignee.textContent!.trim() : "",
+        assignee && assignee.getAttribute("accountid") !== "-1" ? (assignee.textContent?.trim() ?? "") : "",
         instant(textOf(item, "created")),
         instant(textOf(item, "resolved")),
         dayOf(textOf(item, "due")),
@@ -130,10 +138,10 @@ export function jiraXmlToTable(text: string, parser: DOMParser): CsvTable | null
   });
 
   const labelColumns = Math.max(0, ...rows.map((r) => r.labels.length));
-  const commentColumns = Math.max(0, ...rows.map((r) => r.comments.length));
   const fill = (values: string[], n: number) => [...values, ...Array(n - values.length).fill("")];
   return {
-    headers: [...HEADERS, ...Array(labelColumns).fill("Labels"), ...Array(commentColumns).fill("Comment")],
-    rows: rows.map((r) => [...r.cells, ...fill(r.labels, labelColumns), ...fill(r.comments, commentColumns)]),
+    headers: [...HEADERS, ...Array(labelColumns).fill("Labels")],
+    rows: rows.map((r) => [...r.cells, ...fill(r.labels, labelColumns)]),
+    comments: rows.map((r) => r.comments),
   };
 }

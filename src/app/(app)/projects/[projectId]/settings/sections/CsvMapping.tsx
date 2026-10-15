@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import type { ImportBundle, ImportMapping } from "@/lib/import/bundle";
 import { MAX_IMPORT_TASKS } from "@/lib/import/limits";
-import { type CsvTable, type CsvTarget, csvToBundle, distinctValues, guessTargets, isJiraExport, repeatable, shapeKey } from "@/lib/import/csv";
+import { type CsvTable, type CsvTarget, csvToBundle, distinctValues, guessTargets, headerRuns, isJiraExport, repeatable, shapeKey } from "@/lib/import/csv";
 import { effectiveColumns, MAX_COLUMN_LABEL } from "@/lib/columns";
 import { COLUMN_ROLES, type ApiProject, type ApiProjectColumn, type ColumnRole, ROLE_LABELS } from "@/types";
 
@@ -51,7 +51,12 @@ const storageKey = (projectId: string, headers: string[]) => `bp:csv-import:${pr
 function recall(projectId: string, headers: string[]): Saved | null {
   try {
     const saved = JSON.parse(window.localStorage.getItem(storageKey(projectId, headers)) ?? "null") as Saved | null;
-    return saved && Array.isArray(saved.targets) && saved.targets.length === headers.length ? saved : null;
+    if (!saved || !Array.isArray(saved.targets)) return null;
+    if (saved.targets.length === headers.length) return saved;
+    // Stored one per run of a repeated header: each column of the run takes its run's choice
+    const runs = headerRuns(headers);
+    if (saved.targets.length !== runs.length) return null;
+    return { ...saved, targets: headers.map((_, i) => saved.targets[runs.filter((start) => start <= i).length - 1]) };
   } catch {
     return null;
   }
@@ -59,7 +64,8 @@ function recall(projectId: string, headers: string[]): Saved | null {
 
 export function rememberCsvMapping(projectId: string, headers: string[], saved: Saved) {
   try {
-    window.localStorage.setItem(storageKey(projectId, headers), JSON.stringify(saved));
+    const targets = headerRuns(headers).map((start) => saved.targets[start]);
+    window.localStorage.setItem(storageKey(projectId, headers), JSON.stringify({ ...saved, targets }));
   } catch {}
 }
 

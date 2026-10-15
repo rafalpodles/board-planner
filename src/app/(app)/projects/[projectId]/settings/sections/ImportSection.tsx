@@ -119,6 +119,7 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
         const table = jiraXmlToTable(text, new DOMParser());
         return table ? { table, name: "Jira" } : { table: null, error: "This XML file could not be read." };
       }
+      if (/^\s*</.test(text)) return { table: null, error: "Of XML files, only Jira's XML export can be read." };
       if (isJson(file) || /^\s*\{/.test(text)) return { table: null };
       return { table: readCsvTable(text) };
     };

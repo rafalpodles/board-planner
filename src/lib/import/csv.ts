@@ -30,6 +30,8 @@ export interface CsvTable {
   rows: string[][];
   // How long text in it is written, when that is not plain or Markdown
   markup?: "jira-wiki";
+  // Comments read from a format that keeps them apart from the columns, one list per row
+  comments?: ImportComment[][];
 }
 
 const DELIMITERS = [",", ";", "\t", "|"] as const;
@@ -158,8 +160,19 @@ export function guessTargets(headers: string[], fields: CsvField[]): CsvTarget[]
   });
 }
 
+// A run of the same header (Jira's Comment and Labels columns) counts once, so one more comment keeps the shape
+export function headerRuns(headers: string[]): number[] {
+  const starts: number[] = [];
+  headers.forEach((h, i) => {
+    if (i === 0 || h.trim().toLowerCase() !== headers[i - 1].trim().toLowerCase()) starts.push(i);
+  });
+  return starts;
+}
+
 export function shapeKey(headers: string[]): string {
-  return headers.map((h) => h.trim().toLowerCase()).join("\u0001");
+  return headerRuns(headers)
+    .map((i) => headers[i].trim().toLowerCase())
+    .join("\u0001");
 }
 
 export function columnOf(targets: CsvTarget[], target: CsvTarget): number {
@@ -256,7 +269,8 @@ export function csvToBundle(table: CsvTable, targets: CsvTarget[], source: strin
       values[name] = Array.isArray(before) && Array.isArray(value) ? [...new Set([...before, ...value])] : value;
     });
     if (Object.keys(values).length) task.fields = values;
-    if (comments.length) task.comments = comments;
+    const structured = table.comments?.[index] ?? [];
+    if (structured.length || comments.length) task.comments = [...structured, ...comments];
     return Object.fromEntries(Object.entries(task).filter(([, v]) => v !== undefined)) as unknown as ImportTask;
   });
   return { source, tasks };

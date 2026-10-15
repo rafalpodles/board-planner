@@ -38,7 +38,7 @@ function line(raw: string): string {
   if (heading) return `${"#".repeat(+heading[1])} ${inline(heading[2])}`;
   const quote = /^\s*bq\.\s+(.*)$/.exec(raw);
   if (quote) return `> ${inline(quote[1])}`;
-  const list = /^\s*([*#-]+)\s+(.*)$/.exec(raw);
+  const list = /^\s*([*#]+|-)\s+(.*)$/.exec(raw);
   if (list && !/^\*[^*\s][^*]*\*(\s|$)/.test(raw.trim())) {
     const depth = list[1].length - 1;
     const marker = list[1].endsWith("#") ? "1." : "-";
@@ -56,5 +56,6 @@ function inline(text: string): string {
     .replace(/(^|[\s(])\*(\S(?:[^*]*\S)?)\*(?=[\s).,;:!?]|$)/g, "$1**$2**")
     .replace(/(^|[\s(])_(\S(?:[^_]*\S)?)_(?=[\s).,;:!?]|$)/g, "$1*$2*")
     .replace(/(^|[\s(])-(\S(?:[^-]*\S)?)-(?=[\s).,;:!?]|$)/g, "$1~~$2~~")
-    .replace(/\{color(?::[^}]*)?\}/g, "");
+    .replace(/\{color(?::[^}]*)?\}/g, "")
+    .replace(/\[~(?:accountid:)?([^\]]+)\]/g, "@$1");
 }

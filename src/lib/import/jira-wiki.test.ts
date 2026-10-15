@@ -31,6 +31,10 @@ describe("jiraWikiToMarkdown", () => {
     expect(jiraWikiToMarkdown("{code}\nopen")).toBe("```\nopen\n```");
   });
 
+  it("names a mention, and reads Jira's double dash as text, not a nested list", () => {
+    expect(jiraWikiToMarkdown("[~accountid:557058:abc] and [~jan]\n-- Jan")).toBe("@557058:abc and @jan\n-- Jan");
+  });
+
   it("reads a line of bold text as bold, not as a list item", () => {
     expect(jiraWikiToMarkdown("*Important* note")).toBe("**Important** note");
   });

@@ -54,15 +54,21 @@ describe("a Jira XML export", () => {
     const table = jiraXmlToTable(XML, new DOMParser())!;
     expect(table.headers).toEqual([
       "Issue key", "Summary", "Issue Type", "Status", "Priority", "Assignee", "Created", "Resolved", "Due date", "Parent", "Description",
-      "Labels", "Labels", "Comment", "Comment",
+      "Labels", "Labels",
     ]);
     expect(table.rows[0]).toEqual([
       "ORB-12", "Export invoices", "Story", "Done", "Normal", "Maya Kowalska",
       "2026-08-18T08:16:16.000Z", "2026-08-21T12:58:19.000Z", "2026-08-31", "ORB-10",
       "## Context\n\nThe `InvoiceRepository` & its **six** methods.\n\n- one\n- two [link](https://example.com)",
       "billing", "q3",
-      "2026-08-19T07:00:00.000Z;Jan Nowak;Looks good; ship it",
-      "2026-08-20T11:30:00.000Z;712020:zzz;Second",
+    ]);
+    // Kept apart from the columns, known by Jira's own comment id
+    expect(table.comments).toEqual([
+      [
+        { id: "jira-501", createdAt: "2026-08-19T07:00:00.000Z", author: "Jan Nowak", body: "Looks good; ship it" },
+        { id: "jira-502", createdAt: "2026-08-20T11:30:00.000Z", author: "712020:zzz", body: "Second" },
+      ],
+      [],
     ]);
     expect(table.rows[1].slice(0, 10)).toEqual(["ORB-13", "Sign in", "Bug", "To Do", "Highest", "", "2026-08-22T08:00:00.000Z", "", "", ""]);
   });
@@ -78,8 +84,8 @@ describe("a Jira XML export", () => {
       dueDate: "2026-08-31",
       fields: { Labels: ["billing", "q3"] },
       comments: [
-        { author: "Jan Nowak", body: "Looks good; ship it", createdAt: "2026-08-19T07:00:00.000Z" },
-        { author: "712020:zzz", body: "Second" },
+        { id: "jira-501", author: "Jan Nowak", body: "Looks good; ship it", createdAt: "2026-08-19T07:00:00.000Z" },
+        { id: "jira-502", author: "712020:zzz", body: "Second" },
       ],
     });
     expect(bundle.tasks[0].description).toContain("**six**");
@@ -95,5 +101,17 @@ describe("htmlToMarkdown", () => {
     expect(htmlToMarkdown("<pre>a  b\n c</pre><table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>", new DOMParser())).toBe(
       "```\na  b\n c\n```\n\n| A | B |\n| 1 | 2 |"
     );
+  });
+});
+
+describe("a re-export", () => {
+  it("keeps every comment's identity when its author is named differently the next time", () => {
+    const again = XML.replace('<reporter accountid="712020:bbb">Jan Nowak</reporter>', '<reporter accountid="712020:ccc">Someone Else</reporter>').replace(
+      '<reporter accountid="712020:bbb">Jan Nowak</reporter>',
+      '<reporter accountid="712020:ccc">Someone Else</reporter>'
+    );
+    const ids = (xml: string) => jiraXmlToTable(xml, new DOMParser())!.comments![0].map((c) => [c.id, c.author]);
+    expect(ids(XML)).toEqual([["jira-501", "Jan Nowak"], ["jira-502", "712020:zzz"]]);
+    expect(ids(again)).toEqual([["jira-501", "712020:bbb"], ["jira-502", "712020:zzz"]]);
   });
 });
