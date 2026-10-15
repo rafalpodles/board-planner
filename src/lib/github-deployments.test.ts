@@ -151,6 +151,7 @@ describe("syncGithubDeployments", () => {
     expect(result).toMatchObject({ ran: true, finished: 1, requests: 3 });
     const pendingQuery = deploymentFind.mock.calls.find(([f]) => f.state === "pending")![0];
     expect(pendingQuery.startedAt.$gte).toEqual(new Date(NOW.getTime() - 3 * 86_400_000));
+    expect(pendingQuery.environment).toBe("production");
     expect(STATUS_CHECKS_PER_TICK).toBe(10);
   });
 

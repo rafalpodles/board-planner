@@ -109,7 +109,7 @@ export async function syncGithubDeployments(
     );
 
     const unfinished = await db.Deployment.find(
-      { project: project._id, state: "pending", startedAt: { $gte: new Date(now.getTime() - PENDING_GIVE_UP_MS) } },
+      { project: project._id, environment, state: "pending", startedAt: { $gte: new Date(now.getTime() - PENDING_GIVE_UP_MS) } },
       "githubId"
     )
       .sort({ startedAt: -1 })

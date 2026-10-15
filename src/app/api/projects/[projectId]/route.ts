@@ -23,6 +23,9 @@ import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { PROJECT_ICONS, type IPmMcpServer } from "@/types";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import { githubWebBase } from "@/lib/github-host";
+import { DEFAULT_DEPLOYMENT_ENVIRONMENT } from "@/lib/github-deployments";
+
+const MAX_DEPLOYMENT_ENVIRONMENT = 100;
 
 export const GET = withProjectAccessOrWorker(async (_request, { params, user, db }) => {
   await connectDB();
@@ -117,7 +120,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   if (!read.ok) return read.response;
   const body = read.value;
 
-  const allowed = ["name", "description", "icon", "estimateFieldId", "repositoryUrl", "githubToken", "gitlabHost", "gitlabToken", "codaHost", "codaDocId", "codaTableId", "codaToken"];
+  const allowed = ["name", "description", "icon", "estimateFieldId", "repositoryUrl", "githubToken", "deploymentEnvironment", "gitlabHost", "gitlabToken", "codaHost", "codaDocId", "codaTableId", "codaToken"];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
     if (body[field] !== undefined) {
@@ -282,6 +285,17 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     }
   }
 
+  if (updates.deploymentEnvironment !== undefined) {
+    const environment = String(updates.deploymentEnvironment).trim();
+    if (environment.length > MAX_DEPLOYMENT_ENVIRONMENT) {
+      return NextResponse.json(
+        { error: `deploymentEnvironment must be at most ${MAX_DEPLOYMENT_ENVIRONMENT} characters` },
+        { status: 400 }
+      );
+    }
+    updates.deploymentEnvironment = environment || DEFAULT_DEPLOYMENT_ENVIRONMENT;
+  }
+
   if (updates.gitlabHost !== undefined) {
     const host = String(updates.gitlabHost).trim().replace(/\/+$/, "");
     // Same rules as MCP server URLs: public https, localhost allowed outside production
@@ -347,6 +361,12 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     return NextResponse.json({ error: written.error }, { status: written.status });
   }
   const beforeImage = written.before;
+  if (
+    updates.deploymentEnvironment !== undefined &&
+    updates.deploymentEnvironment !== (beforeImage.deploymentEnvironment || DEFAULT_DEPLOYMENT_ENVIRONMENT)
+  ) {
+    await db.Project.updateOne({ _id: projectId }, { $set: { "deploymentSync.syncedThrough": null } });
+  }
   // Both trails before anything else can fail: the write has landed, and a retry would find
   // nothing left to record
   const workerAudit = pendingWorkerAudit(

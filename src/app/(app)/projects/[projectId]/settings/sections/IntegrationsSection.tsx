@@ -44,7 +44,10 @@ export function IntegrationsSection({
   const { toast } = useToast();
 
   const repository = useDraft({ repositoryUrl: project.repositoryUrl || "" });
-  const github = useDraft({ githubToken: "" });
+  const github = useDraft({
+    githubToken: "",
+    deploymentEnvironment: project.deploymentEnvironment || "production",
+  });
   const gitlab = useDraft({
     gitlabHost: project.gitlabHost || "https://gitlab.com",
     gitlabToken: "",
@@ -122,8 +125,13 @@ export function IntegrationsSection({
           const payload: Record<string, string> = {};
           if (github.value.githubToken.trim())
             payload.githubToken = github.value.githubToken.trim();
-          await replaceAndReturn(payload);
-          github.commit({ githubToken: "" });
+          if (github.isDirty("deploymentEnvironment"))
+            payload.deploymentEnvironment = github.value.deploymentEnvironment.trim();
+          const updated = await replaceAndReturn(payload);
+          github.commit({
+            githubToken: "",
+            deploymentEnvironment: updated.deploymentEnvironment || "production",
+          });
           toast("GitHub settings saved", "success");
         } catch (err) {
           fail(err, "Failed to save GitHub settings");
@@ -493,6 +501,20 @@ export function IntegrationsSection({
                       <p className="mt-1 text-xs text-text-muted">
                         Needs <code>repo</code> scope (read access to pull
                         requests).
+                      </p>
+                    </div>
+                    <div>
+                      <Input
+                        label="Production environment"
+                        value={github.value.deploymentEnvironment}
+                        dirty={github.isDirty("deploymentEnvironment")}
+                        onChange={(e) =>
+                          github.set("deploymentEnvironment", e.target.value)
+                        }
+                        placeholder="production"
+                      />
+                      <p className="mt-1 text-xs text-text-muted">
+                        The GitHub deployment environment Insights reads for DORA, on Pro.
                       </p>
                     </div>
                   </div>

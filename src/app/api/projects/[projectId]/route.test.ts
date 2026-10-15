@@ -5,6 +5,7 @@ const getAuthUser = vi.fn();
 const check = vi.fn();
 const projectFindOne = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
+const projectUpdateOne = vi.fn();
 const taskFind = vi.fn();
 const taskDeleteMany = vi.fn();
 const commentDeleteMany = vi.fn();
@@ -56,6 +57,7 @@ vi.mock("@/models/project", () => ({
     findOne: projectFindOne,
     findOneAndDelete: projectFindOneAndDelete,
     findOneAndUpdate: projectFindOneAndUpdate,
+    updateOne: projectUpdateOne,
   },
 }));
 vi.mock("@/models/task", () => ({
@@ -267,6 +269,52 @@ describe("PUT /api/projects/[projectId] key immutability", () => {
       expect.objectContaining({ name: "Renamed" }),
       expect.anything()
     );
+  });
+});
+
+describe("PUT /api/projects/[projectId] deploymentEnvironment", () => {
+  beforeEach(() => {
+    check.mockResolvedValue(true);
+    projectUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+  });
+
+  const sent = () => projectFindOneAndUpdate.mock.calls[0][1] as Record<string, unknown>;
+
+  it("stores a trimmed name and restarts the deployment cursor when it changes", async () => {
+    const res = await PUT(putRequest({ deploymentEnvironment: "  live  " }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(sent()).toMatchObject({ deploymentEnvironment: "live" });
+    expect(projectUpdateOne.mock.calls[0][1]).toEqual({ $set: { "deploymentSync.syncedThrough": null } });
+  });
+
+  it("an empty name means production again", async () => {
+    await PUT(putRequest({ deploymentEnvironment: "" }), ctx());
+
+    expect(sent()).toMatchObject({ deploymentEnvironment: "production" });
+  });
+
+  it("keeps the cursor when the name does not change", async () => {
+    projectFindOneAndUpdate.mockReturnValue({
+      lean: () => Promise.resolve({ _id: PROJECT_ID, name: "Test Project", deploymentEnvironment: "production" }),
+    });
+
+    await PUT(putRequest({ deploymentEnvironment: "production" }), ctx());
+
+    expect(projectUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("refuses a name longer than GitHub would ever send", async () => {
+    const res = await PUT(putRequest({ deploymentEnvironment: "x".repeat(101) }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a name that is not text", async () => {
+    const res = await PUT(putRequest({ deploymentEnvironment: { $ne: "" } }), ctx());
+
+    expect(res.status).toBe(400);
   });
 });
 
