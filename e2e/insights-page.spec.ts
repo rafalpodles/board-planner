@@ -91,6 +91,7 @@ test("on Pro every panel draws the board's own figures, and the filters ask the 
   const live = page.getByTestId("insights-live");
   await expect(live).toBeVisible();
   await expect(page.getByTestId("insights-upsell")).toHaveCount(0);
+  await expect(page.getByRole("main").locator("header")).toHaveCount(1);
   await expect(page.getByRole("main").locator("header").getByRole("link")).toHaveCount(0);
   await expect(page.getByTestId("insights-tiles")).toContainText("Throughput3finished in 12 weeks");
   await expect(page.getByTestId("insights-tiles")).toContainText("In progress1");
