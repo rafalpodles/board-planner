@@ -73,7 +73,7 @@ describe("CsvMapping", () => {
   });
 
   // Back on the automatic option is no choice at all, so a re-run leaves those tasks where they are
-  it("sends nothing for a status put back on No column after picking one", async () => {
+  it("sends nothing for a status put back on Not matched after picking one", async () => {
     const { last } = mount();
     await waitFor(() => expect(last()).not.toBeNull());
     const select = screen.getByLabelText("Status “Open”");

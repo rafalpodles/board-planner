@@ -195,7 +195,7 @@ export function CsvMapping({
 
   const labels = headerLabels(table.headers);
   const columnOptions = [
-    { value: AUTOMATIC, label: "No column (listed in the report)" },
+    { value: AUTOMATIC, label: "Not matched (listed in the report)" },
     ...columns.map((c) => ({ value: c.id, label: c.label })),
   ];
   const userOptions = [
