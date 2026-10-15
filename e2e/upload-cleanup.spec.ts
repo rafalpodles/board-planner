@@ -59,6 +59,11 @@ async function comment(request: APIRequestContext, taskId: string, body: string)
   expect(response.status(), await response.text()).toBe(201);
 }
 
+async function criterion(request: APIRequestContext, taskId: string, text: string) {
+  const response = await request.post(`/api/projects/${PROJECT_KEY}/tasks/${taskId}/checklist`, { headers: ADMIN_AUTH, data: { text } });
+  expect(response.status(), await response.text()).toBe(201);
+}
+
 async function deleteTaskInTheBoard(page: Page, number: number, taskId: string) {
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${number}`);
   await expect(page.getByTestId("task-top-bar")).toBeVisible();
@@ -72,18 +77,28 @@ async function deleteTaskInTheBoard(page: Page, number: number, taskId: string) 
 
 test.describe("BP-1054: a file goes with the last thing that names it", () => {
   test("deleting a task removes its files and its comments' files, and keeps one another task still names", async ({ page, request }) => {
-    const [description, shared, inComment] = [await upload(request, "own.png"), await upload(request, "shared.png"), await upload(request, "comment.png")];
-    const first = await newTask(request, "First owner of the files", `${link(description)} ${link(shared)}`);
+    const [description, shared, inComment, inCriterion, keptByCriterion] = [
+      await upload(request, "own.png"),
+      await upload(request, "shared.png"),
+      await upload(request, "comment.png"),
+      await upload(request, "criterion.png"),
+      await upload(request, "kept-by-criterion.png"),
+    ];
+    const first = await newTask(request, "First owner of the files", `${link(description)} ${link(shared)} ${link(keptByCriterion)}`);
     const second = await newTask(request, "Second owner of the shared file", link(shared));
     await comment(request, first.id, `see ${link(inComment)}`);
-    for (const id of [description, shared, inComment]) expect(await stored(id), "uploaded before the delete").toBe(true);
+    await criterion(request, first.id, `Matches ${link(inCriterion)}`);
+    await criterion(request, second.id, `Matches ${link(keptByCriterion)}`);
+    for (const id of [description, shared, inComment, inCriterion, keptByCriterion]) expect(await stored(id), "uploaded before the delete").toBe(true);
 
     await signIn(page, "owner");
     await deleteTaskInTheBoard(page, first.number, first.id);
 
     await expect.poll(() => stored(description)).toBe(false);
     expect(await stored(inComment)).toBe(false);
+    expect(await stored(inCriterion), "its own criterion's image goes too").toBe(false);
     expect(await stored(shared), "the second task still shows it").toBe(true);
+    expect(await stored(keptByCriterion), "the second task's criterion still shows it").toBe(true);
 
     await deleteTaskInTheBoard(page, second.number, second.id);
     await expect.poll(() => stored(shared)).toBe(false);
