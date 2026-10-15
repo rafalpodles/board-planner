@@ -57,7 +57,8 @@ function Report({ report }: { report: ImportReport }) {
       <p className="text-sm">
         {verb} <strong>{report.created}</strong> and {report.dryRun ? "would update" : "updated"}{" "}
         <strong>{report.updated}</strong> of {report.total} tasks from {report.source}, with{" "}
-        {report.comments.created + report.comments.updated} comments.
+        {report.comments.created + report.comments.updated} comments
+        {report.links > 0 && `, and ${report.links} new ${report.links === 1 ? "link" : "links"} between tasks`}.
       </p>
       <Listed title="Skipped" items={report.skipped} line={(s) => `${s.id}: ${s.reason}`} />
       <Listed title="Values left out" items={report.dropped} line={(d) => `${d.id} · ${d.field} “${d.value}”: ${d.reason}`} />

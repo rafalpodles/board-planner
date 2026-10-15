@@ -16,6 +16,7 @@ import { actingThrough } from "@/lib/activity-source";
 import { logProjectAudit } from "@/lib/projectAudit";
 import type { ImportBundle, ImportComment, ImportMapping, ImportTask } from "./bundle";
 import { normaliseInstant } from "./dates";
+import { linkImported } from "./links";
 
 export const IMPORT_CHUNK = 200;
 const PRIORITIES: readonly Priority[] = ["low", "medium", "high", "urgent"];
@@ -43,6 +44,7 @@ export interface ImportReport {
   truncated: { id: string; field: string }[];
   unmapped: { statuses: string[]; users: string[]; types: string[] };
   notImported: { id: string; what: string }[];
+  links: number;
   processed: number;
   complete: boolean;
   error?: string;
@@ -257,10 +259,6 @@ function resolveTask(
     completedAt = null;
   }
 
-  for (const relation of [task.parent ? "parent" : null, task.blockedBy?.length ? "blocked by" : null]) {
-    if (relation) report.notImported.push({ id: task.id, what: relation });
-  }
-
   return {
     ref: task.id,
     title,
@@ -319,6 +317,7 @@ const emptyReport = (dryRun: boolean, bundle: ImportBundle): ImportReport => ({
   truncated: [],
   unmapped: { statuses: [], users: [], types: [] },
   notImported: [],
+  links: 0,
   processed: 0,
   complete: false,
 });
@@ -496,6 +495,21 @@ async function writeChunk(
   report.processed += chunk.length;
 }
 
+async function carryLinks(
+  db: ScopedDb,
+  projectId: string,
+  importer: Types.ObjectId,
+  bundle: ImportBundle,
+  resolved: Resolved[],
+  report: ImportReport,
+  opts: { dryRun: boolean; pending: Set<string> }
+) {
+  const kept = new Set(resolved.map((t) => t.ref));
+  const outcome = await linkImported(db, projectId, importer, bundle.source, bundle.tasks.filter((t) => kept.has(t.id)), opts);
+  report.links = outcome.created;
+  report.notImported.push(...outcome.unlinked);
+}
+
 /**
  * The quiet path: no notifications, no webhooks, no board feed, one audit row for the whole run.
  * Everything that could not be carried over is said in the report, and a dry run returns the same
@@ -532,6 +546,8 @@ export async function runImport(
     report.updated = stored.size;
     report.created = resolved.length - stored.size;
     report.processed = resolved.length;
+    const pending = new Set(resolved.map((t) => t.ref).filter((ref) => !stored.has(ref)));
+    await carryLinks(db, projectId, importer, bundle, resolved, report, { dryRun: true, pending });
     report.complete = true;
     return report;
   }
@@ -545,6 +561,8 @@ export async function runImport(
     } catch (err) {
       report.error = stoppedBecause(err).message;
     }
+    // What was written is linked even when the run stopped part-way; the rest is listed
+    await carryLinks(db, projectId, importer, bundle, resolved, report, { dryRun: false, pending: new Set() });
   });
 
   await logProjectAudit(db, projectId, importer, "tasks_imported", [
