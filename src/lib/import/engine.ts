@@ -297,7 +297,7 @@ async function writeChunk(
         updatedAt: t.completedAt ?? createdAt,
       };
     });
-    await db.Task.insertMany(docs, { timestamps: false } as never);
+    await db.Task.insertMany(docs);
     await logActivities(
       db,
       fresh.flatMap((t) => [
@@ -354,8 +354,7 @@ async function writeChunk(
           sourceDetail: source,
           createdAt: c.createdAt ?? now,
           updatedAt: c.createdAt ?? now,
-        })),
-        { timestamps: false } as never
+        }))
       );
     }
     const changed = t.comments.filter((c) => storedIds.has(c.ref));
