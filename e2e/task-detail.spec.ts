@@ -506,6 +506,43 @@ test("uploads: an image attaches into the description, an oversized one is refus
   });
 });
 
+test("uploads: an HTML file attaches as a link and is served as a download, never rendered", async ({
+  page,
+  request,
+}) => {
+  await openTask(page, FINISHED_TASK_NUMBER);
+
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  const descriptionField = page
+    .locator("section")
+    .filter({ has: page.getByText("Description", { exact: true }) })
+    .locator("textarea");
+
+  const uploaded = taskWrite(page, "POST", "/api/uploads");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "report.html",
+    mimeType: "text/html",
+    buffer: Buffer.from("<h1>report</h1><script>document.title = 'ran'</script>"),
+  });
+  await expectWritten(uploaded, 200);
+  // A link, not the ![image](…) an image gets
+  await expect(descriptionField).toHaveValue(/(?<!!)\[report\.html\]\(.+\)/);
+
+  const saved = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
+  await descriptionField.blur();
+  await expectWritten(saved, 200);
+
+  const fileId = (await readTask(request, FINISHED_TASK_NUMBER)).description.match(/\[report\.html\]\((.+?)\)/)?.[1] ?? "";
+  const bare = await request.get(fileId);
+  expect([401, 403]).toContain(bare.status());
+
+  const carried = await request.get(fileId, { headers: ADMIN_AUTH });
+  expect(carried.status()).toBe(200);
+  expect(carried.headers()["content-type"]).toContain("text/html");
+  expect(carried.headers()["content-disposition"]).toBe("attachment");
+  expect(carried.headers()["x-content-type-options"]).toBe("nosniff");
+});
+
 test("the history tab narrates a status change with both columns named", async ({ page }) => {
   await openTask(page, FINISHED_TASK_NUMBER);
 

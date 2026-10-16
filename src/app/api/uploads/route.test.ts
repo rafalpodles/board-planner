@@ -146,6 +146,16 @@ describe("POST /api/uploads", () => {
     expect(openUploadStream).not.toHaveBeenCalled();
   });
 
+  it("stores an HTML file under its own type", async () => {
+    const page = new File(["<h1>report</h1>"], "report.html", { type: "text/html" });
+
+    const response = await POST(request(form({ file: page, projectId: "BP" })), ctx());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ fileName: "report.html", contentType: "text/html" });
+    expect(uploadedMetadata().contentType).toBe("text/html");
+  });
+
   it("refuses a file over the size limit", async () => {
     const big = png("big.png", 5 * 1024 * 1024 + 1);
 
