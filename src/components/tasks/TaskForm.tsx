@@ -7,6 +7,7 @@ import { Select } from "@/components/ui/Select";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { Switch } from "@/components/ui/Switch";
 import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
+import { DuplicatesCheck } from "@/ee/ai/DuplicatesCheck";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import {
@@ -72,6 +73,7 @@ export function TaskForm({
   const [title, setTitle] = useState("");
   const dueDateId = useId();
   const [description, setDescription] = useState("");
+  const [duplicateOf, setDuplicateOf] = useState<string[]>([]);
   const [priority, setPriority] = useState<Priority>("medium");
   const [category, setCategory] = useState<Category>(
     categories.includes("user-story") ? "user-story" : categories[0] || "user-story"
@@ -220,6 +222,15 @@ export function TaskForm({
 
     try {
       const created = await api.post(`/api/projects/${projectId}/tasks`, body);
+      let unmarked = 0;
+      for (const original of duplicateOf) {
+        try {
+          await api.post(`/api/projects/${projectId}/tasks/${created._id}/links`, { taskId: original, type: "duplicates" });
+        } catch {
+          unmarked++;
+        }
+      }
+      if (unmarked > 0) toast("Task created, but marking it as a duplicate failed", "error");
       if (parentTaskId) {
         try {
           await api.post(`/api/projects/${projectId}/tasks/${parentTaskId}/links`, {
@@ -355,6 +366,8 @@ export function TaskForm({
         maxLength={TASK_TITLE_MAX_LENGTH}
         required
       />
+
+      <DuplicatesCheck projectId={projectId} projectKey={projectKey} title={title} description={description} selected={duplicateOf} onSelect={setDuplicateOf} />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Select

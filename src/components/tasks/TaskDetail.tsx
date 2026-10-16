@@ -25,6 +25,7 @@ import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { TaskActivityPanel } from "@/components/tasks/TaskActivityPanel";
 import { DecisionPanel } from "@/components/tasks/DecisionPanel";
+import { DuplicatesCheck } from "@/ee/ai/DuplicatesCheck";
 import { ExecutionPanel } from "@/components/tasks/ExecutionPanel";
 import { useToast } from "@/components/ui/Toast";
 import { GitlabActivity } from "@/components/tasks/GitlabActivity";
@@ -653,6 +654,19 @@ function TaskDetailView({
                 onReload();
               }}
               onAddChild={() => setAddingChild(true)}
+            />
+
+            <DuplicatesCheck
+              projectId={projectId}
+              projectKey={project.key}
+              title={task.title}
+              description={task.description ?? ""}
+              taskId={task._id}
+              linkedIds={(task.relations ?? []).filter((r) => r.type === "duplicates").map((r) => r.task._id)}
+              onLinked={() => {
+                wroteHistory();
+                onReload();
+              }}
             />
 
             <GitlabActivity projectId={projectId} taskId={task._id} />

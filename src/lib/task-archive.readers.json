@@ -1,6 +1,7 @@
 {
   "hides": [
     "src/ee/ai/release-notes.ts",
+    "src/ee/ai/duplicates.ts",
     "src/app/api/projects/[projectId]/ai/generate-task/route.ts",
     "src/app/api/projects/[projectId]/sprints/[sprintId]/route.ts",
     "src/app/api/projects/[projectId]/sprints/route.ts",
@@ -33,6 +34,7 @@
     "src/app/api/projects/[projectId]/tasks/[taskId]/decision/route.ts": "by id",
     "src/app/api/projects/[projectId]/tasks/[taskId]/gitlab-activity/route.ts": "by id",
     "src/app/api/projects/[projectId]/tasks/[taskId]/route.ts": "by key and by link, and a relation's other end is shown whatever its state",
+    "src/app/api/projects/[projectId]/duplicates/route.ts": "the task asked about, by id, which the task page shows archived too",
     "src/app/api/projects/[projectId]/tasks/[taskId]/watch/route.ts": "by id",
     "src/app/api/projects/[projectId]/tasks/reorder/route.ts": "the order is one sequence over the whole board",
     "src/lib/account-erasure.ts": "a deleted account's references are cleared from every task, archived or not",

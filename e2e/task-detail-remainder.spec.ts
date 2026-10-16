@@ -224,7 +224,7 @@ test.describe("dependency types beyond blocked_by", () => {
     );
     await section.getByLabel(/Unlink/).click();
     await removed;
-    await expect(page.getByText("Duplicates")).toHaveCount(0);
+    await expect(page.locator("h4", { hasText: "Duplicates" })).toHaveCount(0);
   });
 
   // BP-691: the picker's exclusion set only read outgoing relations, so a task already related to
