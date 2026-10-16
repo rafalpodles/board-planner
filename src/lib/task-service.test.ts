@@ -105,6 +105,8 @@ const taskFindById = vi.fn();
 const taskExists = vi.fn(async (_filter?: unknown): Promise<unknown> => null);
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
+const drainTriage = vi.fn(async (_db?: unknown, _options?: unknown) => {});
+vi.mock("@/ee/ai/triage", () => ({ drainTriage }));
 vi.mock("@/models/worker", () => ({ Worker: { findOne: workerFindOne } }));
 // The real schema, because `order` and `description` are guarded by asking the schema's own
 // caster rather than restating it. A mock without one cannot answer, the guard cannot tell "I
@@ -5859,5 +5861,52 @@ describe("updateTask writing a project field's change", () => {
       expect.objectContaining({ projectId: "p1", field: "description", oldValue: "a", newValue: "b", customField: true }),
     ]);
     expect(logActivity).not.toHaveBeenCalledWith(db, "p1", "t1", "actor", "updated", "description", "a", "b");
+  });
+});
+
+// BP-871: a board with triage on queues each new task on the task itself, and nothing about triage
+// may delay or fail the create
+describe("createTask and triage", () => {
+  const FIELD = "507f1f77bcf86cd799439099";
+  const board = (triageMode: string) => ({
+    ...customBoard,
+    triageMode,
+    categories: [{ name: "bug" }, { name: "user-story" }],
+    customFields: [{ _id: FIELD, name: "Size", fieldType: "dropdown", options: [{ id: "s", value: "S" }], archived: false, required: false }],
+  });
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  beforeEach(() => {
+    drainTriage.mockReset();
+    projectFindOneAndUpdate.mockResolvedValue({ _id: "p1", taskCounter: 1, key: "BP", ...customBoard });
+    taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new" }));
+    taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
+  });
+
+  it("queues a new task, naming what its creator chose so triage leaves it alone", async () => {
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board("suggest")) });
+    await createTask(db, "p1", "actor", { title: "x", category: "bug", customFieldValues: { [FIELD]: "s" } });
+    expect(taskCreate.mock.calls.at(-1)?.[0].triage).toMatchObject({ state: "pending", mode: "suggest", explicit: ["category", `custom:${FIELD}`], attempts: 0 });
+    await flush();
+    expect(drainTriage).toHaveBeenCalledWith(db, { taskId: "new", limit: 1 });
+  });
+
+  it("queues nothing on a board with triage off", async () => {
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board("off")) });
+    await createTask(db, "p1", "actor", { title: "x" });
+    expect(taskCreate.mock.calls.at(-1)?.[0].triage).toBeUndefined();
+    await flush();
+    expect(drainTriage).not.toHaveBeenCalled();
+  });
+
+  it("answers before triage has run, and is not failed by it", async () => {
+    projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board("auto")) });
+    drainTriage.mockImplementation(() => new Promise((_resolve, reject) => setTimeout(() => reject(new Error("model down")), 5)));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await createTask(db, "p1", "actor", { title: "x" });
+    expect(result.ok).toBe(true);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(errors).toHaveBeenCalledWith("Triage could not start:", expect.any(Error));
+    errors.mockRestore();
   });
 });

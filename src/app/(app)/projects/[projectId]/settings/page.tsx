@@ -18,6 +18,7 @@ import { IntegrationsSection } from "./sections/IntegrationsSection";
 import { NotificationsSection } from "./sections/NotificationsSection";
 import { PmAgentSection } from "./sections/PmAgentSection";
 import { WorkersSection } from "./sections/WorkersSection";
+import { TriageSection } from "./sections/TriageSection";
 import { AuditSection } from "./sections/AuditSection";
 import { ImportSection } from "./sections/ImportSection";
 import {
@@ -144,6 +145,15 @@ const SECTIONS: SectionMeta[] = [
     icon: (
       <Icon d="M12 7V4M6 7h12a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V9a2 2 0 012-2zM9 13h.01M15 13h.01" />
     ),
+  },
+  {
+    id: "triage",
+    label: "AI triage",
+    title: "AI triage",
+    blurb: "Suggestions for who should take a new task and how to file it, from the task's own text.",
+    keywords: "ai triage assignee category suggest auto apply new task intake pro",
+    access: "projectAdmin",
+    icon: <Icon d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4L12 3zM18 15l.9 2.1L21 18l-2.1.9L18 21l-.9-2.1L15 18l2.1-.9L18 15z" />,
   },
   {
     id: "import",
@@ -402,6 +412,7 @@ export default function ProjectSettingsPage() {
             {s.id === "integrations" && <IntegrationsSection {...sectionProps} />}
             {s.id === "workers" && <WorkersSection {...sectionProps} />}
             {s.id === "pm" && <PmAgentSection {...sectionProps} />}
+            {s.id === "triage" && <TriageSection {...sectionProps} />}
             {s.id === "import" && <ImportSection {...sectionProps} />}
             {s.id === "audit" && (
               <AuditSection projectId={projectId} active={active === "audit"} />

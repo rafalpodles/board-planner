@@ -12,6 +12,10 @@ export function writtenBy<T>(by: GeneratedBy, work: () => T): T {
   return store.run(by, work);
 }
 
+export function outsideGeneratedBy<T>(work: () => T): T {
+  return store.exit(work);
+}
+
 export function currentGeneratedBy(): GeneratedBy | undefined {
   return store.getStore();
 }

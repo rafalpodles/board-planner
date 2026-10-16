@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { ITask, PRIORITIES, DEFAULT_PRIORITY, RECURRENCE_FREQUENCIES, TASK_DECISION_STATES } from "@/types";
+import { ITask, PRIORITIES, DEFAULT_PRIORITY, RECURRENCE_FREQUENCIES, TASK_DECISION_STATES, TRIAGE_MODES, TRIAGE_OUTCOMES, TRIAGE_STATES } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
 import { externalRefSchema } from "@/lib/import/external-ref";
 import { generatedBySchema } from "@/lib/ai-generated";
@@ -178,6 +178,32 @@ const taskSchema = new Schema<ITask>(
       phaseAt: { type: Date },
       phaseSeq: { type: Number },
     },
+    // Written by createTask (queued) and src/ee/ai/triage.ts only; like `decision`, absent from
+    // updateTask's field list
+    triage: {
+      type: {
+        state: { type: String, enum: TRIAGE_STATES, required: true },
+        mode: { type: String, enum: TRIAGE_MODES.filter((m) => m !== "off"), required: true },
+        explicit: { type: [String], default: [] },
+        attempts: { type: Number, default: 0 },
+        queuedAt: { type: Date, required: true },
+        claimedAt: { type: Date, default: null },
+        suggestions: {
+          type: [
+            {
+              field: { type: String, enum: ["assignee", "category", "custom"], required: true },
+              fieldId: { type: String },
+              value: { type: String, required: true },
+              reason: { type: String, default: "", maxlength: 300 },
+              outcome: { type: String, enum: TRIAGE_OUTCOMES, default: "open" },
+              previous: { type: String, default: null },
+            },
+          ],
+          default: [],
+        },
+      },
+      default: undefined,
+    },
     // A change the protected-paths gate refused, waiting on a person. `default: null` and nothing
     // else: unlike `execution` above, whose defaults make it serialise as a truthy object on every
     // task ever written, this must be absent until a gate actually refuses something — the panel
@@ -263,6 +289,7 @@ taskSchema.index({ "execution.workerId": 1 });
 // The worker asks "what is waiting on me" on every refresh, and the answer is nearly always
 // nothing — unindexed, that question is a scan of every task in every project on each poll
 taskSchema.index({ "decision.workerId": 1 });
+taskSchema.index({ organisation: 1, "triage.state": 1, "triage.queuedAt": 1 }, { partialFilterExpression: { "triage.state": { $exists: true } } });
 // Closing a recurring task asks whether it already has a successor; unindexed that is a scan of
 // every task in every project, and the usual answer — no — is the one that scans to the end
 taskSchema.index({ recurringParentId: 1 });

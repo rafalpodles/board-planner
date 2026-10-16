@@ -61,7 +61,7 @@ test("on a free instance the Coda panel is an upsell, and its sync and settings 
   await signIn(page);
   await openCoda(page);
 
-  const upsell = page.getByTestId("pro-upsell");
+  const upsell = page.getByTestId("pro-upsell").filter({ hasText: "Coda" });
   await expect(upsell).toContainText("Coda sync");
   await expect(upsell.getByRole("link", { name: /^Try Pro free for 30 days/ })).toHaveAttribute(
     "href",
@@ -94,7 +94,7 @@ test("a configured Coda survives the drop to free, read-only, and syncs again wh
 
   await useLicenceKey(request, undefined);
   await openCoda(page);
-  await expect(page.getByTestId("pro-upsell")).toBeVisible();
+  await expect(page.getByTestId("pro-upsell").filter({ hasText: "Coda" })).toBeVisible();
   // The list says what the row is on this plan rather than "Connected"
   await expect(page.getByText("Connected", { exact: true })).toHaveCount(0);
   const kept = page.getByTestId("coda-kept");
@@ -142,7 +142,7 @@ test("a plan that cannot be read is said so, not shown to a Pro board as an upse
   await openCoda(page);
 
   await expect(page.getByRole("alert").filter({ hasText: "Couldn't check this instance's plan" })).toBeVisible();
-  await expect(page.getByTestId("pro-upsell")).toHaveCount(0);
+  await expect(page.getByTestId("pro-upsell").filter({ hasText: "Coda" })).toHaveCount(0);
   // Nor badged Pro in the list: an unread plan is not a Free one
   await expect(page.getByText("Pro feature", { exact: true })).toHaveCount(0);
 });

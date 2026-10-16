@@ -16,6 +16,7 @@ const LABELS: Record<string, string> = {
   icon: "Icon",
   repositoryUrl: "Repository",
   deploymentEnvironment: "Deployment environment",
+  triageMode: "AI triage",
   gitlabHost: "GitLab host",
   codaHost: "Coda host",
   codaDocId: "Coda doc",

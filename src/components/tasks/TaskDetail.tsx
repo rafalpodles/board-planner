@@ -26,6 +26,7 @@ import { TaskForm } from "@/components/tasks/TaskForm";
 import { TaskActivityPanel } from "@/components/tasks/TaskActivityPanel";
 import { DecisionPanel } from "@/components/tasks/DecisionPanel";
 import { DuplicatesCheck } from "@/ee/ai/DuplicatesCheck";
+import { TriagePanel } from "@/ee/ai/TriagePanel";
 import { ExecutionPanel } from "@/components/tasks/ExecutionPanel";
 import { useToast } from "@/components/ui/Toast";
 import { GitlabActivity } from "@/components/tasks/GitlabActivity";
@@ -642,6 +643,17 @@ function TaskDetailView({
               taskId={task._id}
               decision={task.decision}
               onAnswered={onReload}
+            />
+
+            <TriagePanel
+              projectId={projectId}
+              taskId={task._id}
+              triage={task.triage}
+              customFields={project.customFields || []}
+              onChanged={() => {
+                wroteHistory();
+                onReload();
+              }}
             />
 
             <LinkedWork

@@ -96,6 +96,26 @@ function duplicatesAnswer(material) {
   return JSON.stringify({ duplicates: keys.map((key) => ({ key, reason: "The stub was told to" })) });
 }
 
+// Triage (BP-871) asks for JSON. The stub obeys "stub-assignee: x", "stub-category: y" and
+// "stub-field: Name=Option" lines in the task's description, as a model a task's text had talked
+// round would, so a spec can check that only what names a member or an offered value is kept.
+// "stub-fail" in the description answers 500.
+function triageAnswer(material) {
+  const said = (name) => material.task.description.match(new RegExp(`^stub-${name}: (.+)$`, "gm"))?.map((l) => l.slice(`stub-${name}: `.length).trim()) ?? [];
+  const reason = "The stub was told to";
+  const [username] = said("assignee");
+  const [category] = said("category");
+  return JSON.stringify({
+    assignee: username ? { username, reason } : null,
+    category: category ? { name: category, reason } : null,
+    fields: said("field").map((pair) => {
+      const [name, option] = pair.split("=");
+      const field = material.fields.find((f) => f.name === name);
+      return { id: field?.id ?? name, option, reason };
+    }),
+  });
+}
+
 function titlesIn(value, out = []) {
   if (Array.isArray(value)) value.forEach((v) => titlesIn(v, out));
   else if (value && typeof value === "object") {
@@ -282,7 +302,17 @@ serve({
     if (writing) {
       lastWrite = { model: writing.model, tools: writing.tools ?? null, messages: writing.messages };
       const material = JSON.parse(writing.messages[1].content.slice("<data>\n".length, -"\n</data>".length));
-      const content = material.draft && material.candidates ? duplicatesAnswer(material) : ["## Written by the stub", ...titlesIn(material).map((t) => `- ${t}`)].join("\n");
+      const triage = material.ask && material.task;
+      if (triage && material.task.description.includes("stub-fail")) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "stub-fail" } }));
+        return;
+      }
+      const content = triage
+        ? triageAnswer(material)
+        : material.draft && material.candidates
+          ? duplicatesAnswer(material)
+          : ["## Written by the stub", ...titlesIn(material).map((t) => `- ${t}`)].join("\n");
       reply(res, {
         id: "chatcmpl-e2e-write",
         object: "chat.completion",

@@ -51,6 +51,52 @@ export interface GeneratedBy {
 }
 export const DEFAULT_PRIORITY: Priority = "medium";
 
+export const TRIAGE_MODES = ["off", "suggest", "auto"] as const;
+export type TriageMode = (typeof TRIAGE_MODES)[number];
+export const TRIAGE_STATES = ["pending", "running", "ready", "failed"] as const;
+export type TriageState = (typeof TRIAGE_STATES)[number];
+export const TRIAGE_OUTCOMES = ["open", "applied", "dismissed", "undone"] as const;
+export type TriageOutcome = (typeof TRIAGE_OUTCOMES)[number];
+export type TriageField = "assignee" | "category" | "custom";
+
+export interface ITriageSuggestion {
+  _id: Types.ObjectId;
+  field: TriageField;
+  fieldId?: string;
+  value: string;
+  reason: string;
+  outcome: TriageOutcome;
+  // What the field held before triage applied it, for the undo
+  previous?: string | null;
+}
+
+export interface ITaskTriage {
+  state: TriageState;
+  mode: Exclude<TriageMode, "off">;
+  // The fields the person creating the task set, which triage leaves alone
+  explicit: string[];
+  attempts: number;
+  queuedAt: Date;
+  claimedAt?: Date | null;
+  suggestions: ITriageSuggestion[];
+}
+
+export interface ApiTriageSuggestion {
+  _id: string;
+  field: TriageField;
+  fieldId?: string;
+  value: string;
+  reason: string;
+  outcome: TriageOutcome;
+  previous?: string | null;
+}
+
+export interface ApiTaskTriage {
+  state: TriageState;
+  mode: Exclude<TriageMode, "off">;
+  suggestions: ApiTriageSuggestion[];
+}
+
 export const PRIORITY_LABELS: Record<Priority, string> = {
   low: "Low",
   medium: "Medium",
@@ -1035,6 +1081,7 @@ export interface IProject {
   githubRepo: string;
   githubToken: string;
   deploymentEnvironment: string;
+  triageMode: TriageMode;
   deploymentSync: { syncedThrough: Date | null; blockedUntil: Date | null; lastError?: string };
   /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   gitlabRepo: string;
@@ -1228,6 +1275,8 @@ export interface ITask {
   execution: ITaskExecution;
   // Absent on every task that has never had a change refused, which is nearly all of them
   decision?: ITaskDecision | null;
+  // Absent on a task created while its board's triage was off
+  triage?: ITaskTriage;
   // Absent or null on a task nobody archived, which is nearly all of them
   archivedAt?: Date | null;
   archivedBy?: Types.ObjectId | IUser | null;
@@ -1345,6 +1394,7 @@ export interface ApiProject {
   githubWebBase?: string;
   githubTokenSet: boolean;
   deploymentEnvironment?: string;
+  triageMode?: TriageMode;
   gitlabHost?: string;
   gitlabTokenSet?: boolean;
   codaHost?: string;
@@ -1521,6 +1571,7 @@ export interface ApiTask {
   updatedAt: string;
   execution?: ApiTaskExecution;
   decision?: ApiTaskDecision;
+  triage?: ApiTaskTriage;
   /** Machines have spent every attempt on it; no claim takes it again (GET task only) */
   attemptsExhausted?: boolean;
   /** Set while the task is archived: hidden from every list until someone restores it */
@@ -1624,7 +1675,7 @@ export function defaultSortDir(field: SortKey): SortDir {
   return SORT_OPTIONS.find((o) => o.value === field)?.defaultDir ?? "asc";
 }
 
-export const ACTIVITY_SOURCES = ["web-ui", "pm-agent", "worker", "mcp", "api", "import", "system"] as const;
+export const ACTIVITY_SOURCES = ["web-ui", "pm-agent", "ai-triage", "worker", "mcp", "api", "import", "system"] as const;
 export type ActivitySource = (typeof ACTIVITY_SOURCES)[number];
 // What a row written before sources were recorded reads as (BP-824)
 export type ShownActivitySource = ActivitySource | "legacy";

@@ -599,7 +599,7 @@ export async function createTask(
   // to happen in front of, so the project lookup the category and column lists need is split from
   // the `$inc` that spends a number (BP-438). Every refusal past that point leaves a permanent hole
   // in the board's numbering, for a task that never existed.
-  const board = await db.Project.findById(projectId, "categories columns customFields").lean();
+  const board = await db.Project.findById(projectId, "categories columns customFields triageMode").lean();
 
   if (!board) {
     return { ok: false, error: "Project not found", status: 404 };
@@ -680,6 +680,21 @@ export async function createTask(
   }
 
   const generatedBy = currentGeneratedBy();
+  const triage =
+    board.triageMode === "suggest" || board.triageMode === "auto"
+      ? {
+          state: "pending" as const,
+          mode: board.triageMode,
+          explicit: [
+            ...(assigneeId ? ["assignee"] : []),
+            ...(body.category !== undefined ? ["category"] : []),
+            ...Object.keys(customFieldValues).filter((id) => customFieldValues[id]).map((id) => `custom:${id}`),
+          ],
+          attempts: 0,
+          queuedAt: new Date(),
+          suggestions: [],
+        }
+      : undefined;
   const task = await db.Task.create({
     project: projectId,
     taskNumber: project.taskCounter,
@@ -700,6 +715,7 @@ export async function createTask(
     recurrence,
     order,
     ...(generatedBy && { generatedBy }),
+    ...(triage && { triage }),
     createdBy: actorId,
   });
 
@@ -716,6 +732,12 @@ export async function createTask(
     },
   };
   dispatchWebhooks(db, projectId, "task_created", eventPayload);
+  if (triage) {
+    // Imported when needed: triage writes through updateTask, so a static import would be a cycle
+    import("@/ee/ai/triage")
+      .then(({ drainTriage }) => drainTriage(db, { taskId: String(task._id), limit: 1 }))
+      .catch((err) => console.error("Triage could not start:", err));
+  }
   dispatchNotifications(db, projectId, "task_created", eventPayload);
 
   const createdKey = taskKeyOf(project.key, task.taskNumber);
