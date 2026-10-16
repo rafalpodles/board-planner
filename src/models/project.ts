@@ -1,7 +1,7 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IProject, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, GRANT_RELATIONS, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
-import { REPOSITORY_NAME_MAX_LENGTH } from "@/lib/repositories";
+import { MAX_REPOSITORY_URL_LENGTH, REPOSITORY_NAME_MAX_LENGTH } from "@/lib/repositories";
 
 const categorySchema = new Schema(
   {
@@ -245,7 +245,7 @@ const projectSchema = new Schema<IProject>(
       type: [
         new Schema(
           {
-            url: { type: String, required: true, trim: true, maxlength: 2_000 },
+            url: { type: String, required: true, trim: true, maxlength: MAX_REPOSITORY_URL_LENGTH },
             name: { type: String, default: "", trim: true, maxlength: REPOSITORY_NAME_MAX_LENGTH },
           },
           { _id: true }

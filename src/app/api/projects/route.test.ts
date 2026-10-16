@@ -241,6 +241,7 @@ describe("POST /api/projects — a project created with its setup", () => {
     ]);
     expect(created.categories).toEqual([{ name: "bug", color: "#ef4444" }]);
     expect(created.repositoryUrl).toBe("https://github.com/acme/search");
+    expect(created.repositories).toEqual([{ _id: expect.anything(), url: "https://github.com/acme/search", name: "" }]);
     expect(created.pm).toEqual({ enabled: true });
   });
 

@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import { projectRepositoryUrl, type RepositoryFields } from "./repository";
 
 export const REPOSITORY_NAME_MAX_LENGTH = 100;
+export const MAX_REPOSITORY_URL_LENGTH = 2048;
 
 export interface StoredRepository {
   _id: Types.ObjectId;

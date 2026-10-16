@@ -30,7 +30,7 @@ export async function migrateRepositories(db: mongo.Db, { apply }: { apply: bool
     result.filled.push(`${project.key || project._id}: ${url}`);
     if (apply) {
       await db.collection("projects").updateOne(
-        { _id: project._id, $or: [{ repositories: { $exists: false } }, { repositories: { $size: 0 } }] },
+        { _id: project._id, $or: [{ repositories: null }, { repositories: { $size: 0 } }] },
         { $set: { repositories: [{ _id: new Types.ObjectId(), url, name: "" }] } }
       );
     }

@@ -373,6 +373,13 @@ describe("PUT /api/projects/[projectId] deploymentEnvironment", () => {
     expect(projectFindOneAndUpdate.mock.calls[0][1]).toMatchObject({ repositoryUrl: "", repositories: [] });
   });
 
+  it("refuses an address longer than the list can store", async () => {
+    const res = await PUT(putRequest({ repositoryUrl: `https://github.com/${"x".repeat(2048)}` }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
   it("leaves the list alone when the address is not being written", async () => {
     await PUT(putRequest({ name: "Renamed" }), ctx());
     expect(projectFindOneAndUpdate.mock.calls[0][1]).not.toHaveProperty("repositories");

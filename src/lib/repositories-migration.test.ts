@@ -29,7 +29,7 @@ describe("migrateRepositories", () => {
     await migrateRepositories(db, { apply: true });
     expect(updateOne).toHaveBeenCalledTimes(1);
     const [filter, update] = updateOne.mock.calls[0] as unknown as [Record<string, unknown>, { $set: { repositories: { url: string }[] } }];
-    expect(filter).toEqual({ _id: bare._id, $or: [{ repositories: { $exists: false } }, { repositories: { $size: 0 } }] });
+    expect(filter).toEqual({ _id: bare._id, $or: [{ repositories: null }, { repositories: { $size: 0 } }] });
     expect(update.$set.repositories).toEqual([expect.objectContaining({ url: "https://github.com/a/c", name: "" })]);
   });
 });

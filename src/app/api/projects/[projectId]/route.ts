@@ -21,7 +21,7 @@ import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { validatePmConfig, pmAvailability, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { PROJECT_ICONS, type IPmMcpServer } from "@/types";
-import { projectRepositories, withPrimaryUrl, type StoredRepository } from "@/lib/repositories";
+import { projectRepositories, withPrimaryUrl, type StoredRepository, MAX_REPOSITORY_URL_LENGTH } from "@/lib/repositories";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import { githubWebBase } from "@/lib/github-host";
 import { releaseProjectUploads } from "@/lib/upload-cleanup";
@@ -190,6 +190,12 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   }
   if (updates.name !== undefined && !String(updates.name).trim()) {
     return NextResponse.json({ error: "A project needs a name" }, { status: 400 });
+  }
+  if (typeof updates.repositoryUrl === "string" && updates.repositoryUrl.trim().length > MAX_REPOSITORY_URL_LENGTH) {
+    return NextResponse.json(
+      { error: `repositoryUrl must be at most ${MAX_REPOSITORY_URL_LENGTH} characters` },
+      { status: 400 }
+    );
   }
 
   if (body.worker !== undefined) {

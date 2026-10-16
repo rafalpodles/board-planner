@@ -1,4 +1,5 @@
 import { isValidObjectId } from "mongoose";
+import { MAX_REPOSITORY_URL_LENGTH } from "@/lib/repositories";
 import { parseOptions } from "@/lib/custom-fields";
 import {
   CATEGORY_NAME_MAX_LENGTH,
@@ -22,7 +23,6 @@ import {
 } from "@/types";
 
 export const MAX_SETUP_PEOPLE = 200;
-const MAX_REPOSITORY_URL_LENGTH = 2048;
 
 export interface SetupColumn {
   id: string;
