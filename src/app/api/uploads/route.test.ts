@@ -146,7 +146,7 @@ describe("POST /api/uploads", () => {
     expect(openUploadStream).not.toHaveBeenCalled();
   });
 
-  it("stores an HTML file, which is only ever served as a download", async () => {
+  it("stores an HTML file under its own type", async () => {
     const page = new File(["<h1>report</h1>"], "report.html", { type: "text/html" });
 
     const response = await POST(request(form({ file: page, projectId: "BP" })), ctx());

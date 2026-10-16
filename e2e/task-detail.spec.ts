@@ -530,7 +530,7 @@ test("uploads: an HTML file attaches as a link and is served as a download, neve
 
   const saved = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
   await descriptionField.blur();
-  await saved;
+  await expectWritten(saved, 200);
 
   const fileId = (await readTask(request, FINISHED_TASK_NUMBER)).description.match(/\[report\.html\]\((.+?)\)/)?.[1] ?? "";
   const bare = await request.get(fileId);
