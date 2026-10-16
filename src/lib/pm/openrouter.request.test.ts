@@ -232,3 +232,17 @@ describe("the referer the provider is told", () => {
     expect(referers).toEqual(["https://board-planner.com"]);
   });
 });
+
+// BP-855: a call that offers no tools sends none, rather than an empty list some providers refuse beside a tool_choice
+describe("a call with no tools", () => {
+  it("sends neither tools nor tool_choice", async () => {
+    await send({ tools: [] });
+    expect(bodies[0]).not.toHaveProperty("tools");
+    expect(bodies[0]).not.toHaveProperty("tool_choice");
+  });
+
+  it("still sends both when there are tools", async () => {
+    await send({ tools: [{ name: "x", description: "d", parameters: { type: "object", properties: {} } }] });
+    expect(bodies[0]).toMatchObject({ tool_choice: "auto", tools: [{ type: "function", function: { name: "x" } }] });
+  });
+});

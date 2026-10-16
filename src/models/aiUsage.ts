@@ -1,7 +1,7 @@
 import mongoose, { Schema, Model, Types } from "mongoose";
 import { withOrganisation } from "@/lib/organisation-field";
 
-export const AI_USAGE_SOURCES = ["pm", "assist"] as const;
+export const AI_USAGE_SOURCES = ["pm", "assist", "release_notes", "digest", "triage", "duplicates"] as const;
 export const AI_KEY_SOURCES = ["own", "instance", "managed"] as const;
 
 export interface IAiUsage {

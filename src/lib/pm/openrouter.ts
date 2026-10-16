@@ -143,11 +143,14 @@ export async function chatCompletion(opts: {
         ...(opts.sessionId ? { session_id: opts.sessionId } : {}),
         ...(opts.provider ? { provider: opts.provider } : {}),
         max_tokens: MAX_TOKENS(),
-        tools: opts.tools.map((t) => ({
-          type: "function",
-          function: { name: t.name, description: t.description, parameters: t.parameters },
-        })),
-        tool_choice: "auto",
+        // A call with no tools sends none: an empty list beside a tool_choice is refused by some providers
+        ...(opts.tools.length > 0 && {
+          tools: opts.tools.map((t) => ({
+            type: "function",
+            function: { name: t.name, description: t.description, parameters: t.parameters },
+          })),
+          tool_choice: "auto",
+        }),
       }),
       signal: opts.signal,
     });
