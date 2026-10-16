@@ -108,6 +108,14 @@ export const DEFAULT_POLICY: EffectiveConfig = {
   reviewModel: DEFAULT_REVIEW_MODEL,
 };
 
+// One repository of a project that lists several, as the server names it: its own id and name, and the
+// remote this worker reported for it.
+export interface AssignedRepository {
+  id: string;
+  name: string;
+  remote: string;
+}
+
 export interface Assignment {
   project: string;
   // What the project is called — optional, so a server that predates BP-377 still decodes; the
@@ -117,6 +125,9 @@ export interface Assignment {
   // The remote this worker itself reported. It resolves back to a local checkout through the
   // worker's own inventory, so the server never names a directory on this machine.
   remote: string;
+  // Every repository of a project that lists several, in the project's order, `remote` being the first.
+  // Absent for a project with one. Never partly parsed: see parseAssignments.
+  repositories?: AssignedRepository[];
   policy?: Record<string, unknown>;
 }
 
@@ -352,11 +363,38 @@ function isAssignment(value: unknown): value is Assignment {
 // WHOLE config decode, blanking every pane rather than just this one project's name (BP-377 review).
 export function parseAssignments(value: unknown): Assignment[] {
   if (!Array.isArray(value)) return [];
-  return value.filter(isAssignment).map((assignment) => ({
-    ...assignment,
-    key: typeof assignment.key === "string" ? assignment.key : "",
-    name: typeof assignment.name === "string" ? assignment.name : "",
-  }));
+  return value.filter(isAssignment).flatMap((assignment) => {
+    const normalised = {
+      ...assignment,
+      key: typeof assignment.key === "string" ? assignment.key : "",
+      name: typeof assignment.name === "string" ? assignment.name : "",
+    };
+    if (assignment.repositories === undefined) return [normalised];
+    // Unlike key and name, a list that is present but wrong drops the WHOLE assignment: read as the
+    // single `remote` it would run the project in one of its repositories and hand the agent a change
+    // it cannot make whole. Not claiming it is the safe way to disagree with the server.
+    const repositories = parseAssignedRepositories(assignment.repositories);
+    // `remote` is the first of them, as the server says: when the two disagree one of them is not
+    // what the server meant, and the project would bind its primary from one remote and fetch from
+    // the other.
+    return repositories && repositories[0].remote === assignment.remote ? [{ ...normalised, repositories }] : [];
+  });
+}
+
+const MAX_ASSIGNED_REPOSITORIES = 32;
+
+function parseAssignedRepositories(value: unknown): AssignedRepository[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_ASSIGNED_REPOSITORIES) return null;
+  const out: AssignedRepository[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) return null;
+    const { id, name, remote } = entry as Record<string, unknown>;
+    if (!isNonEmptyString(id) || !isNonEmptyString(remote)) return null;
+    // Trimmed before they are compared, so " a" and "a" are one entry rather than two
+    if (out.some((seen) => seen.id === id.trim() || seen.remote === remote.trim())) return null;
+    out.push({ id: id.trim(), name: typeof name === "string" ? name : "", remote: remote.trim() });
+  }
+  return out;
 }
 
 function isOffer(value: unknown): value is ProjectOffer {
