@@ -105,6 +105,19 @@ describe("naming a repository on a task (BP-1066)", () => {
       expect(repositoryIdFor(twins, "same")).toEqual({ error: expect.stringContaining("use an id") });
     });
 
+    it("bounds what it echoes of the reference, in both refusals", () => {
+      const long = "w".repeat(500);
+      const twins = [
+        { _id: api, url: "https://a/x", name: long },
+        { _id: web, url: "https://a/y", name: long },
+      ];
+      const quoted = (answer: { error: string } | { id: string | null }) =>
+        /"([^"]*)"/.exec((answer as { error: string }).error)?.[1] ?? "";
+
+      expect(quoted(repositoryIdFor(project, long)).length).toBeLessThanOrEqual(65);
+      expect(quoted(repositoryIdFor({ repositories: twins }, long)).length).toBeLessThanOrEqual(65);
+    });
+
     it("lists what exists when nothing matches", () => {
       expect(repositoryIdFor(project, "nope")).toEqual({ error: expect.stringContaining(String(web)) });
     });

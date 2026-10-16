@@ -9,11 +9,12 @@ const releaseExpiredTasks = vi.fn();
 const resolveProjectId = vi.fn();
 
 const projectFindOne = vi.fn();
+const projectSelect = vi.fn();
 const workerFindOthers = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({
-  Project: { findOne: () => ({ select: () => ({ lean: projectFindOne }) }) },
+  Project: { findOne: () => ({ select: (fields: string) => (projectSelect(fields), { lean: projectFindOne }) }) },
 }));
 vi.mock("@/models/worker", () => ({
   Worker: { find: () => ({ select: workerFindOthers }) },
@@ -561,12 +562,15 @@ describe("the repositories a claim may take a task for", () => {
     expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", null, ["r-web"]);
   });
 
-  it("judges the project as the claim read it, with its repositories selected", async () => {
+  // The projection is what hands the claim every repository of the board; leave it out and a board
+  // with several is judged as having its first only
+  it("reads the project's repositories, and judges the project it read", async () => {
     verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], owner: "u-owner" });
     claimNextTask.mockResolvedValue(null);
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
+    expect(projectSelect.mock.calls[0][0].split(/\s+/)).toContain("repositories");
     expect(claimableRepositories).toHaveBeenCalledWith(
       expect.objectContaining({ _id: OID }),
       expect.objectContaining({ _id: "p1" }),

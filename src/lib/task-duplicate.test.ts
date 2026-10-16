@@ -16,6 +16,7 @@ const task = {
   dueDate: "2026-05-12T12:00:00.000Z",
   customFieldValues: { f1: "L" },
   recurrence: { frequency: "weekly", interval: 2 },
+  repository: "6ab0f94eadb2609f98d84db2",
 } as unknown as ApiTask;
 
 describe("duplicatePayload", () => {
@@ -28,6 +29,7 @@ describe("duplicatePayload", () => {
       dueDate: "2026-05-12T12:00:00.000Z",
       customFieldValues: { f1: "L" },
       recurrence: { frequency: "weekly", interval: 2 },
+      repository: "6ab0f94eadb2609f98d84db2",
     });
   });
 

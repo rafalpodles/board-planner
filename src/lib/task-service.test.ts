@@ -5954,9 +5954,11 @@ describe("a task naming the repository it changes (BP-1066)", () => {
       expect(taskCreate.mock.calls.at(-1)?.[0].repository).toBe(WEB);
     });
 
-    it("stores none when none is named", async () => {
+    it("stores none when none is named, or an empty string", async () => {
       await createTask(db, "p1", "actor", { title: "x" });
+      await createTask(db, "p1", "actor", { title: "x", repository: "" });
 
+      expect(taskCreate.mock.calls.at(-2)?.[0].repository).toBeNull();
       expect(taskCreate.mock.calls.at(-1)?.[0].repository).toBeNull();
     });
 
@@ -6034,6 +6036,14 @@ describe("a task naming the repository it changes (BP-1066)", () => {
       await updateTask(db, "p1", "t1", { title: "renamed" }, "actor");
 
       expect(findOneAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("repository");
+    });
+
+    it("writes no history row when the repository is sent again unchanged", async () => {
+      setup(API, API);
+
+      await updateTask(db, "p1", "t1", { repository: API }, "actor");
+
+      expect(vi.mocked(logActivity).mock.calls.filter((call) => call[5] === "repository")).toEqual([]);
     });
 
     it("writes the change to the history by name, falling back to the address", async () => {

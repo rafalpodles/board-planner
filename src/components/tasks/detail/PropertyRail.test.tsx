@@ -1695,6 +1695,14 @@ describe("the repository of a task", () => {
     expect(set).toHaveBeenCalledWith("repository", "r2");
   });
 
+  it("clears the repository on No repository", async () => {
+    const set = rail(REPOSITORIES, "r2");
+    await openRow("Repository");
+    await pick(/No repository/);
+
+    expect(set).toHaveBeenCalledWith("repository", null);
+  });
+
   it("shows the repository a task names", () => {
     rail(REPOSITORIES, "r2");
 

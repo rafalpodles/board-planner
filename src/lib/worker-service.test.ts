@@ -1216,6 +1216,16 @@ describe("a project with several repositories", () => {
     expect(claimableRepositories(machine, several(), [], now)).toEqual([]);
   });
 
+  // The claim judges the checkouts the machine may actually use, so one lost to an earlier process on
+  // the same machine must not name the repository
+  it("names the repository of a checkout the machine did not lose to an earlier process", () => {
+    const mine = { _id: "w2", name: "second", host: "mac.home", enabled: true, lastSeenAt: fresh, createdAt: new Date("2026-02-01"), repos: checkouts(API, WEB) };
+    const older = { _id: "w1", name: "first", host: "mac.home", enabled: true, lastSeenAt: fresh, createdAt: new Date("2026-01-01"), repos: checkouts(API) };
+
+    expect(claimableRepositories(mine as never, several(), [older] as never, now)).toEqual(["r-web"]);
+    expect(claimableRepositories(mine as never, several(), [], now)).toEqual(["r-api"]);
+  });
+
   it("puts no restriction on a project with one repository, stored or not", () => {
     const stored = project({ githubRepo: undefined, repositoryUrl: API, repositories: [{ _id: "r-api", url: API }] });
 

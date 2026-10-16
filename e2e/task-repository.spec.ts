@@ -166,6 +166,49 @@ test.describe("which tasks a machine is offered", () => {
     expect((await storedTask(unnamed._id))?.status).toBe(APPROVED);
   });
 
+  // What the worker is told it serves is decided by the heartbeat route, not the claim route, so a
+  // route that read the project without its repositories would hand every machine the first one
+  test("the heartbeat hands a machine the first listed repository it holds as its assignment", async ({ request }) => {
+    const heartbeat = await request.post(`/api/workers/${WORKER_ID}/heartbeat`, {
+      headers: asWorker,
+      data: { repos: [{ remote: `${WEB_URL}.git`, path: "/e2e/web" }, { remote: `${API_URL}.git`, path: "/e2e/api" }] },
+    });
+    expect(heartbeat.status(), await heartbeat.text()).toBe(200);
+    const { assignments } = await heartbeat.json();
+
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0].remote).toBe(`${API_URL}.git`);
+
+    const onlyWeb = await request.post(`/api/workers/${WORKER_ID}/heartbeat`, {
+      headers: asWorker,
+      data: { repos: [{ remote: `${WEB_URL}.git`, path: "/e2e/web" }] },
+    });
+    expect((await onlyWeb.json()).assignments[0].remote).toBe(`${WEB_URL}.git`);
+  });
+
+  test("a task is created naming a listed repository, and refused an unlisted one before it exists", async ({ request }) => {
+    const created = await request.post(`/api/projects/${PROJECT_ID}/tasks`, {
+      headers: ADMIN_AUTH,
+      data: { title: "names the web repository", repository: String(WEB) },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    expect((await created.json()).repository).toBe(String(WEB));
+
+    const unnamed = await request.post(`/api/projects/${PROJECT_ID}/tasks`, {
+      headers: ADMIN_AUTH,
+      data: { title: "names none", repository: "" },
+    });
+    expect(unnamed.status(), await unnamed.text()).toBe(201);
+    expect((await unnamed.json()).repository ?? null).toBeNull();
+
+    const refused = await request.post(`/api/projects/${PROJECT_ID}/tasks`, {
+      headers: ADMIN_AUTH,
+      data: { title: "names a stranger", repository: String(new mongoose.Types.ObjectId()) },
+    });
+    expect(refused.status()).toBe(400);
+    expect(await (await db()).collection("tasks").countDocuments({ title: "names a stranger" })).toBe(0);
+  });
+
   // The control: the same board, a machine that holds the other checkout, takes the other task
   test("a machine holding only the api checkout is given the api task", async ({ request }) => {
     await machineHolds(`${API_URL}.git`);

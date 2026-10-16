@@ -19,7 +19,12 @@ describe("the PM agent naming a task's repository", () => {
     { _id: "r2", url: "https://github.com/acme/site", name: "" },
   ];
   const db = {
-    Project: { findById: () => ({ lean: async () => ({ repositories }) }) },
+    // Honours the projection, so a tool that forgets to select `repositories` sees none
+    Project: {
+      findById: (_id: string, projection: string) => ({
+        lean: async () => (projection.split(/\s+/).includes("repositories") ? { repositories } : {}),
+      }),
+    },
     Task: { findOne: async () => ({ _id: "t1", checklist: [] }) },
   } as never;
 
