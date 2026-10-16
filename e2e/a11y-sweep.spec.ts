@@ -57,11 +57,9 @@ async function withDb<T>(fn: (db: mongoose.mongo.Db) => Promise<T>): Promise<T> 
 }
 
 async function seedCatalog() {
-  await mongoose.connect(E2E_MONGODB_URI);
   const { seedAgents } = await import("@/lib/agent-seed");
   const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
-  await seedAgents(scopedToDefaultOrganisation());
-  await mongoose.disconnect();
+  await withDb(() => seedAgents(scopedToDefaultOrganisation()));
 }
 
 const NOTIFICATION_TITLE = `${PROJECT_KEY}-${SIBLING_TASK_NUMBER} assigned to you`;
@@ -194,7 +192,7 @@ const SCREENS: Screen[] = [
     ready: (page) => page.getByRole("main").getByText(SIBLING_TASK_TITLE).first(),
   },
   { name: "dashboard", open: at(`${BOARD}/dashboard`), ready: (page) => heading(page, "Status Breakdown") },
-  { name: "insights", open: at(`${BOARD}/insights`), ready: (page) => page.getByRole("main").getByRole("heading").first() },
+  { name: "insights", open: at(`${BOARD}/insights`), ready: (page) => page.getByTestId("insights-upsell") },
   ...(
     [
       ["general", "General"],
@@ -230,6 +228,15 @@ const SCREENS: Screen[] = [
     open: at("/agents"),
     ready: (page) => page.getByRole("link", { name: /Default/ }).first(),
   },
+  {
+    name: "agent editor",
+    prepare: seedCatalog,
+    open: async (page) => {
+      await page.goto("/agents");
+      await page.getByRole("link", { name: /Default/ }).first().click();
+    },
+    ready: (page) => page.getByRole("heading", { name: /^Default/ }).first(),
+  },
   { name: "PM chat", open: at(`${BOARD}/pm`), ready: (page) => page.getByPlaceholder(/Message the PM/) },
   {
     name: "settings: users",
@@ -255,11 +262,11 @@ const SCREENS: Screen[] = [
   },
   { name: "settings: security", open: at("/settings/security"), ready: (page) => heading(page, "Change password") },
   { name: "settings: preferences", open: at("/settings/preferences"), ready: (page) => heading(page, "Preferences") },
-  { name: "settings: AI key", open: at("/settings/ai-keys"), ready: (page) => page.getByRole("main").getByRole("heading").first() },
-  { name: "settings: export", open: at("/settings/export"), ready: (page) => page.getByRole("main").getByRole("heading").first() },
-  { name: "settings: licence", open: at("/settings/licence"), ready: (page) => page.getByRole("main").getByRole("heading").first() },
-  { name: "settings: organisation", open: at("/settings/organisation"), ready: (page) => page.getByRole("main").getByRole("heading").first() },
-  { name: "settings: single sign-on", open: at("/settings/sso"), ready: (page) => page.getByRole("main").getByRole("heading").first() },
+  { name: "settings: AI key", open: at("/settings/ai-keys"), ready: (page) => heading(page, "AI key") },
+  { name: "settings: export", open: at("/settings/export"), ready: (page) => heading(page, "Export") },
+  // The licence screen is the organisation's: /settings/licence redirects there
+  { name: "settings: organisation", open: at("/settings/organisation"), ready: (page) => heading(page, "Licence") },
+  { name: "settings: single sign-on", open: at("/settings/sso"), ready: (page) => heading(page, "Single sign-on") },
 ];
 
 test.beforeEach(seed);
@@ -271,6 +278,10 @@ for (const screen of SCREENS) {
     await screen.open(page);
     // Turbopack compiles a route on its first visit, and a click is not covered by navigationTimeout
     await expect(screen.ready(page)).toBeVisible({ timeout: 90_000 });
+    // A heading can stand while what it heads is still a spinner or a "Loading…" line
+    const main = page.getByRole("main");
+    await expect(main.getByText(/^Loading…?$/).filter({ visible: true })).toHaveCount(0, { timeout: 30_000 });
+    await expect(main.locator(".animate-spin").filter({ visible: true })).toHaveCount(0, { timeout: 30_000 });
     expect(await violations(page)).toEqual([]);
   });
 }

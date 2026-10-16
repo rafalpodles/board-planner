@@ -147,9 +147,9 @@ function countAgentWrites(page: Page): () => number {
   return () => seen;
 }
 
-/** A bucket's list, addressed by its heading. */
+/** A bucket, addressed by its heading: the drop zone that holds its list and its empty line */
 const bucketOf = (page: Page, label: string): Locator =>
-  page.getByRole("heading", { name: label, exact: true }).locator("xpath=../following-sibling::ul");
+  page.getByRole("heading", { name: label, exact: true }).locator("xpath=../following-sibling::*[1]");
 
 /**
  * A real pointer drag, because dnd-kit's PointerSensor is what a person uses and a `dispatchEvent`
