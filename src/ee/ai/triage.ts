@@ -47,7 +47,9 @@ export async function triageMaterial(db: ScopedDb, task: ITask): Promise<TriageM
   const fields = singleChoiceFields(project.customFields).filter((f) => !explicit.has(`custom:${f._id}`) && !values[String(f._id)]);
   const ask = {
     assignee: !task.assignee && !explicit.has("assignee"),
-    category: !explicit.has("category") && (project.categories?.length ?? 0) > 1,
+    // Asked even when the creator sent one: the task form always sends a category, so only auto-apply
+    // holds back from an explicit one
+    category: (project.categories?.length ?? 0) > 1,
     fieldIds: fields.map((f) => String(f._id)),
   };
   if (!ask.assignee && !ask.category && ask.fieldIds.length === 0) return null;
@@ -196,7 +198,9 @@ export async function runTriage(db: ScopedDb, taskId: string): Promise<void> {
 
   const pm = await getPmUser(db);
   const stored = (await readTask(db, taskId))?.triage?.suggestions ?? [];
+  const explicitCategory = task.triage.explicit.includes("category");
   for (const suggestion of stored) {
+    if (suggestion.field === "category" && explicitCategory) continue;
     await applyOne(db, taskId, String(suggestion._id), String(pm._id), "apply", true).catch((err) =>
       console.error(`Triage could not apply its ${suggestion.field} suggestion:`, err)
     );

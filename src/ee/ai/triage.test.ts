@@ -173,6 +173,14 @@ describe("runTriage", () => {
     ]);
   });
 
+  it("in auto mode leaves a category the creator sent as a suggestion", async () => {
+    const task = newTask({ mode: "auto", explicit: ["category"] });
+    m.gatewayWrite.mockResolvedValue({ ok: true, text: ANSWER });
+    await runTriage(fakeDb(task), String(task._id));
+    expect(m.updateTask.mock.calls.map((c) => Object.keys(c[3] as object)[0])).toEqual(["assignee", "customFieldValues"]);
+    expect(task.triage.suggestions.find((s) => s.field === "category")?.outcome).toBe("open");
+  });
+
   it("asks nothing of a board whose plan has no triage, or that turned it off", async () => {
     m.can.mockReturnValue(false);
     const task = newTask();
