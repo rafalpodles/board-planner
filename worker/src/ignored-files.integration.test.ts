@@ -88,6 +88,8 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
       push: vi.fn<Delivery["push"]>(async () => {}),
       openPr: vi.fn<Delivery["openPr"]>(async () => "https://x/pull/1"),
       merge: vi.fn<Delivery["merge"]>(async () => {}),
+      isPrivate: vi.fn<Delivery["isPrivate"]>(async () => null),
+      linkRelated: vi.fn<Delivery["linkRelated"]>(async () => {}),
     };
     const ran: string[] = [];
     const gateFor = (entry: SnapshotEntry): Gate => ({

@@ -691,3 +691,95 @@ describe("the checks listed on a pull request", () => {
     expect(prBody("## Changes\n\nchecks were considered", [])).toBe("## Changes\n\nchecks were considered");
   });
 });
+
+// BP-1072. A run in several repositories opens a pull request in each repository the agent changed,
+// and the worker lists the others in each description.
+describe("the pull requests a run in several repositories lists in each other", () => {
+  const A = "https://github.com/acme/api/pull/3";
+  const B = "https://github.com/acme/web/pull/9";
+  const delivery = (responses: Record<string, Partial<CommandResult>>) => {
+    const { runner, run } = fakeCli(responses);
+    return { delivery: createDelivery(runner, gitPath, ghPath), run };
+  };
+
+  describe("linkRelated", () => {
+    it("adds the other pull requests under a heading of the worker's own, keeping what the description already said", async () => {
+      const { delivery: d, run } = delivery({ "gh pr view": { stdout: JSON.stringify({ body: "The change.\n\n" }) } });
+
+      await d.linkRelated("/wt", A, [B]);
+
+      const edit = run.mock.calls.map(([, args]) => args as string[]).find((args) => args[1] === "edit")!;
+      expect(edit.slice(0, 3)).toEqual(["pr", "edit", A]);
+      expect(valueOf(edit, "--body")).toBe(
+        `The change.\n\n---\n\n### Pull requests in the task's other repositories, listed by the worker\n\n- ${B}`
+      );
+      expect(edit).toContain("--repo");
+    });
+
+    it("never lists the pull request in its own description, and does nothing when there is nothing to list", async () => {
+      const { delivery: d, run } = delivery({});
+
+      await d.linkRelated("/wt", A, [A]);
+      await d.linkRelated("/wt", A, []);
+
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    // What is written into a description is a url the worker got from gh, nothing a caller composed
+    it.each([["text", "see also my other PR"], ["a url that is not a pull request", "https://github.com/acme/web/issues/9"], ["a url with userinfo", "https://token@github.com/acme/web/pull/9"], ["markdown", "[x](https://github.com/acme/web/pull/9)"]])(
+      "lists %s as nothing at all",
+      async (_label, bad) => {
+        const { delivery: d, run } = delivery({});
+
+        await d.linkRelated("/wt", A, [bad]);
+
+        expect(run).not.toHaveBeenCalled();
+      }
+    );
+
+    it("refuses a pull request that names no repository, which gh would read from the local checkout", async () => {
+      const { delivery: d } = delivery({});
+
+      await expect(d.linkRelated("/wt", "not-a-url", [B])).rejects.toThrow(/names no repository/);
+    });
+
+    it("fails when it cannot read the description or write it back", async () => {
+      await expect(delivery({ "gh pr view": { code: 1, stderr: "boom" } }).delivery.linkRelated("/wt", A, [B])).rejects.toThrow(/gh pr view failed/);
+      await expect(
+        delivery({ "gh pr view": { stdout: JSON.stringify({ body: "x" }) }, "gh pr edit": { code: 1, stderr: "nope" } }).delivery.linkRelated("/wt", A, [B])
+      ).rejects.toThrow(/gh pr edit failed/);
+      await expect(delivery({ "gh pr view": { stdout: "{}" } }).delivery.linkRelated("/wt", A, [B])).rejects.toThrow(/no description/);
+    });
+  });
+
+  describe("isPrivate", () => {
+    it.each([[true], [false]])("answers %s as gh does", async (isPrivate) => {
+      const { delivery: d, run } = delivery({ "gh repo view": { stdout: JSON.stringify({ isPrivate }) } });
+
+      expect(await d.isPrivate("/wt", A)).toBe(isPrivate);
+      expect(argsOf(run)).toEqual(["repo", "view", "acme/api", "--json", "isPrivate"]);
+    });
+
+    it("answers null when gh cannot say, or says something else, so a caller does not assume", async () => {
+      expect(await delivery({ "gh repo view": { code: 1 } }).delivery.isPrivate("/wt", A)).toBeNull();
+      expect(await delivery({ "gh repo view": { stdout: "not json" } }).delivery.isPrivate("/wt", A)).toBeNull();
+      expect(await delivery({ "gh repo view": { stdout: JSON.stringify({ isPrivate: "yes" }) } }).delivery.isPrivate("/wt", A)).toBeNull();
+      expect(await delivery({}).delivery.isPrivate("/wt", "not-a-url")).toBeNull();
+    });
+  });
+
+  describe("what the agent's summary may not say", () => {
+    it("loses a heading that impersonates the worker's list of other pull requests, like its list of checks", () => {
+      const body = prBody("Changed it.\n\n### Related pull requests\n- https://github.com/evil/x/pull/1\n\n## Pull requests in other repositories\n**Checks passed**\nfine");
+
+      expect(body).not.toMatch(/Related pull requests/i);
+      expect(body).not.toMatch(/Pull requests in other repositories/i);
+      expect(body).not.toMatch(/Checks passed/i);
+      expect(body).toContain("Changed it.");
+    });
+
+    it("keeps an ordinary heading about pull requests", () => {
+      expect(prBody("### Pull request notes\nHow to review it.")).toContain("### Pull request notes");
+    });
+  });
+});
