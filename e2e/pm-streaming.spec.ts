@@ -108,7 +108,7 @@ test.describe("a stream the provider cuts off", () => {
 test.describe("a Stop pressed while the answer is arriving", () => {
   test("ends the turn as stopped and does not keep the half-written text", async ({ page }) => {
     await say(page, "Plan it.", { say: "The plan has three steps: scope it, build it, and then ship it to everyone.", chunkDelayMs: 400 });
-    await expect(liveText(page)).toBeVisible();
+    await expect(liveText(page)).toContainText("The plan has");
 
     await page.getByRole("button", { name: "Stop the PM turn" }).click();
 

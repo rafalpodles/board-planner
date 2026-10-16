@@ -391,7 +391,7 @@ export function PmChat({
       sendGeneration.current++;
       setWorking(false);
       setWorkingStatus("");
-        setThread((current) => ({ ...current, messages: current.messages.filter((m) => m._id !== optimisticId) }));
+      setThread((current) => ({ ...current, messages: current.messages.filter((m) => m._id !== optimisticId) }));
       setInput(message);
       // Merged rather than overwritten, because onDrop is not gated on `working` and anything added
       // mid-flight would otherwise be discarded with its upload orphaned. Clamped, because nothing
@@ -500,7 +500,7 @@ export function PmChat({
       setStopping(false);
       setWorkingStatus("");
       setLiveActions([]);
-      } catch {
+    } catch {
       setRecovering(true);
       setWorkingStatus("Connection lost — recovering the answer…");
     }
