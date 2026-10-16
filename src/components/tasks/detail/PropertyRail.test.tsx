@@ -1644,3 +1644,64 @@ describe("PropertyRail before the agent list has answered", () => {
     expect(screen.queryByTestId("agents-unread")).toBeNull();
   });
 });
+
+// BP-1070. A board that lists several repositories runs a task in all of them, so the reader is told
+// what their own machine lacks instead of "waiting for your machine".
+describe("a board that lists several repositories", () => {
+  const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" } as ApiUser;
+  const AGENT = [{ _id: "a1", name: "Default" }] as React.ComponentProps<typeof PropertyRail>["agents"];
+  const board = (over: Record<string, unknown> = {}) => ({
+    repositoryUrl: "https://github.com/acme/app",
+    workerEnabled: true,
+    lockedByInstance: false,
+    canAdmin: false,
+    columns: BOARD.map((c) => ({ role: c.role })),
+    machine: "live" as const,
+    bindingError: "",
+    haltedBy: null,
+    ...over,
+  });
+  const rail = (over: Record<string, unknown> = {}, currentUsername = "owner") =>
+    renderRail({
+      agents: AGENT,
+      columns: BOARD,
+      board: board(over),
+      draft: { ...draft, agent: "a1", assignee: "owner" },
+      stored: { agent: "a1", assignee: OWNER, assignedBy: OWNER, status: "ready" as never },
+      currentUsername,
+    });
+
+  it("names the repositories the reader's machine has no checkout of", () => {
+    rail({ machineMissing: ["site", "docs"] });
+
+    expect(screen.getByText(/has no checkout of site or docs\. Clone them on that machine/)).toBeTruthy();
+  });
+
+  it("says it of one repository in the singular", () => {
+    rail({ machineMissing: ["site"] });
+
+    expect(screen.getByText(/has no checkout of site\. Clone it on that machine/)).toBeTruthy();
+  });
+
+  it("says the worker is too old when the machine has them all", () => {
+    rail({ machineNeedsUpdate: true });
+
+    expect(screen.getByText(/its worker is too old to run more than one in a task/)).toBeTruthy();
+  });
+
+  it("says nothing of it for a board that lists one repository, and waits for the machine as it did", () => {
+    rail({});
+
+    expect(screen.queryByText(/has no checkout of/)).toBeNull();
+    expect(screen.queryByText(/too old/)).toBeNull();
+    expect(screen.getByTestId("handover-waiting")).toBeTruthy();
+  });
+
+  // Whose machine holds what is the reader's business only when the machine is the reader's to run it
+  it("does not say it to somebody who is not the task's assignee", () => {
+    rail({ machineMissing: ["site"], machineNeedsUpdate: true }, "claude");
+
+    expect(screen.queryByText(/has no checkout of/)).toBeNull();
+    expect(screen.queryByText(/too old/)).toBeNull();
+  });
+});

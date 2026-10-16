@@ -5,7 +5,9 @@ import { connectDB } from "./db";
 import { Worker } from "@/models/worker";
 import { ApiUserSummary, ApiWorker, ApiWorkerTask, IUser, IWorker } from "@/types";
 import { PROJECT_POLICY_DEFAULTS, WORKER_POLICY_DEFAULTS } from "@/lib/worker-policy";
-import { MatchableProject, RepoReport, matchRepo, servedRepository } from "@/lib/repo-match";
+import { MatchableProject, RepoReport, matchRepo, repositoryCoverage, type HeldRepository } from "@/lib/repo-match";
+import { hasSeveralRepositories } from "@/lib/repositories";
+import { MULTI_REPOSITORY } from "@/lib/worker-capabilities";
 import { projectRepositoryUrl } from "@/lib/repository";
 import { ensureWorkerUser } from "@/lib/worker-user";
 import { accessibleProjectIds } from "@/lib/grants";
@@ -66,7 +68,9 @@ export function verdictFor(
   others: CheckoutClaimant[] = [],
   // What ownerReachableProjectIds() answered for this machine. Defaults to reaching nothing, so a
   // caller that forgets it is refused rather than trusted.
-  reachable: string[] | null = []
+  reachable: string[] | null = [],
+  // What the claiming request said the worker can do (capabilitiesOf). Nothing by default.
+  capabilities: readonly string[] = []
 ): Verdict {
   if (requestProtocol !== PROTOCOL_VERSION) {
     return {
@@ -104,6 +108,22 @@ export function verdictFor(
     return { ok: false, reason: "this machine's owner cannot reach this project" };
   }
   const usable = usableRepos(worker as unknown as CheckoutClaimant, others, now);
+  // A project that lists several repositories is one run in several working trees, so the machine has
+  // to hold a usable checkout of every one of them and know how to run them together. Holding some is
+  // not serving the project: the agent would be handed a change it cannot make whole.
+  if (hasSeveralRepositories(project)) {
+    if (!capabilities.includes(MULTI_REPOSITORY)) {
+      return {
+        ok: false,
+        reason: "this project lists several repositories and this worker cannot run more than one yet — update the worker",
+      };
+    }
+    const { missing } = repositoryCoverage(project, usable);
+    if (missing.length > 0) {
+      return { ok: false, reason: `this worker reports no checkout of ${missing.map((r) => r.name).join(", ")}` };
+    }
+    return { ok: true };
+  }
   if (!matchRepo(project, usable)) {
     const lost = lostCheckouts(worker as unknown as CheckoutClaimant, others, now);
     const holder = matchRepo(project, worker.repos ?? []) ? [...lost.values()][0] : null;
@@ -127,6 +147,9 @@ export interface ResolvedAssignment {
   // Exactly the string the worker reported. Never a path: the worker looks its own checkout up by
   // this, so the server has no way to name a directory on someone else's machine.
   remote: string;
+  // Every repository of a project that lists several, in the project's order, each with the remote the
+  // machine reported for it. Absent for a project with one, where `remote` says it all.
+  repositories?: HeldRepository[];
   policy: Record<string, unknown>;
 }
 
@@ -304,19 +327,33 @@ export const overriddenWorkerPolicy = (worker: IWorker) =>
 export function assignmentsFor(
   reported: RepoReport[],
   projects: AssignableProject[],
-  reachable: string[] | null
+  reachable: string[] | null,
+  capabilities: readonly string[] = []
 ): ResolvedAssignment[] {
   const out: ResolvedAssignment[] = [];
   for (const project of projects) {
     if (!projectRunsWorkers(project.worker)) continue;
     if (!canServe(reachable, String(project._id))) continue;
-    const remote = matchRepo(project, reported);
+    let remote: string | null;
+    let repositories: HeldRepository[] | undefined;
+    if (hasSeveralRepositories(project)) {
+      // Only a worker that runs several worktrees per run, and only with every checkout in hand: an
+      // assignment the claim would refuse must never be offered, or the worker's loop retries it
+      if (!capabilities.includes(MULTI_REPOSITORY)) continue;
+      const coverage = repositoryCoverage(project, reported);
+      if (coverage.missing.length > 0) continue;
+      repositories = coverage.held;
+      remote = repositories[0].remote;
+    } else {
+      remote = matchRepo(project, reported);
+    }
     if (!remote) continue;
     out.push({
       project: String(project._id),
       key: project.key ?? "",
       name: project.name ?? "",
       remote,
+      ...(repositories ? { repositories } : {}),
       policy: overriddenPolicy(
         { policy: project.worker.policy, policyOverrides: project.worker.policyOverrides },
         PROJECT_POLICY_DEFAULTS
@@ -599,7 +636,7 @@ export async function touchWorker(
   patch: Partial<
     Pick<
       IWorker,
-      "protocolVersion" | "version" | "commandAckedAt" | "bindingError" | "preflight" | "halt"
+      "protocolVersion" | "version" | "capabilities" | "commandAckedAt" | "bindingError" | "preflight" | "halt"
     >
   > = {}
 ): Promise<void> {

@@ -4,6 +4,7 @@ import { protocolOf, resolveProjectId, withWorker } from "@/lib/middleware";
 import { claimNextTask, releaseExpiredTasks } from "@/lib/task-service";
 import { BoardCannotClaim } from "@/lib/claim-refusal";
 import { ownerReachableProjectIds, verdictFor } from "@/lib/worker-service";
+import { capabilitiesOf } from "@/lib/worker-capabilities";
 import { snapshotFor } from "@/lib/agent-snapshot";
 import { releaseTask } from "@/lib/task-service";
 import { claimingMachineIds, HELD_BY_PLAN_ON_THE_MACHINE, isHeldByPlan } from "@/lib/machine-limit";
@@ -48,7 +49,8 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
     protocolOf(request),
     new Date(),
     others as never,
-    reachable
+    reachable,
+    capabilitiesOf(request)
   );
   if (!verdict.ok) return NextResponse.json({ error: verdict.reason }, { status: 403 });
   // 409, the refusal a worker says once and shows in the menubar app (BP-512). Its assignments stay, so

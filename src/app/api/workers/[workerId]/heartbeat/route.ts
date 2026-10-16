@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { withWorker, protocolOf } from "@/lib/middleware";
 import { RepoReport } from "@/lib/repo-match";
 import { WorkerHalt, WorkerPreflight, WorkerPreflightCheck } from "@/types";
+import { capabilitiesOf } from "@/lib/worker-capabilities";
 import { assignmentsFor, ownerReachableProjectIds, overriddenWorkerPolicy, touchWorker, usableRepos } from "@/lib/worker-service";
 import { PROJECT_RUNS_WORKERS_QUERY } from "@/lib/worker-gate";
 
@@ -122,6 +123,7 @@ export const POST = withWorker(async (request, { worker, db }) => {
   }
 
   const protocolVersion = protocolOf(request);
+  const capabilities = capabilitiesOf(request);
   const repos = reportedRepos(body.repos);
   const preflight = reportedPreflight(body.preflight);
   const halt = reportedHalt(body.halt);
@@ -130,6 +132,9 @@ export const POST = withWorker(async (request, { worker, db }) => {
     // A missing/unparseable protocol header must not overwrite a valid stored version with NaN
     ...(Number.isFinite(protocolVersion) ? { protocolVersion } : {}),
     version: typeof body.version === "string" ? body.version.slice(0, MAX_VERSION_LENGTH) : worker.version,
+    // Recomputed every heartbeat and never kept when absent: a worker binary that was downgraded must
+    // not keep a capability it no longer has. The claim reads the header itself; this is for the screen.
+    capabilities,
     // An ack for a command that is no longer current must not clear the newer one
     ...(body.acked && body.acked === worker.command ? { commandAckedAt: new Date() } : {}),
     ...(typeof body.bindingError === "string"
@@ -178,6 +183,6 @@ export const POST = withWorker(async (request, { worker, db }) => {
     // Only what an operator set: everything else resolves against the worker's own defaults, so
     // raising a default reaches every machine that never pinned it
     policy: overriddenWorkerPolicy(worker),
-    assignments: assignmentsFor(inventory, projects as never, reachable),
+    assignments: assignmentsFor(inventory, projects as never, reachable, capabilities),
   });
 });

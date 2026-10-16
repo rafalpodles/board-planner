@@ -39,7 +39,7 @@ import {
   type Handover,
   type HandoverProblem,
 } from "@/lib/handover";
-import { missingRolesText, readinessGaps, type ReadinessGap } from "@/lib/project-readiness";
+import { missingRolesText, orList, readinessGaps, type ReadinessGap } from "@/lib/project-readiness";
 import { mergesWithoutAPerson } from "@/lib/agent-rules";
 import { describeBindingError } from "@/lib/binding-error";
 import { assigneeToShow } from "./assignee-display";
@@ -97,6 +97,8 @@ interface BlockerContext {
   bindingError: string;
   /** Who paused or stopped the reader's own machine: the board, or somebody at the machine */
   haltedBy: WorkerHaltSource | null;
+  /** The repositories the reader's machine has no checkout of */
+  missingRepositories: string[];
 }
 
 function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }) {
@@ -254,6 +256,21 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
           {describeBindingError(ctx.bindingError)}
         </>
       );
+    case "machine-missing-repository":
+      return (
+        <>
+          This board runs a task in all of its repositories at once, and your machine has no checkout of{" "}
+          {orList(ctx.missingRepositories)}. Clone {ctx.missingRepositories.length === 1 ? "it" : "them"} on that
+          machine, next to the others, and it takes the task.
+        </>
+      );
+    case "machine-needs-update":
+      return (
+        <>
+          This board lists several repositories and your machine has them all, but its worker is too old to
+          run more than one in a task — update the worker on that machine.
+        </>
+      );
     case "machine-failing":
       return (
         <>
@@ -308,6 +325,8 @@ function HandoverNotice({
           lockedByInstance: board.lockedByInstance,
           columns: board.columns,
           machine: viewerIsAssignee ? board.machine : null,
+          machineMissing: viewerIsAssignee ? board.machineMissing : null,
+          machineNeedsUpdate: viewerIsAssignee ? board.machineNeedsUpdate : null,
         })
       : [];
   const blockers: Blocker[] = [
@@ -322,6 +341,7 @@ function HandoverNotice({
     locked: gaps.includes("runs-locked"),
     bindingError: board?.bindingError ?? "",
     haltedBy: board?.haltedBy ?? null,
+    missingRepositories: board?.machineMissing ?? [],
   };
 
   if (blockers.length === 0) {

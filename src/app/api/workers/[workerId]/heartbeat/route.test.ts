@@ -67,7 +67,7 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function request(body: unknown = {}) {
+function request(body: unknown = {}, headers: Record<string, string> = {}) {
   return {
     req: new Request(`http://localhost/api/workers/${WORKER_ID}/heartbeat`, {
       method: "POST",
@@ -76,6 +76,7 @@ function request(body: unknown = {}) {
         authorization: "Bearer cpw_secret",
         "x-worker-id": WORKER_ID,
         "x-cp-protocol": "1",
+        ...headers,
       },
       body: JSON.stringify(body),
     }),
@@ -587,5 +588,53 @@ describe("POST heartbeat — what one worker may store about itself", () => {
     const response = await POST(req, { params: Promise.resolve({ workerId: WORKER_ID }) });
 
     expect(response.status).toBe(200);
+  });
+});
+
+// BP-1070. What the worker says it can do decides whether a project that lists several repositories
+// is offered to it at all.
+describe("POST heartbeat — the multi-repository capability", () => {
+  const API = "https://github.com/owner/api";
+  const WEB = "https://github.com/owner/web";
+  const several = () => ({
+    _id: PROJECT_ID,
+    key: "BP",
+    name: "Board Planner",
+    repositoryUrl: API,
+    repositories: [
+      { _id: "r-api", url: API, name: "api" },
+      { _id: "r-web", url: WEB, name: "web" },
+    ],
+    worker: { enabled: true, policy: {}, policyOverrides: [] },
+  });
+  const both = [{ remote: `${API}.git`, path: "/api" }, { remote: `${WEB}.git`, path: "/web" }];
+
+  beforeEach(() => {
+    projectFind.mockResolvedValue([several()]);
+  });
+
+  it("offers the project, with every repository listed, to a worker that says it can", async () => {
+    const { req, ctx } = request({ repos: both }, { "x-cp-capabilities": "multi-repository" });
+
+    const json = await (await POST(req, ctx)).json();
+
+    expect(json.assignments).toHaveLength(1);
+    expect(json.assignments[0].repositories.map((r: { id: string }) => r.id)).toEqual(["r-api", "r-web"]);
+    expect(json.assignments[0].remote).toBe(`${API}.git`);
+  });
+
+  it("offers it to no worker that does not say so", async () => {
+    const { req, ctx } = request({ repos: both });
+
+    expect((await (await POST(req, ctx)).json()).assignments).toEqual([]);
+  });
+
+  it("stores what the worker said, and forgets it when a later heartbeat does not say it", async () => {
+    await POST(...Object.values(request({}, { "x-cp-capabilities": "multi-repository" })) as [Request, never]);
+    expect(touchWorker.mock.calls[0][2].capabilities).toEqual(["multi-repository"]);
+
+    touchWorker.mockClear();
+    await POST(...Object.values(request({})) as [Request, never]);
+    expect(touchWorker.mock.calls[0][2].capabilities).toEqual([]);
   });
 });

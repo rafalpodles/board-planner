@@ -101,3 +101,26 @@ describe("missingRolesText", () => {
     expect(missingRolesText([{ role: "active" }])).toBe("Ready to pick up, Awaiting review or Done");
   });
 });
+
+describe("readinessGaps and a board that lists several repositories (BP-1070)", () => {
+  it("names the repositories a ready machine lacks, and nothing else", () => {
+    expect(readinessGaps({ ...READY, machineMissing: ["web"] })).toEqual(["machine-missing-repository"]);
+  });
+
+  it("names a worker that is too old when the machine has every repository", () => {
+    expect(readinessGaps({ ...READY, machineNeedsUpdate: true })).toEqual(["machine-needs-update"]);
+  });
+
+  it("says what is missing before it says the worker is old", () => {
+    expect(readinessGaps({ ...READY, machineMissing: ["web"], machineNeedsUpdate: true })).toEqual(["machine-missing-repository"]);
+  });
+
+  // A stopped or failing machine has a better reason to give than a repository it lacks
+  it.each(["stopped", "paused", "failing", "stale", "none"] as const)("leaves a %s machine to its own reason", (machine) => {
+    expect(readinessGaps({ ...READY, machine, machineMissing: ["web"], machineNeedsUpdate: true })).not.toContain("machine-missing-repository");
+  });
+
+  it("is silent when the board lists one repository, which sends neither", () => {
+    expect(readinessGaps({ ...READY, machineMissing: [], machineNeedsUpdate: false })).toEqual([]);
+  });
+});

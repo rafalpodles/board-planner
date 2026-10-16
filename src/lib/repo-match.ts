@@ -103,6 +103,47 @@ export function servedRepository(project: MatchableProject, reported: RepoReport
   return null;
 }
 
+export interface HeldRepository {
+  id: string;
+  name: string;
+  remote: string;
+}
+
+export interface MissingRepository {
+  id: string;
+  name: string;
+}
+
+/**
+ * Which of the project's repositories a machine holds a checkout of, entry by entry in the project's
+ * order. An entry resolves to at most ONE reported checkout and a checkout serves at most one entry:
+ * matching is fuzzy (`sameRepo` lets a bare `owner/repo` match any host), so two entries that read as
+ * the same repository would otherwise be bound to one checkout and run in the same working tree twice.
+ * The second of them is reported as missing, which is the safe answer.
+ *
+ * A project with no stored list has one repository and no ids to name; it has no coverage to judge.
+ */
+export function repositoryCoverage(
+  project: MatchableProject,
+  reported: RepoReport[]
+): { held: HeldRepository[]; missing: MissingRepository[] } {
+  const held: HeldRepository[] = [];
+  const missing: MissingRepository[] = [];
+  const taken = new Set<number>();
+
+  for (const entry of storedRepositories(project)) {
+    const name = (entry.name?.trim() || entry.url.trim()).slice(0, 200);
+    const at = normaliseRemote(entry.url).length === 0 ? -1 : reported.findIndex((r, i) => !taken.has(i) && sameRepo(entry.url, r.remote));
+    if (at < 0) {
+      missing.push({ id: entryId(entry), name });
+      continue;
+    }
+    taken.add(at);
+    held.push({ id: entryId(entry), name, remote: reported[at].remote });
+  }
+  return { held, missing };
+}
+
 // Returns the exact string the worker reported, never a path and never a normalised form: the
 // worker resolves its own checkout from this, and it can only do that against what it sent.
 export function matchRepo(project: MatchableProject, reported: RepoReport[]): string | null {

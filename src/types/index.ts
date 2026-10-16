@@ -831,6 +831,8 @@ export interface IWorker {
   platform: string;
   version: string;
   protocolVersion: number;
+  /** What the worker said it can do on its last heartbeat; absent means nothing. For the screen only: a claim reads the header. */
+  capabilities?: string[];
   credentialHash: string;
   repos: WorkerRepo[];
   policy: WorkerPolicy;
@@ -2099,6 +2101,10 @@ export interface ApiHandoverReadiness {
   bindingError: string;
   /** Who halted the reader's machine, when `machine` is "paused" or "stopped" */
   haltedBy: WorkerHaltSource | null;
+  /** For a board that lists several repositories: those the reader's best machine has no checkout of, by name */
+  machineMissing?: string[];
+  /** For such a board: the reader's machine has every checkout but its worker cannot run several at once */
+  machineNeedsUpdate?: boolean;
 }
 
 export type SetupGuideStepId =

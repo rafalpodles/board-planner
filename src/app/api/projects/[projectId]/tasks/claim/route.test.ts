@@ -9,11 +9,12 @@ const releaseExpiredTasks = vi.fn();
 const resolveProjectId = vi.fn();
 
 const projectFindOne = vi.fn();
+const projectSelect = vi.fn();
 const workerFindOthers = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({
-  Project: { findOne: () => ({ select: () => ({ lean: projectFindOne }) }) },
+  Project: { findOne: () => ({ select: (fields: string) => (projectSelect(fields), { lean: projectFindOne }) }) },
 }));
 vi.mock("@/models/worker", () => ({
   Worker: { find: () => ({ select: workerFindOthers }) },
@@ -542,5 +543,29 @@ describe("the worker's owner travels with the claim", () => {
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
     expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", null);
+  });
+});
+
+// BP-1070. A project that lists several repositories is claimed only by a worker that says it can run
+// them together, and the verdict has to hear that from the request that is claiming.
+describe("the capabilities the claiming request names", () => {
+  it("hands the verdict what the request said, and nothing when it said nothing", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], owner: "u-owner" });
+    claimNextTask.mockResolvedValue(null);
+
+    await POST(request({ ...authed, "x-cp-capabilities": "multi-repository" }), { params: Promise.resolve({ projectId: "CP" }) });
+    await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(verdictFor.mock.calls[0][6]).toEqual(["multi-repository"]);
+    expect(verdictFor.mock.calls[1][6]).toEqual([]);
+  });
+
+  it("reads the project's repositories, or a board with several is judged as having one", async () => {
+    verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], owner: "u-owner" });
+    claimNextTask.mockResolvedValue(null);
+
+    await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+    expect(projectSelect.mock.calls[0][0].split(/\s+/)).toContain("repositories");
   });
 });

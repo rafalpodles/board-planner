@@ -228,6 +228,7 @@ describe("GET handover readiness", () => {
         "owner",
         "lastSeenAt",
         "repos",
+        "capabilities",
         "preflight",
         "command",
         "commandIssuedAt",
@@ -280,5 +281,72 @@ describe("GET handover readiness", () => {
     projectLean.mockResolvedValue(null);
 
     expect((await read()).status).toBe(404);
+  });
+});
+
+// BP-1070. For a board that lists several repositories the reader is told what their own machine
+// lacks. Only the reader's machines are judged, and no path or machine name leaves the route.
+describe("GET handover readiness on a board that lists several repositories", () => {
+  const repositories = [
+    { _id: "507f1f77bcf86cd799439021", url: "https://github.com/acme/app", name: "app" },
+    { _id: "507f1f77bcf86cd799439022", url: "https://github.com/acme/site", name: "" },
+  ];
+  const machine = (repos: string[], capabilities: string[] = ["multi-repository"]) => ({
+    enabled: true,
+    lastSeenAt: new Date(),
+    capabilities,
+    repos: repos.map((remote) => ({ remote, path: `/Users/ada/${remote.split("/").pop()}` })),
+  });
+
+  beforeEach(() => {
+    projectLean.mockResolvedValue({ _id: PROJECT, repositoryUrl: repositories[0].url, repositories });
+  });
+
+  it("names the repositories the machine has no checkout of, by name and else by address", async () => {
+    workerLean.mockResolvedValue([machine(["git@github.com:acme/app.git"])]);
+
+    const { body } = await read();
+
+    expect(body.machineMissing).toEqual(["https://github.com/acme/site"]);
+    expect(body).not.toHaveProperty("machineNeedsUpdate");
+    expect(JSON.stringify(body)).not.toContain("/Users/ada");
+  });
+
+  it("says the worker is too old when the machine has every checkout but cannot run several", async () => {
+    workerLean.mockResolvedValue([machine(["git@github.com:acme/app.git", "git@github.com:acme/site.git"], [])]);
+
+    const { body } = await read();
+
+    expect(body.machineNeedsUpdate).toBe(true);
+    expect(body).not.toHaveProperty("machineMissing");
+  });
+
+  it("says nothing of it for a machine that has all and can run them", async () => {
+    workerLean.mockResolvedValue([machine(["git@github.com:acme/app.git", "git@github.com:acme/site.git"])]);
+
+    const { body } = await read();
+
+    expect(body).not.toHaveProperty("machineMissing");
+    expect(body).not.toHaveProperty("machineNeedsUpdate");
+  });
+
+  it("judges the machine that lacks least, and a switched-off one not at all", async () => {
+    workerLean.mockResolvedValue([
+      machine([]),
+      machine(["git@github.com:acme/app.git"]),
+      { ...machine(["git@github.com:acme/app.git", "git@github.com:acme/site.git"]), enabled: false },
+    ]);
+
+    expect((await read()).body.machineMissing).toEqual(["https://github.com/acme/site"]);
+  });
+
+  it("is silent for a board that lists one repository", async () => {
+    projectLean.mockResolvedValue({ _id: PROJECT, repositoryUrl: repositories[0].url, repositories: [repositories[0]] });
+    workerLean.mockResolvedValue([machine([])]);
+
+    const { body } = await read();
+
+    expect(body).not.toHaveProperty("machineMissing");
+    expect(body).not.toHaveProperty("machineNeedsUpdate");
   });
 });

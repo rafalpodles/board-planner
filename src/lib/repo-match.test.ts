@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   matchRepo,
   normaliseRemote,
+  repositoryCoverage,
   servedRepository,
   projectRemotes,
   prUrlNamesProjectRepo,
@@ -390,5 +391,56 @@ describe("prUrlNamesProjectRepo on a project with several repositories (BP-1066)
   it("still refuses one on a repository the project does not list, or on another host", () => {
     expect(prUrlNamesProjectRepo("https://github.com/acme/other/pull/1", project)).toBe(false);
     expect(prUrlNamesProjectRepo("https://evil.example.com/acme/web/pull/9", project)).toBe(false);
+  });
+});
+
+describe("repositoryCoverage (BP-1070)", () => {
+  const A = "https://github.com/acme/api";
+  const B = "https://github.com/acme/web";
+  const project = {
+    _id: "p1",
+    repositoryUrl: A,
+    repositories: [
+      { _id: "r-api", url: A, name: "api" },
+      { _id: "r-web", url: B, name: "" },
+    ],
+  };
+  const holds = (...remotes: string[]) => remotes.map((remote) => ({ remote, path: `/${remote}` }));
+
+  it("holds every repository a machine has a checkout of, in the project's order, with the remote it reported", () => {
+    const { held, missing } = repositoryCoverage(project, holds("git@github.com:acme/web.git", `${A}.git`));
+
+    expect(missing).toEqual([]);
+    expect(held).toEqual([
+      { id: "r-api", name: "api", remote: `${A}.git` },
+      { id: "r-web", name: B, remote: "git@github.com:acme/web.git" },
+    ]);
+  });
+
+  it("names what a machine lacks, by name and else by address", () => {
+    expect(repositoryCoverage(project, holds(`${A}.git`)).missing).toEqual([{ id: "r-web", name: B }]);
+    expect(repositoryCoverage(project, holds()).missing.map((r) => r.id)).toEqual(["r-api", "r-web"]);
+  });
+
+  // matching is fuzzy: a bare owner/repo has no host and matches any, so two entries can read as one
+  it("binds one checkout to one entry, so two entries that read as the same repository are not both held", () => {
+    const twins = {
+      _id: "p1",
+      repositories: [
+        { _id: "r1", url: "acme/api", name: "first" },
+        { _id: "r2", url: "https://gitlab.example.com/acme/api", name: "second" },
+      ],
+    };
+
+    const { held, missing } = repositoryCoverage(twins, holds("git@github.com:acme/api.git"));
+
+    expect(held.map((r) => r.id)).toEqual(["r1"]);
+    expect(missing).toEqual([{ id: "r2", name: "second" }]);
+  });
+
+  it("holds none of an entry whose address names no repository", () => {
+    const broken = { _id: "p1", repositories: [{ _id: "r1", url: ".git", name: "" }] };
+
+    expect(repositoryCoverage(broken, holds(".git")).missing).toHaveLength(1);
   });
 });
