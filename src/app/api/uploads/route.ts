@@ -25,6 +25,7 @@ const ALLOWED_MIME_TYPES = new Set([
   "text/plain",
   "text/markdown",
   "text/csv",
+  "text/html",
   "application/json",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
