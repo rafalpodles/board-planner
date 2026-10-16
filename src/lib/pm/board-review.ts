@@ -51,7 +51,7 @@ export interface BoardDigest {
   truncated: boolean;
 }
 
-function titleTokens(title: string): Set<string> {
+export function titleTokens(title: string): Set<string> {
   return new Set(
     title
       .toLowerCase()
@@ -61,7 +61,7 @@ function titleTokens(title: string): Set<string> {
   );
 }
 
-function jaccard(a: Set<string>, b: Set<string>): number {
+export function jaccard(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 || b.size === 0) return 0;
   let shared = 0;
   for (const token of a) if (b.has(token)) shared++;

@@ -88,6 +88,14 @@ let lastAssistAuthorization = null;
 // and the request is kept for /last-write
 let lastWrite = null;
 
+// Duplicate detection (BP-872) asks for JSON. The stub names every key a "stub-duplicate: KEY" line
+// in the draft's description gives, whether or not it was a candidate, so a spec can check that only
+// the shortlist's keys are kept.
+function duplicatesAnswer(material) {
+  const keys = material.draft.description.match(/^stub-duplicate: (.+)$/gm)?.map((l) => l.slice("stub-duplicate: ".length).trim()) ?? [];
+  return JSON.stringify({ duplicates: keys.map((key) => ({ key, reason: "The stub was told to" })) });
+}
+
 function titlesIn(value, out = []) {
   if (Array.isArray(value)) value.forEach((v) => titlesIn(v, out));
   else if (value && typeof value === "object") {
@@ -274,7 +282,7 @@ serve({
     if (writing) {
       lastWrite = { model: writing.model, tools: writing.tools ?? null, messages: writing.messages };
       const material = JSON.parse(writing.messages[1].content.slice("<data>\n".length, -"\n</data>".length));
-      const content = ["## Written by the stub", ...titlesIn(material).map((t) => `- ${t}`)].join("\n");
+      const content = material.draft && material.candidates ? duplicatesAnswer(material) : ["## Written by the stub", ...titlesIn(material).map((t) => `- ${t}`)].join("\n");
       reply(res, {
         id: "chatcmpl-e2e-write",
         object: "chat.completion",
