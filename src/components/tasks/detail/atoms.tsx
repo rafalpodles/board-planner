@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { avatarStyle } from "@/lib/avatar-color";
 import { PRIORITIES, Priority } from "@/types";
 
 /**
@@ -88,10 +89,12 @@ export function SectionLabel({ children }: { children: ReactNode }) {
 
 export function Avatar({
   name,
+  username,
   size = 28,
   className = "",
 }: {
   name?: string | null;
+  username?: string | null;
   size?: number;
   className?: string;
 }) {
@@ -115,8 +118,13 @@ export function Avatar({
   return (
     <span
       aria-hidden
-      className={`inline-flex shrink-0 items-center justify-center rounded-full bg-bg-input font-bold text-text ${className}`}
-      style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }}
+      className={`inline-flex shrink-0 items-center justify-center rounded-full font-bold text-text ${className}`}
+      style={{
+        width: size,
+        height: size,
+        fontSize: Math.round(size * 0.42),
+        ...avatarStyle(username || name),
+      }}
     >
       {initials}
     </span>

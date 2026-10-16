@@ -432,6 +432,7 @@ interface PropertyRailProps {
   categories: ApiProjectCategory[];
   customFields: ApiCustomField[];
   reporter: string | null;
+  reporterUsername?: string | null;
   archived: boolean;
   /** Only the board's owner may delete; anybody who can edit may archive */
   canDelete: boolean;
@@ -465,6 +466,7 @@ export function PropertyRail({
   categories,
   customFields,
   reporter,
+  reporterUsername,
   archived,
   canDelete,
   onArchive,
@@ -556,7 +558,7 @@ export function PropertyRail({
           options={offeredUsers.map((user) => ({
             value: user.username,
             label: user.fullName,
-            adornment: <Avatar name={user.fullName} size={20} />,
+            adornment: <Avatar name={user.fullName} username={user.username} size={20} />,
           }))}
           emptyOption="Unassigned"
           onChange={(username) => {
@@ -569,7 +571,7 @@ export function PropertyRail({
         >
           {(selected) => (
             <span className="flex items-center gap-2">
-              <Avatar name={selected?.label} size={20} />
+              <Avatar name={selected?.label} username={selected?.value} size={20} />
               {selected ? selected.label : <EmptyValue>Unassigned</EmptyValue>}
             </span>
           )}
@@ -853,7 +855,7 @@ export function PropertyRail({
       <div className="mt-auto flex flex-col gap-3 border-t border-border pt-4">
         {reporter && (
           <div className="flex items-center gap-2 px-2.5 text-xs text-text-muted">
-            <Avatar name={reporter} size={22} />
+            <Avatar name={reporter} username={reporterUsername} size={22} />
             Reported by {reporter}
           </div>
         )}

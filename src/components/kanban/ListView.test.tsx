@@ -4,6 +4,7 @@ import { render, screen, cleanup, act } from "@testing-library/react";
 import { ListView } from "./ListView";
 import { ApiCustomField, ApiSprint, ApiTask } from "@/types";
 import { pinTimezone } from "@/lib/testing/pin-timezone";
+import { avatarColorIndex } from "@/lib/avatar-color";
 
 const sprints = [
   { _id: "s1", name: "Sprint 2026-Q3 hardening and cleanup", startDate: "2026-07-01", endDate: "2026-07-14", status: "completed" },
@@ -626,5 +627,26 @@ describe("ListView grouped", () => {
     cleanup();
     renderList({ tasks: [second, tasks[0]], onReorder: () => {} });
     expect(screen.queryAllByLabelText(/^Reorder /)).toHaveLength(2);
+  });
+});
+
+describe("ListView assignee colour", () => {
+  const colourOf = (el: Element) => /var\(--avatar-\d+\)/.exec(el.getAttribute("style") ?? "")?.[0];
+
+  it("colours a read-only avatar by the assignee's username", () => {
+    renderList();
+    expect(colourOf(screen.getByText("ON"))).toBe(`var(--avatar-${avatarColorIndex("owner")})`);
+  });
+
+  it("colours the inline picker's avatar the same way", () => {
+    renderList({ assignableUsers: roster, onAssigneeChange: vi.fn() });
+    expect(colourOf(screen.getByText("ON"))).toBe(`var(--avatar-${avatarColorIndex("owner")})`);
+  });
+
+  it("leaves an unassigned row uncoloured", () => {
+    renderList({ tasks: [{ ...tasks[0], assignee: undefined } as unknown as ApiTask] });
+    const dash = screen.getByText("–");
+    expect(colourOf(dash)).toBeUndefined();
+    expect(dash.className).toContain("border-dashed");
   });
 });

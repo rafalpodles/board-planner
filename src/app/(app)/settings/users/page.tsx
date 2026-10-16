@@ -18,6 +18,7 @@ import { PendingInvitations } from "@/components/settings/PendingInvitations";
 import { SignUpDomains } from "@/components/settings/SignUpDomains";
 import { generatePassword } from "@/lib/password-generator";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
+import { avatarStyle } from "@/lib/avatar-color";
 import { timeAgo } from "@/lib/time";
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -400,7 +401,10 @@ export default function UsersPage() {
             onClick={() => openEdit(u)}
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-primary/30 flex items-center justify-center text-sm font-medium flex-shrink-0">
+              <div
+                className="w-10 h-10 rounded-full text-text flex items-center justify-center text-sm font-medium flex-shrink-0"
+                style={avatarStyle(u.username || u.fullName)}
+              >
                 {u.fullName.charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">

@@ -326,6 +326,8 @@ function TaskDetailView({
       : task.createdBy === null
         ? "Deleted user"
         : null;
+  const reporterUsername =
+    task.createdBy && typeof task.createdBy === "object" ? task.createdBy.username : null;
   const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);
   const projectDefaultAgent = project.worker?.agent ? String(project.worker.agent) : undefined;
 
@@ -716,6 +718,7 @@ function TaskDetailView({
               categories={project.categories || []}
               customFields={project.customFields || []}
               reporter={reporter}
+              reporterUsername={reporterUsername}
               archived={!!archivedAt}
               canDelete={canDelete}
               onArchive={requestArchive}
@@ -763,6 +766,7 @@ function TaskDetailView({
           categories={project.categories || []}
           customFields={project.customFields || []}
           reporter={reporter}
+          reporterUsername={reporterUsername}
           archived={!!archivedAt}
           canDelete={canDelete}
           onArchive={requestArchive}

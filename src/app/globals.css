@@ -54,6 +54,21 @@ body {
   color: var(--color-text);
 }
 
+/* Initials avatars (BP-1063): a person's colour is picked by hashing their username, so the
+   index is the same everywhere. Each theme's set carries --color-text at AA. */
+:root {
+  --avatar-0: #1d4ed8;
+  --avatar-1: #0f766e;
+  --avatar-2: #15803d;
+  --avatar-3: #92400e;
+  --avatar-4: #c2410c;
+  --avatar-5: #be123c;
+  --avatar-6: #a21caf;
+  --avatar-7: #6d28d9;
+  --avatar-8: #0e7490;
+  --avatar-9: #4d7c0f;
+}
+
 /* Light theme overrides */
 [data-theme="light"] {
   --color-bg: #f8fafc;
@@ -72,6 +87,17 @@ body {
   --color-warning: #92400e;
 
   --pin-edge-shadow: -10px 0 12px -6px rgba(15, 23, 42, 0.35);
+
+  --avatar-0: #bfdbfe;
+  --avatar-1: #99f6e4;
+  --avatar-2: #bbf7d0;
+  --avatar-3: #fde68a;
+  --avatar-4: #fed7aa;
+  --avatar-5: #fecdd3;
+  --avatar-6: #f5d0fe;
+  --avatar-7: #ddd6fe;
+  --avatar-8: #a5f3fc;
+  --avatar-9: #d9f99d;
 
   --color-status-planned: #4b5563;
   --color-status-todo: #1d4ed8;

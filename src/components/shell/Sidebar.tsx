@@ -22,6 +22,7 @@ import { ProjectTree } from "./ProjectTree";
 import { ProjectRail } from "./ProjectRail";
 import { FleetPanel } from "./FleetPanel";
 import { APP_NAME } from "@/lib/brand";
+import { avatarStyle } from "@/lib/avatar-color";
 
 const ICONS = {
   myTasks:
@@ -486,7 +487,10 @@ export function Sidebar({
               compact ? "justify-center" : ""
             }`}
           >
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/30 text-[11px] font-semibold uppercase">
+            <span
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold uppercase text-text"
+              style={avatarStyle(user.username || user.fullName)}
+            >
               {user.fullName.charAt(0)}
             </span>
             {!compact && (
