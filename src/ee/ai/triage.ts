@@ -11,6 +11,8 @@ import { stillServed } from "@/lib/organisation-jobs";
 import { actingThrough } from "@/lib/activity-source";
 import { updateTask, type TaskServiceResult } from "@/lib/task-service";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
+import { orderedOptions } from "@/lib/custom-fields";
+import { outsideGeneratedBy } from "@/lib/ai-generated";
 
 export const TRIAGE_MAX_ATTEMPTS = 3;
 export const TRIAGE_CLAIM_STALE_MS = 10 * 60_000;
@@ -36,7 +38,7 @@ function fieldValues(task: Pick<ITask, "customFieldValues">): Record<string, unk
 type Suggestion = Pick<ITriageSuggestion, "field" | "fieldId" | "value" | "reason">;
 
 function singleChoiceFields(fields: ICustomField[] | undefined): ICustomField[] {
-  return (fields ?? []).filter((f) => f.fieldType === "dropdown" && !f.archived && f.options.length > 0);
+  return (fields ?? []).filter((f) => f.fieldType === "dropdown" && !f.archived && orderedOptions(f).length > 0);
 }
 
 export async function triageMaterial(db: ScopedDb, task: ITask): Promise<TriageMaterial | null> {
@@ -77,7 +79,7 @@ export async function triageMaterial(db: ScopedDb, task: ITask): Promise<TriageM
     ask,
     people: people.map((p) => ({ username: p.username, name: p.fullName || p.username, recentWork: workOf.get(String(p._id)) ?? [] })),
     categories: ask.category ? (project.categories ?? []).map((c) => c.name) : [],
-    fields: fields.map((f) => ({ id: String(f._id), name: f.name, options: f.options.map((o) => ({ id: o.id, label: o.value })) })),
+    fields: fields.map((f) => ({ id: String(f._id), name: f.name, options: orderedOptions(f).map((o) => ({ id: o.id, label: o.value })) })),
   };
 }
 
@@ -181,6 +183,7 @@ export async function runTriage(db: ScopedDb, taskId: string): Promise<void> {
     return;
   }
 
+  const asRead = { assignee: task.assignee, category: task.category, customFieldValues: fieldValues(task) } as unknown as Pick<ITask, "assignee" | "category" | "customFieldValues">;
   const written = await gatewayWrite(
     db,
     { projectId: String(task.project), userId: String(task.createdBy), source: "triage" },
@@ -193,8 +196,9 @@ export async function runTriage(db: ScopedDb, taskId: string): Promise<void> {
   }
 
   const suggestions = suggestionsFrom(written.text, material, task.category);
-  await settle(db, taskId, { state: "ready", claimedAt: null, suggestions: suggestions.map((s) => ({ ...s, outcome: "open" })) });
-  if (task.triage.mode !== "auto" || suggestions.length === 0) return;
+  // `previous` is what the field held when the model read the task; auto-apply leaves a field that moved since
+  await settle(db, taskId, { state: "ready", claimedAt: null, suggestions: suggestions.map((s) => ({ ...s, outcome: "open", previous: currentValue(asRead, s) })) });
+  if (project.triageMode !== "auto" || suggestions.length === 0) return;
 
   const pm = await getPmUser(db);
   const stored = (await readTask(db, taskId))?.triage?.suggestions ?? [];
@@ -210,9 +214,9 @@ export async function runTriage(db: ScopedDb, taskId: string): Promise<void> {
 export type TriageAction = "apply" | "dismiss" | "undo";
 
 /**
- * One suggestion, by the person on the page or by triage itself. The field must still hold what it
- * held when the suggestion was made (or, for an undo, what triage set), so nothing a person typed
- * since is overwritten.
+ * One suggestion, by the person on the page or by triage itself. Triage's own apply leaves a field
+ * that moved since the model read the task, and an undo one that moved since triage set it; a
+ * person's apply is their own choice and overwrites.
  */
 export async function applyOne(
   db: ScopedDb,
@@ -246,7 +250,7 @@ export async function applyOne(
   if (action === "undo" && now !== suggestion.value) {
     return { ok: false, error: "The field has changed since triage set it; it is left as it is", status: 409 };
   }
-  if (action === "apply" && byTriage && now !== "" && suggestion.field !== "category") {
+  if (action === "apply" && byTriage && now !== (suggestion.previous ?? "")) {
     await outcomeAt("dismissed");
     return { ok: true };
   }
@@ -279,9 +283,11 @@ export async function drainTriage(db: ScopedDb, { limit = 5, taskId }: { limit?:
       { sort: { "triage.queuedAt": 1 }, projection: { _id: 1 } }
     );
     if (!claimed) break;
-    await runTriage(db, String(claimed._id)).catch(async (err) => {
+    // A task the PM agent created must not have triage's writes recorded as the PM's
+    await outsideGeneratedBy(() => runTriage(db, String(claimed._id))).catch(async (err) => {
       console.error("Triage failed:", err);
-      await settle(db, String(claimed._id), { state: "pending", claimedAt: null }).catch(() => {});
+      // Only a run that never stored its suggestions goes back in the queue
+      await db.Task.updateOne({ _id: claimed._id, "triage.state": "running" }, { $set: { "triage.state": "pending", "triage.claimedAt": null } }).catch(() => {});
     });
   }
   const spent = await db.Task.updateMany(

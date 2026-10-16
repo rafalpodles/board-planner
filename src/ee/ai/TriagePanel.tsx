@@ -8,7 +8,9 @@ import { SectionLabel } from "@/components/tasks/detail/atoms";
 import type { ApiCustomField, ApiTaskTriage, ApiTriageSuggestion } from "@/types";
 
 const POLL_MS = 3000;
-const POLLS = 20;
+const FAST_POLLS = 20;
+// A run that failed waits for the scheduler's next tick, minutes away; the panel keeps asking, slower
+const SLOW_POLL_MS = 30_000;
 
 function describe(s: ApiTriageSuggestion, fields: ApiCustomField[]): { name: string; value: string } {
   if (s.field === "assignee") return { name: "Assignee", value: s.value };
@@ -43,20 +45,27 @@ export function TriagePanel({
   useEffect(() => {
     if (!waiting) return;
     let polls = 0;
-    const timer = setInterval(async () => {
-      if (++polls > POLLS) return clearInterval(timer);
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const ask = async () => {
       try {
         const answer: { triage: ApiTaskTriage | null } = await api.get(`/api/projects/${projectId}/tasks/${taskId}/triage`);
+        if (stopped) return;
         if (answer.triage && answer.triage.state !== "pending" && answer.triage.state !== "running") {
-          clearInterval(timer);
           setTriage(answer.triage);
           if (answer.triage.suggestions.some((s) => s.outcome === "applied")) changed.current();
+          return;
         }
       } catch {
-        clearInterval(timer);
+        // Asked again on the slower clock
       }
-    }, POLL_MS);
-    return () => clearInterval(timer);
+      if (!stopped) timer = setTimeout(ask, ++polls < FAST_POLLS ? POLL_MS : SLOW_POLL_MS);
+    };
+    timer = setTimeout(ask, POLL_MS);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
   }, [waiting, api, projectId, taskId]);
 
   if (!triage) return null;

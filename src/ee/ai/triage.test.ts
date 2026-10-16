@@ -23,7 +23,8 @@ vi.mock("@/lib/task-service", () => ({
   },
 }));
 
-const { suggestionsFrom, runTriage, applyOne, drainTriage, TRIAGE_MAX_ATTEMPTS } = await import("./triage");
+const { suggestionsFrom, runTriage, applyOne, drainTriage, triageMaterial, TRIAGE_MAX_ATTEMPTS } = await import("./triage");
+const { writtenBy, pmAgentMark } = await import("@/lib/ai-generated");
 
 const FIELD = "f1";
 const MATERIAL = {
@@ -85,7 +86,7 @@ interface FakeTask {
   };
 }
 
-function fakeDb(task: FakeTask, project: Record<string, unknown> = { triageMode: "suggest" }) {
+function fakeDb(task: FakeTask, project: Record<string, unknown> = { triageMode: task.triage.mode }, customFields: unknown[] = [{ _id: FIELD, name: "Size", fieldType: "dropdown", archived: false, options: [{ id: "s", value: "S" }] }]) {
   const lean = <T>(v: T) => ({ lean: async () => v, sort: () => ({ limit: () => ({ lean: async () => v }) }) });
   const apply = (update: Record<string, Record<string, unknown>>, filter: Record<string, unknown>) => {
     const set = update.$set ?? {};
@@ -111,7 +112,7 @@ function fakeDb(task: FakeTask, project: Record<string, unknown> = { triageMode:
     },
     Project: {
       findById: (_id: unknown, projection: string) =>
-        lean(projection === "triageMode" ? project : { categories: [{ name: "bug" }, { name: "user-story" }], customFields: [{ _id: FIELD, name: "Size", fieldType: "dropdown", archived: false, options: [{ id: "s", value: "S" }] }] }),
+        lean(projection === "triageMode" ? project : { categories: [{ name: "bug" }, { name: "user-story" }], customFields }),
     },
     User: { find: () => lean([{ _id: "u-ann", username: "ann", fullName: "Ann" }]) },
   } as never;
@@ -171,6 +172,24 @@ describe("runTriage", () => {
       ["applied", "user-story"],
       ["applied", ""],
     ]);
+  });
+
+  it("in auto mode leaves a field a person changed while the model was reading", async () => {
+    const task = newTask({ mode: "auto" });
+    m.gatewayWrite.mockImplementation(async () => {
+      task.category = "idea";
+      return { ok: true, text: ANSWER };
+    });
+    await runTriage(fakeDb(task), String(task._id));
+    expect(m.updateTask.mock.calls.map((c) => Object.keys(c[3] as object)[0])).toEqual(["assignee", "customFieldValues"]);
+    expect(task.triage.suggestions.find((s) => s.field === "category")?.outcome).toBe("dismissed");
+  });
+
+  it("follows the board's mode when it runs, not the one the task was queued under", async () => {
+    const task = newTask({ mode: "auto" });
+    m.gatewayWrite.mockResolvedValue({ ok: true, text: ANSWER });
+    await runTriage(fakeDb(task, { triageMode: "suggest" }), String(task._id));
+    expect(m.updateTask).not.toHaveBeenCalled();
   });
 
   it("in auto mode leaves a category the creator sent as a suggestion", async () => {
@@ -251,7 +270,25 @@ describe("applyOne", () => {
   });
 });
 
+describe("triageMaterial", () => {
+  it("offers the options of a field stored before options had ids", async () => {
+    const task = newTask();
+    const material = await triageMaterial(fakeDb(task, undefined, [{ _id: FIELD, name: "Size", fieldType: "dropdown", archived: false, options: ["S", "L"] }]), task as never);
+    expect(material?.fields).toEqual([{ id: FIELD, name: "Size", options: [{ id: "S", label: "S" }, { id: "L", label: "L" }] }]);
+  });
+});
+
 describe("drainTriage", () => {
+  it("records triage's own writes as triage on a task the PM agent created", async () => {
+    const task = newTask({ mode: "auto", state: "pending", attempts: 0 });
+    const db = fakeDb(task) as unknown as { Task: { findOneAndUpdate: ReturnType<typeof vi.fn> } };
+    db.Task.findOneAndUpdate.mockResolvedValueOnce({ _id: task._id }).mockResolvedValue(null);
+    m.gatewayWrite.mockResolvedValue({ ok: true, text: ANSWER });
+    await writtenBy(pmAgentMark("model"), () => drainTriage(db as never, { taskId: String(task._id), limit: 1 }));
+    expect(m.provenance).toEqual(["ai-triage", "ai-triage", "ai-triage"]);
+  });
+
+
   it("claims only what is waiting and has attempts left, and gives up on the rest", async () => {
     const db = fakeDb(newTask()) as unknown as { Task: { findOneAndUpdate: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> } };
     db.Task.findOneAndUpdate.mockResolvedValue(null);

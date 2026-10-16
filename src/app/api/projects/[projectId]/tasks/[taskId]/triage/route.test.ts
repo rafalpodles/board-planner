@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({ applyOne: vi.fn(), exists: vi.fn(), entitled: { va
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/ee/ai/triage", () => ({ applyOne: m.applyOne }));
 vi.mock("@/lib/middleware", () => ({
+  entitlementRefusal: async (_db: unknown, feature: string) => (m.entitled.value ? null : Response.json({ feature }, { status: 402 })),
   withProjectAccess:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
     (req: Request, ctx: Record<string, unknown>) =>
@@ -13,8 +14,6 @@ vi.mock("@/lib/middleware", () => ({
         user: { _id: "u1" },
         db: { Task: { exists: m.exists, findById: () => ({ lean: async () => ({ triage: { state: "ready", suggestions: [] } }) }), findOne: () => ({ lean: async () => ({ triage: { state: "pending" } }) }) } },
       }),
-  requireEntitlement: (_feature: string, handler: (req: Request, ctx: unknown) => Promise<Response>) => (req: Request, ctx: unknown) =>
-    m.entitled.value ? handler(req, ctx) : Promise.resolve(Response.json({ feature: _feature }, { status: 402 })),
 }));
 
 const { GET, POST } = await import("./route");
@@ -52,9 +51,11 @@ describe("the triage route", () => {
     expect((await post({ suggestionId: SUGGESTION, action: "apply" })).status).toBe(409);
   });
 
-  it("is a Pro feature to act on, while anyone on the board may read the state", async () => {
+  it("is a Pro feature to apply or undo, while dismissing and reading stay open after a downgrade", async () => {
     m.entitled.value = false;
     expect((await post({ suggestionId: SUGGESTION, action: "apply" })).status).toBe(402);
+    expect((await post({ suggestionId: SUGGESTION, action: "undo" })).status).toBe(402);
+    expect((await post({ suggestionId: SUGGESTION, action: "dismiss" })).status).toBe(200);
     expect(await (await GET(new Request("https://app.example.com/x"), ctx())).json()).toEqual({ triage: { state: "pending" } });
   });
 });

@@ -289,7 +289,7 @@ taskSchema.index({ "execution.workerId": 1 });
 // The worker asks "what is waiting on me" on every refresh, and the answer is nearly always
 // nothing — unindexed, that question is a scan of every task in every project on each poll
 taskSchema.index({ "decision.workerId": 1 });
-taskSchema.index({ "triage.state": 1, "triage.queuedAt": 1 }, { sparse: true });
+taskSchema.index({ organisation: 1, "triage.state": 1, "triage.queuedAt": 1 }, { partialFilterExpression: { "triage.state": { $exists: true } } });
 // Closing a recurring task asks whether it already has a successor; unindexed that is a scan of
 // every task in every project, and the usual answer — no — is the one that scans to the end
 taskSchema.index({ recurringParentId: 1 });
