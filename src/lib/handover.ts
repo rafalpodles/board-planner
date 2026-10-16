@@ -22,6 +22,7 @@ export type HandoverReason =
   | "assigned-by-someone-else"
   | "pm-assigned-for-someone-else"
   | "blocked"
+  | "no-repository"
   | "attempts-exhausted";
 
 export interface HandoverProblem {
@@ -34,7 +35,7 @@ export interface HandoverProblem {
 export type Handover = { runs: true } | { runs: false; problems: HandoverProblem[] };
 
 type Judged = Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "pmAssignedFor" | "status"> &
-  Partial<Pick<ApiTask, "blockedBy" | "attemptsExhausted">>;
+  Partial<Pick<ApiTask, "blockedBy" | "attemptsExhausted" | "repository">>;
 
 // Only blockers whose status arrived with them can be judged; a bare id says nothing either way
 function openBlockers(task: Judged, columns: AnyColumn[]): number[] {
@@ -133,8 +134,10 @@ export function finalProblem(handover: Handover): HandoverProblem | null {
  *
  * @param columns the board's own columns, which carry the roles a claim is defined in terms of.
  * Omitted where the caller does not know them, and then this requirement is not judged.
+ * @param repositories how many repositories the board lists. With several, a claim takes only a task
+ * that names one; omitted where the caller does not know, and then this is not judged either.
  */
-export function handoverOf(task: Judged, columns?: AnyColumn[]): Handover {
+export function handoverOf(task: Judged, columns?: AnyColumn[], repositories?: number): Handover {
   if (!task.agent) return { runs: false, problems: [{ reason: "no-agent", by: null }] };
   // Nothing resets a task's attempts and the claim skips one that has spent them, so no other
   // advice would make it run: the reason stands alone, like choosing no agent
@@ -150,6 +153,7 @@ export function handoverOf(task: Judged, columns?: AnyColumn[]): Handover {
   }
   const assignee = assigneeProblem(task);
   if (assignee) problems.push(assignee);
+  if ((repositories ?? 0) > 1 && !task.repository) problems.push({ reason: "no-repository", by: null });
   // The claim leaves a task with an unfinished blocker alone until that blocker reaches a done column
   const blockers = columns ? openBlockers(task, columns) : [];
   if (blockers.length > 0) problems.push({ reason: "blocked", by: null, blockers });

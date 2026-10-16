@@ -762,6 +762,23 @@ export function PropertyRail({
           </ComboboxRow>
         )}
 
+        {(board?.repositories?.length ?? 0) > 1 && (
+          <ComboboxRow
+            label="Repository"
+            touch={touch}
+            value={draft.repository || ""}
+            options={(board?.repositories ?? []).map((r) => ({ value: r.id, label: r.name }))}
+            emptyOption="No repository"
+            onChange={(repositoryId) => set("repository", repositoryId || null)}
+          >
+            {() =>
+              board?.repositories?.find((r) => r.id === draft.repository)?.name ?? (
+                <EmptyValue>Choose one</EmptyValue>
+              )
+            }
+          </ComboboxRow>
+        )}
+
         <PickerRow
           label="Repeats"
           touch={touch}

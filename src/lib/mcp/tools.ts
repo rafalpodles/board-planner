@@ -24,6 +24,8 @@ import {
   DUE_DATE_PARAM,
   RECURRENCE_PARAM,
   SPRINT_PARAM,
+  REPOSITORY_PARAM,
+  repositoryForWrite,
   dueDateValue,
   recurrenceValue,
   sprintClears,
@@ -544,6 +546,7 @@ export function registerPlannerTools(server: McpServer): void {
           .describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
         dueDate: DUE_DATE_PARAM,
         sprint: SPRINT_PARAM,
+        repository: REPOSITORY_PARAM,
         recurrence: RECURRENCE_PARAM,
         fields: z
           .record(z.any())
@@ -565,7 +568,7 @@ export function registerPlannerTools(server: McpServer): void {
       }, { hints: CREATE_TASK_HINTS, writes: true }),
     },
     async (
-      { project, title, description, priority, category, assignee, status, acceptanceCriteria, minimal, dueDate, sprint, recurrence, fields },
+      { project, title, description, priority, category, assignee, status, acceptanceCriteria, minimal, dueDate, sprint, repository, recurrence, fields },
       extra
     ) => {
       const client = clientFrom(extra);
@@ -581,6 +584,9 @@ export function registerPlannerTools(server: McpServer): void {
       if (recurrence) data.recurrence = recurrenceValue(recurrence);
       if (sprint && !sprintClears(sprint)) {
         data.sprint = sprintForWrite(sprint, (await client.listSprints(proj._id)) as SprintRow[]);
+      }
+      if (repository) {
+        data.repository = repositoryForWrite(repository, (await client.getProject(proj._id)).repositories ?? []);
       }
       if (fields && Object.keys(fields).length) {
         data.customFieldValues = resolveFieldsByName(fields, proj.customFields || []);
@@ -635,6 +641,7 @@ export function registerPlannerTools(server: McpServer): void {
           ),
         dueDate: DUE_DATE_PARAM,
         sprint: SPRINT_PARAM,
+        repository: REPOSITORY_PARAM,
         recurrence: RECURRENCE_PARAM,
         fields: z
           .record(z.any())
@@ -656,13 +663,13 @@ export function registerPlannerTools(server: McpServer): void {
       }, { hints: UPDATE_TASK_HINTS, writes: true }),
     },
     async (
-      { taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, minimal, dueDate, sprint, recurrence, fields },
+      { taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, minimal, dueDate, sprint, repository, recurrence, fields },
       extra
     ) => {
       // Before the lookup, so a call that changes nothing costs nothing and the refusal is the
       // first thing that happens rather than the last
       if (
-        ![title, description, priority, category, assignee, agent, acceptanceCriteria, dueDate, sprint, recurrence].some(
+        ![title, description, priority, category, assignee, agent, acceptanceCriteria, dueDate, sprint, repository, recurrence].some(
           (v) => v !== undefined
         ) &&
         !Object.keys(fields || {}).length
@@ -690,6 +697,10 @@ export function registerPlannerTools(server: McpServer): void {
         data.sprint = sprintClears(sprint)
           ? null
           : sprintForWrite(sprint, (await client.listSprints(projectId)) as SprintRow[]);
+      }
+
+      if (repository !== undefined) {
+        data.repository = repositoryForWrite(repository, (await client.getProject(projectId)).repositories ?? []);
       }
 
       if (fields && Object.keys(fields).length) {

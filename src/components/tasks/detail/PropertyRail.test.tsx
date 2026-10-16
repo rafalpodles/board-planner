@@ -19,6 +19,7 @@ const draft: TaskDraft = {
   checklist: [],
   sprint: null,
   agent: null,
+  repository: null,
   recurrence: null,
   customFieldValues: {},
 };

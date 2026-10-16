@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   matchRepo,
   normaliseRemote,
+  servedRepository,
   projectRemotes,
   prUrlNamesProjectRepo,
   sameRepo,
@@ -326,5 +327,47 @@ describe("prUrlNamesProjectRepo on an instance whose GitHub is not github.com", 
     expect(prUrlNamesProjectRepo("https://evil.example.com/owner/repo/pull/7", project)).toBe(false);
     // github.com is now the other host, and fails closed like any other
     expect(prUrlNamesProjectRepo("https://github.com/owner/repo/pull/7", project)).toBe(false);
+  });
+});
+
+describe("a project with several repositories (BP-1066)", () => {
+  const project = {
+    _id: "p1",
+    repositoryUrl: "https://github.com/acme/api",
+    repositories: [
+      { _id: "r-api", url: "https://github.com/acme/api" },
+      { _id: "r-web", url: "git@github.com:acme/web.git" },
+    ],
+  };
+  const holds = (...remotes: string[]) => remotes.map((remote) => ({ remote, path: `/${remote}` }));
+
+  it("offers every stored address to match against", () => {
+    expect(projectRemotes(project)).toEqual(["https://github.com/acme/api", "git@github.com:acme/web.git"]);
+  });
+
+  it("matches a checkout of the second repository alone, returning the remote as reported", () => {
+    const web = "https://github.com/acme/web";
+
+    expect(matchRepo(project, holds(web))).toBe(web);
+    expect(servedRepository(project, holds(web))).toEqual({ id: "r-web", remote: web });
+  });
+
+  it("answers the first repository in the project's order when both are held, whatever order they were reported in", () => {
+    const reported = holds("https://github.com/acme/web", "git@github.com:acme/api.git");
+
+    expect(servedRepository(project, reported)).toEqual({ id: "r-api", remote: "git@github.com:acme/api.git" });
+  });
+
+  it("matches nothing for an unrelated checkout", () => {
+    expect(servedRepository(project, holds("https://github.com/acme/other"))).toBeNull();
+  });
+
+  it("keeps a project without a stored list on its legacy fields, with no id to name", () => {
+    const legacy = { _id: "p1", githubRepo: "acme/api" };
+
+    expect(servedRepository(legacy, holds("git@github.com:acme/api.git"))).toEqual({
+      id: null,
+      remote: "git@github.com:acme/api.git",
+    });
   });
 });

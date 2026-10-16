@@ -312,3 +312,29 @@ describe("finalProblem", () => {
     expect(finalProblem(handover as never)).toEqual(expected);
   });
 });
+
+describe("handoverOf and the repository a task names (BP-1066)", () => {
+  it("says a task names no repository once the board lists several", () => {
+    expect(handoverOf(task(), BOARD, 2)).toEqual({ runs: false, problems: [{ reason: "no-repository", by: null }] });
+  });
+
+  it("runs a task that names one", () => {
+    expect(handoverOf(task({ repository: "r1" }), BOARD, 2)).toEqual({ runs: true });
+  });
+
+  it("says nothing about a repository on a board with one, or when the caller does not know", () => {
+    expect(handoverOf(task(), BOARD, 1)).toEqual({ runs: true });
+    expect(handoverOf(task(), BOARD, 0)).toEqual({ runs: true });
+    expect(handoverOf(task(), BOARD)).toEqual({ runs: true });
+  });
+
+  it("lists it beside the other requirements the task fails", () => {
+    const verdict = handoverOf(task({ status: "someday" }), BOARD, 2);
+
+    expect(verdict).toMatchObject({ runs: false });
+    expect((verdict as { problems: { reason: string }[] }).problems.map((p) => p.reason)).toEqual([
+      "not-approved-yet",
+      "no-repository",
+    ]);
+  });
+});

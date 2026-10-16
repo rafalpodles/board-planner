@@ -1,4 +1,5 @@
 import { repositoryCandidates, repositoryUrlCandidates, RepositoryFields } from "./repository";
+import { entryId, storedRepositories, type RepositoryEntry } from "./repositories";
 
 // One repository is reachable by many strings — ssh, https, with or without .git, and through a
 // per-account ssh host alias like `git@github-owner:owner/repo.git`. Matching a worker's
@@ -56,24 +57,50 @@ export interface RepoReport {
 
 export interface MatchableProject extends RepositoryFields {
   _id: unknown;
+  repositories?: RepositoryEntry[] | null;
 }
 
-// One candidate once a project has been migrated to repositoryUrl; until then, both legacy fields
-// exactly as they were stored — see repositoryCandidates for why they are not normalised first.
+// Every address the project names: its stored repositories once it has any, otherwise one candidate
+// once a project has been migrated to repositoryUrl, or both legacy fields exactly as they were
+// stored — see repositoryCandidates for why they are not normalised first.
 export function projectRemotes(project: MatchableProject): string[] {
-  return repositoryCandidates(project).filter((value) => normaliseRemote(value).length > 0);
+  const entries = storedRepositories(project).map((r) => r.url);
+  const wanted = entries.length > 0 ? entries : repositoryCandidates(project);
+  return wanted.filter((value) => normaliseRemote(value).length > 0);
+}
+
+export interface ServedRepository {
+  // Null for a project that has no stored list yet, whose single repository has no id to name
+  id: string | null;
+  remote: string;
+}
+
+/**
+ * The repository of this project a machine holds a checkout of, and the remote it reported for it.
+ * With several the first in the project's own order wins, so every caller names the same one: until
+ * the worker can bind more than one checkout per project, an assignment carries exactly this remote
+ * and a task is only offered to the machine when it names this entry.
+ */
+export function servedRepository(project: MatchableProject, reported: RepoReport[]): ServedRepository | null {
+  const entries = storedRepositories(project).filter((r) => normaliseRemote(r.url).length > 0);
+  if (entries.length === 0) {
+    const wanted = projectRemotes(project);
+    for (const repo of reported) {
+      if (wanted.some((candidate) => sameRepo(candidate, repo.remote))) return { id: null, remote: repo.remote };
+    }
+    return null;
+  }
+  for (const entry of entries) {
+    const hit = reported.find((repo) => sameRepo(entry.url, repo.remote));
+    if (hit) return { id: entryId(entry), remote: hit.remote };
+  }
+  return null;
 }
 
 // Returns the exact string the worker reported, never a path and never a normalised form: the
 // worker resolves its own checkout from this, and it can only do that against what it sent.
 export function matchRepo(project: MatchableProject, reported: RepoReport[]): string | null {
-  const wanted = projectRemotes(project);
-  if (wanted.length === 0) return null;
-
-  for (const repo of reported) {
-    if (wanted.some((candidate) => sameRepo(candidate, repo.remote))) return repo.remote;
-  }
-  return null;
+  return servedRepository(project, reported)?.remote ?? null;
 }
 
 /**

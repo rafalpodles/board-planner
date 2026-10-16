@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import { projectRepositoryUrl, type RepositoryFields } from "./repository";
+import { echo } from "./echo";
 
 export const REPOSITORY_NAME_MAX_LENGTH = 100;
 export const MAX_REPOSITORY_URL_LENGTH = 2048;
@@ -16,7 +17,19 @@ export interface ProjectRepository {
   name: string;
 }
 
-type WithRepositories = RepositoryFields & { repositories?: StoredRepository[] | null };
+// What a stored entry looks like from the database (`_id`) or from the API (`id`)
+export interface RepositoryEntry {
+  _id?: unknown;
+  id?: string;
+  url: string;
+  name?: string;
+}
+
+type WithRepositories = RepositoryFields & { repositories?: RepositoryEntry[] | null };
+
+export function entryId(entry: RepositoryEntry): string {
+  return String(entry._id ?? entry.id ?? "");
+}
 
 /**
  * The project's repositories, the first being the one everything still reads today. A project the
@@ -26,7 +39,7 @@ type WithRepositories = RepositoryFields & { repositories?: StoredRepository[] |
 export function projectRepositories(project: WithRepositories): ProjectRepository[] {
   const stored = (project.repositories ?? []).filter((r) => r.url?.trim());
   if (stored.length > 0) {
-    return stored.map((r) => ({ id: String(r._id), url: r.url.trim(), name: r.name?.trim() ?? "" }));
+    return stored.map((r) => ({ id: entryId(r), url: r.url.trim(), name: r.name?.trim() ?? "" }));
   }
   const url = projectRepositoryUrl(project);
   return url ? [{ id: "primary", url, name: "" }] : [];
@@ -42,4 +55,57 @@ export function withPrimaryUrl(stored: StoredRepository[] | null | undefined, ur
   if (!trimmed) return rest;
   const first = stored?.[0];
   return [{ _id: first?._id ?? new Types.ObjectId(), url: trimmed, name: first?.name ?? "" }, ...rest];
+}
+
+export function storedRepositories(project: WithRepositories): RepositoryEntry[] {
+  return (project.repositories ?? []).filter((r) => r.url?.trim());
+}
+
+export function hasSeveralRepositories(project: WithRepositories): boolean {
+  return storedRepositories(project).length > 1;
+}
+
+/**
+ * Why this value cannot be written to a task's `repository`, or null when it can. Only a stored
+ * entry is nameable: the derived `primary` of a project the migration has not reached would dangle
+ * the moment it does.
+ */
+export function repositoryRefusal(project: WithRepositories, value: unknown): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  const entries = storedRepositories(project);
+  if (typeof value === "string" && entries.some((r) => entryId(r) === value)) return null;
+  if (entries.length === 0) return "This project names no repository to choose from";
+  const known = entries
+    .map((r) => `${entryId(r)} (${(r.name?.trim() || r.url).slice(0, 80)})`)
+    .join(", ");
+  return `Unknown repository "${echo(value)}" — this project's repositories: ${known}`;
+}
+
+/** What the history shows for a repository id: its name or address, the id itself once it is gone */
+export function repositoryNameOf(project: WithRepositories, id: unknown): string | null {
+  if (!id) return null;
+  const entry = storedRepositories(project).find((r) => entryId(r) === String(id));
+  return (entry?.name?.trim() || entry?.url.trim() || String(id)).slice(0, 200);
+}
+
+/**
+ * The entry a caller means by an id, a name or an address, or why it cannot be told. Empty clears.
+ * Names are not unique, so one two entries share is refused with their ids rather than answered
+ * for whichever came first.
+ */
+export function repositoryIdFor(
+  project: WithRepositories,
+  ref: string
+): { id: string | null } | { error: string } {
+  const wanted = ref.trim();
+  if (wanted === "") return { id: null };
+  const entries = storedRepositories(project);
+  const byId = entries.find((r) => entryId(r) === wanted);
+  if (byId) return { id: entryId(byId) };
+  const lower = wanted.toLowerCase();
+  const matches = entries.filter((r) => (r.name ?? "").trim().toLowerCase() === lower || r.url.trim().toLowerCase() === lower);
+  if (matches.length === 1) return { id: entryId(matches[0]) };
+  const list = entries.map((r) => `${(r.name?.trim() || r.url).slice(0, 80)} (${entryId(r)})`).join(", ") || "none";
+  if (matches.length > 1) return { error: `More than one repository is called "${echo(wanted)}" — use an id. Repositories: ${list}` };
+  return { error: `No repository "${echo(wanted)}" on this board, by name, address or id. Repositories: ${list}` };
 }

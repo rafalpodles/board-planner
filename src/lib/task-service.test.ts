@@ -5910,3 +5910,148 @@ describe("createTask and triage", () => {
     errors.mockRestore();
   });
 });
+
+describe("a task naming the repository it changes (BP-1066)", () => {
+  const API = "6ab0f94eadb2609f98d84db1";
+  const WEB = "6ab0f94eadb2609f98d84db2";
+  const board = {
+    ...customBoard,
+    repositories: [
+      { _id: API, url: "https://github.com/o/api", name: "api" },
+      { _id: WEB, url: "https://github.com/o/web", name: "" },
+    ],
+  };
+
+  describe("createTask", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
+      projectFindOneAndUpdate.mockResolvedValue({ _id: "p1", taskCounter: 1, key: "BP", ...board });
+      taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new" }));
+      taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
+    });
+
+    it("stores a repository the board lists", async () => {
+      const result = await createTask(db, "p1", "actor", { title: "x", repository: WEB });
+
+      expect(result.ok).toBe(true);
+      expect(taskCreate.mock.calls.at(-1)?.[0].repository).toBe(WEB);
+    });
+
+    it("stores none when none is named", async () => {
+      await createTask(db, "p1", "actor", { title: "x" });
+
+      expect(taskCreate.mock.calls.at(-1)?.[0].repository).toBeNull();
+    });
+
+    it("refuses one the board does not list, before a task number is spent", async () => {
+      const result = await createTask(db, "p1", "actor", { title: "x", repository: "6ab0f94eadb2609f98d84dff" });
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect((result as { error: string }).error).toContain(`${API} (api)`);
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+      expect(taskCreate).not.toHaveBeenCalled();
+    });
+
+    it("does not echo an unbounded value into the refusal", async () => {
+      const result = await createTask(db, "p1", "actor", { title: "x", repository: "y".repeat(500) });
+
+      expect((result as { error: string }).error).not.toContain("y".repeat(65));
+    });
+  });
+
+  describe("updateTask", () => {
+    function setup(before: string | null, after: string | null) {
+      vi.clearAllMocks();
+      projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
+      const stored = { _id: "t1", taskNumber: 7, status: "doing", title: "x", repository: before };
+      findOne.mockReturnValue({
+        lean: () => Promise.resolve(stored),
+        populate: () => ({ lean: () => Promise.resolve(stored) }),
+      });
+      findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve({ ...stored, repository: after }) });
+    }
+
+    it("writes a repository the board lists", async () => {
+      setup(null, WEB);
+
+      const result = await updateTask(db, "p1", "t1", { repository: WEB }, "actor");
+
+      expect(result.ok).toBe(true);
+      expect(findOneAndUpdate.mock.calls[0][1].$set.repository).toBe(WEB);
+    });
+
+    it("refuses one the board does not list, writing nothing", async () => {
+      setup(null, null);
+
+      const result = await updateTask(db, "p1", "t1", { repository: "6ab0f94eadb2609f98d84dff" }, "actor");
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("reads an empty string as no repository", async () => {
+      setup(API, null);
+
+      await updateTask(db, "p1", "t1", { repository: "" }, "actor");
+
+      expect(findOneAndUpdate.mock.calls[0][1].$set.repository).toBeNull();
+    });
+
+    it("leaves a task alone that the request does not mention", async () => {
+      setup(API, API);
+
+      await updateTask(db, "p1", "t1", { title: "renamed" }, "actor");
+
+      expect(findOneAndUpdate.mock.calls[0][1].$set).not.toHaveProperty("repository");
+    });
+
+    it("writes the change to the history by name, falling back to the address", async () => {
+      setup(API, WEB);
+
+      await updateTask(db, "p1", "t1", { repository: WEB }, "actor");
+
+      const rows = vi.mocked(logActivity).mock.calls.filter((call) => call[5] === "repository");
+      expect(rows).toEqual([[db, "p1", "t1", "actor", "updated", "repository", "api", "https://github.com/o/web"]]);
+    });
+  });
+
+  describe("claimNextTask", () => {
+    async function claimFilter(repositories?: string[] | null): Promise<Record<string, unknown>> {
+      findOneAndUpdate.mockReset();
+      projectFindOne.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
+      find.mockReturnValue({ lean: () => Promise.resolve([]) });
+      findOneAndUpdate.mockResolvedValue(null);
+      await claimNextTask(db, "p1", "worker-a", "run-1", OWNER, "machine-user", repositories);
+      return findOneAndUpdate.mock.calls[0][0];
+    }
+
+    it("takes any task when nothing narrows it, as before", async () => {
+      const filter = await claimFilter();
+
+      expect(filter).not.toHaveProperty("repository");
+      expect(matches(filter, task({ repository: API }))).toBe(true);
+      expect(matches(filter, task())).toBe(true);
+    });
+
+    it("takes only a task naming a repository the machine serves", async () => {
+      const filter = await claimFilter([API]);
+
+      expect(matches(filter, task({ repository: API }))).toBe(true);
+      expect(matches(filter, task({ repository: WEB }))).toBe(false);
+    });
+
+    it("never takes a task that names none once the board has several", async () => {
+      const filter = await claimFilter([API]);
+
+      expect(matches(filter, task())).toBe(false);
+      expect(matches(filter, task({ repository: null }))).toBe(false);
+    });
+
+    it("takes nothing for a machine that serves none of them", async () => {
+      const filter = await claimFilter([]);
+
+      expect(matches(filter, task({ repository: API }))).toBe(false);
+    });
+  });
+});
