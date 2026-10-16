@@ -1,6 +1,6 @@
 /**
  * Maps a changed file to the e2e/groups.ts group(s) it can affect, so CI only has to run those
- * Playwright projects instead of all six (BP CI speed-up, September 2026). Consumed by
+ * Playwright projects instead of all seven (BP CI speed-up, September 2026). Consumed by
  * scripts/plan-e2e-groups.ts, which turns the answer into the `plan-e2e` job's output.
  *
  * A path matches the longest OWNED prefix it has an entry for. Coverage here is deliberately
@@ -172,13 +172,18 @@ for (const [group, specs] of Object.entries(GROUPS) as [GroupName, readonly stri
   for (const spec of specs) SPEC_TO_GROUP.set(spec, group);
 }
 
+// Every screen is in a11y-sweep.spec.ts, so anything that renders one can turn it red
+function rendersAScreen(file: string): boolean {
+  return /^src\/(components|app)\//.test(file) && !file.startsWith("src/app/api/");
+}
+
 export function computeAffectedGroups(changedFiles: readonly string[]): GroupName[] {
   if (changedFiles.length === 0) return [];
 
   const groups = new Set<GroupName>();
   for (const file of changedFiles) {
     // Checked before CRITICAL_PREFIXES' blanket "e2e/" entry, so touching one spec runs only the
-    // group it belongs to rather than all six.
+    // group it belongs to rather than all seven.
     const specMatch = file.match(/^e2e\/([^/]+\.spec\.ts)$/);
     if (specMatch) {
       const group = SPEC_TO_GROUP.get(specMatch[1]);
@@ -194,6 +199,7 @@ export function computeAffectedGroups(changedFiles: readonly string[]): GroupNam
     )[0];
     if (!match) return [...GROUP_NAMES];
     match.groups.forEach((g) => groups.add(g));
+    if (rendersAScreen(file)) groups.add("a11y");
   }
 
   return GROUP_NAMES.filter((g) => groups.has(g));

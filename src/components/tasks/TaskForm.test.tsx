@@ -71,3 +71,10 @@ describe("AI Assist", () => {
     expect(screen.getByText("An AI model fills every field below. Check and edit them before saving.")).toBeTruthy();
   });
 });
+
+describe("the due date", () => {
+  it("is named by its label, so a screen reader says what the date is for", () => {
+    mount();
+    expect(screen.getByLabelText("Due Date").getAttribute("type")).toBe("date");
+  });
+});

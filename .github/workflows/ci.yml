@@ -341,8 +341,8 @@ jobs:
       - run: ./backup/test.sh
 
   plan_e2e:
-    # Decides which of the six groups below this push can possibly affect, so a change confined to
-    # one feature area doesn't pay for all six. See e2e/affected-groups.ts for the mapping and the
+    # Decides which of the seven groups below this push can possibly affect, so a change confined to
+    # one feature area doesn't pay for all seven. See e2e/affected-groups.ts for the mapping and the
     # fail-safe rules; scripts/plan-e2e-groups.ts turns its answer into the output the matrix job
     # reads. No `npm ci` here — the script imports nothing outside this repo's own TypeScript.
     name: Plan — which e2e groups this change touches
@@ -365,14 +365,14 @@ jobs:
           set -e
           if [ "$STATUS" -ne 0 ] || ! grep -q '^groups=' "$GITHUB_OUTPUT"; then
             echo "::warning::could not determine affected e2e groups, running all of them"
-            echo 'groups=["tasks","task-fields","board","project","people","automation"]' >> "$GITHUB_OUTPUT"
+            echo 'groups=["tasks","task-fields","board","project","people","automation","a11y"]' >> "$GITHUB_OUTPUT"
           fi
 
   e2e:
     # One job per group in e2e/groups.ts, each with a runner, a Mongo and a dev server of its own,
     # so the groups need no isolation from one another. `groups.test.ts` fails the unit job when
     # this list and that file disagree, and when a spec belongs to no group at all. The matrix
-    # always lists all six — plan_e2e decides which of them actually run. That gate is a step-level
+    # always lists all seven — plan_e2e decides which of them actually run. That gate is a step-level
     # `if:`, not a job-level one: the `matrix` context (needed to compare against plan_e2e's answer)
     # is only available to steps, not to a job's own `if:`. An unaffected group's job still starts,
     # and its first step says there is nothing to run; every other step is skipped, so it costs the
@@ -391,7 +391,7 @@ jobs:
     # `if: !cancelled()` plus the `!= 'success'` half of the "Whether plan_e2e picked this group"
     # check below both exist for the same failure the plan_e2e job's own internal fallback can't
     # reach: plan_e2e failing outright (checkout, setup-node, an infra hiccup) rather than its
-    # script failing. `needs:` alone would then skip every e2e job — running zero of six groups,
+    # script failing. `needs:` alone would then skip every e2e job — running zero of seven groups,
     # the opposite of "ambiguous means run everything." `!= 'success'` short-circuits before
     # `fromJson` ever sees a possibly-empty `outputs.groups`.
     name: End to end — ${{ matrix.group }} (shard ${{ matrix.shard }})
@@ -402,7 +402,7 @@ jobs:
       fail-fast: false
       matrix:
         # e2e-groups-start
-        group: [tasks, task-fields, board, project, people, automation]
+        group: [tasks, task-fields, board, project, people, automation, a11y]
         # e2e-groups-end
         shard: [1, 2, 3]
     services:
@@ -422,7 +422,7 @@ jobs:
         id: affected
         env:
           # How many shards each group is cut into, at most the three the matrix lists (BP-1042)
-          SHARDS: '{"tasks":2,"task-fields":1,"board":2,"project":3,"people":2,"automation":2}'
+          SHARDS: '{"tasks":2,"task-fields":1,"board":2,"project":3,"people":2,"automation":2,"a11y":1}'
           PICKED: ${{ needs.plan_e2e.result != 'success' || contains(fromJson(needs.plan_e2e.outputs.groups), matrix.group) }}
         run: |
           shards=$(echo "$SHARDS" | jq -r --arg group "${{ matrix.group }}" '.[$group] // 1')

@@ -66,7 +66,7 @@ const blockRow = (page: Page, name: string): Locator =>
   page.getByRole("button", { name, exact: true }).locator("xpath=ancestor::li[1]");
 
 const bucketOf = (page: Page, label: string): Locator =>
-  page.getByRole("heading", { name: label, exact: true }).locator("xpath=../following-sibling::ul");
+  page.getByRole("heading", { name: label, exact: true }).locator("xpath=../following-sibling::*[1]");
 
 /**
  * A block authored by the route the dialog calls, and an agent built from it beside an untouched

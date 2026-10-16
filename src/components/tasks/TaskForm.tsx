@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, FormEvent, useEffect, type CSSProperties } from "react";
+import { useState, useCallback, useRef, FormEvent, useEffect, useId, type CSSProperties } from "react";
 import { useApi } from "@/hooks/use-api";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -70,6 +70,7 @@ export function TaskForm({
   onBusyChange,
 }: TaskFormProps) {
   const [title, setTitle] = useState("");
+  const dueDateId = useId();
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
   const [category, setCategory] = useState<Category>(
@@ -394,8 +395,9 @@ export function TaskForm({
           placeholder="Unassigned"
         />
         <div>
-          <label className="block text-sm font-medium mb-1">Due Date</label>
+          <label htmlFor={dueDateId} className="block text-sm font-medium mb-1">Due Date</label>
           <input
+            id={dueDateId}
             type="date"
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}

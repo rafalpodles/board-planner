@@ -311,7 +311,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
       >
         <p className="mb-3 text-xs text-text-muted">
           Diff limits, review, merging and the models moved to the{" "}
-          <Link href="/agents" className="text-primary hover:underline">
+          <Link href="/agents" className="text-primary underline">
             steps and gates
           </Link>{" "}
           that do them.

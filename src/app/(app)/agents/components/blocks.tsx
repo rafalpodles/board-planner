@@ -209,35 +209,37 @@ export function Bucket({
         <span className="text-[12px] text-text-muted">{hint}</span>
       </div>
 
-      <ul
+      <div
         ref={setNodeRef}
         data-testid={`bucket-${id}`}
-        className={`flex min-h-[72px] flex-col gap-2 rounded-lg border border-dashed p-2 transition-colors ${
+        className={`min-h-[72px] rounded-lg border border-dashed p-2 transition-colors ${
           isOver ? "border-primary bg-primary/5" : "border-border"
         }`}
       >
-        <SortableContext
-          id={`${BUCKET_PREFIX}${id}`}
-          items={entries.map((e) => e.uid)}
-          strategy={verticalListSortingStrategy}
-        >
-          {entries.map((entry) => (
-            <SortableEntry
-              key={entry.uid}
-              entry={entry}
-              lookup={lookup}
-              readOnly={readOnly}
-              onRemove={() => onRemove(entry.uid)}
-            />
-          ))}
-        </SortableContext>
+        <ul className="flex flex-col gap-2">
+          <SortableContext
+            id={`${BUCKET_PREFIX}${id}`}
+            items={entries.map((e) => e.uid)}
+            strategy={verticalListSortingStrategy}
+          >
+            {entries.map((entry) => (
+              <SortableEntry
+                key={entry.uid}
+                entry={entry}
+                lookup={lookup}
+                readOnly={readOnly}
+                onRemove={() => onRemove(entry.uid)}
+              />
+            ))}
+          </SortableContext>
+        </ul>
 
         {entries.length === 0 && (
           <p className="py-3 text-center text-[12px] text-text-muted">
             {readOnly ? "Nothing here." : "Drag a step or a gate here."}
           </p>
         )}
-      </ul>
+      </div>
     </section>
   );
 }

@@ -113,6 +113,17 @@ describe("WorkersSection", () => {
   });
 });
 
+// BP-703. Inside a sentence of muted text, primary blue alone is 1.13:1 against its neighbours
+describe("the link to the steps and gates", () => {
+  it("is underlined at rest, not only on hover", async () => {
+    renderSection(true);
+    await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
+
+    const link = screen.getByRole("link", { name: "steps and gates" });
+    expect(link.className.split(/\s+/)).toContain("underline");
+  });
+});
+
 // BP-777. The list said "live" for a machine whose worker refused its checkout of this board.
 describe("machines offering this repository", () => {
   function worker(over: Record<string, unknown> = {}) {

@@ -21,8 +21,8 @@ describe("the CI jobs and the groups agree", () => {
   });
 
   // The list above says which jobs exist. These two say the jobs still run what they are named
-  // for — a matrix `exclude:` deletes a job outright, and a hardcoded --project makes five of the
-  // six run the same group. Both leave the list itself untouched.
+  // for — a matrix `exclude:` deletes a job outright, and a hardcoded --project makes six of the
+  // seven run the same group. Both leave the list itself untouched.
   it("takes no group back out of the matrix", () => {
     const strategy = workflow.slice(
       workflow.indexOf("# e2e-groups-start"),
