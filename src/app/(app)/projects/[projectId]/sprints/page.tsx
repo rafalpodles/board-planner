@@ -241,8 +241,11 @@ export default function SprintsPage() {
                 Create Task
               </Button>
             )}
-            <Button size="sm" variant="secondary" onClick={() => setShowReleaseNotes(true)}>
-              Release notes
+            <Button size="sm" variant="secondary" onClick={() => setShowReleaseNotes(true)} aria-label="Release notes" title="Release notes">
+              <svg aria-hidden className="h-4 w-4 @md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4h7l4 4v12H7zM14 4v4h4M10 13h5M10 17h5" />
+              </svg>
+              <span className="hidden @md:inline">Release notes</span>
             </Button>
             {canShowVelocity && (
               <Button size="sm" variant="secondary" onClick={() => setShowVelocity(true)}>
