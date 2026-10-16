@@ -428,7 +428,7 @@ describe("repositoryCoverage (BP-1070)", () => {
       _id: "p1",
       repositories: [
         { _id: "r1", url: "acme/api", name: "first" },
-        { _id: "r2", url: "https://gitlab.example.com/acme/api", name: "second" },
+        { _id: "r2", url: "https://github.com/acme/api", name: "second" },
       ],
     };
 

@@ -324,9 +324,10 @@ function HandoverNotice({
           workerEnabled: board.workerEnabled,
           lockedByInstance: board.lockedByInstance,
           columns: board.columns,
+          // Only the assignee's own machine is judged, and both facts below are judged only for a ready one
           machine: viewerIsAssignee ? board.machine : null,
-          machineMissing: viewerIsAssignee ? board.machineMissing : null,
-          machineNeedsUpdate: viewerIsAssignee ? board.machineNeedsUpdate : null,
+          machineMissing: board.machineMissing,
+          machineNeedsUpdate: board.machineNeedsUpdate,
         })
       : [];
   const blockers: Blocker[] = [
