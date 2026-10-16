@@ -37,6 +37,7 @@ export const GROUPS = {
     "task-composing-controls.spec.ts",
     "due-date-in-the-viewers-day.spec.ts",
     "task-tab-title.spec.ts",
+    "avatar-colours.spec.ts",
     "link-preview.spec.ts",
     "comment-shown-once.spec.ts",
     "activity-source.spec.ts",
