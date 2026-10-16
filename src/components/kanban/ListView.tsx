@@ -17,6 +17,7 @@ import {
 } from "@/types";
 import { BUILT_IN_COLUMNS, ListColumnId, isColumnVisible, listColumns as projectListColumns } from "@/lib/list-columns";
 import { fieldCellText, orderedOptions } from "@/lib/custom-fields";
+import { avatarStyle } from "@/lib/avatar-color";
 import { effectiveColumns } from "@/lib/columns";
 import { CopyTaskLink } from "@/components/tasks/CopyTaskLink";
 import {
@@ -88,16 +89,17 @@ function initials(fullName: string): string {
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
-function AssigneeAvatar({ fullName }: { fullName: string }) {
+function AssigneeAvatar({ fullName, username }: { fullName: string; username?: string }) {
   const label = initials(fullName);
   return (
     <span
       aria-hidden
       className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${
         label
-          ? "bg-primary/30 text-text"
+          ? "text-text"
           : "border border-dashed border-border text-text-muted"
       }`}
+      style={label ? avatarStyle(username || fullName) : undefined}
     >
       {label || "–"}
     </span>
@@ -530,6 +532,10 @@ export function ListView({
                 task.assignee && typeof task.assignee === "object"
                   ? task.assignee.fullName
                   : "—";
+              const assigneeUsername =
+                task.assignee && typeof task.assignee === "object"
+                  ? task.assignee.username
+                  : undefined;
 
               return (
                 <SortableRow key={task._id} id={task._id} disabled={!canReorder}>
@@ -714,6 +720,7 @@ export function ListView({
                       ) : (
                         <AssigneeAvatar
                           fullName={assigneeName === "—" ? "" : assigneeName}
+                          username={assigneeUsername}
                         />
                       )}
                     </td>
@@ -971,7 +978,7 @@ function AssigneeCell({
         saving ? "opacity-50" : ""
       }`}
     >
-      {() => <AssigneeAvatar fullName={fullName} />}
+      {() => <AssigneeAvatar fullName={fullName} username={current} />}
     </Combobox>
   );
 }

@@ -4,6 +4,7 @@ import { render, screen, cleanup, act } from "@testing-library/react";
 import { TaskCard } from "./TaskCard";
 import { ApiTask, ApiProjectCategory } from "@/types";
 import { pinTimezone } from "@/lib/testing/pin-timezone";
+import { avatarColorIndex } from "@/lib/avatar-color";
 
 const task = {
   _id: "t1",
@@ -560,5 +561,17 @@ describe("TaskCard on an epic", () => {
     expect(screen.getAllByRole("progressbar")).toHaveLength(1);
     expect(screen.getByText("1/1")).toBeTruthy();
     expect(screen.getByText("1 of 4 done")).toBeTruthy();
+  });
+});
+
+describe("TaskCard assignee colour", () => {
+  const withAssignee = (username: string, fullName: string) =>
+    ({ ...task, assignee: { _id: "u1", username, fullName } }) as unknown as ApiTask;
+
+  it("colours the initial by the assignee's username", () => {
+    renderCard({ task: withAssignee("rafal", "Rafal Podles") });
+    expect(screen.getByText("R").getAttribute("style")).toContain(
+      `var(--avatar-${avatarColorIndex("rafal")})`
+    );
   });
 });

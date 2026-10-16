@@ -11,6 +11,7 @@ import { dateOnlyKey, dueDateClass, formatDateOnly } from "@/lib/date-only";
 import { CopyTaskLink } from "@/components/tasks/CopyTaskLink";
 import { PullRequestState } from "@/components/tasks/PullRequestBadge";
 import { EpicProgress } from "@/components/tasks/EpicProgress";
+import { avatarStyle } from "@/lib/avatar-color";
 
 // A card is a summary; past a few badges it stops being one
 const MAX_CARD_BADGES = 3;
@@ -294,7 +295,10 @@ export function TaskCard({
       <div className="flex items-center justify-between">
         {task.assignee && typeof task.assignee === "object" ? (
           <span className="text-xs text-text-muted flex items-center gap-1">
-            <span className="w-5 h-5 rounded-full bg-primary/30 flex items-center justify-center text-[10px] font-medium">
+            <span
+              className="w-5 h-5 rounded-full text-text flex items-center justify-center text-[10px] font-medium"
+              style={avatarStyle(task.assignee.username || task.assignee.fullName)}
+            >
               {task.assignee.fullName?.charAt(0).toUpperCase() || "?"}
             </span>
             <span>{task.assignee.fullName || task.assignee.username}</span>

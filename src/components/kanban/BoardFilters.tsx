@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from "react";
+import { avatarStyle } from "@/lib/avatar-color";
 import {
   ApiTask, ApiCustomField, ApiSavedView,
   ApiProjectCategory,
@@ -435,6 +436,7 @@ export function BoardFilters({
     label: string;
     colour?: string;
     initial?: string;
+    initialKey?: string;
     fieldId?: string;
   }[] =
     [];
@@ -449,6 +451,12 @@ export function BoardFilters({
           : filters.assignee === ME
             ? "M"
             : filters.assignee.charAt(0).toUpperCase(),
+      initialKey:
+        filters.assignee === UNASSIGNED
+          ? undefined
+          : filters.assignee === ME
+            ? currentUsername
+            : filters.assignee,
     });
   }
   if (filters.category) {
@@ -596,6 +604,7 @@ export function BoardFilters({
                       label={chip.label}
                       colour={chip.colour}
                       initial={chip.initial}
+                      initialKey={chip.initialKey}
                       isAssignee={chip.key === "assignee"}
                       onRemove={() =>
                         chip.fieldId
@@ -913,12 +922,14 @@ function FilterChip({
   label,
   colour,
   initial,
+  initialKey,
   isAssignee,
   onRemove,
 }: {
   label: string;
   colour?: string;
   initial?: string;
+  initialKey?: string;
   isAssignee?: boolean;
   onRemove: () => void;
 }) {
@@ -936,7 +947,12 @@ function FilterChip({
       }`}
     >
       {initial && (
-        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary/25 text-[9px] font-semibold">
+        <span
+          className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold ${
+            initialKey ? "text-text" : "bg-primary/25"
+          }`}
+          style={avatarStyle(initialKey)}
+        >
           {initial}
         </span>
       )}

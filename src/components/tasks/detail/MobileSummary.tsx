@@ -41,7 +41,7 @@ export function MobileSummary({
         {draft.category}
       </span>
       <span className={CHIP} data-testid="mobile-assignee-chip">
-        <Avatar name={assignee?.fullName} size={18} />
+        <Avatar name={assignee?.fullName} username={assignee?.username} size={18} />
         {assignee ? assignee.fullName : "Unassigned"}
       </span>
       <button

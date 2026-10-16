@@ -416,7 +416,7 @@ export function Comments({
       {/* Wide screens only: a phone comments through the bar pinned to the bottom of
           the task, so a second composer here would be a decoy */}
       <form onSubmit={handleSubmit} className="hidden items-start gap-3 pt-3 lg:flex">
-        <Avatar name={user?.fullName} size={28} className="mt-1 hidden sm:inline-flex" />
+        <Avatar name={user?.fullName} username={user?.username} size={28} className="mt-1 hidden sm:inline-flex" />
         <div className="flex min-w-0 flex-1 flex-col gap-2.5">
           <div className="relative">
             <SuggestionList
