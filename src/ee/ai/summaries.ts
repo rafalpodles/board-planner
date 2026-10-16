@@ -209,7 +209,7 @@ export function figuresOutsideFacts(note: string, facts: Facts): string[] {
     .sort((a, b) => b.length - a.length)
     .reduce((text, key) => text.replace(new RegExp(`(?<![\\w-])${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`, "g"), ""), note);
   const digits = [...withoutKeys.matchAll(/\d+(?:[.,]\d+)*/g)].map((m) => m[0]).filter((n) => !/^\d+$/.test(n) || !allowed.has(Number(n)));
-  const words = [...note.matchAll(NUMBER_WORDS)].map((m) => m[0]);
+  const words = [...withoutKeys.matchAll(NUMBER_WORDS)].map((m) => m[0]);
   return [...digits, ...words];
 }
 
