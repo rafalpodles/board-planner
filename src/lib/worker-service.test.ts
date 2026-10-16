@@ -1233,3 +1233,31 @@ describe("a project with several repositories", () => {
     expect(claimableRepositories(worker(), project(), [], now)).toBeNull();
   });
 });
+
+// BP-1066. What the app offers to clone and shows as served is about the primary address alone: a
+// machine holding only a later entry serves the project already, and cloning the primary onto it
+// would change which repository its assignment names.
+describe("the clone offer and the catalogue on a project with several repositories", () => {
+  const API = "https://github.com/owner/api";
+  const WEB = "https://github.com/owner/web";
+  const several = project({
+    githubRepo: undefined,
+    repositoryUrl: API,
+    repositories: [
+      { _id: "r-api", url: API },
+      { _id: "r-web", url: WEB },
+    ],
+  });
+  const onlyWeb = [{ remote: `${WEB}.git`, path: "/web" }];
+  const onlyApi = [{ remote: `${API}.git`, path: "/api" }];
+
+  it("still offers the primary to a machine holding only a later entry, and does not call the project served there", () => {
+    expect(offersFor(onlyWeb, [several], [PROJECT_ID])).toHaveLength(1);
+    expect(catalogueFor(onlyWeb, [several], [PROJECT_ID], undefined)[0]).toMatchObject({ servedHere: false, wanted: false });
+  });
+
+  it("calls it served, and offers nothing, once the primary is held", () => {
+    expect(offersFor(onlyApi, [several], [PROJECT_ID])).toEqual([]);
+    expect(catalogueFor(onlyApi, [several], [PROJECT_ID], undefined)[0]).toMatchObject({ servedHere: true, wanted: true });
+  });
+});

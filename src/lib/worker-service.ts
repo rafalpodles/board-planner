@@ -327,6 +327,15 @@ export function assignmentsFor(
   return out;
 }
 
+// The offer and the catalogue are about the one address a machine is handed to clone, the primary
+// repository's. A machine holding only a later entry serves the project, but cloning the primary onto
+// it would make that the entry its assignment names, and every task naming the later one would stop
+// being claimable there — so these two keep answering about the primary alone until the worker binds
+// several checkouts per project (BP-1067).
+function holdsPrimary(project: MatchableProject, reported: RepoReport[]): boolean {
+  return !!matchRepo({ ...project, repositories: null }, reported);
+}
+
 // The same question assignmentsFor asks, minus the checkout — "what could this machine serve if
 // somebody cloned the repository". assignmentsFor is deliberately silent about those, because it
 // feeds a claim loop that must never iterate a project the claim would refuse; the app needs the
@@ -344,7 +353,7 @@ export function offersFor(
     if (!projectRunsWorkers(project.worker)) continue;
     if (!canServe(reachable, String(project._id))) continue;
     // Already served: offering it again invites a second clone of a repository this machine has
-    if (matchRepo(project, reported)) continue;
+    if (holdsPrimary(project, reported)) continue;
 
     const repositoryUrl = projectRepositoryUrl(project);
     if (!repositoryUrl) continue;
@@ -377,7 +386,7 @@ export function catalogueFor(
     if (!canServe(reachable, id)) continue;
 
     const repositoryUrl = projectRepositoryUrl(project);
-    const servedHere = !!matchRepo(project, reported);
+    const servedHere = holdsPrimary(project, reported);
 
     out.push({
       project: id,

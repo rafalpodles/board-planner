@@ -380,7 +380,7 @@ export async function prUrlNamesProjectRepo(
 ): Promise<boolean> {
   if (!prUrl) return true;
   const project = await db.Project.findById(projectId)
-    .select("repositoryUrl githubRepo gitlabRepo gitlabHost")
+    .select("repositoryUrl repositories githubRepo gitlabRepo gitlabHost")
     .lean<{ _id: unknown } & RepositoryFields | null>();
   return project ? namesProjectRepo(prUrl, project) : true;
 }

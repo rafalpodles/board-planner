@@ -371,3 +371,24 @@ describe("a project with several repositories (BP-1066)", () => {
     });
   });
 });
+
+describe("prUrlNamesProjectRepo on a project with several repositories (BP-1066)", () => {
+  const project = {
+    _id: "p1",
+    repositoryUrl: "https://github.com/acme/api",
+    repositories: [
+      { _id: "r-api", url: "https://github.com/acme/api" },
+      { _id: "r-web", url: "https://github.com/acme/web" },
+    ],
+  };
+
+  it("takes a pull request on any of the repositories as the project's own", () => {
+    expect(prUrlNamesProjectRepo("https://github.com/acme/api/pull/3", project)).toBe(true);
+    expect(prUrlNamesProjectRepo("https://github.com/acme/web/pull/9", project)).toBe(true);
+  });
+
+  it("still refuses one on a repository the project does not list, or on another host", () => {
+    expect(prUrlNamesProjectRepo("https://github.com/acme/other/pull/1", project)).toBe(false);
+    expect(prUrlNamesProjectRepo("https://evil.example.com/acme/web/pull/9", project)).toBe(false);
+  });
+});
