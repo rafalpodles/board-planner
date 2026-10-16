@@ -6006,6 +6006,20 @@ describe("a task naming the repository it changes (BP-1066)", () => {
       expect(findOneAndUpdate).not.toHaveBeenCalled();
     });
 
+    // A client that GETs a task and PUTs the whole object back echoes the id it was given, which the
+    // project may have dropped since; that must not block an unrelated edit
+    it("lets a stale repository be echoed back while something else is edited, but not be moved to", async () => {
+      const GONE = "6ab0f94eadb2609f98d84dfe";
+      setup(GONE, GONE);
+
+      const echoed = await updateTask(db, "p1", "t1", { title: "renamed", repository: GONE }, "actor");
+      expect(echoed.ok).toBe(true);
+
+      setup(null, null);
+      const moved = await updateTask(db, "p1", "t1", { repository: GONE }, "actor");
+      expect(moved).toMatchObject({ ok: false, status: 400 });
+    });
+
     it("reads an empty string as no repository", async () => {
       setup(API, null);
 

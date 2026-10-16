@@ -277,7 +277,7 @@ test.describe("choosing the repository on the task page", () => {
     await openAsMember(page);
 
     await expect(notice(page)).toHaveAttribute("data-reason", "repository-not-served");
-    await expect(notice(page)).toContainText("Your machine holds the checkout of app");
+    await expect(notice(page)).toContainText("the first listed one it holds a checkout of, here app");
     await expect(waiting(page)).toHaveCount(0);
   });
 

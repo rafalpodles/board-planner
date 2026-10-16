@@ -1714,13 +1714,13 @@ describe("the repository of a task", () => {
   it("says the reader's machine will not take a task naming a repository it does not hold", () => {
     rail(REPOSITORIES, "r2", ["r1"]);
 
-    expect(screen.getByText(/Your machine holds the checkout of app, and a machine takes only that repository's tasks/)).toBeTruthy();
+    expect(screen.getByText(/the first listed one it holds a checkout of, here app/)).toBeTruthy();
   });
 
   it("says nothing of it for the repository the machine holds", () => {
     rail(REPOSITORIES, "r1", ["r1"]);
 
-    expect(screen.queryByText(/Your machine holds the checkout/)).toBeNull();
+    expect(screen.queryByText(/the first listed one it holds a checkout of/)).toBeNull();
   });
 
   it("does not say it to somebody who is not the task's assignee, whose machine would not take it anyway", () => {
@@ -1733,6 +1733,6 @@ describe("the repository of a task", () => {
       currentUsername: "claude",
     });
 
-    expect(screen.queryByText(/Your machine holds the checkout/)).toBeNull();
+    expect(screen.queryByText(/the first listed one it holds a checkout of/)).toBeNull();
   });
 });

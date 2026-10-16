@@ -1082,15 +1082,8 @@ export async function updateTask(
   // until the assignee this update leaves behind is known.
   if (updates.agent === "") updates.agent = null;
 
-  // Same "no value" spelling as agent. Only an entry the project lists can be named, and the list
-  // read here is the one the write is judged against.
-  let repositoryBoard: { repositories?: RepositoryEntry[] | null } | null = null;
+  // Same "no value" spelling as agent. Judged further down, once the stored value is known.
   if (updates.repository === "") updates.repository = null;
-  if (updates.repository !== undefined) {
-    repositoryBoard = await db.Project.findById(projectId, "repositories").lean();
-    const refusal = repositoryRefusal(repositoryBoard ?? {}, updates.repository);
-    if (refusal) return { ok: false, error: refusal, status: 400 };
-  }
 
   // Both refusals below are sliced: they reach a model as a tool result, same as noSuchAccount.
   if (updates.category !== undefined || updates.status !== undefined) {
@@ -1193,6 +1186,18 @@ export async function updateTask(
   // exactly as it did.
   const before = oldTask.assignee as { _id?: unknown } | null | undefined;
   const storedAssignee = String((before && before._id) ?? before ?? "");
+
+  // Only a MOVE of the repository is judged, for the reason the assignee is below: a client that
+  // PUTs the whole object back echoes an id the project may have dropped since, and refusing it
+  // would block every unrelated edit. Only an entry the project lists can be moved to.
+  let repositoryBoard: { repositories?: RepositoryEntry[] | null } | null = null;
+  if (updates.repository !== undefined) {
+    repositoryBoard = await db.Project.findById(projectId, "repositories").lean();
+    if ((updates.repository ?? null) !== (oldTask.repository ?? null)) {
+      const refusal = repositoryRefusal(repositoryBoard ?? {}, updates.repository);
+      if (refusal) return { ok: false, error: refusal, status: 400 };
+    }
+  }
 
   // Only a MOVE is judged, never an echo of what is already stored. A REST or MCP client that GETs
   // a task, edits one field and PUTs the whole object back sends the assignee too — so judging

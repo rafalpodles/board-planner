@@ -138,8 +138,9 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
         .map((r) => r.name);
       return (
         <>
-          Your machine holds the checkout of {held.join(", ") || "another repository"}, and a machine takes only
-          that repository&apos;s tasks — pick it here, or clone this task&apos;s repository on the machine.
+          A machine takes the tasks of one repository per board — the first listed one it holds a checkout of,
+          here {held.join(", ") || "another repository"}. Pick it for this task, or use a machine whose
+          checkouts start with this task&apos;s repository.
         </>
       );
     }

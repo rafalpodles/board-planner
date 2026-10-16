@@ -240,7 +240,7 @@ function whyThisProblem({ reason, blockers }: HandoverProblem, key: string): str
     case "repository-not-chosen":
       return "this project lists several repositories and the task names none, so no machine takes it — set its repository";
     case "repository-not-served":
-      return "a machine takes only the tasks of the repository it holds a checkout of, and this task names another";
+      return "a machine takes the tasks of one repository per board, the first listed one it holds a checkout of, and this task names another";
     case "not-approved-yet":
       return "it is not in a column a machine claims from, so nothing will run it yet";
     case "unassigned":
