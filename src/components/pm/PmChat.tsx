@@ -21,6 +21,7 @@ import { BoardLoadFailed } from "@/components/ui/LoadFailed";
 import { AiKeyUnreadable, AiLocked, AiNeedsKey } from "@/components/AiNeedsKey";
 import { EMPTY_THREAD, withNewestPage, withOlderPage, type ThreadPage } from "./thread-paging";
 import { AiBadge } from "@/components/ui/AiBadge";
+import { toolStatus } from "./tool-status";
 
 const MAX_ATTACHMENTS = 4;
 const MAX_INPUT_HEIGHT = 200;
@@ -80,6 +81,7 @@ export function PmChat({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [liveActions, setLiveActions] = useState<{ tool: string; taskKey?: string; summary: string }[]>([]);
+  const [liveText, setLiveText] = useState("");
   const [recovering, setRecovering] = useState(false);
   const [stopping, setStopping] = useState(false);
   // The server takes a turn's lock before it answers the send, and answers at once, so an answer
@@ -152,7 +154,7 @@ export function PmChat({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [newestId, liveActions, working]);
+  }, [newestId, liveActions, liveText, working]);
 
   // Stream lost mid-turn: poll history until the assistant message is finalized (BP-452).
   const recoveryPoll = useCallback(async () => {
@@ -168,6 +170,7 @@ export function PmChat({
         setStopping(false);
         setWorkingStatus("");
         setLiveActions([]);
+        setLiveText("");
         refreshTaskMap();
         emitBoardRefresh(projectId);
         return;
@@ -318,6 +321,7 @@ export function PmChat({
     setWorking(true);
     setWorkingStatus("PM is thinking…");
     setLiveActions([]);
+    setLiveText("");
 
     const sentPending = pending;
     const sentAttachments = pending.map(({ previewUrl: _preview, ...rest }) => rest);
@@ -354,6 +358,7 @@ export function PmChat({
       sendGeneration.current++;
       setWorking(false);
       setWorkingStatus("");
+      setLiveText("");
       setThread((current) => ({ ...current, messages: current.messages.filter((m) => m._id !== optimisticId) }));
       setInput(message);
       // Merged rather than overwritten, because onDrop is not gated on `working` and anything added
@@ -420,7 +425,15 @@ export function PmChat({
           if (!eventLine || !dataLine) continue;
           const data = JSON.parse(dataLine);
 
-          if (eventLine === "action") {
+          if (eventLine === "round") {
+            setLiveText("");
+            setWorkingStatus("PM is thinking…");
+          } else if (eventLine === "delta") {
+            setLiveText((prev) => prev + data.text);
+            setWorkingStatus("PM is writing…");
+          } else if (eventLine === "tool") {
+            setWorkingStatus(toolStatus(data.tool, data.phase));
+          } else if (eventLine === "action") {
             setLiveActions((prev) => [...prev, data]);
             setWorkingStatus(data.summary);
             emitBoardRefresh(projectId);
@@ -453,6 +466,7 @@ export function PmChat({
       setStopping(false);
       setWorkingStatus("");
       setLiveActions([]);
+      setLiveText("");
     } catch {
       setRecovering(true);
       setWorkingStatus("Connection lost — recovering the answer…");
@@ -667,7 +681,12 @@ export function PmChat({
             <div className="max-w-[85%] bg-bg-card border border-border rounded-lg px-3 py-2">
               <p className="mb-1 mr-1.5 inline-block text-[11px] font-medium text-text-muted">PM Agent</p>
               <AiBadge />
-              <div className="flex items-center gap-2 text-sm text-text-muted">
+              {liveText && (
+                <div className="text-sm prose-sm break-words" data-testid="pm-live-text">
+                  <MarkdownContent>{liveText}</MarkdownContent>
+                </div>
+              )}
+              <div className="flex items-center gap-2 text-sm text-text-muted" role="status">
                 <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-primary border-t-transparent shrink-0" />
                 {workingStatus || "PM is working…"}
               </div>

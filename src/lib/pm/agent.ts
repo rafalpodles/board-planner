@@ -29,6 +29,11 @@ export interface PmTurnEvent {
   summary: string;
 }
 
+export type PmStreamEvent =
+  | { type: "round" }
+  | { type: "delta"; text: string }
+  | { type: "tool"; tool: string; phase: "preparing" | "running" };
+
 export interface PmTurnResult {
   ok: boolean;
   message: IPmMessage | null;
@@ -178,6 +183,8 @@ export async function runPmTurn(db: ScopedDb, opts: {
    */
   autonomous?: boolean;
   onEvent?: (event: PmTurnEvent) => void;
+  /** Asks for each model call to be streamed; a turn with nobody watching leaves it out */
+  onStream?: (event: PmStreamEvent) => void;
   signal?: AbortSignal;
 }): Promise<PmTurnResult> {
   await connectDB();
@@ -337,6 +344,7 @@ export async function runPmTurn(db: ScopedDb, opts: {
   for (let step = 0; step < MAX_STEPS; step++) {
     if (opts.signal?.aborted) return interrupted();
 
+    opts.onStream?.({ type: "round" });
     const completion = await gatewayChat(db, { source: "pm", projectId: opts.projectId, userId: opts.triggeredByUserId }, {
       model,
       messages,
@@ -347,6 +355,16 @@ export async function runPmTurn(db: ScopedDb, opts: {
       cachePrefixLength: stablePrefixLength,
       sessionId,
       signal: opts.signal,
+      ...(opts.onStream
+        ? {
+            onDelta: (delta) =>
+              opts.onStream!(
+                delta.type === "text"
+                  ? { type: "delta", text: delta.text }
+                  : { type: "tool", tool: delta.name, phase: "preparing" }
+              ),
+          }
+        : {}),
     });
 
     if (completion.type === "aborted") {
@@ -375,6 +393,7 @@ export async function runPmTurn(db: ScopedDb, opts: {
 
       let result: unknown;
       let action: PmTurnEvent | undefined;
+      opts.onStream?.({ type: "tool", tool: call.name, phase: "running" });
 
       if (call.parseError) {
         result = { error: `Invalid tool arguments: ${call.parseError}` };

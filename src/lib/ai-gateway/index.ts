@@ -99,7 +99,7 @@ export async function gatewayChat(
   });
   if (completion.type === "text" || completion.type === "tool_calls") {
     await record(db, { ...context, keySource: gate.keySource, model: opts.model, usage: completion.usage }, gate.counter);
-  } else if (completion.type === "aborted") {
+  } else if (completion.type === "aborted" || (completion.type === "error" && completion.sent)) {
     // A request that reached the provider is billed whether or not anyone waited for the answer
     const sent = sentTokens(opts.messages);
     const usage = { promptTokens: sent, completionTokens: 0, totalTokens: sent, cachedPromptTokens: 0, cacheWriteTokens: 0 };

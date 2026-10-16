@@ -62,7 +62,15 @@ export type OrCompletionResult =
       usage?: OrUsage;
     }
   | { type: "aborted" }
-  | { type: "error"; error: string };
+  /** `sent`: the request reached the provider and began to answer, so it was billed though nothing usable came back */
+  | { type: "error"; error: string; sent?: boolean };
+
+export type OrStreamDelta =
+  | { type: "text"; text: string }
+  | { type: "tool"; name: string };
+
+/** Silence from the provider, comments and chunks alike, after which a stream is given up on */
+export const STREAM_IDLE_MS = 60_000;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function usageOf(data: any): OrUsage | undefined {
@@ -118,10 +126,17 @@ export async function chatCompletion(opts: {
   sessionId?: string;
   provider?: ProviderPreferences;
   signal?: AbortSignal;
+  /** Asks the provider to stream the answer and reports it as it arrives; the result is the same one a plain call returns */
+  onDelta?: (delta: OrStreamDelta) => void;
+  idleMs?: number;
 }): Promise<OrCompletionResult> {
   const { apiKey } = opts;
   // A provider's refusal of a key can quote it back, and what lands here reaches a thread every member reads
   const withoutKey = (text: string) => (apiKey ? text.replaceAll(apiKey, "[key]") : text);
+
+  const streaming = opts.onDelta !== undefined;
+  const idle = streaming ? new AbortController() : null;
+  const signal = idle && opts.signal ? AbortSignal.any([opts.signal, idle.signal]) : (idle?.signal ?? opts.signal);
 
   let response: Response;
   try {
@@ -151,8 +166,9 @@ export async function chatCompletion(opts: {
           })),
           tool_choice: "auto",
         }),
+        ...(streaming && { stream: true, stream_options: { include_usage: true } }),
       }),
-      signal: opts.signal,
+      signal,
     });
   } catch (err) {
     if (opts.signal?.aborted) return { type: "aborted" };
@@ -162,6 +178,10 @@ export async function chatCompletion(opts: {
   if (!response.ok) {
     const bodyText = await response.text().catch(() => "");
     return { type: "error", error: `OpenRouter HTTP ${response.status}: ${withoutKey(bodyText).slice(0, 300)}` };
+  }
+
+  if (streaming) {
+    return readStream(response, opts.onDelta!, { signal: opts.signal, idle: idle!, idleMs: opts.idleMs ?? STREAM_IDLE_MS, withoutKey });
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -181,31 +201,146 @@ export async function chatCompletion(opts: {
 
   const rawCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
   if (rawCalls.length > 0) {
-    const calls: OrToolCall[] = rawCalls.map(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (tc: any, i: number) => {
-        const id = tc?.id || `call_${i}`;
-        const name = tc?.function?.name || "";
-        const rawArgs = tc?.function?.arguments ?? "{}";
-        try {
-          const parsed = typeof rawArgs === "string" ? JSON.parse(rawArgs || "{}") : rawArgs;
-          if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-            return { id, name, args: null, parseError: "arguments must be a JSON object" };
-          }
-          return { id, name, args: parsed as Record<string, unknown> };
-        } catch {
-          return { id, name, args: null, parseError: `arguments are not valid JSON: ${String(rawArgs).slice(0, 200)}` };
-        }
-      }
-    );
     return {
       type: "tool_calls",
       content: message.content || "",
-      calls,
+      calls: parseToolCalls(rawCalls),
       assistantMessage: message,
       usage: usageOf(data),
     };
   }
 
   return { type: "text", content: message.content || "", usage: usageOf(data) };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseToolCalls(rawCalls: any[]): OrToolCall[] {
+  return rawCalls.map((tc, i) => {
+    const id = tc?.id || `call_${i}`;
+    const name = tc?.function?.name || "";
+    const rawArgs = tc?.function?.arguments ?? "{}";
+    try {
+      const parsed = typeof rawArgs === "string" ? JSON.parse(rawArgs || "{}") : rawArgs;
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        return { id, name, args: null, parseError: "arguments must be a JSON object" };
+      }
+      return { id, name, args: parsed as Record<string, unknown> };
+    } catch {
+      return { id, name, args: null, parseError: `arguments are not valid JSON: ${String(rawArgs).slice(0, 200)}` };
+    }
+  });
+}
+
+// A stream cut short may hold half a tool call, so only one that ends as the protocol says is believed
+
+async function readStream(
+  response: Response,
+  onDelta: (delta: OrStreamDelta) => void,
+  { signal, idle, idleMs, withoutKey }: { signal?: AbortSignal; idle: AbortController; idleMs: number; withoutKey: (text: string) => string }
+): Promise<OrCompletionResult> {
+  if (!response.body) return { type: "error", error: "OpenRouter returned no stream" };
+
+  let content = "";
+  let usage: OrUsage | undefined;
+  let finished = false;
+  let failure: string | null = null;
+  const calls = new Map<number, { id: string; name: string; args: string }>();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  const rearm = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      timedOut = true;
+      idle.abort();
+    }, idleMs);
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const take = (chunk: any) => {
+    if (chunk?.error) {
+      failure = `OpenRouter error: ${withoutKey(String(chunk.error.message ?? "the stream failed"))}`;
+      return;
+    }
+    if (chunk?.usage) usage = usageOf(chunk);
+    const choice = chunk?.choices?.[0];
+    if (!choice) return;
+    const delta = choice.delta ?? {};
+    if (typeof delta.content === "string" && delta.content) {
+      content += delta.content;
+      onDelta({ type: "text", text: delta.content });
+    }
+    for (const part of Array.isArray(delta.tool_calls) ? delta.tool_calls : []) {
+      const index = Number.isInteger(part?.index) ? part.index : 0;
+      const call = calls.get(index) ?? { id: "", name: "", args: "" };
+      const named = Boolean(call.name);
+      if (part?.id) call.id = part.id;
+      if (part?.function?.name) call.name += part.function.name;
+      if (typeof part?.function?.arguments === "string") call.args += part.function.arguments;
+      calls.set(index, call);
+      if (!named && call.name) onDelta({ type: "tool", name: call.name });
+    }
+    if (choice.finish_reason === "error") failure = failure ?? "OpenRouter error: the provider failed mid-answer";
+    if (choice.finish_reason) finished = true;
+  };
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  rearm();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      rearm();
+      buffer += decoder.decode(value, { stream: true });
+      let end;
+      while ((end = buffer.search(/\r?\n\r?\n/)) !== -1) {
+        const event = buffer.slice(0, end);
+        buffer = buffer.slice(end).replace(/^\r?\n\r?\n/, "");
+        const data = event
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trimStart())
+          .join("\n");
+        if (!data) continue;
+        if (data === "[DONE]") {
+          finished = true;
+          continue;
+        }
+        try {
+          take(JSON.parse(data));
+        } catch {
+          failure = failure ?? "OpenRouter sent an unreadable chunk";
+        }
+        if (failure) break;
+      }
+      if (failure) break;
+    }
+  } catch {
+    if (signal?.aborted) return { type: "aborted" };
+    failure = timedOut
+      ? `The model stopped responding (nothing received for ${Math.round(idleMs / 1000)} s).`
+      : "The connection to the model was cut off before the answer was complete.";
+  } finally {
+    clearTimeout(timer);
+    await reader.cancel().catch(() => {});
+  }
+
+  if (signal?.aborted) return { type: "aborted" };
+  if (failure) return { type: "error", error: failure, sent: true };
+  if (!finished) return { type: "error", error: "The connection to the model was cut off before the answer was complete.", sent: true };
+
+  if (calls.size > 0) {
+    const raw = [...calls.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, c], i) => ({ id: c.id || `call_${i}`, type: "function", function: { name: c.name, arguments: c.args } }));
+    return {
+      type: "tool_calls",
+      content,
+      calls: parseToolCalls(raw),
+      assistantMessage: { role: "assistant", content, tool_calls: raw },
+      usage,
+    };
+  }
+  return { type: "text", content, usage };
 }
