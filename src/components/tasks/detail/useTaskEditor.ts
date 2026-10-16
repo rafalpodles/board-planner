@@ -42,7 +42,6 @@ export interface TaskDraft {
   checklist: ChecklistDraftItem[];
   sprint: string | null;
   agent: string | null;
-  repository: string | null;
   recurrence: { frequency: RecurrenceFrequency; interval: number; endDate: string | null } | null;
   customFieldValues: Record<string, unknown>;
 }
@@ -62,7 +61,6 @@ export function draftFromTask(task: ApiTask): TaskDraft {
     // against the draft, and an object would make the field read as permanently edited.
     agent: refIdOf(task.agent),
     sprint: task.sprint || null,
-    repository: task.repository ?? null,
     recurrence: task.recurrence
       ? {
           frequency: task.recurrence.frequency,

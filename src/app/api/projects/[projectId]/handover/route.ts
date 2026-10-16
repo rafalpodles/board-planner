@@ -4,10 +4,11 @@ import { withProjectAccess } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { getProjectColumns } from "@/lib/columns";
 import { projectRepositoryUrl } from "@/lib/repository";
-import { projectRepositories } from "@/lib/repositories";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import { machineReadinessFor } from "@/lib/worker-service";
-import { servedRepository } from "@/lib/repo-match";
+import { hasSeveralRepositories } from "@/lib/repositories";
+import { repositoryCoverage } from "@/lib/repo-match";
+import { MULTI_REPOSITORY } from "@/lib/worker-capabilities";
 import type { ApiHandoverReadiness } from "@/types";
 import { claimingMachineIds } from "@/lib/machine-limit";
 
@@ -24,14 +25,15 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
     db.Project.findById(projectId, "repositoryUrl repositories githubRepo gitlabRepo worker columns").lean(),
     db.Worker.find(
       { owner: user._id },
-      "enabled owner lastSeenAt repos preflight command commandIssuedAt commandAckedAt bindingError halt"
+      "enabled owner lastSeenAt repos capabilities preflight command commandIssuedAt commandAckedAt bindingError halt"
     ).lean(),
     check(db, user, projectId, "admin"),
     claimingMachineIds(db),
   ]);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  const machine = machineReadinessFor(workers, project, new Date(), claiming);
+  const judged = judgeMachines(project, workers);
+  const machine = machineReadinessFor(judged.workers, project, new Date(), claiming);
   const body: ApiHandoverReadiness = {
     canAdmin,
     repositoryUrl: projectRepositoryUrl(project),
@@ -41,10 +43,43 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
     machine: machine.state,
     bindingError: machine.bindingError,
     haltedBy: machine.haltedBy,
-    repositories: projectRepositories(project).map((r) => ({ id: r.id, name: r.name || r.url })),
-    machineRepositories: [
-      ...new Set(workers.flatMap((w) => servedRepository(project, w.repos ?? [])?.id ?? [])),
-    ],
+    ...judged.extra,
   };
   return NextResponse.json(body);
 });
+
+type ReaderWorker = { enabled?: boolean; repos?: { remote: string; path: string }[]; capabilities?: string[] };
+
+/**
+ * Which of the reader's machines count for a board that lists several repositories, and what to say
+ * when none of them can take it. The claim takes a machine only with every checkout and a worker that
+ * can run them together, so the state shown is that of the machines the claim would accept, never of a
+ * machine that holds one repository and would be refused: a laptop that is online with one checkout
+ * must not hide a desktop that is switched off with both.
+ *
+ * Only the reader's own machines ever reach this: whose machine holds what is not a member's business.
+ */
+function judgeMachines<W extends ReaderWorker>(
+  project: Parameters<typeof hasSeveralRepositories>[0] & Parameters<typeof repositoryCoverage>[0],
+  workers: W[]
+): { workers: W[]; extra: { machineMissing?: string[]; machineNeedsUpdate?: boolean } } {
+  if (!hasSeveralRepositories(project)) return { workers, extra: {} };
+
+  const covered = workers.map((worker) => ({
+    worker,
+    missing: repositoryCoverage(project, worker.repos ?? []).missing.map((r) => r.name),
+    capable: (worker.capabilities ?? []).includes(MULTI_REPOSITORY),
+  }));
+  const whole = covered.filter((c) => c.missing.length === 0);
+
+  const ready = whole.filter((c) => c.capable);
+  if (ready.length > 0) return { workers: ready.map((c) => c.worker), extra: {} };
+  if (whole.length > 0) return { workers: whole.map((c) => c.worker), extra: { machineNeedsUpdate: true } };
+
+  const fewest = Math.min(...covered.map((c) => c.missing.length), Infinity);
+  const nearest = covered.filter((c) => c.missing.length === fewest);
+  return {
+    workers: nearest.map((c) => c.worker),
+    extra: nearest.length > 0 ? { machineMissing: nearest[0].missing } : {},
+  };
+}

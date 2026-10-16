@@ -12,7 +12,6 @@ import { ACTION_RECORD_LABEL } from "./labels";
 import { replayHistory, stripSpoofedLabels, HISTORY_AUTHOR_PREFIX } from "./history";
 import { pmThreadFilter } from "./thread";
 import { getProjectColumns, defaultStatusFor } from "@/lib/columns";
-import { projectRepositories } from "@/lib/repositories";
 import { APP_NAME } from "@/lib/brand";
 import type { ScopedDb } from "@/lib/db-scope";
 import { gatewayChat, openGate } from "@/lib/ai-gateway";
@@ -114,14 +113,6 @@ export function buildSystemPrompt(
     // the autonomous board review. Raw, a name containing a newline could add a rule of its own.
     `- Task categories in this project: ${JSON.stringify((project.categories || []).map((c: { name: string }) => c.name)) }.`
   );
-  const repositories = projectRepositories(project);
-  if (repositories.length > 1) {
-    lines.push(
-      // Encoded for the reason the categories above are: names are member-writable
-      `- This project lists several repositories; give a task the one it changes with the \`repository\` parameter of create_task/update_task, or a machine will not take it: ` +
-        JSON.stringify(repositories.map((r) => ({ id: r.id, name: r.name || r.url })))
-    );
-  }
   // Without the names and options the `fields` parameter is unusable — the model
   // would be guessing at both. Size and component live here since CP-213.
   const fields = (project.customFields || []).filter((f: { archived?: boolean }) => !f.archived);

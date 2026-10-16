@@ -20,12 +20,10 @@ vi.mock("@/models/worker", () => ({
   Worker: { find: () => ({ select: workerFindOthers }) },
 }));
 const ownerReachableProjectIds = vi.fn();
-const claimableRepositories = vi.fn();
 vi.mock("@/lib/worker-service", () => ({
   verifyWorkerCredential,
   verdictFor,
   ownerReachableProjectIds,
-  claimableRepositories,
   PROTOCOL_VERSION: 1,
 }));
 const releaseTask = vi.fn();
@@ -117,7 +115,6 @@ function hydrated(fields: Record<string, unknown>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  claimableRepositories.mockReturnValue(null);
   projectFindOne.mockResolvedValue({ _id: "p1", githubRepo: "owner/repo", worker: { enabled: true } });
   workerFindOthers.mockResolvedValue([]);
   resolveProjectId.mockResolvedValue(OID);
@@ -182,7 +179,7 @@ describe("POST /tasks/claim", () => {
       params: Promise.resolve({ projectId: "CP" }),
     });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", null, null, null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", null, null);
   });
 
   /**
@@ -196,7 +193,7 @@ describe("POST /tasks/claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER, null, null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER, null);
     expect(snapshotFor).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, undefined, OWNER);
   });
 
@@ -211,7 +208,7 @@ describe("POST /tasks/claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER, null, null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER, null);
     expect(snapshotFor).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, undefined, OWNER);
   });
 
@@ -501,7 +498,7 @@ describe("the worker's identity does not decide what is claimed", () => {
 
     // The owner is what is claimed on. The identity is the sixth argument, who the History row is
     // written as, and nothing in the claim's filter reads it (BP-1045)
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", "u-worker", null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", "u-worker");
   });
 });
 
@@ -536,7 +533,7 @@ describe("the worker's owner travels with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", null, null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", null);
   });
 
   it("passes the owner set at enrolment", async () => {
@@ -545,36 +542,30 @@ describe("the worker's owner travels with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", null, null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", null);
   });
 });
 
-// BP-1066. A board with several repositories offers a machine only the tasks of the one its
-// assignment names, and that restriction has to reach the claim's filter.
-describe("the repositories a claim may take a task for", () => {
-  it("hands the claim what the worker service says this machine may take", async () => {
+// BP-1070. A project that lists several repositories is claimed only by a worker that says it can run
+// them together, and the verdict has to hear that from the request that is claiming.
+describe("the capabilities the claiming request names", () => {
+  it("hands the verdict what the request said, and nothing when it said nothing", async () => {
     verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], owner: "u-owner" });
-    claimableRepositories.mockReturnValue(["r-web"]);
     claimNextTask.mockResolvedValue(null);
 
+    await POST(request({ ...authed, "x-cp-capabilities": "multi-repository" }), { params: Promise.resolve({ projectId: "CP" }) });
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", null, ["r-web"]);
+    expect(verdictFor.mock.calls[0][6]).toEqual(["multi-repository"]);
+    expect(verdictFor.mock.calls[1][6]).toEqual([]);
   });
 
-  // The projection is what hands the claim every repository of the board; leave it out and a board
-  // with several is judged as having its first only
-  it("reads the project's repositories, and judges the project it read", async () => {
+  it("reads the project's repositories, or a board with several is judged as having one", async () => {
     verifyWorkerCredential.mockResolvedValue({ _id: OID, assignments: [], owner: "u-owner" });
     claimNextTask.mockResolvedValue(null);
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
     expect(projectSelect.mock.calls[0][0].split(/\s+/)).toContain("repositories");
-    expect(claimableRepositories).toHaveBeenCalledWith(
-      expect.objectContaining({ _id: OID }),
-      expect.objectContaining({ _id: "p1" }),
-      expect.anything()
-    );
   });
 });

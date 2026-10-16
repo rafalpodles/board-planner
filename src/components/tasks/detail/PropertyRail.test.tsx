@@ -19,7 +19,6 @@ const draft: TaskDraft = {
   checklist: [],
   sprint: null,
   agent: null,
-  repository: null,
   recurrence: null,
   customFieldValues: {},
 };
@@ -1646,15 +1645,12 @@ describe("PropertyRail before the agent list has answered", () => {
   });
 });
 
-// BP-1066. A board with several repositories needs each task to name the one it changes.
-describe("the repository of a task", () => {
+// BP-1070. A board that lists several repositories runs a task in all of them, so the reader is told
+// what their own machine lacks instead of "waiting for your machine".
+describe("a board that lists several repositories", () => {
   const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" } as ApiUser;
   const AGENT = [{ _id: "a1", name: "Default" }] as React.ComponentProps<typeof PropertyRail>["agents"];
-  const REPOSITORIES = [
-    { id: "r1", name: "app" },
-    { id: "r2", name: "site" },
-  ];
-  const board = (repositories: { id: string; name: string }[]) => ({
+  const board = (over: Record<string, unknown> = {}) => ({
     repositoryUrl: "https://github.com/acme/app",
     workerEnabled: true,
     lockedByInstance: false,
@@ -1663,84 +1659,49 @@ describe("the repository of a task", () => {
     machine: "live" as const,
     bindingError: "",
     haltedBy: null,
-    repositories,
+    ...over,
   });
-  const rail = (
-    repositories: { id: string; name: string }[],
-    taskRepository: string | null = null,
-    machineRepositories: string[] = []
-  ) =>
+  const rail = (over: Record<string, unknown> = {}, currentUsername = "owner") =>
     renderRail({
       agents: AGENT,
       columns: BOARD,
-      board: { ...board(repositories), machineRepositories },
-      draft: { ...draft, agent: "a1", assignee: "owner", repository: taskRepository },
-      stored: { agent: "a1", assignee: OWNER, assignedBy: OWNER, status: "ready" as never, repository: taskRepository },
+      board: board(over),
+      draft: { ...draft, agent: "a1", assignee: "owner" },
+      stored: { agent: "a1", assignee: OWNER, assignedBy: OWNER, status: "ready" as never },
+      currentUsername,
     });
 
-  it("is not asked for on a board with one repository", () => {
-    rail([REPOSITORIES[0]]);
+  it("names the repositories the reader's machine has no checkout of", () => {
+    rail({ machineMissing: ["site", "docs"] });
 
-    expect(screen.queryByText("Repository")).toBeNull();
+    expect(screen.getByText(/has no checkout of site or docs\. Clone them on that machine/)).toBeTruthy();
   });
 
-  it("offers each repository by name once the board lists several, and writes the one picked", async () => {
-    const set = rail(REPOSITORIES);
-    await openRow("Repository");
+  it("says it of one repository in the singular", () => {
+    rail({ machineMissing: ["site"] });
 
-    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(
-      expect.arrayContaining([expect.stringContaining("app"), expect.stringContaining("site")])
-    );
-    await pick(/site/);
-    expect(set).toHaveBeenCalledWith("repository", "r2");
+    expect(screen.getByText(/has no checkout of site\. Clone it on that machine/)).toBeTruthy();
   });
 
-  it("clears the repository on No repository", async () => {
-    const set = rail(REPOSITORIES, "r2");
-    await openRow("Repository");
-    await pick(/No repository/);
+  it("says the worker is too old when the machine has them all", () => {
+    rail({ machineNeedsUpdate: true });
 
-    expect(set).toHaveBeenCalledWith("repository", null);
+    expect(screen.getByText(/its worker is too old to run more than one in a task/)).toBeTruthy();
   });
 
-  it("shows the repository a task names", () => {
-    rail(REPOSITORIES, "r2");
+  it("says nothing of it for a board that lists one repository, and waits for the machine as it did", () => {
+    rail({});
 
-    expect(screen.getByText("site")).toBeTruthy();
-    expect(screen.queryByText("Choose one")).toBeNull();
+    expect(screen.queryByText(/has no checkout of/)).toBeNull();
+    expect(screen.queryByText(/too old/)).toBeNull();
+    expect(screen.getByTestId("handover-waiting")).toBeTruthy();
   });
 
-  it("says a machine will not take a task that names none, and stops saying it once it does", () => {
-    rail(REPOSITORIES);
-    expect(screen.getByText(/lists several repositories and the task names none/)).toBeTruthy();
-    cleanup();
+  // Whose machine holds what is the reader's business only when the machine is the reader's to run it
+  it("does not say it to somebody who is not the task's assignee", () => {
+    rail({ machineMissing: ["site"], machineNeedsUpdate: true }, "claude");
 
-    rail(REPOSITORIES, "r1");
-    expect(screen.queryByText(/lists several repositories and the task names none/)).toBeNull();
-  });
-
-  it("says the reader's machine will not take a task naming a repository it does not hold", () => {
-    rail(REPOSITORIES, "r2", ["r1"]);
-
-    expect(screen.getByText(/the first listed one it holds a checkout of, here app/)).toBeTruthy();
-  });
-
-  it("says nothing of it for the repository the machine holds", () => {
-    rail(REPOSITORIES, "r1", ["r1"]);
-
-    expect(screen.queryByText(/the first listed one it holds a checkout of/)).toBeNull();
-  });
-
-  it("does not say it to somebody who is not the task's assignee, whose machine would not take it anyway", () => {
-    renderRail({
-      agents: AGENT,
-      columns: BOARD,
-      board: { ...board(REPOSITORIES), machineRepositories: ["r1"] },
-      draft: { ...draft, agent: "a1", assignee: "owner", repository: "r2" },
-      stored: { agent: "a1", assignee: OWNER, assignedBy: OWNER, status: "ready" as never, repository: "r2" },
-      currentUsername: "claude",
-    });
-
-    expect(screen.queryByText(/the first listed one it holds a checkout of/)).toBeNull();
+    expect(screen.queryByText(/has no checkout of/)).toBeNull();
+    expect(screen.queryByText(/too old/)).toBeNull();
   });
 });

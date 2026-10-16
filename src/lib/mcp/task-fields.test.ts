@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dueDateValue, recurrenceValue, repositoryForWrite, sprintClears, sprintForWrite } from "./task-fields";
+import { dueDateValue, recurrenceValue, sprintClears, sprintForWrite } from "./task-fields";
 
 describe("dueDateValue", () => {
   it("passes a day and clears on an empty string", () => {
@@ -92,26 +92,5 @@ describe("sprintForWrite", () => {
   it("names the sprints the board has when nothing matches", () => {
     expect(() => sprintForWrite("Nope", SPRINTS)).toThrow(/Sprints: Sprint 4, Hardening, Old/);
     expect(() => sprintForWrite("Nope", [])).toThrow(/Sprints: none/);
-  });
-});
-
-describe("repositoryForWrite (BP-1066)", () => {
-  const repositories = [
-    { id: "r1", name: "API", url: "https://github.com/acme/api" },
-    { id: "r2", name: "", url: "https://github.com/acme/web" },
-  ];
-
-  it("takes an id, a name in any case, or an address", () => {
-    expect(repositoryForWrite("r2", repositories)).toBe("r2");
-    expect(repositoryForWrite("api", repositories)).toBe("r1");
-    expect(repositoryForWrite("https://github.com/acme/web", repositories)).toBe("r2");
-  });
-
-  it("clears on an empty string", () => {
-    expect(repositoryForWrite("", repositories)).toBeNull();
-  });
-
-  it("refuses an unknown reference with the board's own list", () => {
-    expect(() => repositoryForWrite("nope", repositories)).toThrow(/Repositories: API \(r1\), https:\/\/github.com\/acme\/web \(r2\)/);
   });
 });

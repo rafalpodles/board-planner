@@ -16,7 +16,9 @@ export type ReadinessGap =
   | "machine-unbound"
   | "machine-paused"
   | "machine-stopped"
-  | "machine-failing";
+  | "machine-failing"
+  | "machine-missing-repository"
+  | "machine-needs-update";
 
 export interface ReadinessFacts {
   repositoryUrl?: string | null;
@@ -27,6 +29,10 @@ export interface ReadinessFacts {
   columns?: RoleBearing[];
   /** Unknown (`null`/omitted) is not judged: only the machine's own owner is ever told its state. */
   machine?: MachineState | null;
+  /** The repositories of a board that lists several which the reader's best machine lacks a checkout of */
+  machineMissing?: string[] | null;
+  /** The reader's machine holds every repository but its worker cannot run several in one go */
+  machineNeedsUpdate?: boolean | null;
 }
 
 type RoleBearing = { role: ColumnRole };
@@ -76,5 +82,10 @@ export function readinessGaps(facts: ReadinessFacts): ReadinessGap[] {
   // that cannot work until the repository is named
   const machineGap = facts.machine ? MACHINE_GAPS[facts.machine] : undefined;
   if (machineGap && !noRepository) gaps.push(machineGap);
+  // Only for a machine that is otherwise ready: a stopped or failing one has a better reason to give
+  if (facts.machine === "live") {
+    if (facts.machineMissing?.length) gaps.push("machine-missing-repository");
+    else if (facts.machineNeedsUpdate) gaps.push("machine-needs-update");
+  }
   return gaps;
 }

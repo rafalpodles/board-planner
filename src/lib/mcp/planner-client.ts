@@ -13,7 +13,6 @@ export interface McpProject {
   /** Only the single-project read carries these: where the repository is, and whether a token is stored (never the token) */
   repositoryUrl?: string;
   repositoryProvider?: "github" | "gitlab" | "";
-  repositories?: { id: string; name?: string; url: string }[];
   githubTokenSet?: boolean;
   gitlabTokenSet?: boolean;
 }

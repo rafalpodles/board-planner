@@ -1,3 +1,4 @@
+import { capabilitiesOf } from "@/lib/worker-capabilities";
 import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
@@ -20,7 +21,7 @@ const POLICY_FIELDS = ["pollIntervalMs"] as const;
 // The worker's own source of current policy and assignments between heartbeats, so it has to
 // answer the same question the heartbeat does — otherwise a worker that reported its checkouts
 // would never learn which projects they match.
-export const GET = withWorker(async (_request, { worker, db }) => {
+export const GET = withWorker(async (request, { worker, db }) => {
   // The one withWorker route that used to answer a killed worker, handing it its policy, its
   // assignments and the whole fleet inventory — an incomplete kill switch (BP-305)
   if (!worker.enabled) {
@@ -47,7 +48,8 @@ export const GET = withWorker(async (_request, { worker, db }) => {
     assignments: assignmentsFor(
       usableRepos(worker as never, others as never),
       projects as never,
-      reachable
+      reachable,
+      capabilitiesOf(request)
     ),
     // The other half of the same question: what this machine could serve if it had the checkout.
     // Rendered by the app as the projects you can add, so it carries an address to clone and a name

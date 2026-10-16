@@ -31,7 +31,6 @@ const {
   offersFor,
   lostCheckouts,
   usableRepos,
-  claimableRepositories,
   overriddenWorkerPolicy,
   ownerReachableProjectIds,
   registerWorker,
@@ -56,7 +55,8 @@ const verdictFor = (...args: Parameters<typeof rawVerdictFor>) =>
     args[2],
     args[3],
     args[4],
-    args.length > 5 ? args[5] : [PROJECT_ID]
+    args.length > 5 ? args[5] : [PROJECT_ID],
+    args[6]
   );
 
 const now = new Date("2026-08-01T12:00:00.000Z");
@@ -1177,66 +1177,9 @@ describe("a machine the Free plan's limit holds", () => {
   });
 });
 
-// BP-1066. A project lists several repositories and a worker binds one checkout per project, so the
-// entry its assignment names is the only one a claim may take a task for.
-describe("a project with several repositories", () => {
-  const API = "https://github.com/owner/api";
-  const WEB = "https://github.com/owner/web";
-  const several = () =>
-    project({
-      githubRepo: undefined,
-      repositoryUrl: API,
-      repositories: [
-        { _id: "r-api", url: API },
-        { _id: "r-web", url: WEB },
-      ],
-    });
-  const checkouts = (...remotes: string[]) => remotes.map((remote) => ({ remote, path: `/${remote}` }));
-  const holding = (...remotes: string[]) => worker({ repos: checkouts(...remotes) });
-
-  it("serves a machine that holds only the second repository", () => {
-    const machine = holding(WEB);
-
-    expect(verdictFor(machine, several(), PROTOCOL_VERSION, now)).toEqual({ ok: true });
-    expect(assignmentsFor(checkouts(WEB), [several()], [PROJECT_ID])[0].remote).toBe(WEB);
-    expect(claimableRepositories(machine, several(), [], now)).toEqual(["r-web"]);
-  });
-
-  it("names the first repository in the project's order when a machine holds both", () => {
-    const machine = holding(WEB, API);
-
-    expect(assignmentsFor(checkouts(WEB, API), [several()], [PROJECT_ID])[0].remote).toBe(API);
-    expect(claimableRepositories(machine, several(), [], now)).toEqual(["r-api"]);
-  });
-
-  it("refuses a machine that holds neither, and lets it claim nothing", () => {
-    const machine = holding("git@github.com:owner/other.git");
-
-    expect(verdictFor(machine, several(), PROTOCOL_VERSION, now).ok).toBe(false);
-    expect(claimableRepositories(machine, several(), [], now)).toEqual([]);
-  });
-
-  // The claim judges the checkouts the machine may actually use, so one lost to an earlier process on
-  // the same machine must not name the repository
-  it("names the repository of a checkout the machine did not lose to an earlier process", () => {
-    const mine = { _id: "w2", name: "second", host: "mac.home", enabled: true, lastSeenAt: fresh, createdAt: new Date("2026-02-01"), repos: checkouts(API, WEB) };
-    const older = { _id: "w1", name: "first", host: "mac.home", enabled: true, lastSeenAt: fresh, createdAt: new Date("2026-01-01"), repos: checkouts(API) };
-
-    expect(claimableRepositories(mine as never, several(), [older] as never, now)).toEqual(["r-web"]);
-    expect(claimableRepositories(mine as never, several(), [], now)).toEqual(["r-api"]);
-  });
-
-  it("puts no restriction on a project with one repository, stored or not", () => {
-    const stored = project({ githubRepo: undefined, repositoryUrl: API, repositories: [{ _id: "r-api", url: API }] });
-
-    expect(claimableRepositories(holding(API), stored, [], now)).toBeNull();
-    expect(claimableRepositories(worker(), project(), [], now)).toBeNull();
-  });
-});
-
-// BP-1066. What the app offers to clone and shows as served is about the primary address alone: a
-// machine holding only a later entry serves the project already, and cloning the primary onto it
-// would change which repository its assignment names.
+// BP-1066. What the app offers to clone and shows as served is about the primary address alone, as it
+// was before a project could list several repositories: a machine holding only a later entry is not
+// asked to clone the primary on its own.
 describe("the clone offer and the catalogue on a project with several repositories", () => {
   const API = "https://github.com/owner/api";
   const WEB = "https://github.com/owner/web";
@@ -1259,5 +1202,89 @@ describe("the clone offer and the catalogue on a project with several repositori
   it("calls it served, and offers nothing, once the primary is held", () => {
     expect(offersFor(onlyApi, [several], [PROJECT_ID])).toEqual([]);
     expect(catalogueFor(onlyApi, [several], [PROJECT_ID], undefined)[0]).toMatchObject({ servedHere: true, wanted: true });
+  });
+});
+
+// BP-1070. A project that lists several repositories is one run in several working trees: a machine
+// takes it only with a usable checkout of every one and a worker that says it can run them together.
+describe("a project that lists several repositories", () => {
+  const API = "https://github.com/owner/api";
+  const WEB = "https://github.com/owner/web";
+  const several = project({
+    githubRepo: undefined,
+    repositoryUrl: API,
+    repositories: [
+      { _id: "r-api", url: API, name: "api" },
+      { _id: "r-web", url: WEB, name: "web" },
+    ],
+  });
+  const checkouts = (...remotes: string[]) => remotes.map((remote) => ({ remote, path: `/e2e/${remote.split("/").pop()}` }));
+  const holding = (...remotes: string[]) => worker({ repos: checkouts(...remotes) });
+  const capable = ["multi-repository"];
+  const claim = (machine: never, capabilities: readonly string[], others: never[] = []) =>
+    verdictFor(machine, several, PROTOCOL_VERSION, now, others, [PROJECT_ID], capabilities);
+
+  it("takes a machine that holds both and says it can run several", () => {
+    expect(claim(holding(`${API}.git`, `${WEB}.git`), capable)).toEqual({ ok: true });
+  });
+
+  it("refuses a worker that does not say it can, however many checkouts it holds", () => {
+    const verdict = claim(holding(`${API}.git`, `${WEB}.git`), []);
+
+    expect(verdict).toEqual({ ok: false, reason: expect.stringContaining("update the worker") });
+  });
+
+  it("refuses a machine that holds only one, naming the one it lacks", () => {
+    expect(claim(holding(`${API}.git`), capable)).toEqual({ ok: false, reason: "this worker reports no checkout of web" });
+    expect(claim(holding(`${WEB}.git`), capable)).toEqual({ ok: false, reason: "this worker reports no checkout of api" });
+  });
+
+  it("refuses a machine whose checkout of one repository was lost to an earlier process on the same host", () => {
+    const mine = { _id: "w2", name: "second", host: "mac.home", enabled: true, lastSeenAt: fresh, createdAt: new Date("2026-02-01"), repos: checkouts(`${API}.git`, `${WEB}.git`), owner: "6a732075133f935b19154cd2", protocolVersion: PROTOCOL_VERSION };
+    const older = { _id: "w1", name: "first", host: "mac.home", enabled: true, lastSeenAt: fresh, createdAt: new Date("2026-01-01"), repos: checkouts(`${WEB}.git`) };
+
+    expect(claim(mine as never, capable, [older as never])).toEqual({ ok: false, reason: "this worker reports no checkout of web" });
+  });
+
+  it("names every repository the machine lacks", () => {
+    expect(claim(holding(), capable)).toEqual({ ok: false, reason: "this worker reports no checkout of api, web" });
+  });
+
+  // A one-entry stored list is still one repository: it must not demand the capability or a list
+  it("treats a project that stores one entry as one repository", () => {
+    const stored = project({ githubRepo: undefined, repositoryUrl: API, repositories: [{ _id: "r-api", url: API, name: "api" }] });
+
+    expect(verdictFor(holding(`${API}.git`), stored, PROTOCOL_VERSION, now, [], [PROJECT_ID], [])).toEqual({ ok: true });
+    const [assignment] = assignmentsFor(checkouts(`${API}.git`), [stored], [PROJECT_ID], []);
+    expect(assignment.remote).toBe(`${API}.git`);
+    expect(assignment).not.toHaveProperty("repositories");
+  });
+
+  it("is the control: a project with one repository needs no capability and no list", () => {
+    expect(verdictFor(worker(), project(), PROTOCOL_VERSION, now, [], [PROJECT_ID], [])).toEqual({ ok: true });
+  });
+
+  describe("the assignment", () => {
+    it("lists every repository with the remote the machine reported, and keeps the primary's as `remote`", () => {
+      const [assignment] = assignmentsFor(checkouts(`${WEB}.git`, `${API}.git`), [several], [PROJECT_ID], capable);
+
+      expect(assignment.remote).toBe(`${API}.git`);
+      expect(assignment.repositories).toEqual([
+        { id: "r-api", name: "api", remote: `${API}.git` },
+        { id: "r-web", name: "web", remote: `${WEB}.git` },
+      ]);
+    });
+
+    it("offers none to a worker that cannot run several, nor to a machine missing one", () => {
+      expect(assignmentsFor(checkouts(`${API}.git`, `${WEB}.git`), [several], [PROJECT_ID], [])).toEqual([]);
+      expect(assignmentsFor(checkouts(`${API}.git`), [several], [PROJECT_ID], capable)).toEqual([]);
+    });
+
+    it("leaves a project with one repository exactly as it was, with no list", () => {
+      const [assignment] = assignmentsFor(checkouts(REMOTE), [project()], [PROJECT_ID]);
+
+      expect(assignment.remote).toBe(REMOTE);
+      expect(assignment).not.toHaveProperty("repositories");
+    });
   });
 });

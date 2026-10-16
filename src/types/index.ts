@@ -831,6 +831,8 @@ export interface IWorker {
   platform: string;
   version: string;
   protocolVersion: number;
+  /** What the worker said it can do on its last heartbeat; absent means nothing. For the screen only: a claim reads the header. */
+  capabilities?: string[];
   credentialHash: string;
   repos: WorkerRepo[];
   policy: WorkerPolicy;
@@ -1268,7 +1270,6 @@ export interface ITask {
   watchers: Types.ObjectId[];
   sprint: Types.ObjectId | ISprint | null;
   agent: Types.ObjectId | IAgent | null;
-  repository?: string | null;
   customFieldValues: Map<string, unknown>;
   recurrence: IRecurrence | null;
   recurringParentId: Types.ObjectId | null;
@@ -1563,7 +1564,6 @@ export interface ApiTask {
   // Populated where the task is read whole, a bare id where a writer echoes back what it sent —
   // the same union `assignedBy` above carries, and for the same reason
   agent?: ApiAgentSummary | string | null;
-  repository?: string | null;
   customFieldValues: Record<string, unknown>;
   recurrence: ApiRecurrence | null;
   recurringParentId: string | null;
@@ -2101,10 +2101,10 @@ export interface ApiHandoverReadiness {
   bindingError: string;
   /** Who halted the reader's machine, when `machine` is "paused" or "stopped" */
   haltedBy: WorkerHaltSource | null;
-  /** The board's repositories, which a task names one of once there are several */
-  repositories?: { id: string; name: string }[];
-  /** Which of them the reader's own machines hold a checkout of, as their assignments name it */
-  machineRepositories?: string[];
+  /** For a board that lists several repositories: those the reader's best machine has no checkout of, by name */
+  machineMissing?: string[];
+  /** For such a board: the reader's machine has every checkout but its worker cannot run several at once */
+  machineNeedsUpdate?: boolean;
 }
 
 export type SetupGuideStepId =
