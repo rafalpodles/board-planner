@@ -1,5 +1,56 @@
 # Changelog
 
+## [1.9.0](https://github.com/rafalpodles/board-planner/compare/v1.8.0...v1.9.0) (2026-10-16)
+
+
+### Features
+
+* /api/version and the running version shown in Settings → Organisation (BP-723) ([#677](https://github.com/rafalpodles/board-planner/issues/677)) ([365c49e](https://github.com/rafalpodles/board-planner/commit/365c49e77b01c8eced3bd5d382c9eaaeb77cbf77))
+* a file goes with the last task, comment or board that names it (BP-1054) ([#701](https://github.com/rafalpodles/board-planner/issues/701)) ([537b22e](https://github.com/rafalpodles/board-planner/commit/537b22e44ed48fd1536bf310a04a6ecea6ec4d92))
+* a project lists its repositories, the first mirroring repositoryUrl (BP-986) ([#712](https://github.com/rafalpodles/board-planner/issues/712)) ([200f078](https://github.com/rafalpodles/board-planner/commit/200f078263d39d30a1e86b6aaeee92c0a8208362))
+* a project owner exports one project, with its history and files, as one file (BP-1011) ([#675](https://github.com/rafalpodles/board-planner/issues/675)) ([3b79216](https://github.com/rafalpodles/board-planner/commit/3b79216d98683528366a0249cebe6f92e1b39f36))
+* a setup guide in the sidebar for a board's owner (BP-1034) ([#665](https://github.com/rafalpodles/board-planner/issues/665)) ([100c007](https://github.com/rafalpodles/board-planner/commit/100c00795441d4b3924d425ad0056ded37019fbf))
+* add Lost card recovery for missing pages (BP-262) ([#667](https://github.com/rafalpodles/board-planner/issues/667)) ([0fd5a15](https://github.com/rafalpodles/board-planner/commit/0fd5a15f2b2b926b9e46f59f7d12fe51724e597e))
+* AI status summaries, standup, sprint and project, around figures the board counts (BP-870) ([#709](https://github.com/rafalpodles/board-planner/issues/709)) ([d4f59cd](https://github.com/rafalpodles/board-planner/commit/d4f59cd3423819c485e64b56ce3e82f0080d3985))
+* AI triage suggests an assignee, category and choice fields on a new task, shown or applied with an undo (BP-871) ([#710](https://github.com/rafalpodles/board-planner/issues/710)) ([6a7ad42](https://github.com/rafalpodles/board-planner/commit/6a7ad42dc4d67cd902b4ed091f550023bed056ae))
+* an admin can delete a worker that has gone quiet from the fleet console (BP-1040) ([#673](https://github.com/rafalpodles/board-planner/issues/673)) ([f6140e4](https://github.com/rafalpodles/board-planner/commit/f6140e49a96dc1af8279c71bd2f8016fffdea7d7))
+* an administrator lists the largest uploaded files and deletes them to free space (BP-1025) ([#692](https://github.com/rafalpodles/board-planner/issues/692)) ([74f9aaf](https://github.com/rafalpodles/board-planner/commit/74f9aaf4d1931da280191770534f00634731b23a))
+* an import engine that writes quietly, updates on a re-run and reports what it could not carry over (BP-863) ([#699](https://github.com/rafalpodles/board-planner/issues/699)) ([a7ce2ee](https://github.com/rafalpodles/board-planner/commit/a7ce2ee001406168590b1ca80d0438a01914c76b))
+* an import's parents and blockers become links on the board (BP-1059) ([#705](https://github.com/rafalpodles/board-planner/issues/705)) ([31f4eeb](https://github.com/rafalpodles/board-planner/commit/31f4eeb8ec83e1570ac5e9332e9ba826c1369495))
+* audit logs filter, page by cursor and export as CSV or NDJSON (BP-860) ([#696](https://github.com/rafalpodles/board-planner/issues/696)) ([f6a8f1b](https://github.com/rafalpodles/board-planner/commit/f6a8f1b426c538bad3115f847da4e3c466e5d1f7))
+* CSV import with a column-mapping step, on the import engine (BP-864) ([#703](https://github.com/rafalpodles/board-planner/issues/703)) ([e51784b](https://github.com/rafalpodles/board-planner/commit/e51784b36691492559b308104e9f18515001f4ad))
+* CSV presets for Asana, GitHub Projects and OpenProject exports (BP-964) ([#706](https://github.com/rafalpodles/board-planner/issues/706)) ([fe1df83](https://github.com/rafalpodles/board-planner/commit/fe1df83ab2d26e8356e213c7ed6fee875af2d8ad))
+* deleting an account removes its personal agents, the export is complete and the decision panel names a deleted user (BP-1036) ([#676](https://github.com/rafalpodles/board-planner/issues/676)) ([b4fc7e7](https://github.com/rafalpodles/board-planner/commit/b4fc7e7a4da376409a7000d824070ba7bed88219))
+* DORA on Insights from GitHub deployments read into a store by the sync (BP-878) ([#700](https://github.com/rafalpodles/board-planner/issues/700)) ([baa64ce](https://github.com/rafalpodles/board-planner/commit/baa64ce5b9d1d6cb1bb5363e21c02f40e1819d94))
+* duplicate detection ranks a lexical shortlist with one model call, on a new task and on demand (BP-872) ([#711](https://github.com/rafalpodles/board-planner/issues/711)) ([6b8d248](https://github.com/rafalpodles/board-planner/commit/6b8d248994f6903e4c9794198a13f5e060ba479c))
+* every comment and history entry says where it came from (BP-824) ([#695](https://github.com/rafalpodles/board-planner/issues/695)) ([75b33b5](https://github.com/rafalpodles/board-planner/commit/75b33b524ffb08ef8943409fb15fb407928611cf))
+* guided new-project wizard that creates the board with its workflow, fields and people in one request (BP-199) ([#670](https://github.com/rafalpodles/board-planner/issues/670)) ([951c99b](https://github.com/rafalpodles/board-planner/commit/951c99b616856f46b30070dc9e674aef334667a7))
+* insights route with lead time, cycle time, throughput and aging WIP behind reports.insights (BP-877) ([#691](https://github.com/rafalpodles/board-planner/issues/691)) ([8665ad8](https://github.com/rafalpodles/board-planner/commit/8665ad866605c2a8b1d6942b3905affff4791e59))
+* Jira import from its CSV, Excel and XML exports (BP-683) ([#704](https://github.com/rafalpodles/board-planner/issues/704)) ([86a5bc7](https://github.com/rafalpodles/board-planner/commit/86a5bc735ee42b90c40add9b8c04653967ffea63))
+* licence notices in the image and the menu bar app, an SBOM with each release and a SECURITY.md (BP-944) ([#686](https://github.com/rafalpodles/board-planner/issues/686)) ([0eab604](https://github.com/rafalpodles/board-planner/commit/0eab6044b7e34dd804ec38d923c4154d5b2f9cef))
+* link previews with a branded image and the task key, on the organisation's own host (BP-1058) ([#702](https://github.com/rafalpodles/board-planner/issues/702)) ([4cbd67b](https://github.com/rafalpodles/board-planner/commit/4cbd67ba42533a00a91c14cf3009cf4b7fde9c02))
+* release notes from finished tasks and merged pull requests, behind ai.release_notes (BP-869) ([#707](https://github.com/rafalpodles/board-planner/issues/707)) ([03db31f](https://github.com/rafalpodles/board-planner/commit/03db31ffb99a39facd6cb359fc372f2584b669e3))
+* status history that answers when a task started and finished, with a project on each activity row and an index (BP-876) ([#682](https://github.com/rafalpodles/board-planner/issues/682)) ([98ecfae](https://github.com/rafalpodles/board-planner/commit/98ecfaee2ba67b0a54cccae8b154c9bed9785a65))
+* stored secrets sealed under the instance key or in the clear are refused, and the reseal machinery is removed (BP-900) ([#693](https://github.com/rafalpodles/board-planner/issues/693)) ([a92540a](https://github.com/rafalpodles/board-planner/commit/a92540a937caddafd6b9ccadbaae7032d44640aa))
+* the backup service's deploy settings as Railway Infrastructure as Code (BP-1004) ([#688](https://github.com/rafalpodles/board-planner/issues/688)) ([1133e57](https://github.com/rafalpodles/board-planner/commit/1133e57bb39ac40ee0aec925ba24a4dc3b7f2064))
+* the Insights page, Pro, with a sample and the upsell on Free (BP-879) ([#694](https://github.com/rafalpodles/board-planner/issues/694)) ([6f326f0](https://github.com/rafalpodles/board-planner/commit/6f326f0ea7682da2091153ccc1583f34520b3531))
+* the sidebar shows the machines, what each is working on, and which have gone quiet (BP-252) ([#697](https://github.com/rafalpodles/board-planner/issues/697)) ([d2dc1c3](https://github.com/rafalpodles/board-planner/commit/d2dc1c33506b68ce6ffcd337d7c33a63f745a4b5))
+
+
+### Bug Fixes
+
+* a Stop pressed before the PM turn has taken its lock is asked again once it has (BP-1029) ([#674](https://github.com/rafalpodles/board-planner/issues/674)) ([81f760f](https://github.com/rafalpodles/board-planner/commit/81f760fcc5c560ce7fafc1bd652968f254820ebb))
+* a worker's claim, a release and a lease expiry write a status_changed row (BP-1045) ([#683](https://github.com/rafalpodles/board-planner/issues/683)) ([380ef36](https://github.com/rafalpodles/board-planner/commit/380ef3633780b532a7914c8c40b39e0b94141ae1))
+* an IPv6 client is throttled by its /64, not by its full address (BP-1046) ([#685](https://github.com/rafalpodles/board-planner/issues/685)) ([16b21f5](https://github.com/rafalpodles/board-planner/commit/16b21f5c953dc66fcb001aa91a5e53f73d2d202f))
+* drop duplicate group-roles recipes that broke the build ([#669](https://github.com/rafalpodles/board-planner/issues/669)) ([9a221f4](https://github.com/rafalpodles/board-planner/commit/9a221f4f5687ea3645fb4d9009844e29df1d683f))
+* routes with no client address stop sharing one throttle bucket between every caller (BP-1030) ([#681](https://github.com/rafalpodles/board-planner/issues/681)) ([3f4bda6](https://github.com/rafalpodles/board-planner/commit/3f4bda6f82fffb5206b2df8b0df6ec67e82a4a89))
+* shared controls say what they are to a screen reader, and the sprint form's dates fit a phone and match the row (BP-1033, BP-1028) ([#671](https://github.com/rafalpodles/board-planner/issues/671)) ([b5946bc](https://github.com/rafalpodles/board-planner/commit/b5946bcfafa320716a76103590add43f5efc0cf4))
+* the Insights page header drops its Dashboard link (BP-1056) ([#698](https://github.com/rafalpodles/board-planner/issues/698)) ([9c40f17](https://github.com/rafalpodles/board-planner/commit/9c40f17b639fdc806d44e03d3752dc95f0f1ba38))
+* the lease sweep leaves a task no run is holding (BP-1047) ([#684](https://github.com/rafalpodles/board-planner/issues/684)) ([b8df19f](https://github.com/rafalpodles/board-planner/commit/b8df19f61a18f17a535aeba82626dc628c364c3d))
+* the sidebar's project list is re-read after a board is created, renamed or deleted (BP-1035) ([#666](https://github.com/rafalpodles/board-planner/issues/666)) ([883e0fd](https://github.com/rafalpodles/board-planner/commit/883e0fd43049bede5f172084df6a9a00255fde8e))
+* the wizard's AI messages point to Settings → AI key and name who switched the key off (BP-1041) ([#690](https://github.com/rafalpodles/board-planner/issues/690)) ([e74d2a3](https://github.com/rafalpodles/board-planner/commit/e74d2a32314bdef34bf81a46ed8190eef841243d))
+* the worker smoke runs on a production build and keeps its artifacts when it fails (BP-1050, BP-1049) ([#687](https://github.com/rafalpodles/board-planner/issues/687)) ([300b95e](https://github.com/rafalpodles/board-planner/commit/300b95e2acb629be3b85686fc91ba6010f8a52bc))
+
 ## [1.8.0](https://github.com/rafalpodles/board-planner/compare/v1.7.0...v1.8.0) (2026-10-11)
 
 
