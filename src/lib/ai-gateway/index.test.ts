@@ -190,6 +190,19 @@ describe("gatewayChat", () => {
     );
   });
 
+  it("counts a stream that broke after the provider began to answer", async () => {
+    const messages = [{ role: "user", content: "x".repeat(100) }];
+    m.chatCompletion.mockResolvedValue({ type: "error", error: "The connection to the model was cut off.", sent: true });
+
+    await gatewayChat(db, CONTEXT, { ...CHAT, messages });
+
+    expect(m.recordUsage).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({ usage: { promptTokens: 33, completionTokens: 0, totalTokens: 33, cachedPromptTokens: 0, cacheWriteTokens: 0 } }),
+      "month"
+    );
+  });
+
   it("counts a stopped call's images at a flat figure each, not at the length of the base64 they travel as", async () => {
     m.chatCompletion.mockResolvedValue({ type: "aborted" });
     const messages = [

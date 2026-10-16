@@ -708,3 +708,58 @@ describe("a tool the PM runs", () => {
     expect(currentGeneratedBy(), "the mark outlived the tool call").toBeUndefined();
   });
 });
+
+describe("a turn someone is watching (BP-1037)", () => {
+  const watched = (onStream: (event: unknown) => void) =>
+    runPmTurn(db, { projectId: PROJECT._id, userMessage: "hi", triggeredByUserId: "pm-user-id", onStream: onStream as never });
+
+  it("makes every call as a streamed one, and says when each begins", async () => {
+    const events: unknown[] = [];
+    chatCompletion
+      .mockResolvedValueOnce(toolCall("add_comment", { taskKey: "BP-1", body: "answer" }))
+      .mockResolvedValueOnce({ type: "text", content: "done" });
+
+    await watched((e) => events.push(e));
+
+    expect(chatCompletion.mock.calls.map((c) => typeof c[0].onDelta)).toEqual(["function", "function"]);
+    expect(events.filter((e) => (e as { type: string }).type === "round")).toHaveLength(2);
+  });
+
+  it("passes on the model's text and the tool it is preparing, then says which tool is running", async () => {
+    const events: unknown[] = [];
+    chatCompletion.mockImplementationOnce(async (opts) => {
+      opts.onDelta({ type: "text", text: "Adding " });
+      opts.onDelta({ type: "tool", name: "add_comment" });
+      return toolCall("add_comment", { taskKey: "BP-1", body: "answer" });
+    });
+    chatCompletion.mockResolvedValueOnce({ type: "text", content: "done" });
+
+    await watched((e) => events.push(e));
+
+    expect(events).toEqual([
+      { type: "round" },
+      { type: "delta", text: "Adding " },
+      { type: "tool", tool: "add_comment", phase: "preparing" },
+      { type: "tool", tool: "add_comment", phase: "running" },
+      { type: "round" },
+    ]);
+  });
+
+  it("is still held to its write limit and its step limit", async () => {
+    chatCompletion.mockResolvedValue(toolCall("add_comment", { taskKey: "BP-1", body: "again" }));
+
+    const result = await watched(() => {});
+
+    expect(chatCompletion).toHaveBeenCalledTimes(15);
+    expect(addCommentExecute).toHaveBeenCalledTimes(10);
+    expect(result.message?.content).toMatch(/step limit/);
+  });
+
+  it("asks for no stream when nobody is watching", async () => {
+    chatCompletion.mockResolvedValue({ type: "text", content: "done" });
+
+    await turn([]);
+
+    expect(chatCompletion.mock.calls[0][0]).not.toHaveProperty("onDelta");
+  });
+});

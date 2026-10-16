@@ -517,6 +517,105 @@ describe("a turn still running", () => {
   });
 });
 
+describe("a turn that streams its answer (BP-1037)", () => {
+  const event = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+
+  async function startTurn() {
+    const stream = heldStream();
+    api.stream.mockResolvedValue(stream.response);
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const box = await screen.findByRole("textbox");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "Plan it.");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: /send/i }).click();
+    });
+    return stream;
+  }
+
+  it("shows the text as it arrives, a piece at a time", async () => {
+    const stream = await startTurn();
+
+    await act(async () => stream.push(event("round", {}) + event("delta", { text: "Here is " })));
+    expect((await screen.findByTestId("pm-live-text")).textContent).toBe("Here is");
+
+    await act(async () => stream.push(event("delta", { text: "the plan." })));
+    expect(screen.getByTestId("pm-live-text").textContent).toBe("Here is the plan.");
+    await act(async () => stream.close());
+  });
+
+  it("starts the text again when the agent makes another call, because only the last call's text is the answer", async () => {
+    const stream = await startTurn();
+
+    await act(async () => stream.push(event("delta", { text: "Let me look." })));
+    expect((await screen.findByTestId("pm-live-text")).textContent).toBe("Let me look.");
+    await act(async () => stream.push(event("round", {})));
+
+    expect(screen.queryByTestId("pm-live-text")).toBeNull();
+    await act(async () => stream.close());
+  });
+
+  it("drops the text in front of a tool call as soon as the call begins, since it cannot be the answer", async () => {
+    const stream = await startTurn();
+
+    await act(async () => stream.push(event("delta", { text: "I will add that." })));
+    expect(await screen.findByTestId("pm-live-text")).toBeTruthy();
+    await act(async () => stream.push(event("tool", { tool: "create_task", phase: "preparing" })));
+
+    expect(screen.queryByTestId("pm-live-text")).toBeNull();
+    await act(async () => stream.close());
+  });
+
+  it("keeps saying Stopping… while the stream goes on until the abort lands", async () => {
+    api.post.mockResolvedValue({});
+    const stream = await startTurn();
+    await act(async () => stream.push(event("delta", { text: "Writing" })));
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Stop the PM turn" }).click();
+    });
+    expect(screen.getByRole("status").textContent).toBe("Stopping…");
+    await act(async () => stream.push(event("delta", { text: " more" }) + event("tool", { tool: "list_tasks", phase: "running" })));
+
+    expect(screen.getByRole("status").textContent).toBe("Stopping…");
+    await act(async () => stream.close());
+  });
+
+  it("does not announce each chunk of the answer to a screen reader", async () => {
+    const stream = await startTurn();
+
+    await act(async () => stream.push(event("delta", { text: "Writing" })));
+    expect(screen.getByRole("status").getAttribute("aria-live")).toBe("off");
+
+    await act(async () => stream.push(event("tool", { tool: "create_task", phase: "preparing" })));
+    expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite");
+    await act(async () => stream.close());
+  });
+
+  it("says which tool the agent is preparing and then running", async () => {
+    const stream = await startTurn();
+
+    await act(async () => stream.push(event("tool", { tool: "create_task", phase: "preparing" })));
+    expect(screen.getByRole("status").textContent).toBe("Preparing a new task…");
+
+    await act(async () => stream.push(event("tool", { tool: "create_task", phase: "running" })));
+    expect(screen.getByRole("status").textContent).toBe("Applying a new task…");
+    await act(async () => stream.close());
+  });
+
+  it("keeps the text it had on screen under the recovery notice when the stream drops", async () => {
+    const stream = await startTurn();
+    await act(async () => stream.push(event("delta", { text: "Half an ans" })));
+
+    await act(async () => stream.close());
+
+    expect(await screen.findByText(/Connection lost/)).toBeTruthy();
+    expect(screen.getByTestId("pm-live-text").textContent).toBe("Half an ans");
+  });
+});
+
 /**
  * BP-1029. "PM is thinking…" and Stop appear before the send has reached the server's lock, and a
  * Stop pressed then was answered "no turn is running", read as "it finished on its own", and

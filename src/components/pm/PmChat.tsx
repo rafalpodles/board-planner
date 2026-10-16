@@ -2,7 +2,7 @@
 
 import { useOrganisation } from "@/hooks/use-organisation";
 import { pmUnavailable } from "@/lib/cloud-copy";
-import { useCallback, useEffect, useRef, useState, KeyboardEvent } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, KeyboardEvent, type RefObject } from "react";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { emitBoardRefresh } from "@/lib/board-refresh";
@@ -21,7 +21,9 @@ import { BoardLoadFailed } from "@/components/ui/LoadFailed";
 import { AiKeyUnreadable, AiLocked, AiNeedsKey } from "@/components/AiNeedsKey";
 import { EMPTY_THREAD, withNewestPage, withOlderPage, type ThreadPage } from "./thread-paging";
 import { AiBadge } from "@/components/ui/AiBadge";
+import { toolStatus } from "./tool-status";
 
+const WRITING = "PM is writing…";
 const MAX_ATTACHMENTS = 4;
 const MAX_INPUT_HEIGHT = 200;
 
@@ -48,6 +50,26 @@ const ACTION_ICONS: Record<string, string> = {
   assign_task: "@",
   add_comment: "💬",
 };
+
+interface LiveAnswerHandle {
+  append: (text: string) => void;
+  clear: () => void;
+}
+
+// Holds the streaming text itself, so a chunk re-renders this bubble and not the whole thread
+function LiveAnswer({ handle, onGrow }: { handle: RefObject<LiveAnswerHandle | null>; onGrow: () => void }) {
+  const [text, setText] = useState("");
+  useImperativeHandle(handle, () => ({ append: (chunk) => setText((prev) => prev + chunk), clear: () => setText("") }), []);
+  useEffect(() => {
+    if (text) onGrow();
+  }, [text, onGrow]);
+  if (!text) return null;
+  return (
+    <div className="text-sm prose-sm break-words" data-testid="pm-live-text">
+      <MarkdownContent>{text}</MarkdownContent>
+    </div>
+  );
+}
 
 export function PmChat({
   projectId,
@@ -80,6 +102,9 @@ export function PmChat({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [liveActions, setLiveActions] = useState<{ tool: string; taskKey?: string; summary: string }[]>([]);
+  const liveAnswer = useRef<LiveAnswerHandle | null>(null);
+  const stickToBottom = useRef(true);
+  const stopRequested = useRef(false);
   const [recovering, setRecovering] = useState(false);
   const [stopping, setStopping] = useState(false);
   // The server takes a turn's lock before it answers the send, and answers at once, so an answer
@@ -154,6 +179,15 @@ export function PmChat({
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [newestId, liveActions, working]);
 
+  const followLiveAnswer = useCallback(() => {
+    if (stickToBottom.current) bottomRef.current?.scrollIntoView({ block: "end" });
+  }, []);
+
+  // A Stop in flight owns the label: the stream goes on until the abort lands
+  const showStatus = (label: string) => {
+    if (!stopRequested.current) setWorkingStatus(label);
+  };
+
   // Stream lost mid-turn: poll history until the assistant message is finalized (BP-452).
   const recoveryPoll = useCallback(async () => {
     // A deadline rather than a count. usePollWhileVisible fires once on mount and again on every
@@ -200,6 +234,7 @@ export function PmChat({
   usePollWhileVisible(recoveryPoll, RECOVERY_INTERVAL_MS, recovering);
 
   async function interrupt() {
+    stopRequested.current = true;
     setStopping(true);
     setWorkingStatus("Stopping…");
     await requestStop();
@@ -227,6 +262,7 @@ export function PmChat({
         stopPending.current = true;
         return;
       }
+      stopRequested.current = false;
       setStopping(false);
       setWorkingStatus("");
       setErrorState(
@@ -313,6 +349,7 @@ export function PmChat({
       [...messages].reverse().find((m) => m.role === "assistant")?._id ?? "";
     setInput("");
     setStopping(false);
+    stopRequested.current = false;
     turnAccepted.current = false;
     sendGeneration.current++;
     setWorking(true);
@@ -420,9 +457,19 @@ export function PmChat({
           if (!eventLine || !dataLine) continue;
           const data = JSON.parse(dataLine);
 
-          if (eventLine === "action") {
+          if (eventLine === "round") {
+            liveAnswer.current?.clear();
+            showStatus("PM is thinking…");
+          } else if (eventLine === "delta") {
+            liveAnswer.current?.append(data.text);
+            showStatus(WRITING);
+          } else if (eventLine === "tool") {
+            // Once a call begins, what came before it is not the answer
+            if (data.phase === "preparing") liveAnswer.current?.clear();
+            showStatus(toolStatus(data.tool, data.phase));
+          } else if (eventLine === "action") {
             setLiveActions((prev) => [...prev, data]);
-            setWorkingStatus(data.summary);
+            showStatus(data.summary);
             emitBoardRefresh(projectId);
           } else if (eventLine === "done" || eventLine === "error") {
             finished = true;
@@ -483,7 +530,7 @@ export function PmChat({
     }
   }
 
-  function ActionChips({ actions }: { actions: { tool: string; taskKey?: string; summary: string }[] }) {
+  function actionChips(actions: { tool: string; taskKey?: string; summary: string }[]) {
     if (!actions.length) return null;
     return (
       <div className="flex flex-wrap gap-1.5 mt-2">
@@ -594,7 +641,13 @@ export function PmChat({
       {showTitle && (
         <h1 className="font-bold text-lg py-2 border-b border-border">PM — {project.name}</h1>
       )}
-      <div className="flex-1 overflow-y-auto py-4 space-y-4 min-h-0">
+      <div
+        className="flex-1 overflow-y-auto py-4 space-y-4 min-h-0"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        }}
+      >
         {nextCursor && (
           <div className="text-center">
             <button onClick={loadOlder} className="text-xs text-text-muted hover:text-text cursor-pointer">
@@ -657,7 +710,7 @@ export function PmChat({
               <div className="text-sm prose-sm break-words">
                 <MarkdownContent>{m.content || (m.attachments?.length ? "" : "…")}</MarkdownContent>
               </div>
-              <ActionChips actions={m.actions} />
+              {actionChips(m.actions)}
               <p className="text-[10px] text-text-muted mt-1">{timeAgo(m.createdAt)}</p>
             </div>
           </div>
@@ -667,11 +720,16 @@ export function PmChat({
             <div className="max-w-[85%] bg-bg-card border border-border rounded-lg px-3 py-2">
               <p className="mb-1 mr-1.5 inline-block text-[11px] font-medium text-text-muted">PM Agent</p>
               <AiBadge />
-              <div className="flex items-center gap-2 text-sm text-text-muted">
+              <LiveAnswer handle={liveAnswer} onGrow={followLiveAnswer} />
+              <div
+                className="flex items-center gap-2 text-sm text-text-muted"
+                role="status"
+                aria-live={workingStatus === WRITING ? "off" : "polite"}
+              >
                 <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-primary border-t-transparent shrink-0" />
                 {workingStatus || "PM is working…"}
               </div>
-              <ActionChips actions={liveActions} />
+              {actionChips(liveActions)}
             </div>
           </div>
         )}

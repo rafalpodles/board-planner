@@ -201,6 +201,7 @@ async function chat(request: Request, params: Promise<Record<string, string>>, u
             attachments: parsedAttachments,
             triggeredByUserId,
             onEvent: (event) => sendEvent("action", event),
+            onStream: ({ type, ...data }) => sendEvent(type, data),
             signal: abort.signal,
           });
           if (result.ok) {

@@ -24,6 +24,8 @@ import { readBody, serve } from "./stub-guard.mjs";
  *   failTimes        answer 500 for the first N requests carrying this directive, then behave.
  *                    Keyed by the directive text, so a Retry of the same message is the second.
  *   delayMs          hold the response, so a test can see the turn while it is still running.
+ *   chunkDelayMs     on a streamed request (BP-1037), pause this long between chunks of the answer.
+ *   cutAfterChunks   on a streamed request, drop the connection after this many chunks, with no finish.
  *
  * It also serves /models, which `modelAcceptsImages` reads before it accepts an attachment.
  * `e2e/vision-model` takes images and `e2e/text-only-model` does not; anything else is absent
@@ -181,6 +183,44 @@ const usageWith = (fromCache) => ({
     : { cached_tokens: 0, cache_write_tokens: 900 },
 });
 
+// A completion, as a client that asked for `stream: true` receives it: the text in a few pieces, a tool
+// call's arguments split mid-JSON, then the usage, then [DONE]. The pieces are cut so a client that only
+// handled whole values would fail.
+async function streamOut(res, body, { chunkDelayMs = 0, cutAfterChunks } = {}) {
+  const choice = body.choices[0];
+  const message = choice.message;
+  const chunks = [];
+  const text = message.content ?? "";
+  for (let i = 0; i < text.length; i += 4) chunks.push({ choices: [{ index: 0, delta: { content: text.slice(i, i + 4) } }] });
+  (message.tool_calls ?? []).forEach((tc, index) => {
+    chunks.push({ choices: [{ index: 0, delta: { tool_calls: [{ index, id: tc.id, type: "function", function: { name: tc.function.name, arguments: "" } }] } }] });
+    const args = tc.function.arguments;
+    const cut = Math.max(1, Math.floor(args.length / 2));
+    for (const piece of [args.slice(0, cut), args.slice(cut)]) {
+      chunks.push({ choices: [{ index: 0, delta: { tool_calls: [{ index, function: { arguments: piece } }] } }] });
+    }
+  });
+  chunks.push({ choices: [{ index: 0, delta: {}, finish_reason: choice.finish_reason }] });
+  if (body.usage) chunks.push({ choices: [], usage: body.usage });
+
+  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
+  // Each write is waited on: a socket destroyed with its first bytes still queued reaches the client as no response at all
+  const write = (piece) => new Promise((resolve) => res.write(piece, resolve));
+  await write(": OPENROUTER PROCESSING\n\n");
+  let sent = 0;
+  for (const chunk of chunks) {
+    if (cutAfterChunks !== undefined && sent >= cutAfterChunks) {
+      res.destroy();
+      return;
+    }
+    await write(`data: ${JSON.stringify(chunk)}\n\n`);
+    sent++;
+    if (chunkDelayMs) await new Promise((resolve) => setTimeout(resolve, chunkDelayMs));
+  }
+  res.write("data: [DONE]\n\n");
+  res.end();
+}
+
 serve({
   name: "openrouter stub",
   port: PORT,
@@ -328,8 +368,11 @@ serve({
     let messages = [];
     let offeredTools = [];
     let provider = null;
+    let streaming = false;
+    let streamOptions = {};
     try {
       const body = JSON.parse(raw);
+      streaming = body.stream === true;
       messages = body.messages ?? [];
       provider = body.provider ?? null;
       const markedRoles = markedRolesIn(messages);
@@ -383,6 +426,7 @@ serve({
     };
 
     const toolHasRun = messages.some((m) => m?.role === "tool");
+    const respond = (payload) => (streaming ? void streamOut(res, payload, streamOptions) : reply(res, payload));
 
     const said = [...messages].reverse().find((m) => m?.role === "user");
     const text = typeof said?.content === "string"
@@ -393,7 +437,7 @@ serve({
     // is keyed on that prompt's own opening line and does the one thing the turn is allowed to.
     const escalated = /^Task (\S+) was just moved to "needs_human_review"/m.exec(text ?? "");
     if (escalated && !toolHasRun) {
-      reply(res, {
+      respond({
         usage: usageWith(false),
         choices: [
           {
@@ -428,7 +472,7 @@ serve({
     if (reviewing && flagged && !toolHasRun) {
       // A task titled with this holds the review open, so a spec can ask for a second one meanwhile
       if (/\(hold the review\)/.test(text)) await new Promise((resolve) => setTimeout(resolve, 15_000));
-      reply(res, {
+      respond({
         usage: usageWith(false),
         choices: [
           {
@@ -459,6 +503,7 @@ serve({
     // every directive silently became {} and every turn answered with the fallback.
     const script = directive?.[1] ?? process.env.PM_STUB_TOOL_CALL ?? "{}";
     const call = JSON.parse(script);
+    streamOptions = { chunkDelayMs: call.chunkDelayMs, cutAfterChunks: call.cutAfterChunks };
 
     const attempts = (seen.get(script) ?? 0) + 1;
     seen.set(script, attempts);
@@ -468,7 +513,7 @@ serve({
       // The tool has already run when its result is in the history; anything else is the first
       // pass. Delaying *this* answer is what holds the turn open while its action chips show.
       if (toolHasRun) {
-        reply(res, {
+        respond({
           // The turn's later calls read back the prefix its first call wrote (BP-568)
           usage: usageWith(true),
           choices: [{ finish_reason: "stop", message: { role: "assistant", content: "Done." } }],
@@ -481,7 +526,7 @@ serve({
         return;
       }
       if (!call.name) {
-        reply(res, {
+        respond({
           usage: usageWith(false),
           choices: [
             { finish_reason: "stop", message: { role: "assistant", content: call.say ?? "Noted." } },
@@ -489,7 +534,7 @@ serve({
         });
         return;
       }
-      reply(res, {
+      respond({
         // A real provider reports what the call cost on every answer; BP-284 reads it
         usage: usageWith(false),
         choices: [
