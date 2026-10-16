@@ -574,14 +574,4 @@ describe("TaskCard assignee colour", () => {
       `var(--avatar-${avatarColorIndex("rafal")})`
     );
   });
-
-  it("colours two people with the same initial by who they are", () => {
-    // 'ann' and 'andy' hash to different buckets; the card must not flatten both to a letter's colour
-    expect(avatarColorIndex("ann")).not.toBe(avatarColorIndex("andy"));
-    renderCard({ task: withAssignee("ann", "Ann") });
-    const ann = screen.getByText("A").getAttribute("style");
-    cleanup();
-    renderCard({ task: withAssignee("andy", "Andy") });
-    expect(screen.getByText("A").getAttribute("style")).not.toBe(ann);
-  });
 });

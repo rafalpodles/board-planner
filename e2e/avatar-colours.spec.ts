@@ -106,7 +106,7 @@ test("the colour follows the theme: a different shade in light than in dark", as
     .locator('span[style*="--avatar-"]');
 
   await page.emulateMedia({ colorScheme: "dark" });
-  await expectPersonColour(page, avatar, ADMIN_USERNAME);
+  await expect.poll(async () => backgroundOf(avatar)).toBe(await paletteColour(page, ADMIN_USERNAME));
   const dark = await backgroundOf(avatar);
 
   await page.emulateMedia({ colorScheme: "light" });

@@ -54,8 +54,6 @@ body {
   color: var(--color-text);
 }
 
-/* Initials avatars (BP-1063): a person's colour is picked by hashing their username, so the
-   index is the same everywhere. Each theme's set carries --color-text at AA. */
 :root {
   --avatar-0: #1d4ed8;
   --avatar-1: #0f766e;

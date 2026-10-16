@@ -649,4 +649,13 @@ describe("ListView assignee colour", () => {
     expect(colourOf(dash)).toBeUndefined();
     expect(dash.className).toContain("border-dashed");
   });
+
+  it("leaves the dash uncoloured when the assignee has a username but no name", () => {
+    renderList({
+      tasks: [{ ...tasks[0], assignee: { _id: "u9", username: "bob", fullName: "" } } as unknown as ApiTask],
+    });
+    const dash = screen.getByText("–");
+    expect(colourOf(dash)).toBeUndefined();
+    expect(dash.className).toContain("border-dashed");
+  });
 });

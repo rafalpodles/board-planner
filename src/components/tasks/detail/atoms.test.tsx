@@ -21,11 +21,10 @@ describe("Avatar colour", () => {
   });
 
   it("gives one username one colour whatever name it is shown under", () => {
-    const a = avatar({ name: "Rafal Podles", username: "rafal" });
-    const b = avatar({ name: "Claude Code", username: "rafal" });
-    const colour = (el: HTMLElement) => /var\(--avatar-\d+\)/.exec(background(el))?.[0];
-    expect(colour(a)).toBeDefined();
-    expect(colour(a)).toBe(colour(b));
+    const wanted = `var(--avatar-${avatarColorIndex("rafal")})`;
+    expect(avatarColorIndex("Ann")).not.toBe(avatarColorIndex("rafal"));
+    expect(background(avatar({ name: "Rafal Podles", username: "rafal" }))).toContain(wanted);
+    expect(background(avatar({ name: "Ann", username: "rafal" }))).toContain(wanted);
   });
 
   it("falls back to the name when no username is known", () => {

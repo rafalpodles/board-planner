@@ -63,7 +63,7 @@ describe("avatarStyle", () => {
     });
   });
 
-  it.each([undefined, null, "", "   "])("has no colour for %j, so the fallback class shows", (key) => {
+  it.each([undefined, null, "", "   "])("has no style for %j", (key) => {
     expect(avatarStyle(key)).toBeUndefined();
   });
 });
