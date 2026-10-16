@@ -125,13 +125,6 @@ const taskSchema = new Schema<ITask>(
       ref: "Agent",
       default: null,
     },
-    // The id of one of the project's `repositories` entries: the repository this task changes. A
-    // string and not an ObjectId so a value the project no longer lists is still readable.
-    repository: {
-      type: String,
-      default: null,
-      maxlength: 64,
-    },
     customFieldValues: {
       type: Map,
       of: Schema.Types.Mixed,

@@ -97,9 +97,6 @@ interface BlockerContext {
   bindingError: string;
   /** Who paused or stopped the reader's own machine: the board, or somebody at the machine */
   haltedBy: WorkerHaltSource | null;
-  repositories: { id: string; name: string }[];
-  /** The ids of those the reader's own machines hold a checkout of */
-  machineRepositories: string[];
 }
 
 function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }) {
@@ -132,20 +129,6 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
           work its owner assigned to themselves.
         </>
       );
-    case "repository-not-served": {
-      const held = (ctx.repositories ?? [])
-        .filter((r) => ctx.machineRepositories?.includes(r.id))
-        .map((r) => r.name);
-      return (
-        <>
-          A machine takes the tasks of one repository per board — the first listed one it holds a checkout of,
-          here {held.join(", ") || "another repository"}. Pick it for this task, or use a machine whose
-          first listed checkout is this task&apos;s repository.
-        </>
-      );
-    }
-    case "repository-not-chosen":
-      return <>This board lists several repositories and the task names none — choose the one it changes, and a machine can take it.</>;
     case "blocked": {
       const keys = (("blockers" in blocker && blocker.blockers) || []).map((n) =>
         ctx.projectKey ? `${ctx.projectKey}-${n}` : `#${n}`
@@ -339,8 +322,6 @@ function HandoverNotice({
     locked: gaps.includes("runs-locked"),
     bindingError: board?.bindingError ?? "",
     haltedBy: board?.haltedBy ?? null,
-    repositories: board?.repositories ?? [],
-    machineRepositories: board?.machineRepositories ?? [],
   };
 
   if (blockers.length === 0) {
@@ -427,7 +408,7 @@ interface PropertyRailProps {
    * describe a state that has never existed.
    */
   stored: Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "status"> &
-    Partial<Pick<ApiTask, "pmAssignedFor" | "blockedBy" | "repository">>;
+    Partial<Pick<ApiTask, "pmAssignedFor" | "blockedBy">>;
   /** The board's own columns — a claim is defined in terms of their roles, not their names */
   columns?: AnyColumn[];
   /** What the board itself lacks for any run; null until read, and then nothing is judged */
@@ -516,15 +497,7 @@ export function PropertyRail({
   const pending =
     (draft.agent ?? null) !== storedAgent ||
     (draft.assignee ?? null) !== (stored.assignee?.username ?? null);
-  const viewerIsAssignee = !!currentUsername && stored.assignee?.username === currentUsername;
-  const handover = pending
-    ? null
-    : handoverOf(
-        stored,
-        columns,
-        board?.repositories?.length,
-        viewerIsAssignee ? board?.machineRepositories : null
-      );
+  const handover = pending ? null : handoverOf(stored, columns);
   const awaiting = !columns || awaitingClaim(columns, stored.status);
   // Read off the stored task rather than off `handover`, which is suppressed mid-edit and orders
   // the column requirement first: the repair is about what the document is missing, not about
@@ -786,23 +759,6 @@ export function PropertyRail({
             onChange={(sprintId) => set("sprint", sprintId || null)}
           >
             {() => (sprint ? sprint.name : <EmptyValue>Backlog</EmptyValue>)}
-          </ComboboxRow>
-        )}
-
-        {(board?.repositories?.length ?? 0) > 1 && (
-          <ComboboxRow
-            label="Repository"
-            touch={touch}
-            value={draft.repository || ""}
-            options={(board?.repositories ?? []).map((r) => ({ value: r.id, label: r.name }))}
-            emptyOption="No repository"
-            onChange={(repositoryId) => set("repository", repositoryId || null)}
-          >
-            {() =>
-              board?.repositories?.find((r) => r.id === draft.repository)?.name ?? (
-                <EmptyValue>Choose one</EmptyValue>
-              )
-            }
           </ComboboxRow>
         )}
 

@@ -16,7 +16,6 @@ import { buildBoardDigest } from "./board-review";
 import { finalProblem, handoverOf, type HandoverProblem } from "@/lib/handover";
 import { missingRolesText, readinessGaps, type ReadinessGap } from "@/lib/project-readiness";
 import { projectRepositoryUrl } from "@/lib/repository";
-import { projectRepositories, repositoryIdFor } from "@/lib/repositories";
 import type { AnyColumn } from "@/lib/columns";
 import { getProjectColumns } from "@/lib/columns";
 import { echo } from "@/lib/echo";
@@ -169,13 +168,12 @@ async function whyItWillNotRun(
     pmAssignedFor?: unknown;
     status?: unknown;
     blockedBy?: unknown;
-    repository?: unknown;
     execution?: { attempts?: number } | null;
   }
 ): Promise<string> {
   const project = await db.Project.findById(
     projectId,
-    "key columns worker repositoryUrl repositories githubRepo gitlabRepo"
+    "key columns worker repositoryUrl githubRepo gitlabRepo"
   ).lean();
   if (!project) return "this project is not enabled for workers, so nothing will run it";
   const columns = getProjectColumns(project);
@@ -187,11 +185,10 @@ async function whyItWillNotRun(
     pmAssignedFor: task.pmAssignedFor,
     status: task.status,
     blockedBy: task.blockedBy,
-    repository: task.repository,
     attemptsExhausted: (task.execution?.attempts ?? 0) >= MAX_EXECUTION_ATTEMPTS,
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handover = handoverOf(judged as any, columns, projectRepositories(project).length);
+  const handover = handoverOf(judged as any, columns);
   // No agent, or no attempts left: nothing about the board would change that
   const final = finalProblem(handover);
   if (final) return whyThisProblem(final, project.key);
@@ -237,10 +234,6 @@ function whyThisProblem({ reason, blockers }: HandoverProblem, key: string): str
       return `it waits on unfinished blockers (${(blockers ?? []).map((n) => `${key}-${n}`).join(", ")})`;
     case "no-agent":
       return "no agent is named on it, so nothing will run it — a task naming none is one a person is doing";
-    case "repository-not-chosen":
-      return "this project lists several repositories and the task names none, so no machine takes it — set its repository";
-    case "repository-not-served":
-      return "a machine takes the tasks of one repository per board, the first listed one it holds a checkout of, and this task names another";
     case "not-approved-yet":
       return "it is not in a column a machine claims from, so nothing will run it yet";
     case "unassigned":
@@ -252,16 +245,6 @@ function whyThisProblem({ reason, blockers }: HandoverProblem, key: string): str
     case "pm-assigned-for-someone-else":
       return "it was handed over on somebody else's instruction, so nothing will run it";
   }
-}
-
-async function repositoryFromArgs(
-  db: ScopedDb,
-  projectId: string,
-  ref: unknown
-): Promise<{ id: string | null } | { error: string } | null> {
-  if (ref === undefined) return null;
-  const project = await db.Project.findById(projectId, "repositories").lean();
-  return repositoryIdFor(project ?? {}, str(ref));
 }
 
 export const PM_TOOLS: Record<string, PmTool> = {
@@ -467,7 +450,6 @@ export const PM_TOOLS: Record<string, PmTool> = {
           fields: { type: "object", description: "Project fields keyed by name, e.g. { \"Difficulty\": \"M\", \"Component\": \"ui\" } — see the project context for the field list" },
           acceptanceCriteria: { type: "string", description: "Markdown checklist, e.g. '- [ ] item'" },
           assignee: { type: "string", description: "Username, optional" },
-          repository: { type: "string", description: "The repository the task changes, by name or id, when the project lists several (see the project context)" },
         },
         required: ["title"],
         additionalProperties: false,
@@ -481,11 +463,8 @@ export const PM_TOOLS: Record<string, PmTool> = {
       const createFields = Object.keys(resolvedFields).length
         ? { customFieldValues: resolvedFields }
         : {};
-      const repository = await repositoryFromArgs(db, ctx.projectId, args.repository);
-      if (repository && "error" in repository) return { result: { error: repository.error } };
       const result = await createTaskOnInstruction(db, ctx, {
         title,
-        ...(repository ? { repository: repository.id } : {}),
         description: str(args.description),
         priority: args.priority,
         category: args.category,
@@ -521,7 +500,6 @@ export const PM_TOOLS: Record<string, PmTool> = {
           fields: { type: "object", description: "Project fields keyed by name, e.g. { \"Difficulty\": \"L\" }. Only the named fields change." },
           acceptanceCriteria: { type: "string" },
           dueDate: { type: "string", description: "YYYY-MM-DD or empty to clear" },
-          repository: { type: "string", description: "The repository the task changes, by name or id, when the project lists several; empty to clear" },
         },
         required: ["taskKey"],
         additionalProperties: false,
@@ -537,9 +515,6 @@ export const PM_TOOLS: Record<string, PmTool> = {
       }
       const updates = await fieldValuesFor(db, ctx.projectId, args.fields);
       if ("error" in updates) return { result: { error: updates.error as string } };
-      const repository = await repositoryFromArgs(db, ctx.projectId, args.repository);
-      if (repository && "error" in repository) return { result: { error: repository.error } };
-      if (repository) body.repository = repository.id;
       if (typeof body.acceptanceCriteria === "string") {
         // Read against the criteria the task holds, so an unchanged line keeps its id and its tick
         body.checklist = mergeCriteria(body.acceptanceCriteria, (resolved.task.checklist ?? []) as never);

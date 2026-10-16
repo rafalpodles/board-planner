@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { protocolOf, resolveProjectId, withWorker } from "@/lib/middleware";
 import { claimNextTask, releaseExpiredTasks } from "@/lib/task-service";
 import { BoardCannotClaim } from "@/lib/claim-refusal";
-import { claimableRepositories, ownerReachableProjectIds, verdictFor } from "@/lib/worker-service";
+import { ownerReachableProjectIds, verdictFor } from "@/lib/worker-service";
 import { snapshotFor } from "@/lib/agent-snapshot";
 import { releaseTask } from "@/lib/task-service";
 import { claimingMachineIds, HELD_BY_PLAN_ON_THE_MACHINE, isHeldByPlan } from "@/lib/machine-limit";
@@ -74,15 +74,7 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
 
   let task: Awaited<ReturnType<typeof claimNextTask>>;
   try {
-    task = await claimNextTask(
-      db,
-      projectId,
-      String(worker._id),
-      runId,
-      machineOwnerId,
-      identityOf(worker),
-      claimableRepositories(worker as never, project as never, others as never)
-    );
+    task = await claimNextTask(db, projectId, String(worker._id), runId, machineOwnerId, identityOf(worker));
   } catch (error) {
     // 409 with the reason, never 204: 204 is what an empty queue answers, and a board with no
     // column to claim into read as an idle machine for as long as nobody happened to look at the

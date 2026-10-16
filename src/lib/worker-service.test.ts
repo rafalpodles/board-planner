@@ -31,7 +31,6 @@ const {
   offersFor,
   lostCheckouts,
   usableRepos,
-  claimableRepositories,
   overriddenWorkerPolicy,
   ownerReachableProjectIds,
   registerWorker,
@@ -1174,63 +1173,6 @@ describe("a machine the Free plan's limit holds", () => {
     expect(machineReadinessFor([machine("first", { lastSeenAt: old }), machine("second")], board, NOW, first).state).toBe(
       "held"
     );
-  });
-});
-
-// BP-1066. A project lists several repositories and a worker binds one checkout per project, so the
-// entry its assignment names is the only one a claim may take a task for.
-describe("a project with several repositories", () => {
-  const API = "https://github.com/owner/api";
-  const WEB = "https://github.com/owner/web";
-  const several = () =>
-    project({
-      githubRepo: undefined,
-      repositoryUrl: API,
-      repositories: [
-        { _id: "r-api", url: API },
-        { _id: "r-web", url: WEB },
-      ],
-    });
-  const checkouts = (...remotes: string[]) => remotes.map((remote) => ({ remote, path: `/${remote}` }));
-  const holding = (...remotes: string[]) => worker({ repos: checkouts(...remotes) });
-
-  it("serves a machine that holds only the second repository", () => {
-    const machine = holding(WEB);
-
-    expect(verdictFor(machine, several(), PROTOCOL_VERSION, now)).toEqual({ ok: true });
-    expect(assignmentsFor(checkouts(WEB), [several()], [PROJECT_ID])[0].remote).toBe(WEB);
-    expect(claimableRepositories(machine, several(), [], now)).toEqual(["r-web"]);
-  });
-
-  it("names the first repository in the project's order when a machine holds both", () => {
-    const machine = holding(WEB, API);
-
-    expect(assignmentsFor(checkouts(WEB, API), [several()], [PROJECT_ID])[0].remote).toBe(API);
-    expect(claimableRepositories(machine, several(), [], now)).toEqual(["r-api"]);
-  });
-
-  it("refuses a machine that holds neither, and lets it claim nothing", () => {
-    const machine = holding("git@github.com:owner/other.git");
-
-    expect(verdictFor(machine, several(), PROTOCOL_VERSION, now).ok).toBe(false);
-    expect(claimableRepositories(machine, several(), [], now)).toEqual([]);
-  });
-
-  // The claim judges the checkouts the machine may actually use, so one lost to an earlier process on
-  // the same machine must not name the repository
-  it("names the repository of a checkout the machine did not lose to an earlier process", () => {
-    const mine = { _id: "w2", name: "second", host: "mac.home", enabled: true, lastSeenAt: fresh, createdAt: new Date("2026-02-01"), repos: checkouts(API, WEB) };
-    const older = { _id: "w1", name: "first", host: "mac.home", enabled: true, lastSeenAt: fresh, createdAt: new Date("2026-01-01"), repos: checkouts(API) };
-
-    expect(claimableRepositories(mine as never, several(), [older] as never, now)).toEqual(["r-web"]);
-    expect(claimableRepositories(mine as never, several(), [], now)).toEqual(["r-api"]);
-  });
-
-  it("puts no restriction on a project with one repository, stored or not", () => {
-    const stored = project({ githubRepo: undefined, repositoryUrl: API, repositories: [{ _id: "r-api", url: API }] });
-
-    expect(claimableRepositories(holding(API), stored, [], now)).toBeNull();
-    expect(claimableRepositories(worker(), project(), [], now)).toBeNull();
   });
 });
 

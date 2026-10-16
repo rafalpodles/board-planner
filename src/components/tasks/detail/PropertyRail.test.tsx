@@ -19,7 +19,6 @@ const draft: TaskDraft = {
   checklist: [],
   sprint: null,
   agent: null,
-  repository: null,
   recurrence: null,
   customFieldValues: {},
 };
@@ -1643,104 +1642,5 @@ describe("PropertyRail before the agent list has answered", () => {
     expect(agentRow()).toBeTruthy();
     expect(screen.queryByTestId("agent-unread")).toBeNull();
     expect(screen.queryByTestId("agents-unread")).toBeNull();
-  });
-});
-
-// BP-1066. A board with several repositories needs each task to name the one it changes.
-describe("the repository of a task", () => {
-  const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" } as ApiUser;
-  const AGENT = [{ _id: "a1", name: "Default" }] as React.ComponentProps<typeof PropertyRail>["agents"];
-  const REPOSITORIES = [
-    { id: "r1", name: "app" },
-    { id: "r2", name: "site" },
-  ];
-  const board = (repositories: { id: string; name: string }[]) => ({
-    repositoryUrl: "https://github.com/acme/app",
-    workerEnabled: true,
-    lockedByInstance: false,
-    canAdmin: false,
-    columns: BOARD.map((c) => ({ role: c.role })),
-    machine: "live" as const,
-    bindingError: "",
-    haltedBy: null,
-    repositories,
-  });
-  const rail = (
-    repositories: { id: string; name: string }[],
-    taskRepository: string | null = null,
-    machineRepositories: string[] = []
-  ) =>
-    renderRail({
-      agents: AGENT,
-      columns: BOARD,
-      board: { ...board(repositories), machineRepositories },
-      draft: { ...draft, agent: "a1", assignee: "owner", repository: taskRepository },
-      stored: { agent: "a1", assignee: OWNER, assignedBy: OWNER, status: "ready" as never, repository: taskRepository },
-    });
-
-  it("is not asked for on a board with one repository", () => {
-    rail([REPOSITORIES[0]]);
-
-    expect(screen.queryByText("Repository")).toBeNull();
-  });
-
-  it("offers each repository by name once the board lists several, and writes the one picked", async () => {
-    const set = rail(REPOSITORIES);
-    await openRow("Repository");
-
-    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(
-      expect.arrayContaining([expect.stringContaining("app"), expect.stringContaining("site")])
-    );
-    await pick(/site/);
-    expect(set).toHaveBeenCalledWith("repository", "r2");
-  });
-
-  it("clears the repository on No repository", async () => {
-    const set = rail(REPOSITORIES, "r2");
-    await openRow("Repository");
-    await pick(/No repository/);
-
-    expect(set).toHaveBeenCalledWith("repository", null);
-  });
-
-  it("shows the repository a task names", () => {
-    rail(REPOSITORIES, "r2");
-
-    expect(screen.getByText("site")).toBeTruthy();
-    expect(screen.queryByText("Choose one")).toBeNull();
-  });
-
-  it("says a machine will not take a task that names none, and stops saying it once it does", () => {
-    rail(REPOSITORIES);
-    expect(screen.getByText(/lists several repositories and the task names none/)).toBeTruthy();
-    cleanup();
-
-    rail(REPOSITORIES, "r1");
-    expect(screen.queryByText(/lists several repositories and the task names none/)).toBeNull();
-  });
-
-  it("says the reader's machine will not take a task naming a repository it does not hold", () => {
-    rail(REPOSITORIES, "r2", ["r1"]);
-
-    expect(screen.getByText(/the first listed one it holds a checkout of, here app/)).toBeTruthy();
-  });
-
-  it("says nothing of it for the repository the machine holds", () => {
-    rail(REPOSITORIES, "r1", ["r1"]);
-
-    expect(screen.queryByText(/the first listed one it holds a checkout of/)).toBeNull();
-  });
-
-  it("does not say it to somebody who is not the task's assignee, whose machine would not take it anyway", () => {
-    renderRail({
-      agents: AGENT,
-      columns: BOARD,
-      board: { ...board(REPOSITORIES), machineRepositories: ["r1"] },
-      draft: { ...draft, agent: "a1", assignee: "owner", repository: "r2" },
-      stored: { agent: "a1", assignee: OWNER, assignedBy: OWNER, status: "ready" as never, repository: "r2" },
-      currentUsername: "claude",
-    });
-
-    expect(screen.queryByText(/the first listed one it holds a checkout of/)).toBeNull();
   });
 });

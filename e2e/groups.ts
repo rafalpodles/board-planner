@@ -258,7 +258,6 @@ export const GROUPS = {
     "refused-change-decision.spec.ts",
     "claim-ownership.spec.ts",
     "claim-returns-a-document.spec.ts",
-    "task-repository.spec.ts",
     "in-app-notifications.spec.ts",
     "board-feed-notifications.spec.ts",
     "notification-grid-delivery.spec.ts",
