@@ -241,11 +241,9 @@ export default function SprintsPage() {
                 Create Task
               </Button>
             )}
-            {board.sprints.length > 0 && (
-              <Button size="sm" variant="secondary" onClick={() => setShowReleaseNotes(true)}>
-                Release notes
-              </Button>
-            )}
+            <Button size="sm" variant="secondary" onClick={() => setShowReleaseNotes(true)}>
+              Release notes
+            </Button>
             {canShowVelocity && (
               <Button size="sm" variant="secondary" onClick={() => setShowVelocity(true)}>
                 Velocity

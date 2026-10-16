@@ -3,7 +3,7 @@ import {
   allowLoopbackIn,
   fetchDeployments,
   fetchDeploymentStatuses,
-  fetchPullRequests,
+  fetchMergedPullRequests, fetchPullRequests,
   GitHubRateLimited,
   GitHubRefused,
   matchPRsToTasks,
@@ -299,5 +299,31 @@ describe("deployments and the rate limit they can hit (BP-878)", () => {
     expect(err).not.toBeInstanceOf(GitHubRateLimited);
     expect(err).toBeInstanceOf(GitHubRefused);
     expect(err.message).toBe("GitHub answered 403");
+  });
+});
+
+// BP-869: release notes need every merge of a window, not the latest few the activity listing holds
+describe("fetchMergedPullRequests", () => {
+  const item = (n: number) => ({ title: `PR ${n}`, html_url: `https://github.com/o/r/pull/${n}`, pull_request: { merged_at: "2026-10-03T00:00:00Z" } });
+
+  it("searches merged pull requests by the days of the window, page after page, and says when it read them all", async () => {
+    safeFetch.mockReset();
+    safeFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({ total_count: 101, items: Array.from({ length: 100 }, (_, i) => item(i + 1)) })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ total_count: 101, items: [item(101), { title: "unmerged", html_url: "x", pull_request: { merged_at: null } }] })));
+    const result = await fetchMergedPullRequests("o", "r", "tok", new Date("2026-10-01T00:00:00Z"), new Date("2026-10-14T23:59:59Z"));
+    expect(result.pulls).toHaveLength(101);
+    expect(result.complete).toBe(true);
+    const first = decodeURIComponent(String(safeFetch.mock.calls[0][0]));
+    expect(first).toContain("/search/issues?q=repo:o/r is:pr is:merged merged:2026-10-01..2026-10-14&per_page=100&page=1");
+    expect(String(safeFetch.mock.calls[1][0])).toContain("page=2");
+  });
+
+  it("stops at five pages and says the list is not whole", async () => {
+    safeFetch.mockReset();
+    safeFetch.mockImplementation(async () => new Response(JSON.stringify({ total_count: 900, items: Array.from({ length: 100 }, (_, i) => item(i)) })));
+    const result = await fetchMergedPullRequests("o", "r", "tok", new Date("2026-01-01"), new Date("2026-12-31"));
+    expect(safeFetch).toHaveBeenCalledTimes(5);
+    expect(result.complete).toBe(false);
   });
 });

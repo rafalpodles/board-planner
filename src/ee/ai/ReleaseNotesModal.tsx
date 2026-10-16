@@ -17,7 +17,9 @@ interface Notes {
   empty: boolean;
   tasks: number;
   pullRequests: number;
-  repositoryUnread: string | null;
+  tasksLeftOut: number;
+  pullRequestsIncomplete: boolean;
+  repositoryUnread: boolean;
 }
 
 const DATES = "\u0000dates";
@@ -37,7 +39,7 @@ export function ReleaseNotesModal({
 }) {
   const api = useApi();
   const entitlement = useEntitlement("ai.release_notes");
-  const [window, setWindow] = useState(initialSprintId ?? sprints[0]?._id ?? DATES);
+  const [covering, setCovering] = useState(initialSprintId ?? sprints[0]?._id ?? DATES);
   const [from, setFrom] = useState(daysAgo(14));
   const [to, setTo] = useState(today());
   const [tone, setTone] = useState<"changelog" | "customer">("changelog");
@@ -54,7 +56,7 @@ export function ReleaseNotesModal({
     setNotes(null);
     setCopied(false);
     try {
-      const body = window === DATES ? { from, to, tone } : { sprintId: window, tone };
+      const body = covering === DATES ? { from, to, tone } : { sprintId: covering, tone };
       const answer: Notes = await api.post(`/api/projects/${projectId}/release-notes`, body);
       if (mine === asked.current) setNotes(answer);
     } catch (e) {
@@ -87,9 +89,9 @@ export function ReleaseNotesModal({
           <div className="grid gap-3 sm:grid-cols-2">
             <Select
               label="Covering"
-              value={window}
+              value={covering}
               disabled={busy}
-              onChange={(e) => setWindow(e.target.value)}
+              onChange={(e) => setCovering(e.target.value)}
               options={[...sprints.map((s) => ({ value: s._id, label: s.name })), { value: DATES, label: "Between two days" }]}
             />
             <Select
@@ -103,14 +105,14 @@ export function ReleaseNotesModal({
               ]}
             />
           </div>
-          {window === DATES && (
+          {covering === DATES && (
             <div className="grid gap-3 sm:grid-cols-2">
               <Input label="From" type="date" value={from} max={to} disabled={busy} onChange={(e) => setFrom(e.target.value)} />
               <Input label="To" type="date" value={to} min={from} disabled={busy} onChange={(e) => setTo(e.target.value)} />
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" onClick={write} disabled={busy || (window === DATES && (!from || !to))}>
+            <Button size="sm" onClick={write} disabled={busy || (covering === DATES && (!from || !to))}>
               {busy ? "Writing…" : notes ? "Write again" : "Write the notes"}
             </Button>
             {notes && !notes.empty && (
@@ -133,7 +135,13 @@ export function ReleaseNotesModal({
                 </p>
               )}
               {notes.repositoryUnread && (
-                <p className="text-sm text-warning">The repository could not be read ({notes.repositoryUnread}), so pull requests with no task are missing.</p>
+                <p className="text-sm text-warning">The repository could not be read, so pull requests with no task are missing.</p>
+              )}
+              {notes.tasksLeftOut > 0 && (
+                <p className="text-sm text-warning">{notes.tasksLeftOut} more finished tasks did not fit; choose a shorter window.</p>
+              )}
+              {notes.pullRequestsIncomplete && (
+                <p className="text-sm text-warning">The repository had more merges than could be read; some pull requests with no task are missing.</p>
               )}
               <div className="prose prose-sm max-w-none max-h-[50vh] overflow-y-auto rounded-lg border border-border p-3 text-sm leading-relaxed">
                 <MarkdownContent>{notes.markdown}</MarkdownContent>

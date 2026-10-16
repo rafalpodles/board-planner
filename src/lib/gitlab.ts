@@ -35,6 +35,31 @@ export async function fetchMergeRequests(
   return readBoundedJson(res, MAX_RESPONSE_BYTES);
 }
 
+const MERGED_PAGES = 5;
+
+/** Every merge request merged since a day, newest activity first; `complete` is false past five pages */
+export async function fetchMergedRequests(
+  host: string,
+  projectPath: string,
+  token: string,
+  since: Date
+): Promise<{ requests: GitLabMR[]; complete: boolean }> {
+  const base = host.replace(/\/+$/, "");
+  const requests: GitLabMR[] = [];
+  for (let page = 1; page <= MERGED_PAGES; page++) {
+    const url = `${base}/api/v4/projects/${encodeURIComponent(projectPath)}/merge_requests?state=merged&updated_after=${encodeURIComponent(since.toISOString())}&per_page=100&page=${page}`;
+    const res = await safeFetch(url, { headers: { "PRIVATE-TOKEN": token }, signal: AbortSignal.timeout(15000) }, GITLAB_DESTINATION);
+    if (!res.ok) {
+      await logUpstreamFailure("GitLab", res);
+      throw new Error(`GitLab answered ${res.status}`);
+    }
+    const batch = (await readBoundedJson(res, MAX_RESPONSE_BYTES)) as GitLabMR[];
+    requests.push(...batch);
+    if (batch.length < 100) return { requests, complete: true };
+  }
+  return { requests, complete: false };
+}
+
 // Same matching rules as GitHub PRs: project key + number in branch or title, and the keys the
 // project used to have — renaming a project renames every task at once, while the branches and MR
 // titles already on GitLab keep the prefix they were created with.

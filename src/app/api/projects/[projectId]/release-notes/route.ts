@@ -9,6 +9,8 @@ import { RELEASE_NOTE_TONES, isEmpty, releaseMaterial, writeReleaseNotes, type R
 /** Notes one person may ask for in the rate limiter's 15-minute window */
 export const NOTES_PER_USER_WINDOW = 20;
 const MAX_DAYS = 366;
+// One at a time per person: each asks the repository for up to five pages
+const inFlight = new Set<string>();
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 function day(value: unknown, end: boolean): Date | null {
@@ -33,8 +35,8 @@ export const POST = withProjectAccess(
       if (typeof sprintId !== "string" || !isValidObjectId(sprintId)) return NextResponse.json({ error: "sprintId must be a sprint's id" }, { status: 400 });
       const sprint = await db.Sprint.findOne({ _id: sprintId, project: projectId }, "name startDate endDate").lean<{ name: string; startDate: Date; endDate: Date }>();
       if (!sprint) return NextResponse.json({ error: "Sprint not found" }, { status: 404 });
-      const endOfLastDay = new Date(`${new Date(sprint.endDate).toISOString().slice(0, 10)}T23:59:59.999Z`);
-      window = { from: new Date(sprint.startDate), to: endOfLastDay, label: sprint.name };
+      // A sprint ends where the next one may begin, so its last instant is just before its end date
+      window = { from: new Date(sprint.startDate), to: new Date(new Date(sprint.endDate).getTime() - 1), label: sprint.name, sprintId: String(sprintId) };
     } else {
       const start = day(from, false);
       const end = day(to, true);
@@ -46,19 +48,32 @@ export const POST = withProjectAccess(
       window = { from: start, to: end, label: `${from} to ${to}` };
     }
 
-    const material = await releaseMaterial(db, projectId, window);
-    if (!material) return NextResponse.json({ error: "Project not found" }, { status: 404 });
-    const counts = { tasks: material.tasks.length, pullRequests: material.pullRequestsWithoutTask.length, repositoryUnread: material.repositoryUnread };
-    // Nothing shipped is said plainly, and costs no model call
-    if (isEmpty(material)) {
-      return NextResponse.json({ markdown: `Nothing reached a done column, and no pull request was merged, in ${window.label}.`, empty: true, ...counts });
-    }
-
-    if ((await countAttempt(sourceKey(`user:${String(user._id)}`, "ai-release-notes"))) > NOTES_PER_USER_WINDOW) {
+    // Counted before any work, empty answers included: the repository is read for every one of them
+    const holder = String(user._id);
+    if ((await countAttempt(sourceKey(`user:${holder}`, "ai-release-notes"))) > NOTES_PER_USER_WINDOW) {
       return NextResponse.json({ error: "Too many release notes asked for. Try again in 15 minutes." }, { status: 429 });
     }
-    const written = await writeReleaseNotes(db, { projectId, userId: String(user._id) }, material, tone as ReleaseNoteTone);
-    if (!written.ok) return NextResponse.json(written.body, { status: written.status });
-    return NextResponse.json({ markdown: written.text, empty: false, ...counts });
+    if (inFlight.has(holder)) return NextResponse.json({ error: "Release notes are already being written." }, { status: 409 });
+    inFlight.add(holder);
+    try {
+      const material = await releaseMaterial(db, projectId, window);
+      if (!material) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+      const counts = {
+        tasks: material.tasks.length,
+        pullRequests: material.pullRequestsWithoutTask.length,
+        tasksLeftOut: material.tasksLeftOut,
+        pullRequestsIncomplete: material.pullRequestsIncomplete,
+        repositoryUnread: material.repositoryUnread,
+      };
+      // Nothing shipped is said plainly, and costs no model call
+      if (isEmpty(material)) {
+        return NextResponse.json({ markdown: `Nothing reached a done column, and no pull request was merged, in ${window.label}.`, empty: true, ...counts });
+      }
+      const written = await writeReleaseNotes(db, { projectId, userId: holder }, material, tone as ReleaseNoteTone);
+      if (!written.ok) return NextResponse.json(written.body, { status: written.status });
+      return NextResponse.json({ markdown: written.text, empty: false, ...counts });
+    } finally {
+      inFlight.delete(holder);
+    }
   })
 );

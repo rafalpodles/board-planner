@@ -130,6 +130,51 @@ export async function fetchPullRequests(
   return [...openPRs, ...closedPRs];
 }
 
+export interface MergedPullRequest {
+  title: string;
+  url: string;
+  mergedAt: string;
+}
+
+const MERGED_PAGES = 5;
+
+/**
+ * Every pull request merged between two days, by GitHub's search rather than the recent-activity listing,
+ * which holds only the latest few. `complete` is false when there were more than five pages of them.
+ */
+export async function fetchMergedPullRequests(
+  owner: string,
+  repo: string,
+  token: string,
+  from: Date,
+  to: Date
+): Promise<{ pulls: MergedPullRequest[]; complete: boolean }> {
+  const headers = { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}` };
+  const range = `${from.toISOString().slice(0, 10)}..${to.toISOString().slice(0, 10)}`;
+  const q = encodeURIComponent(`repo:${owner}/${repo} is:pr is:merged merged:${range}`);
+  const pulls: MergedPullRequest[] = [];
+  let total = 0;
+  for (let page = 1; page <= MERGED_PAGES; page++) {
+    const res = await safeFetch(
+      `${API_BASE()}/search/issues?q=${q}&per_page=100&page=${page}`,
+      { headers, signal: AbortSignal.timeout(15000) },
+      GITHUB_DESTINATION
+    );
+    if (!res.ok) throw await refusal(res);
+    const body = (await readBoundedJson(res, MAX_RESPONSE_BYTES)) as {
+      total_count?: number;
+      items?: { title: string; html_url: string; pull_request?: { merged_at?: string | null } }[];
+    };
+    total = body.total_count ?? 0;
+    const items = body.items ?? [];
+    for (const item of items) {
+      if (item.pull_request?.merged_at) pulls.push({ title: item.title, url: item.html_url, mergedAt: item.pull_request.merged_at });
+    }
+    if (items.length < 100 || pulls.length >= total) break;
+  }
+  return { pulls, complete: pulls.length >= total };
+}
+
 async function fetchPage(url: string, headers: Record<string, string>): Promise<GitHubPR[]> {
   const res = await safeFetch(
     url,
