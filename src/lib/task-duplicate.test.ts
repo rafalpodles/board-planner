@@ -16,7 +16,6 @@ const task = {
   dueDate: "2026-05-12T12:00:00.000Z",
   customFieldValues: { f1: "L" },
   recurrence: { frequency: "weekly", interval: 2 },
-  repository: "6ab0f94eadb2609f98d84db2",
 } as unknown as ApiTask;
 
 describe("duplicatePayload", () => {
@@ -29,7 +28,6 @@ describe("duplicatePayload", () => {
       dueDate: "2026-05-12T12:00:00.000Z",
       customFieldValues: { f1: "L" },
       recurrence: { frequency: "weekly", interval: 2 },
-      repository: "6ab0f94eadb2609f98d84db2",
     });
   });
 
@@ -87,5 +85,13 @@ describe("undoneChecklist", () => {
   it("answers an empty list for a task that has no criteria at all", () => {
     expect(undoneChecklist(undefined)).toEqual([]);
     expect(undoneChecklist(null)).toEqual([]);
+  });
+});
+
+// BP-1066. A copy names no repository: the one the original names may be gone from the board by now,
+// and a create naming an unlisted one is refused. On a board with several the task page asks for it.
+describe("duplicatePayload and the repository", () => {
+  it("does not carry the repository of the original", () => {
+    expect(duplicatePayload({ ...task, repository: "6ab0f94eadb2609f98d84db2" } as ApiTask)).not.toHaveProperty("repository");
   });
 });

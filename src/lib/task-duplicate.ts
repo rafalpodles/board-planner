@@ -32,7 +32,6 @@ type DuplicableTask = Pick<
   | "dueDate"
   | "customFieldValues"
   | "recurrence"
-  | "repository"
 >;
 
 /**
@@ -66,7 +65,5 @@ export function duplicatePayload(task: DuplicableTask) {
     dueDate: task.dueDate,
     customFieldValues: task.customFieldValues,
     recurrence: task.recurrence,
-    // The copy changes the same repository, and on a board with several a task naming none is never claimed
-    repository: task.repository ?? null,
   };
 }
