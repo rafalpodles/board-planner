@@ -2348,6 +2348,22 @@ describe("a status change announces the same things whichever path made it", () 
     expect(taskCreate.mock.calls[0]?.[0].agent).toBe("a1");
   });
 
+  // BP-1066. On a board with several repositories a task that names none is never claimed, so an
+  // occurrence that forgot the repository would be a series no machine takes
+  it("carries the repository into the next occurrence, or the series stops being claimed", async () => {
+    setup({
+      recurrence: { frequency: "weekly", interval: 1 },
+      assignee: "u9",
+      assignedBy: "u9",
+      agent: "a1",
+      repository: "6ab0f94eadb2609f98d84db2",
+    });
+    await updateTask(db, "p1", "t1", { status: "shipped" }, "actor");
+    await flush();
+
+    expect(taskCreate.mock.calls[0]?.[0].repository).toBe("6ab0f94eadb2609f98d84db2");
+  });
+
   // Null rather than undefined: Task.create would default an absent field anyway, but the pair
   // above and below are the two halves of one decision and reading them together should not
   // require knowing which fields the schema defaults
