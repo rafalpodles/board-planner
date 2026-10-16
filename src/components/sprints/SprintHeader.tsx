@@ -21,6 +21,7 @@ interface SprintHeaderProps {
   onActivate: () => void;
   onComplete: () => void;
   onEdit: () => void;
+  onSummary?: () => void;
   onDelete: () => void;
   onSelectSprint: (sprintId: string) => void;
 }
@@ -75,6 +76,7 @@ export function SprintHeader({
   onActivate,
   onComplete,
   onEdit,
+  onSummary,
   onDelete,
   onSelectSprint,
 }: SprintHeaderProps) {
@@ -186,6 +188,14 @@ export function SprintHeader({
                 </Button>
               )}
             </>
+          )}
+          {onSummary && (
+            <Button size="sm" variant="ghost" onClick={onSummary} aria-label="Sprint summary" title="Sprint summary">
+              <svg aria-hidden className="h-4 w-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h7" />
+              </svg>
+              <span className="hidden sm:inline">Summary</span>
+            </Button>
           )}
           <Button size="sm" variant="ghost" onClick={onEdit}>
             Edit

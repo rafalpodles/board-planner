@@ -243,14 +243,6 @@ export default function SprintsPage() {
                 Create Task
               </Button>
             )}
-            {board.sprints.length > 0 && (
-              <Button size="sm" variant="secondary" onClick={() => setShowSummary(true)} aria-label="Sprint summary" title="Sprint summary">
-                <svg aria-hidden className="h-4 w-4 @md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h7" />
-                </svg>
-                <span className="hidden @md:inline">Sprint summary</span>
-              </Button>
-            )}
             <Button size="sm" variant="secondary" onClick={() => setShowReleaseNotes(true)} aria-label="Release notes" title="Release notes">
               <svg aria-hidden className="h-4 w-4 @md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4h7l4 4v12H7zM14 4v4h4M10 13h5M10 17h5" />
@@ -299,6 +291,7 @@ export default function SprintsPage() {
                   onActivate={() => handleActivate(selected._id)}
                   onComplete={() => setCompleting(selected)}
                   onEdit={() => openForm(selected)}
+                  onSummary={() => setShowSummary(true)}
                   onDelete={() => setConfirmDelete(selected)}
                   onSelectSprint={(id) => router.push(sprintUrl(id, view))}
                 />
