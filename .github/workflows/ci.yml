@@ -422,7 +422,7 @@ jobs:
         id: affected
         env:
           # How many shards each group is cut into, at most the three the matrix lists (BP-1042)
-          SHARDS: '{"tasks":2,"task-fields":1,"board":2,"project":3,"people":2,"automation":2}'
+          SHARDS: '{"tasks":2,"task-fields":1,"board":2,"project":3,"people":2,"automation":2,"a11y":1}'
           PICKED: ${{ needs.plan_e2e.result != 'success' || contains(fromJson(needs.plan_e2e.outputs.groups), matrix.group) }}
         run: |
           shards=$(echo "$SHARDS" | jq -r --arg group "${{ matrix.group }}" '.[$group] // 1')
