@@ -158,8 +158,11 @@ export function BoardHeader({
       </div>
 
       {onSummary && (
-        <Button size="sm" variant="secondary" onClick={onSummary} className="h-11 shrink-0 whitespace-nowrap">
-          Summary
+        <Button size="sm" variant="secondary" onClick={onSummary} aria-label="Summary" title="Summary" className="h-11 shrink-0 whitespace-nowrap">
+          <svg aria-hidden className="h-4 w-4 @md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h7" />
+          </svg>
+          <span className="hidden @md:inline">Summary</span>
         </Button>
       )}
 
