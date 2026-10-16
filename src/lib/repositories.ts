@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { projectRepositoryUrl, type RepositoryFields } from "./repository";
+import { entryId, projectRepositoryUrl, storedRepositories, type RepositoryEntry, type RepositoryFields } from "./repository";
 import { echo } from "./echo";
 
 export const REPOSITORY_NAME_MAX_LENGTH = 100;
@@ -17,19 +17,8 @@ export interface ProjectRepository {
   name: string;
 }
 
-// What a stored entry looks like from the database (`_id`) or from the API (`id`)
-export interface RepositoryEntry {
-  _id?: unknown;
-  id?: string;
-  url: string;
-  name?: string;
-}
-
 type WithRepositories = RepositoryFields & { repositories?: RepositoryEntry[] | null };
 
-export function entryId(entry: RepositoryEntry): string {
-  return String(entry._id ?? entry.id ?? "");
-}
 
 /**
  * The project's repositories, the first being the one everything still reads today. A project the
@@ -55,10 +44,6 @@ export function withPrimaryUrl(stored: StoredRepository[] | null | undefined, ur
   if (!trimmed) return rest;
   const first = stored?.[0];
   return [{ _id: first?._id ?? new Types.ObjectId(), url: trimmed, name: first?.name ?? "" }, ...rest];
-}
-
-export function storedRepositories(project: WithRepositories): RepositoryEntry[] {
-  return (project.repositories ?? []).filter((r) => r.url?.trim());
 }
 
 export function hasSeveralRepositories(project: WithRepositories): boolean {

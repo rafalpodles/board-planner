@@ -128,3 +128,20 @@ export function repositoryProvider(
 
   return "";
 }
+
+// What a stored entry looks like from the database (`_id`) or from the API (`id`). Here and not in
+// repositories.ts, which imports mongoose: client code matches repositories too (repo-match.ts).
+export interface RepositoryEntry {
+  _id?: unknown;
+  id?: string;
+  url: string;
+  name?: string;
+}
+
+export function entryId(entry: RepositoryEntry): string {
+  return String(entry._id ?? entry.id ?? "");
+}
+
+export function storedRepositories(project: { repositories?: RepositoryEntry[] | null }): RepositoryEntry[] {
+  return (project.repositories ?? []).filter((r) => r.url?.trim());
+}

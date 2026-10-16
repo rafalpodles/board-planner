@@ -28,7 +28,8 @@ import {
 import { notifyBoardFeed } from "@/lib/board-feed";
 import { pillToneForRole } from "@/lib/email-template";
 import { criterionChanges, parseChecklistString } from "@/lib/checklist";
-import { repositoryNameOf, repositoryRefusal, type RepositoryEntry } from "@/lib/repositories";
+import { repositoryNameOf, repositoryRefusal } from "@/lib/repositories";
+import type { RepositoryEntry } from "@/lib/repository";
 import { undoneChecklist } from "@/lib/task-duplicate";
 import {
   COMMENT_BODY_MAX_LENGTH,

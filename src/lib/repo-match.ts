@@ -1,5 +1,11 @@
-import { repositoryCandidates, repositoryUrlCandidates, RepositoryFields } from "./repository";
-import { entryId, storedRepositories, type RepositoryEntry } from "./repositories";
+import {
+  entryId,
+  repositoryCandidates,
+  repositoryUrlCandidates,
+  storedRepositories,
+  type RepositoryEntry,
+  type RepositoryFields,
+} from "./repository";
 
 // One repository is reachable by many strings — ssh, https, with or without .git, and through a
 // per-account ssh host alias like `git@github-owner:owner/repo.git`. Matching a worker's
