@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { taskPath } from "@/lib/urls";
 import { useApi } from "@/hooks/use-api";
 import { useEntitlement } from "@/hooks/use-entitlement";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +11,7 @@ import { ProUpsell } from "@/components/ui/ProUpsell";
 
 interface Duplicate {
   taskId: string;
+  taskNumber: number;
   key: string;
   title: string;
   status: string;
@@ -18,10 +20,6 @@ interface Duplicate {
 
 type Shown = { duplicates: Duplicate[] } | null;
 
-/**
- * A draft's check offers a tick per candidate, linked once the task exists (`selected`); a task's
- * check links at once through the task's own links route, which keeps its cycle check.
- */
 export function DuplicatesCheck({
   projectId,
   projectKey,
@@ -51,11 +49,12 @@ export function DuplicatesCheck({
   const [upsell, setUpsell] = useState(false);
   const asked = useRef(0);
 
-  // A result belongs to the text it was asked about; a draft that changes drops it
   useEffect(() => {
     if (taskId) return;
     asked.current++;
     setShown(null);
+    setError("");
+    setBusy((b) => (b === "checking" ? null : b));
     onSelect?.([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, description, taskId]);
@@ -92,7 +91,7 @@ export function DuplicatesCheck({
   }
 
   const ticked = new Set(selected ?? []);
-  const taskHref = (d: Duplicate) => `/projects/${projectKey ?? projectId}/tasks/${d.key.split("-").pop()}`;
+  const taskHref = (d: Duplicate) => taskPath(projectKey ?? projectId, d.taskNumber);
 
   return (
     <div className="flex flex-col gap-2" data-testid="duplicates-check">
@@ -109,38 +108,47 @@ export function DuplicatesCheck({
           {error}
         </p>
       )}
-      {shown && shown.duplicates.length === 0 && <p className="text-sm text-text-muted">No likely duplicates on this board.</p>}
-      {shown && shown.duplicates.length > 0 && (
-        <ul className="flex flex-col gap-2" aria-label="Possible duplicates">
-          {shown.duplicates.map((d) => {
-            const linked = linkedIds.includes(d.taskId);
-            return (
-              <li key={d.taskId} className="flex flex-wrap items-start gap-x-3 gap-y-1 rounded-lg border border-border p-2.5 text-sm">
-                <div className="min-w-0 flex-1">
-                  <Link href={taskHref(d)} target={taskId ? undefined : "_blank"} className="focus-ring rounded font-medium text-primary underline">
-                    {d.key} {d.title}
-                  </Link>
-                  {d.reason && <p className="text-text-muted">{d.reason}</p>}
-                </div>
-                {taskId ? (
-                  <Button type="button" size="sm" variant="secondary" onClick={() => link(d)} disabled={busy !== null || linked} aria-label={`Mark as a duplicate of ${d.key}`}>
-                    {linked ? "Marked" : "Mark as duplicate"}
-                  </Button>
-                ) : (
-                  <label className="flex shrink-0 items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={ticked.has(d.taskId)}
-                      onChange={(e) => onSelect?.(e.target.checked ? [...ticked, d.taskId] : [...ticked].filter((id) => id !== d.taskId))}
-                    />
-                    Duplicate of {d.key}
-                  </label>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      <div aria-live="polite">
+        {shown && shown.duplicates.length === 0 && <p className="text-sm text-text-muted">No likely duplicates on this board.</p>}
+        {shown && shown.duplicates.length > 0 && (
+          <ul className="flex flex-col gap-2" aria-label="Possible duplicates">
+            {shown.duplicates.map((d) => {
+              const linked = linkedIds.includes(d.taskId);
+              return (
+                <li key={d.taskId} className="flex flex-wrap items-start gap-x-3 gap-y-1 rounded-lg border border-border p-2.5 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <Link href={taskHref(d)} target={taskId ? undefined : "_blank"} className="focus-ring rounded font-medium text-primary underline">
+                      {d.key} {d.title}
+                    </Link>
+                    {d.reason && <p className="text-text-muted">{d.reason}</p>}
+                  </div>
+                  {taskId ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => link(d)}
+                      disabled={busy !== null || linked}
+                      aria-label={`Mark as a duplicate of ${d.key}`}
+                    >
+                      {linked ? "Marked" : "Mark as duplicate"}
+                    </Button>
+                  ) : (
+                    <label className="flex shrink-0 items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={ticked.has(d.taskId)}
+                        onChange={(e) => onSelect?.(e.target.checked ? [...ticked, d.taskId] : [...ticked].filter((id) => id !== d.taskId))}
+                      />
+                      Duplicate of {d.key}
+                    </label>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

@@ -20,6 +20,7 @@ export interface Draft {
 
 export interface Candidate {
   taskId: string;
+  taskNumber: number;
   key: string;
   title: string;
   status: string;
@@ -29,34 +30,47 @@ export interface Candidate {
 
 export interface Duplicate {
   taskId: string;
+  taskNumber: number;
   key: string;
   title: string;
   status: string;
   reason: string;
 }
 
-/** Shared words over the smaller side: a short title inside a long description still counts */
 function overlap(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 || b.size === 0) return 0;
   let shared = 0;
   for (const token of a) if (b.has(token)) shared++;
+  // One shared word is a coincidence once there are two to share
+  if (shared < Math.min(2, a.size)) return 0;
   return shared / Math.min(a.size, b.size);
 }
 
-export function lexicalScore(draft: Draft, other: { title: string; description: string }): number {
-  const titles = jaccard(titleTokens(draft.title), titleTokens(other.title));
-  const whole = overlap(
-    titleTokens(`${draft.title} ${draft.description.slice(0, DESCRIPTION_READ)}`),
-    titleTokens(`${other.title} ${other.description.slice(0, DESCRIPTION_READ)}`)
-  );
-  return Math.max(titles, whole * 0.8);
+interface DraftTokens {
+  title: Set<string>;
+  whole: Set<string>;
 }
 
-export async function shortlist(db: ScopedDb, projectId: string, draft: Draft, excludeTaskId?: string): Promise<Candidate[]> {
+function draftTokens(draft: Draft): DraftTokens {
+  return { title: titleTokens(draft.title), whole: titleTokens(`${draft.title} ${draft.description.slice(0, DESCRIPTION_READ)}`) };
+}
+
+function scoreAgainst(tokens: DraftTokens, other: { title: string; description: string }): number {
+  const titles = jaccard(tokens.title, titleTokens(other.title));
+  const whole = overlap(tokens.whole, titleTokens(`${other.title} ${other.description.slice(0, DESCRIPTION_READ)}`));
+  return Math.max(titles, whole * 0.6);
+}
+
+export function lexicalScore(draft: Draft, other: { title: string; description: string }): number {
+  return scoreAgainst(draftTokens(draft), other);
+}
+
+export async function shortlist(db: ScopedDb, projectId: string, draft: Draft, excludeTaskIds: string[] = []): Promise<Candidate[]> {
   const project = await db.Project.findById(projectId, "key").lean();
   if (!project) return [];
+  const tokens = draftTokens(draft);
   const tasks = await db.Task.find(
-    { project: projectId, ...NOT_ARCHIVED, ...(excludeTaskId && { _id: { $ne: excludeTaskId } }) },
+    { project: projectId, ...NOT_ARCHIVED, ...(excludeTaskIds.length > 0 && { _id: { $nin: excludeTaskIds } }) },
     "taskNumber title description status"
   )
     .sort({ taskNumber: -1 })
@@ -65,11 +79,12 @@ export async function shortlist(db: ScopedDb, projectId: string, draft: Draft, e
   return tasks
     .map((t) => ({
       taskId: String(t._id),
+      taskNumber: t.taskNumber,
       key: taskKeyOf(project.key, t.taskNumber),
       title: t.title,
       status: String(t.status),
       description: (t.description ?? "").slice(0, DESCRIPTION_READ),
-      score: lexicalScore(draft, { title: t.title, description: t.description ?? "" }),
+      score: scoreAgainst(tokens, { title: t.title, description: t.description ?? "" }),
     }))
     .filter((c) => c.score >= SHORTLIST_MIN_SCORE)
     .sort((a, b) => b.score - a.score)
@@ -84,7 +99,6 @@ export function duplicateInstructions(): string {
   ].join("\n");
 }
 
-/** Only keys from the shortlist survive, once each; anything else the model said is dropped */
 export function duplicatesFrom(text: string, candidates: Candidate[]): Duplicate[] {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
@@ -103,7 +117,7 @@ export function duplicatesFrom(text: string, candidates: Candidate[]): Duplicate
     const candidate = candidates.find((c) => c.key === key);
     if (!candidate || out.some((d) => d.taskId === candidate.taskId)) continue;
     const reason = typeof item?.reason === "string" ? item.reason.trim().slice(0, REASON_MAX) : "";
-    out.push({ taskId: candidate.taskId, key: candidate.key, title: candidate.title, status: candidate.status, reason });
+    out.push({ taskId: candidate.taskId, taskNumber: candidate.taskNumber, key: candidate.key, title: candidate.title, status: candidate.status, reason });
     if (out.length === DUPLICATES_MAX) break;
   }
   return out;
@@ -115,9 +129,9 @@ export async function findDuplicates(
   db: ScopedDb,
   context: { projectId: string; userId: string },
   draft: Draft,
-  excludeTaskId?: string
+  excludeTaskIds: string[] = []
 ): Promise<DuplicatesResult> {
-  const candidates = await shortlist(db, context.projectId, draft, excludeTaskId);
+  const candidates = await shortlist(db, context.projectId, draft, excludeTaskIds);
   if (candidates.length === 0) return { ok: true, duplicates: [], shortlisted: 0 };
   const written = await gatewayWrite(
     db,
@@ -125,7 +139,7 @@ export async function findDuplicates(
     {
       model: await resolveAiModel(db),
       instructions: duplicateInstructions(),
-      data: { draft, candidates: candidates.map(({ key, title, description }) => ({ key, title, description })) },
+      data: { draft: { title: draft.title, description: draft.description.slice(0, DESCRIPTION_READ) }, candidates: candidates.map(({ key, title, description }) => ({ key, title, description })) },
     }
   );
   if (!written.ok) return written;

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const m = vi.hoisted(() => ({ findDuplicates: vi.fn(), exists: vi.fn() }));
+const m = vi.hoisted(() => ({ findDuplicates: vi.fn(), findOne: vi.fn(), find: vi.fn() }));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/rateLimit", async () => {
@@ -12,7 +12,7 @@ vi.mock("@/lib/middleware", () => ({
   withProjectAccess:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
     (req: Request, ctx: { user?: unknown }) =>
-      handler(req, { ...ctx, user: ctx.user ?? { _id: "u1" }, db: { Task: { exists: m.exists } } }),
+      handler(req, { ...ctx, user: ctx.user ?? { _id: "u1" }, db: { Task: { findOne: (...a: unknown[]) => ({ lean: async () => m.findOne(...a) }), find: (...a: unknown[]) => ({ lean: async () => m.find(...a) }) } } }),
   requireEntitlement: (_feature: string, handler: unknown) => handler,
 }));
 
@@ -29,18 +29,20 @@ const ask = (body: unknown, userId = "u1") =>
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
-  m.exists.mockResolvedValue({ _id: TASK });
+  m.findOne.mockResolvedValue({ _id: TASK, relations: [{ task: "rel1", type: "parent_of" }], blockedBy: ["blk1"] });
+  m.find.mockResolvedValue([{ _id: "back1" }]);
   m.findDuplicates.mockResolvedValue({ ok: true, duplicates: [{ key: "TP-1" }], shortlisted: 2 });
 });
 
 describe("POST duplicates", () => {
-  it("checks a draft, and a task of this board without itself", async () => {
+  it("checks a draft, and a task of this board without itself or anything already linked to it either way", async () => {
     const res = await ask({ title: " Export invoices ", description: "csv" });
     expect(await res.json()).toEqual({ duplicates: [{ key: "TP-1" }], shortlisted: 2 });
-    expect(m.findDuplicates).toHaveBeenCalledWith(expect.anything(), { projectId: "p1", userId: "u1" }, { title: "Export invoices", description: "csv" }, undefined);
+    expect(m.findDuplicates).toHaveBeenCalledWith(expect.anything(), { projectId: "p1", userId: "u1" }, { title: "Export invoices", description: "csv" }, []);
     await ask({ title: "x", taskId: TASK });
-    expect(m.exists).toHaveBeenCalledWith({ _id: TASK, project: "p1" });
-    expect(m.findDuplicates.mock.calls[1][3]).toBe(TASK);
+    expect(m.findOne.mock.calls[0][0]).toEqual({ _id: TASK, project: "p1" });
+    expect(m.find.mock.calls[0][0]).toEqual({ project: "p1", $or: [{ "relations.task": TASK }, { blockedBy: TASK }] });
+    expect(m.findDuplicates.mock.calls[1][3]).toEqual([TASK, "rel1", "blk1", "back1"]);
   });
 
   it.each([[{}], [{ title: "  " }], [{ title: "x".repeat(201) }], [{ title: "x", description: 5 }], [{ title: "x", taskId: "nope" }]])("refuses %j", async (body) => {
@@ -49,7 +51,7 @@ describe("POST duplicates", () => {
   });
 
   it("answers 404 for a task of another board", async () => {
-    m.exists.mockResolvedValue(null);
+    m.findOne.mockResolvedValue(null);
     expect((await ask({ title: "x", taskId: TASK })).status).toBe(404);
     expect(m.findDuplicates).not.toHaveBeenCalled();
   });

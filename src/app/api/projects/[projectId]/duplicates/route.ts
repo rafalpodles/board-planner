@@ -34,10 +34,20 @@ export const POST = withProjectAccess(
     inFlight.add(holder);
     try {
       await connectDB();
-      if (taskId && !(await db.Task.exists({ _id: taskId, project: projectId }))) {
-        return NextResponse.json({ error: "Task not found" }, { status: 404 });
+      let exclude: string[] = [];
+      if (taskId) {
+        const asked = await db.Task.findOne({ _id: taskId, project: projectId }, "relations blockedBy").lean();
+        if (!asked) return NextResponse.json({ error: "Task not found" }, { status: 404 });
+        // A pair holds one relation, and marking replaces it: anything already linked either way is no candidate
+        const linkedToIt = await db.Task.find({ project: projectId, $or: [{ "relations.task": taskId }, { blockedBy: taskId }] }, "_id").lean();
+        exclude = [
+          String(taskId),
+          ...(asked.relations ?? []).map((r) => String(r.task)),
+          ...(asked.blockedBy ?? []).map(String),
+          ...linkedToIt.map((t) => String(t._id)),
+        ];
       }
-      const result = await findDuplicates(db, { projectId, userId: holder }, { title: title.trim(), description }, taskId as string | undefined);
+      const result = await findDuplicates(db, { projectId, userId: holder }, { title: title.trim(), description }, exclude);
       if (!result.ok) return NextResponse.json(result.body, { status: result.status });
       return NextResponse.json({ duplicates: result.duplicates, shortlisted: result.shortlisted });
     } finally {

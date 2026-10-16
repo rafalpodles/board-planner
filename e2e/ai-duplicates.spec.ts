@@ -120,3 +120,16 @@ test("an existing task finds its duplicate on demand and marks it through the li
   const stored = await (await db()).collection("tasks").findOne({ _id: copy });
   expect(stored?.relations).toEqual([expect.objectContaining({ type: "duplicates", task: original })]);
 });
+
+test("a task already linked either way is never offered, since marking would replace the link", async ({ page, request }) => {
+  await useLicenceKey(request, e2eLicence());
+  const original = await task(801, "Export invoices to CSV");
+  await task(803, "Invoices CSV download is broken", "stub-duplicate: TP-801");
+  await (await db()).collection("tasks").updateOne({ _id: original }, { $set: { relations: [{ type: "parent_of", task: (await (await db()).collection("tasks").findOne({ taskNumber: 803, project: PROJECT_ID }))!._id }] } });
+  await signIn(page, "owner");
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/803`);
+  const check = page.getByTestId("duplicates-check");
+  await check.getByRole("button", { name: "Find duplicates" }).click();
+  await expect(check.getByText("No likely duplicates on this board.")).toBeVisible();
+  expect(await lastWrite()).toEqual({});
+});

@@ -222,13 +222,15 @@ export function TaskForm({
 
     try {
       const created = await api.post(`/api/projects/${projectId}/tasks`, body);
+      let unmarked = 0;
       for (const original of duplicateOf) {
         try {
           await api.post(`/api/projects/${projectId}/tasks/${created._id}/links`, { taskId: original, type: "duplicates" });
         } catch {
-          toast("Task created, but marking it as a duplicate failed", "error");
+          unmarked++;
         }
       }
+      if (unmarked > 0) toast("Task created, but marking it as a duplicate failed", "error");
       if (parentTaskId) {
         try {
           await api.post(`/api/projects/${projectId}/tasks/${parentTaskId}/links`, {
