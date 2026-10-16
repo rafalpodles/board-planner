@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   writeReleaseNotes: vi.fn(),
   sprintFindOne: vi.fn(),
   nextSprint: vi.fn(),
+  sprintFilters: [] as Record<string, unknown>[],
 }));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -21,7 +22,7 @@ vi.mock("@/lib/middleware", () => ({
   withProjectAccess:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
     (req: Request, ctx: { user?: unknown }) =>
-      handler(req, { ...ctx, user: ctx.user ?? { _id: "u1" }, db: { Sprint: { findOne: (filter: { startDate?: unknown }) => (filter.startDate ? { sort: () => ({ lean: m.nextSprint }) } : { lean: m.sprintFindOne }) } } }),
+      handler(req, { ...ctx, user: ctx.user ?? { _id: "u1" }, db: { Sprint: { findOne: (filter: { startDate?: unknown }) => { m.sprintFilters.push(filter); return filter.startDate ? { sort: () => ({ lean: m.nextSprint }) } : { lean: m.sprintFindOne }; } } } }),
   requireEntitlement: (_feature: string, handler: unknown) => handler,
 }));
 
@@ -40,6 +41,7 @@ function ask(body: unknown, userId = "u1") {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  m.sprintFilters.length = 0;
   await resetRateLimits();
   m.releaseMaterial.mockResolvedValue(MATERIAL);
   m.writeReleaseNotes.mockResolvedValue({ ok: true, text: "## Notes" });
@@ -63,6 +65,7 @@ describe("POST release-notes", () => {
     m.nextSprint.mockResolvedValue({ startDate: new Date("2026-10-15T00:00:00Z") });
     await ask({ sprintId: SPRINT });
     expect(m.releaseMaterial.mock.calls[0][2].to).toEqual(new Date("2026-10-14T23:59:59.999Z"));
+    expect(m.sprintFilters).toContainEqual({ project: "p1", startDate: { $gt: new Date("2026-10-01T00:00:00Z") } });
   });
 
   it("covers two days whole", async () => {
