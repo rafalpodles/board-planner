@@ -154,6 +154,7 @@ export async function fetchMergedPullRequests(
   const q = encodeURIComponent(`repo:${owner}/${repo} is:pr is:merged merged:${range}`);
   const pulls: MergedPullRequest[] = [];
   let total = 0;
+  let partial = false;
   for (let page = 1; page <= MERGED_PAGES; page++) {
     const res = await safeFetch(
       `${API_BASE()}/search/issues?q=${q}&per_page=100&page=${page}`,
@@ -163,16 +164,19 @@ export async function fetchMergedPullRequests(
     if (!res.ok) throw await refusal(res);
     const body = (await readBoundedJson(res, MAX_RESPONSE_BYTES)) as {
       total_count?: number;
+      incomplete_results?: boolean;
       items?: { title: string; html_url: string; pull_request?: { merged_at?: string | null } }[];
     };
     total = body.total_count ?? 0;
+    // GitHub's search can time out and answer with part of the result, and says so
+    if (body.incomplete_results) partial = true;
     const items = body.items ?? [];
     for (const item of items) {
       if (item.pull_request?.merged_at) pulls.push({ title: item.title, url: item.html_url, mergedAt: item.pull_request.merged_at });
     }
     if (items.length < 100 || pulls.length >= total) break;
   }
-  return { pulls, complete: pulls.length >= total };
+  return { pulls, complete: !partial && pulls.length >= total };
 }
 
 async function fetchPage(url: string, headers: Record<string, string>): Promise<GitHubPR[]> {

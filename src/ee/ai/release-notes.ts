@@ -140,7 +140,7 @@ export function releaseNoteInstructions(tone: ReleaseNoteTone): string {
     TONE[tone],
     "Group the lines under a heading per category, using the categories given. Put pull requests that belong to no task under a heading of their own named Other changes.",
     "Mention every task and every pull request given, once, and nothing that is not given. Do not invent version numbers, dates or figures.",
-    "If tasksLeftOut is above zero or pullRequestsIncomplete is true, end with one line saying the list is not complete.",
+    "If tasksLeftOut is above zero, or pullRequestsIncomplete or repositoryUnread is true, end with one line saying the list is not complete.",
     "Answer with the Markdown only.",
   ].join(" ");
 }

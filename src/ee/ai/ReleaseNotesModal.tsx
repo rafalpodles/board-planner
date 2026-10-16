@@ -138,7 +138,9 @@ export function ReleaseNotesModal({
                 <p className="text-sm text-warning">The repository could not be read, so pull requests with no task are missing.</p>
               )}
               {notes.tasksLeftOut > 0 && (
-                <p className="text-sm text-warning">{notes.tasksLeftOut} more finished tasks did not fit; choose a shorter window.</p>
+                <p className="text-sm text-warning">
+                  {notes.tasksLeftOut} more finished {notes.tasksLeftOut === 1 ? "task" : "tasks"} did not fit and {notes.tasksLeftOut === 1 ? "is" : "are"} not in the notes.
+                </p>
               )}
               {notes.pullRequestsIncomplete && (
                 <p className="text-sm text-warning">The repository had more merges than could be read; some pull requests with no task are missing.</p>

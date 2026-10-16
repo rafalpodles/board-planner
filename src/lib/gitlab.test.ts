@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   fetchMergeRequests,
+  fetchMergedRequests,
   fetchTaskBranches,
   fetchTaskCommits,
   matchMRsToTasks,
@@ -325,5 +326,31 @@ describe("a refused GitLab request", () => {
     await expect(fetchTaskCommits("https://gitlab.com", "g/p", "token", "GL-3")).rejects.toThrow(
       /^GitLab answered 403$/
     );
+  });
+});
+
+// BP-869: release notes read merged requests by date, page after page
+describe("fetchMergedRequests", () => {
+  const mr = (iid: number) => ({ iid, title: `MR ${iid}`, state: "merged", web_url: `u${iid}`, merged_at: "2026-10-03T00:00:00Z", source_branch: "b", updated_at: "2026-10-03T00:00:00Z" });
+
+  it("asks for merged requests updated since the day, and reads every page", async () => {
+    safeFetch.mockReset();
+    safeFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify(Array.from({ length: 100 }, (_, i) => mr(i)))))
+      .mockResolvedValueOnce(new Response(JSON.stringify([mr(100)])));
+    const result = await fetchMergedRequests("https://gitlab.example.com/", "g/p", "tok", new Date("2026-10-01T00:00:00Z"));
+    expect(result).toMatchObject({ complete: true });
+    expect(result.requests).toHaveLength(101);
+    expect(String(safeFetch.mock.calls[0][0])).toBe(
+      "https://gitlab.example.com/api/v4/projects/g%2Fp/merge_requests?state=merged&updated_after=2026-10-01T00%3A00%3A00.000Z&per_page=100&page=1"
+    );
+  });
+
+  it("stops at five full pages and says the list is not whole", async () => {
+    safeFetch.mockReset();
+    safeFetch.mockImplementation(async () => new Response(JSON.stringify(Array.from({ length: 100 }, (_, i) => mr(i)))));
+    const result = await fetchMergedRequests("https://gitlab.example.com", "g/p", "tok", new Date("2026-01-01"));
+    expect(safeFetch).toHaveBeenCalledTimes(5);
+    expect(result.complete).toBe(false);
   });
 });

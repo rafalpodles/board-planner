@@ -319,6 +319,12 @@ describe("fetchMergedPullRequests", () => {
     expect(String(safeFetch.mock.calls[1][0])).toContain("page=2");
   });
 
+  it("says the list is not whole when GitHub's search timed out", async () => {
+    safeFetch.mockReset();
+    safeFetch.mockResolvedValueOnce(new Response(JSON.stringify({ total_count: 1, incomplete_results: true, items: [item(1)] })));
+    expect((await fetchMergedPullRequests("o", "r", "tok", new Date("2026-10-01"), new Date("2026-10-02"))).complete).toBe(false);
+  });
+
   it("stops at five pages and says the list is not whole", async () => {
     safeFetch.mockReset();
     safeFetch.mockImplementation(async () => new Response(JSON.stringify({ total_count: 900, items: Array.from({ length: 100 }, (_, i) => item(i)) })));

@@ -4,6 +4,7 @@ const m = vi.hoisted(() => ({
   releaseMaterial: vi.fn(),
   writeReleaseNotes: vi.fn(),
   sprintFindOne: vi.fn(),
+  nextSprint: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -20,7 +21,7 @@ vi.mock("@/lib/middleware", () => ({
   withProjectAccess:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
     (req: Request, ctx: { user?: unknown }) =>
-      handler(req, { ...ctx, user: ctx.user ?? { _id: "u1" }, db: { Sprint: { findOne: () => ({ lean: m.sprintFindOne }) } } }),
+      handler(req, { ...ctx, user: ctx.user ?? { _id: "u1" }, db: { Sprint: { findOne: (filter: { startDate?: unknown }) => (filter.startDate ? { sort: () => ({ lean: m.nextSprint }) } : { lean: m.sprintFindOne }) } } }),
   requireEntitlement: (_feature: string, handler: unknown) => handler,
 }));
 
@@ -43,18 +44,25 @@ beforeEach(async () => {
   m.releaseMaterial.mockResolvedValue(MATERIAL);
   m.writeReleaseNotes.mockResolvedValue({ ok: true, text: "## Notes" });
   m.sprintFindOne.mockResolvedValue({ name: "Sprint 7", startDate: new Date("2026-10-01T00:00:00Z"), endDate: new Date("2026-10-15T00:00:00Z") });
+  m.nextSprint.mockResolvedValue(null);
 });
 
 describe("POST release-notes", () => {
-  it("covers a sprint from its start to just before its end, where the next one may begin, by the sprint's own tasks", async () => {
+  it("covers a sprint through its last day, by the sprint's own tasks", async () => {
     const res = await ask({ sprintId: SPRINT });
     expect(res.status).toBe(200);
     expect(m.releaseMaterial).toHaveBeenCalledWith(expect.anything(), "p1", {
       from: new Date("2026-10-01T00:00:00Z"),
-      to: new Date("2026-10-14T23:59:59.999Z"),
+      to: new Date("2026-10-15T23:59:59.999Z"),
       label: "Sprint 7",
       sprintId: SPRINT,
     });
+  });
+
+  it("ends a sprint just before the next one begins, when that is sooner, so no merge is in two sprints' notes", async () => {
+    m.nextSprint.mockResolvedValue({ startDate: new Date("2026-10-15T00:00:00Z") });
+    await ask({ sprintId: SPRINT });
+    expect(m.releaseMaterial.mock.calls[0][2].to).toEqual(new Date("2026-10-14T23:59:59.999Z"));
   });
 
   it("covers two days whole", async () => {

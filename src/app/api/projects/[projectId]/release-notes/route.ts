@@ -35,8 +35,14 @@ export const POST = withProjectAccess(
       if (typeof sprintId !== "string" || !isValidObjectId(sprintId)) return NextResponse.json({ error: "sprintId must be a sprint's id" }, { status: 400 });
       const sprint = await db.Sprint.findOne({ _id: sprintId, project: projectId }, "name startDate endDate").lean<{ name: string; startDate: Date; endDate: Date }>();
       if (!sprint) return NextResponse.json({ error: "Sprint not found" }, { status: 404 });
-      // A sprint ends where the next one may begin, so its last instant is just before its end date
-      window = { from: new Date(sprint.startDate), to: new Date(new Date(sprint.endDate).getTime() - 1), label: sprint.name, sprintId: String(sprintId) };
+      // Its last day whole, unless the next sprint begins sooner: a merge belongs to one sprint's notes
+      const start = new Date(sprint.startDate);
+      const next = await db.Sprint.findOne({ project: projectId, startDate: { $gt: start } }, "startDate")
+        .sort({ startDate: 1 })
+        .lean<{ startDate: Date }>();
+      const lastDay = new Date(`${new Date(sprint.endDate).toISOString().slice(0, 10)}T23:59:59.999Z`);
+      const to = next && new Date(next.startDate).getTime() - 1 < lastDay.getTime() ? new Date(new Date(next.startDate).getTime() - 1) : lastDay;
+      window = { from: start, to, label: sprint.name, sprintId: String(sprintId) };
     } else {
       const start = day(from, false);
       const end = day(to, true);
