@@ -190,7 +190,7 @@ test.describe("which machine a project with several repositories is given to", (
   test("two entries that read as one repository are not both held by one checkout", async ({ request }) => {
     await listRepositories([
       { _id: API, url: "e2e-owner/api", name: "first" },
-      { _id: WEB, url: "https://gitlab.example.com/e2e-owner/api", name: "second" },
+      { _id: WEB, url: "https://github.com/e2e-owner/api", name: "second" },
     ]);
     await machineHolds(`${API_URL}.git`);
     await addTask();
