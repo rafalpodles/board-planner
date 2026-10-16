@@ -40,6 +40,7 @@ export function TriageSection({ projectId, project, replaceProject }: SectionPro
   );
 
   if (entitlement.loading) return <p className="text-sm text-text-muted">Loading…</p>;
+  if (entitlement.error) return <p className="text-sm text-text-muted">Couldn&apos;t check this instance&apos;s plan. Reload the page to try again.</p>;
   if (!entitlement.entitled) {
     return (
       <>
