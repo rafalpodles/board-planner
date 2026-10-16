@@ -7,6 +7,8 @@ import { fetchPullRequests, matchPRsToTasks, parseRepoString } from "@/lib/githu
 import { fetchMergeRequests, matchMRsToTasks, parseGitlabRepo } from "@/lib/gitlab";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import { gatewayWrite, type WriteResult } from "@/lib/ai-gateway";
+import { resolveAiModel } from "@/lib/pm/availability";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 
 export const RELEASE_NOTE_TONES = ["changelog", "customer"] as const;
 export type ReleaseNoteTone = (typeof RELEASE_NOTE_TONES)[number];
@@ -84,7 +86,7 @@ export async function releaseMaterial(db: ScopedDb, projectId: string, window: R
     .filter((t) => !t.archived && t.role === "done" && t.history.kind === "recorded" && within(t.history.finishedAt, window))
     .slice(0, MAX_TASKS);
   const details = await db.Task.find(
-    { project: projectId, _id: { $in: finished.map((t) => t.taskId) } },
+    { project: projectId, _id: { $in: finished.map((t) => t.taskId) }, ...NOT_ARCHIVED },
     "_id description linkedPRs"
   ).lean<{ _id: unknown; description?: string; linkedPRs?: { title: string; url: string; mergedAt?: Date | null }[] }[]>();
   const byId = new Map(details.map((d) => [String(d._id), d]));
@@ -143,5 +145,5 @@ export async function writeReleaseNotes(
   material: ReleaseMaterial,
   tone: ReleaseNoteTone
 ): Promise<WriteResult> {
-  return gatewayWrite(db, { ...context, source: "release_notes" }, { instructions: releaseNoteInstructions(tone), data: material });
+  return gatewayWrite(db, { ...context, source: "release_notes" }, { model: await resolveAiModel(db), instructions: releaseNoteInstructions(tone), data: material });
 }

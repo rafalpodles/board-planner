@@ -10,6 +10,7 @@ vi.mock("@/lib/status-history", () => ({ projectStatusHistories: m.histories }))
 vi.mock("@/lib/github", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/github")>()), fetchPullRequests: m.fetchPullRequests }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: () => "token" }));
 vi.mock("@/lib/ai-gateway", () => ({ gatewayWrite: m.gatewayWrite }));
+vi.mock("@/lib/pm/availability", () => ({ resolveAiModel: async () => "openai/gpt-6-luna" }));
 
 const { releaseMaterial, isEmpty, releaseNoteInstructions, writeReleaseNotes } = await import("./release-notes");
 
@@ -98,6 +99,6 @@ describe("writing the notes", () => {
     m.gatewayWrite.mockResolvedValue({ ok: true, text: "## Bug\n- x" });
     const material = { window: { from: "a", to: "b", label: "S" }, tasks: [], pullRequestsWithoutTask: [], repositoryUnread: null };
     await writeReleaseNotes({ organisation: "org" } as never, { projectId: "p1", userId: "u1" }, material, "customer");
-    expect(m.gatewayWrite).toHaveBeenCalledWith(expect.anything(), { projectId: "p1", userId: "u1", source: "release_notes" }, { instructions: releaseNoteInstructions("customer"), data: material });
+    expect(m.gatewayWrite).toHaveBeenCalledWith(expect.anything(), { projectId: "p1", userId: "u1", source: "release_notes" }, { model: "openai/gpt-6-luna", instructions: releaseNoteInstructions("customer"), data: material });
   });
 });

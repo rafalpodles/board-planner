@@ -6,7 +6,6 @@ import { getOrganisation } from "@/lib/organisation";
 import { isManagedModel, openrouterModel, unmanagedModelError } from "@/lib/managed-models";
 import { describeAiLock, describeBudgetRefusal } from "./refusal";
 import { recordUsage, type UsageEntry } from "./usage";
-import { getSettings } from "@/models/settings";
 
 const CHARACTERS_PER_TOKEN = 4;
 const TOKENS_PER_IMAGE = 1500;
@@ -119,10 +118,8 @@ export type WriteResult = { ok: true; text: string } | { ok: false; status: numb
 export async function gatewayWrite(
   db: ScopedDb,
   context: GatewayContext,
-  { instructions, data }: { instructions: string; data: unknown }
+  { model, instructions, data }: { model: string; instructions: string; data: unknown }
 ): Promise<WriteResult> {
-  const { aiModel } = await getSettings(db);
-  const model = openrouterModel(aiModel);
   const gate = await openGate(db, { error: "AI is not available on this instance", status: 501 }, model);
   if (!gate.ok) return { ok: false, status: gate.status, body: gate.body };
 
