@@ -330,14 +330,50 @@ describe("GET handover readiness on a board that lists several repositories", ()
     expect(body).not.toHaveProperty("machineNeedsUpdate");
   });
 
-  it("judges the machine that lacks least, and a switched-off one not at all", async () => {
+  it("judges the machine that lacks least", async () => {
+    workerLean.mockResolvedValue([machine([]), machine(["git@github.com:acme/app.git"])]);
+
+    expect((await read()).body.machineMissing).toEqual(["https://github.com/acme/site"]);
+  });
+
+  // The claim would refuse the laptop, so the screen must not call the board ready because of it
+  it("does not let an online machine with one checkout hide the machine that holds both", async () => {
+    const both = ["git@github.com:acme/app.git", "git@github.com:acme/site.git"];
+    workerLean.mockResolvedValue([
+      machine(["git@github.com:acme/app.git"]),
+      { ...machine(both), lastSeenAt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    ]);
+
+    const { body } = await read();
+
+    expect(body.machine).toBe("stale");
+    expect(body).not.toHaveProperty("machineMissing");
+    expect(body).not.toHaveProperty("machineNeedsUpdate");
+  });
+
+  it("names a switched-off machine that holds both as switched off, not as lacking a repository", async () => {
     workerLean.mockResolvedValue([
       machine([]),
-      machine(["git@github.com:acme/app.git"]),
       { ...machine(["git@github.com:acme/app.git", "git@github.com:acme/site.git"]), enabled: false },
     ]);
 
-    expect((await read()).body.machineMissing).toEqual(["https://github.com/acme/site"]);
+    const { body } = await read();
+
+    expect(body.machine).toBe("disabled");
+    expect(body).not.toHaveProperty("machineMissing");
+  });
+
+  it("says the worker is too old while the machine that holds both is the one that is online", async () => {
+    workerLean.mockResolvedValue([
+      machine(["git@github.com:acme/app.git"]),
+      machine(["git@github.com:acme/app.git", "git@github.com:acme/site.git"], []),
+    ]);
+
+    const { body } = await read();
+
+    expect(body.machine).toBe("live");
+    expect(body.machineNeedsUpdate).toBe(true);
+    expect(body).not.toHaveProperty("machineMissing");
   });
 
   it("is silent for a board that lists one repository", async () => {

@@ -32,7 +32,8 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
   ]);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  const machine = machineReadinessFor(workers, project, new Date(), claiming);
+  const judged = judgeMachines(project, workers);
+  const machine = machineReadinessFor(judged.workers, project, new Date(), claiming);
   const body: ApiHandoverReadiness = {
     canAdmin,
     repositoryUrl: projectRepositoryUrl(project),
@@ -42,29 +43,43 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
     machine: machine.state,
     bindingError: machine.bindingError,
     haltedBy: machine.haltedBy,
-    ...multipleRepositories(project, workers),
+    ...judged.extra,
   };
   return NextResponse.json(body);
 });
 
+type ReaderWorker = { enabled?: boolean; repos?: { remote: string; path: string }[]; capabilities?: string[] };
+
 /**
- * What the reader's own machines lack for a board that lists several repositories, judged on the one
- * that lacks least. Only the reader's machines ever reach this: whose machine holds what is not a
- * member's business.
+ * Which of the reader's machines count for a board that lists several repositories, and what to say
+ * when none of them can take it. The claim takes a machine only with every checkout and a worker that
+ * can run them together, so the state shown is that of the machines the claim would accept, never of a
+ * machine that holds one repository and would be refused: a laptop that is online with one checkout
+ * must not hide a desktop that is switched off with both.
+ *
+ * Only the reader's own machines ever reach this: whose machine holds what is not a member's business.
  */
-function multipleRepositories(
+function judgeMachines<W extends ReaderWorker>(
   project: Parameters<typeof hasSeveralRepositories>[0] & Parameters<typeof repositoryCoverage>[0],
-  workers: { enabled?: boolean; repos?: { remote: string; path: string }[]; capabilities?: string[] }[]
-): { machineMissing?: string[]; machineNeedsUpdate?: boolean } {
-  if (!hasSeveralRepositories(project)) return {};
-  const judged = workers
-    .filter((w) => w.enabled !== false)
-    .map((w) => ({
-      missing: repositoryCoverage(project, w.repos ?? []).missing.map((r) => r.name),
-      capable: (w.capabilities ?? []).includes(MULTI_REPOSITORY),
-    }))
-    .sort((a, b) => a.missing.length - b.missing.length || Number(b.capable) - Number(a.capable));
-  const best = judged[0];
-  if (!best) return {};
-  return best.missing.length > 0 ? { machineMissing: best.missing } : best.capable ? {} : { machineNeedsUpdate: true };
+  workers: W[]
+): { workers: W[]; extra: { machineMissing?: string[]; machineNeedsUpdate?: boolean } } {
+  if (!hasSeveralRepositories(project)) return { workers, extra: {} };
+
+  const covered = workers.map((worker) => ({
+    worker,
+    missing: repositoryCoverage(project, worker.repos ?? []).missing.map((r) => r.name),
+    capable: (worker.capabilities ?? []).includes(MULTI_REPOSITORY),
+  }));
+  const whole = covered.filter((c) => c.missing.length === 0);
+
+  const ready = whole.filter((c) => c.capable);
+  if (ready.length > 0) return { workers: ready.map((c) => c.worker), extra: {} };
+  if (whole.length > 0) return { workers: whole.map((c) => c.worker), extra: { machineNeedsUpdate: true } };
+
+  const fewest = Math.min(...covered.map((c) => c.missing.length), Infinity);
+  const nearest = covered.filter((c) => c.missing.length === fewest);
+  return {
+    workers: nearest.map((c) => c.worker),
+    extra: nearest.length > 0 ? { machineMissing: nearest[0].missing } : {},
+  };
 }
