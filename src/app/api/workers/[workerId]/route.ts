@@ -32,7 +32,7 @@ export const GET = withWorker(async (_request, { worker, db }) => {
     // Not narrowed to `worker.enabled` any more: the catalogue below has to carry the switched-off
     // projects too, because the screen that renders it is where somebody switches one on. The
     // enabled test still happens, inside assignmentsFor and offersFor, where it decides work.
-    db.Project.find({}).select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
+    db.Project.find({}).select("_id key name repositoryUrl repositories githubRepo gitlabRepo gitlabHost worker").lean(),
     db.Worker.find({ _id: { $ne: worker._id } }).select(
       "_id name host repos enabled lastSeenAt createdAt"
     ),

@@ -422,7 +422,7 @@ export function withProjectAccessOrWorker(
     await connectDB();
     const [project, reachable] = await Promise.all([
       db.Project.findById(projectId)
-        .select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker")
+        .select("_id repositoryUrl repositories githubRepo gitlabRepo gitlabHost worker")
         .lean(),
       ownerReachableProjectIds(db, worker),
     ]);

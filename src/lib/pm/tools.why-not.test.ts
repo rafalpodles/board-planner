@@ -120,6 +120,37 @@ describe("the PM says every reason its hand-over will not run", () => {
     });
   });
 
+  // BP-1066. A board listing several repositories only offers a machine the tasks that name one.
+  describe("on a board with several repositories", () => {
+    const SEVERAL = {
+      repositories: [
+        { _id: "r1", url: "https://github.com/acme/bp", name: "app" },
+        { _id: "r2", url: "https://github.com/acme/site", name: "site" },
+      ],
+    };
+
+    it("says a task naming none will not be taken", async () => {
+      board(SEVERAL);
+
+      expect((await assign()).result).toMatchObject({
+        willRun: false,
+        note: expect.stringContaining("lists several repositories and the task names none"),
+      });
+    });
+
+    it("says nothing about it once the task names one", async () => {
+      board(SEVERAL);
+
+      expect((await assign({ repository: "r2" })).result).toEqual({ task: "BP-9", assignee: "owner" });
+    });
+
+    it("does not ask for a repository on a board with one", async () => {
+      board({ repositories: [SEVERAL.repositories[0]] });
+
+      expect((await assign()).result).toEqual({ task: "BP-9", assignee: "owner" });
+    });
+  });
+
   it("names spent attempts alone, with no advice about the board beside it", async () => {
     board({ repositoryUrl: "", worker: { enabled: false } });
 

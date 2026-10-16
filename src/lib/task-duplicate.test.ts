@@ -87,3 +87,11 @@ describe("undoneChecklist", () => {
     expect(undoneChecklist(null)).toEqual([]);
   });
 });
+
+// BP-1066. A copy names no repository: the one the original names may be gone from the board by now,
+// and a create naming an unlisted one is refused. On a board with several the task page asks for it.
+describe("duplicatePayload and the repository", () => {
+  it("does not carry the repository of the original", () => {
+    expect(duplicatePayload({ ...task, repository: "6ab0f94eadb2609f98d84db2" } as ApiTask)).not.toHaveProperty("repository");
+  });
+});

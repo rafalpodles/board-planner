@@ -3,6 +3,7 @@ import { RECURRENCE_FREQUENCIES } from "@/types";
 import { MAX_RECURRENCE_INTERVAL } from "@/lib/recurrence";
 import { echo } from "@/lib/echo";
 import { findSprint, type SprintRow } from "./sprints";
+import { repositoryIdFor } from "@/lib/repositories";
 
 export const DUE_DATE_PARAM = z
   .string()
@@ -78,3 +79,18 @@ export function sprintForWrite(ref: string, sprints: SprintRow[]): string | null
 
 /** "backlog" and an empty string take a task out of its sprint, with no lookup to make. */
 export const sprintClears = (ref: string) => ref.trim() === "" || ref.trim().toLowerCase() === "backlog";
+
+export const REPOSITORY_PARAM = z
+  .string()
+  .optional()
+  .describe(
+    "The repository this task changes, by name, address or id — one of get_project's repositories. " +
+      "A board with several needs it on a task before a machine takes the task. Empty string clears it."
+  );
+
+/** The id to write for a repository reference, or null to clear; refused with the board's own list. */
+export function repositoryForWrite(ref: string, repositories: { id: string; name?: string; url: string }[]): string | null {
+  const found = repositoryIdFor({ repositories }, ref);
+  if ("error" in found) throw new Error(found.error);
+  return found.id;
+}

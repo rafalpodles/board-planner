@@ -28,6 +28,8 @@ import {
 import { notifyBoardFeed } from "@/lib/board-feed";
 import { pillToneForRole } from "@/lib/email-template";
 import { criterionChanges, parseChecklistString } from "@/lib/checklist";
+import { repositoryNameOf, repositoryRefusal } from "@/lib/repositories";
+import type { RepositoryEntry } from "@/lib/repository";
 import { undoneChecklist } from "@/lib/task-duplicate";
 import {
   COMMENT_BODY_MAX_LENGTH,
@@ -599,7 +601,7 @@ export async function createTask(
   // to happen in front of, so the project lookup the category and column lists need is split from
   // the `$inc` that spends a number (BP-438). Every refusal past that point leaves a permanent hole
   // in the board's numbering, for a task that never existed.
-  const board = await db.Project.findById(projectId, "categories columns customFields triageMode").lean();
+  const board = await db.Project.findById(projectId, "categories columns customFields triageMode repositories").lean();
 
   if (!board) {
     return { ok: false, error: "Project not found", status: 404 };
@@ -639,6 +641,10 @@ export async function createTask(
     }
     assigneeId = resolved.user._id;
   }
+
+  const repository = body.repository === "" ? null : (body.repository ?? null);
+  const repositoryRefused = repositoryRefusal(board, repository);
+  if (repositoryRefused) return { ok: false, error: repositoryRefused, status: 400 };
 
   const priority = body.priority ?? DEFAULT_PRIORITY;
   const dueDate = body.dueDate || null;
@@ -711,6 +717,7 @@ export async function createTask(
     // exactly as the body sent them, judged but not coerced
     checklist: checklist as ITask["checklist"],
     sprint,
+    repository,
     customFieldValues,
     recurrence,
     order,
@@ -1020,7 +1027,7 @@ export async function updateTask(
   // Whitelist allowed fields to prevent overwriting protected fields
   const allowed = [
     "title", "description", "priority", "category",
-    "status", "assignee", "dueDate", "checklist", "order", "sprint", "agent", "customFieldValues", "recurrence",
+    "status", "assignee", "dueDate", "checklist", "order", "sprint", "agent", "repository", "customFieldValues", "recurrence",
   ];
   const updates: Record<string, unknown> = {};
   for (const field of allowed) {
@@ -1074,6 +1081,9 @@ export async function updateTask(
   // anything reads the field, so there is one way to say "no agent" — the check itself has to wait
   // until the assignee this update leaves behind is known.
   if (updates.agent === "") updates.agent = null;
+
+  // Same "no value" spelling as agent. Judged further down, once the stored value is known.
+  if (updates.repository === "") updates.repository = null;
 
   // Both refusals below are sliced: they reach a model as a tool result, same as noSuchAccount.
   if (updates.category !== undefined || updates.status !== undefined) {
@@ -1176,6 +1186,18 @@ export async function updateTask(
   // exactly as it did.
   const before = oldTask.assignee as { _id?: unknown } | null | undefined;
   const storedAssignee = String((before && before._id) ?? before ?? "");
+
+  // Only a MOVE of the repository is judged, for the reason the assignee is below: a client that
+  // PUTs the whole object back echoes an id the project may have dropped since, and refusing it
+  // would block every unrelated edit. Only an entry the project lists can be moved to.
+  let repositoryBoard: { repositories?: RepositoryEntry[] | null } | null = null;
+  if (updates.repository !== undefined) {
+    repositoryBoard = await db.Project.findById(projectId, "repositories").lean();
+    if ((updates.repository ?? null) !== (oldTask.repository ?? null)) {
+      const refusal = repositoryRefusal(repositoryBoard ?? {}, updates.repository);
+      if (refusal) return { ok: false, error: refusal, status: 400 };
+    }
+  }
 
   // Only a MOVE is judged, never an echo of what is already stored. A REST or MCP client that GETs
   // a task, edits one field and PUTs the whole object back sends the assignee too — so judging
@@ -1334,6 +1356,16 @@ export async function updateTask(
     activities.push(
       storedAgentName(db, oldTask.agent).then((before) =>
         logActivity(db, projectId, taskId, actorId, "updated", "agent", before, populatedAgentName(task.agent))
+      )
+    );
+  }
+
+  if (repositoryBoard && (oldTask.repository ?? null) !== (task.repository ?? null)) {
+    activities.push(
+      logActivity(
+        db, projectId, taskId, actorId, "updated", "repository",
+        repositoryNameOf(repositoryBoard, oldTask.repository) ?? undefined,
+        repositoryNameOf(repositoryBoard, task.repository) ?? undefined
       )
     );
   }
@@ -1628,6 +1660,7 @@ async function createNextRecurrence(
     // nothing unvetted executes — this is a one-off document repair, out of band: see
     // scripts/repair-recurring-agent-pairing.ts.
     agent: oldTask.agent ?? null,
+    repository: oldTask.repository ?? null,
     dueDate: nextDue,
     checklist,
     // Rebuilt rather than copied, so the anchor the arithmetic just resolved travels with the
@@ -1872,7 +1905,11 @@ export async function claimNextTask(
   ownerId?: string | null,
   // Who the claim's History row is written as: the machine's own identity, which is who its status
   // changes and comments are already authored by (BP-1045)
-  actorId?: string | null
+  actorId?: string | null,
+  // The repositories this machine may take a task for. Null leaves the claim as it was; a list
+  // takes only the tasks naming one of them, so on a board with several repositories a task that
+  // names none is never claimed (BP-1066)
+  repositories?: string[] | null
   // A document, not a plain ITask: the caller has to know, because spreading one silently yields
   // Mongoose internals with every real field a level down.
 ): Promise<HydratedDocument<ITask> | null> {
@@ -1965,6 +2002,7 @@ export async function claimNextTask(
       ],
       // Choosing an agent is the hand-over; a task naming none is one a person is doing
       agent: { $ne: null },
+      ...(repositories ? { repository: { $in: repositories } } : {}),
       // On an array field this means "holds none of them", so a task with no blockers, one whose
       // blockers have all finished, and one written before the field existed all still qualify
       blockedBy: { $nin: openBlockers },

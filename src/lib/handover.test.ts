@@ -312,3 +312,58 @@ describe("finalProblem", () => {
     expect(finalProblem(handover as never)).toEqual(expected);
   });
 });
+
+describe("handoverOf and the repository a task names (BP-1066)", () => {
+  it("says a task names no repository once the board lists several", () => {
+    expect(handoverOf(task(), BOARD, 2)).toEqual({ runs: false, problems: [{ reason: "repository-not-chosen", by: null }] });
+  });
+
+  it("runs a task that names one", () => {
+    expect(handoverOf(task({ repository: "r1" }), BOARD, 2)).toEqual({ runs: true });
+  });
+
+  it("says nothing about a repository on a board with one, or when the caller does not know", () => {
+    expect(handoverOf(task(), BOARD, 1)).toEqual({ runs: true });
+    expect(handoverOf(task(), BOARD, 0)).toEqual({ runs: true });
+    expect(handoverOf(task(), BOARD)).toEqual({ runs: true });
+  });
+
+  it("lists it beside the other requirements the task fails", () => {
+    const verdict = handoverOf(task({ status: "someday" }), BOARD, 2);
+
+    expect(verdict).toMatchObject({ runs: false });
+    expect((verdict as { problems: { reason: string }[] }).problems.map((p) => p.reason)).toEqual([
+      "not-approved-yet",
+      "repository-not-chosen",
+    ]);
+  });
+});
+
+describe("handoverOf and the repositories the reader's machines hold (BP-1066)", () => {
+  it("says a task names a repository none of the reader's machines serves", () => {
+    expect(handoverOf(task({ repository: "r2" }), BOARD, 2, ["r1"])).toEqual({
+      runs: false,
+      problems: [{ reason: "repository-not-served", by: null }],
+    });
+  });
+
+  it("runs a task naming the repository a machine serves", () => {
+    expect(handoverOf(task({ repository: "r1" }), BOARD, 2, ["r1"])).toEqual({ runs: true });
+    expect(handoverOf(task({ repository: "r2" }), BOARD, 2, ["r1", "r2"])).toEqual({ runs: true });
+  });
+
+  // With no machine serving anything the board's own readiness already says so; a second sentence
+  // blaming the repository would point at the wrong thing
+  it("does not judge it when no machine serves any, or when the caller does not know", () => {
+    expect(handoverOf(task({ repository: "r2" }), BOARD, 2, [])).toEqual({ runs: true });
+    expect(handoverOf(task({ repository: "r2" }), BOARD, 2, null)).toEqual({ runs: true });
+    expect(handoverOf(task({ repository: "r2" }), BOARD, 2)).toEqual({ runs: true });
+  });
+
+  it("asks for a repository before it asks whether a machine serves it", () => {
+    expect(handoverOf(task(), BOARD, 2, ["r1"])).toEqual({
+      runs: false,
+      problems: [{ reason: "repository-not-chosen", by: null }],
+    });
+  });
+});

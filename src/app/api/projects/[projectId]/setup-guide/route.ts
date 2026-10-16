@@ -43,7 +43,7 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
     await Promise.all([
       db.Project.findById(
         projectId,
-        "repositoryUrl githubRepo gitlabRepo worker columns customFields categories notificationChannels webhooks pm"
+        "repositoryUrl repositories githubRepo gitlabRepo worker columns customFields categories notificationChannels webhooks pm"
       ).lean(),
       db.Worker.find(
         { owner: user._id },

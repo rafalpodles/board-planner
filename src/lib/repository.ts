@@ -8,6 +8,7 @@ export type RepositoryProvider = "github" | "gitlab" | "";
 
 export interface RepositoryFields {
   repositoryUrl?: string;
+  repositories?: RepositoryEntry[] | null;
   githubRepo?: string;
   gitlabRepo?: string;
   gitlabHost?: string;
@@ -72,6 +73,10 @@ export function repositoryCandidates(project: RepositoryFields): string[] {
  * for its API calls to work — and both are offered, because a project can carry both.
  */
 export function repositoryUrlCandidates(project: RepositoryFields): string[] {
+  // A project that lists several repositories names every one of them, and a pull request on any is its own
+  const listed = storedRepositories(project).map((r) => r.url.trim());
+  if (listed.length > 0) return listed;
+
   const explicit = project.repositoryUrl?.trim();
   if (explicit) return [explicit];
 
@@ -127,4 +132,21 @@ export function repositoryProvider(
   if (instance && instance === host) return "github";
 
   return "";
+}
+
+// What a stored entry looks like from the database (`_id`) or from the API (`id`). Here and not in
+// repositories.ts, which imports mongoose: client code matches repositories too (repo-match.ts).
+export interface RepositoryEntry {
+  _id?: unknown;
+  id?: string;
+  url: string;
+  name?: string;
+}
+
+export function entryId(entry: RepositoryEntry): string {
+  return String(entry._id ?? entry.id ?? "");
+}
+
+export function storedRepositories(project: { repositories?: RepositoryEntry[] | null }): RepositoryEntry[] {
+  return (project.repositories ?? []).filter((r) => r.url?.trim());
 }

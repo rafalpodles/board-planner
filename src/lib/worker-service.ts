@@ -5,7 +5,8 @@ import { connectDB } from "./db";
 import { Worker } from "@/models/worker";
 import { ApiUserSummary, ApiWorker, ApiWorkerTask, IUser, IWorker } from "@/types";
 import { PROJECT_POLICY_DEFAULTS, WORKER_POLICY_DEFAULTS } from "@/lib/worker-policy";
-import { MatchableProject, RepoReport, matchRepo } from "@/lib/repo-match";
+import { MatchableProject, RepoReport, matchRepo, servedRepository } from "@/lib/repo-match";
+import { hasSeveralRepositories } from "@/lib/repositories";
 import { projectRepositoryUrl } from "@/lib/repository";
 import { ensureWorkerUser } from "@/lib/worker-user";
 import { accessibleProjectIds } from "@/lib/grants";
@@ -326,6 +327,16 @@ export function assignmentsFor(
   return out;
 }
 
+// The offer and the catalogue are about the one address a machine is handed to clone, the primary
+// repository's, and they answer exactly as they did before a project could list several. A machine
+// holding only a later entry is therefore not asked to clone the primary on its own (`wanted` defaults
+// to `servedHere`). A person who ticks the project there still gets it, and that clone makes the
+// primary the entry the machine's assignment names, so tasks naming the later one stop being claimable
+// on it. Closing that needs the worker to bind several checkouts per project (BP-1067).
+function holdsPrimary(project: MatchableProject, reported: RepoReport[]): boolean {
+  return !!matchRepo({ ...project, repositories: null }, reported);
+}
+
 // The same question assignmentsFor asks, minus the checkout — "what could this machine serve if
 // somebody cloned the repository". assignmentsFor is deliberately silent about those, because it
 // feeds a claim loop that must never iterate a project the claim would refuse; the app needs the
@@ -343,7 +354,7 @@ export function offersFor(
     if (!projectRunsWorkers(project.worker)) continue;
     if (!canServe(reachable, String(project._id))) continue;
     // Already served: offering it again invites a second clone of a repository this machine has
-    if (matchRepo(project, reported)) continue;
+    if (holdsPrimary(project, reported)) continue;
 
     const repositoryUrl = projectRepositoryUrl(project);
     if (!repositoryUrl) continue;
@@ -376,7 +387,7 @@ export function catalogueFor(
     if (!canServe(reachable, id)) continue;
 
     const repositoryUrl = projectRepositoryUrl(project);
-    const servedHere = !!matchRepo(project, reported);
+    const servedHere = holdsPrimary(project, reported);
 
     out.push({
       project: id,
@@ -481,6 +492,23 @@ export function usableRepos(
 ): RepoReport[] {
   const lost = lostCheckouts(worker, others, now);
   return (worker.repos ?? []).filter((r) => !lost.has(r.path));
+}
+
+/**
+ * The repositories of this project a claim by this machine may take a task for. Null when the
+ * project has one and nothing narrows the claim; otherwise the entry the machine's assignment names
+ * (`servedRepository`), because a worker binds one checkout per project and would run a task for any
+ * other entry in the wrong working tree. Empty when it holds none of them.
+ */
+export function claimableRepositories(
+  worker: CheckoutClaimant,
+  project: MatchableProject,
+  others: CheckoutClaimant[],
+  now = new Date()
+): string[] | null {
+  if (!hasSeveralRepositories(project)) return null;
+  const served = servedRepository(project, usableRepos(worker, others, now));
+  return served?.id ? [served.id] : [];
 }
 
 /**

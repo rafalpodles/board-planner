@@ -44,7 +44,7 @@ export const GET = withAuth(async (_request, { params, user, db }) => {
   // The machine's reach, not the caller's: an instance admin looking at somebody else's laptop
   // must see what that laptop can be given, not what they themselves can reach.
   const [projects, others, reachable] = await Promise.all([
-    db.Project.find({}).select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
+    db.Project.find({}).select("_id key name repositoryUrl repositories githubRepo gitlabRepo gitlabHost worker").lean(),
     db.Worker.find({ _id: { $ne: worker._id } }).select("_id name host repos enabled lastSeenAt createdAt"),
     ownerReachableProjectIds(db, worker),
   ]);
