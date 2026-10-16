@@ -23,6 +23,7 @@ import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { ReleaseNotesModal } from "@/ee/ai/ReleaseNotesModal";
+import { SummaryModal } from "@/ee/ai/SummaryModal";
 
 function Spinner() {
   return (
@@ -60,6 +61,7 @@ export default function SprintsPage() {
   const [deletingSprint, setDeletingSprint] = useState(false);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
   const [showReleaseNotes, setShowReleaseNotes] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
   const [showVelocity, setShowVelocity] = useState(false);
   // The panes' own counts come straight from board.tasks, but board.applySprintChange can
   // only ever drop a task out of that list, never add one — so a task the planning view just
@@ -241,6 +243,14 @@ export default function SprintsPage() {
                 Create Task
               </Button>
             )}
+            {board.sprints.length > 0 && (
+              <Button size="sm" variant="secondary" onClick={() => setShowSummary(true)} aria-label="Sprint summary" title="Sprint summary">
+                <svg aria-hidden className="h-4 w-4 @md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h7" />
+                </svg>
+                <span className="hidden @md:inline">Sprint summary</span>
+              </Button>
+            )}
             <Button size="sm" variant="secondary" onClick={() => setShowReleaseNotes(true)} aria-label="Release notes" title="Release notes">
               <svg aria-hidden className="h-4 w-4 @md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4h7l4 4v12H7zM14 4v4h4M10 13h5M10 17h5" />
@@ -339,6 +349,16 @@ export default function SprintsPage() {
         <Modal open onClose={() => setShowVelocity(false)} title="Velocity">
           <VelocityChart sprints={board.sprints} />
         </Modal>
+      )}
+
+      {showSummary && (
+        <SummaryModal
+          projectId={projectId}
+          sprints={board.sprints}
+          initialKind="sprint"
+          initialSprintId={selected?._id ?? null}
+          onClose={() => setShowSummary(false)}
+        />
       )}
 
       {showReleaseNotes && (

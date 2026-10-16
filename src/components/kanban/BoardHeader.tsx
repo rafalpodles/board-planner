@@ -21,6 +21,7 @@ interface BoardHeaderProps {
   onViewModeChange: (mode: "board" | "list") => void;
   onRefresh: () => void;
   onNewTask: () => void;
+  onSummary?: () => void;
 }
 
 export function BoardHeader({
@@ -34,6 +35,7 @@ export function BoardHeader({
   onViewModeChange,
   onRefresh,
   onNewTask,
+  onSummary,
 }: BoardHeaderProps) {
   const [scopeOpen, setScopeOpen] = useState(false);
   const scopeRef = useRef<HTMLDivElement>(null);
@@ -154,6 +156,12 @@ export function BoardHeader({
           </button>
         ))}
       </div>
+
+      {onSummary && (
+        <Button size="sm" variant="secondary" onClick={onSummary} className="h-11 shrink-0 whitespace-nowrap">
+          Summary
+        </Button>
+      )}
 
       <button
         type="button"

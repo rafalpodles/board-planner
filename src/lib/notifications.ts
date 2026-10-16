@@ -263,6 +263,39 @@ function formatPayload(
   }
 }
 
+const DISCORD_MAX = 2000;
+
+/**
+ * A summary a person chose to post, to every enabled team channel whatever its events. Awaited, unlike an
+ * event's notification, so the person is told how many channels took it.
+ */
+export async function postToTeamChannels(db: ScopedDb, projectId: string, markdown: string): Promise<{ channels: number; delivered: number }> {
+  const project = await db.Project.findById(projectId, "notificationChannels").lean();
+  const active = (project?.notificationChannels ?? []).filter((ch) => ch.enabled);
+  let delivered = 0;
+  await runBounded(active, OUTBOUND_CONCURRENCY, async (channel) => {
+    let webhookUrl: string;
+    try {
+      webhookUrl = decryptSecret(channel.webhookUrl, db.organisation);
+    } catch {
+      console.error(`Project chat webhook could not be decrypted: project ${projectId}, channel "${channel.name}"`);
+      return;
+    }
+    if (!isAllowedWebhookUrl(webhookUrl, WEBHOOK_DESTINATION)) return;
+    const body =
+      channel.type === "discord"
+        ? { content: markdown.length > DISCORD_MAX ? `${markdown.slice(0, DISCORD_MAX - 1)}…` : markdown, allowed_mentions: DISCORD_NO_MENTIONS }
+        : { text: escapeSlack(markdown) };
+    const res = await safeFetch(
+      webhookUrl,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) },
+      WEBHOOK_DESTINATION
+    ).catch(() => null);
+    if (res?.ok) delivered++;
+  });
+  return { channels: active.length, delivered };
+}
+
 export async function dispatchNotifications(
   db: ScopedDb,
   projectId: string,

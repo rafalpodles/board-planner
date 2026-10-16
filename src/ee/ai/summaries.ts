@@ -63,13 +63,14 @@ async function standupFacts(db: ScopedDb, projectId: string, now: Date): Promise
     byPerson.set(who, items);
   }
   const counted = [...byPerson.values()].reduce((n, items) => n + items.length, 0);
+  const movers = new Set(moves.filter((mv) => mv.user && taskOf.has(String(mv.task))).map((mv) => String(mv.user))).size;
 
   return {
     kind: "standup",
     title: "Standup",
     figures: [
       { label: "Moves between columns in the last day", value: counted },
-      { label: "People who moved work", value: byPerson.size },
+      { label: "People who moved work", value: movers },
       { label: "Blocked tasks", value: blocked.length },
     ],
     lists: [
