@@ -38,6 +38,8 @@ vi.mock("@/hooks/use-project-board", async (importOriginal) => {
 });
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
+// The board asks whether summaries are on the plan; these tests are about the board itself
+vi.mock("@/hooks/use-entitlement", () => ({ useEntitlement: () => ({ loading: false, entitled: false }) }));
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({ user: { username: "owner", collapseEmptyColumns: false }, isAdmin: false }),
 }));

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ApiProject, ApiTask } from "@/types";
 import { columnIdsWithRole } from "@/lib/columns";
@@ -9,6 +9,8 @@ import { ProjectBoardView } from "@/components/kanban/ProjectBoardView";
 import { useCanonicalUrl } from "@/hooks/use-canonical-url";
 import { projectPath } from "@/lib/urls";
 import { BoardHeader } from "@/components/kanban/BoardHeader";
+import { SummaryModal } from "@/ee/ai/SummaryModal";
+import { useEntitlement } from "@/hooks/use-entitlement";
 import { sprintScopeFromParam, sprintScopeToQuery, isSprintScopeShape } from "@/lib/sprint-scope";
 import { APP_NAME } from "@/lib/brand";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -33,6 +35,8 @@ export default function KanbanPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [showSummary, setShowSummary] = useState(false);
+  const summaryEntitlement = useEntitlement("ai.digest");
 
   // Scope lives in the URL so it survives a reload and can be shared;
   // filters stay in localStorage
@@ -79,7 +83,18 @@ export default function KanbanPage() {
         onViewModeChange={board.setViewMode}
         onRefresh={board.reload}
         onNewTask={() => board.setShowNewTask(true)}
+        onSummary={() => setShowSummary(true)}
+        summaryOnPhone={summaryEntitlement.entitled}
       />
+      {showSummary && (
+        <SummaryModal
+          projectId={projectId}
+          sprints={board.sprints}
+          initialKind="standup"
+          initialSprintId={null}
+          onClose={() => setShowSummary(false)}
+        />
+      )}
       <ProjectBoardView
         board={board}
         onScopeChange={(next) => router.push(projectPath(projectId) + sprintScopeToQuery(next))}

@@ -12,7 +12,7 @@ const STALE_DAYS_BY_ROLE: Partial<Record<ColumnRole, number>> = {
 };
 const REFINABLE_ROLES: ColumnRole[] = ["approved", "active", "review", "blocked"];
 const DUPLICATE_SIMILARITY = 0.6;
-const MAX_TASKS_SCANNED = 500;
+export const MAX_TASKS_SCANNED = 500;
 const MAX_ITEMS_PER_FINDING = 10;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -47,6 +47,8 @@ export interface BoardDigest {
   byStatus: { status: string; label: string; count: number }[];
   gaps: BoardGap[];
   stale: BoardStale[];
+  // Before the list is cut to its first few
+  staleTotal: number;
   duplicates: BoardDuplicate[];
   truncated: boolean;
 }
@@ -163,6 +165,7 @@ export async function buildBoardDigest(db: ScopedDb, projectId: string): Promise
     byStatus,
     gaps: gaps.slice(0, MAX_ITEMS_PER_FINDING),
     stale: stale.slice(0, MAX_ITEMS_PER_FINDING),
+    staleTotal: stale.length,
     duplicates: duplicates.slice(0, MAX_ITEMS_PER_FINDING),
     truncated: openTotal > tasks.length,
   };

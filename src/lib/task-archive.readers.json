@@ -3,6 +3,7 @@
     "src/ee/ai/release-notes.ts",
     "src/ee/ai/duplicates.ts",
     "src/ee/ai/triage.ts",
+    "src/ee/ai/summaries.ts",
     "src/app/api/projects/[projectId]/ai/generate-task/route.ts",
     "src/app/api/projects/[projectId]/sprints/[sprintId]/route.ts",
     "src/app/api/projects/[projectId]/sprints/route.ts",
