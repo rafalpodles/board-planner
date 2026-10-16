@@ -22,6 +22,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { ReleaseNotesModal } from "@/ee/ai/ReleaseNotesModal";
 
 function Spinner() {
   return (
@@ -58,6 +59,7 @@ export default function SprintsPage() {
   const [confirmDelete, setConfirmDelete] = useState<ApiSprint | null>(null);
   const [deletingSprint, setDeletingSprint] = useState(false);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
+  const [showReleaseNotes, setShowReleaseNotes] = useState(false);
   const [showVelocity, setShowVelocity] = useState(false);
   // The panes' own counts come straight from board.tasks, but board.applySprintChange can
   // only ever drop a task out of that list, never add one — so a task the planning view just
@@ -239,6 +241,11 @@ export default function SprintsPage() {
                 Create Task
               </Button>
             )}
+            {board.sprints.length > 0 && (
+              <Button size="sm" variant="secondary" onClick={() => setShowReleaseNotes(true)}>
+                Release notes
+              </Button>
+            )}
             {canShowVelocity && (
               <Button size="sm" variant="secondary" onClick={() => setShowVelocity(true)}>
                 Velocity
@@ -331,6 +338,15 @@ export default function SprintsPage() {
         <Modal open onClose={() => setShowVelocity(false)} title="Velocity">
           <VelocityChart sprints={board.sprints} />
         </Modal>
+      )}
+
+      {showReleaseNotes && (
+        <ReleaseNotesModal
+          projectId={projectId}
+          sprints={board.sprints}
+          initialSprintId={selected?._id ?? null}
+          onClose={() => setShowReleaseNotes(false)}
+        />
       )}
 
       {showForm && (

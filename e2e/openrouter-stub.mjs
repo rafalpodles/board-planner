@@ -83,6 +83,20 @@ let lastAuthorization = null;
 let lastAssistRequest = null;
 let lastAssistAuthorization = null;
 
+// The Pro AI features (BP-855) ask for prose with no tools and their material in a <data> block.
+// The answer lists every "title" and "key" in that material, so a spec can see what reached the model,
+// and the request is kept for /last-write
+let lastWrite = null;
+
+function titlesIn(value, out = []) {
+  if (Array.isArray(value)) value.forEach((v) => titlesIn(v, out));
+  else if (value && typeof value === "object") {
+    if (typeof value.title === "string") out.push(value.key ? `${value.title} (${value.key})` : value.title);
+    Object.values(value).forEach((v) => titlesIn(v, out));
+  }
+  return out;
+}
+
 /**
  * One entry per completion request, for /requests (BP-568). What a turn's second call sends in
  * front of the cache breakpoint has to be the same bytes as its first, and no assertion on the
@@ -152,6 +166,7 @@ serve({
       lastAuthorization = null;
       lastAssistRequest = null;
       lastAssistAuthorization = null;
+      lastWrite = null;
       requests = [];
       res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
       return;
@@ -162,6 +177,11 @@ serve({
     // rather than merely that a turn ran (BP-451 review).
     if (req.url === "/last") {
       res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(received));
+      return;
+    }
+
+    if (req.url === "/last-write") {
+      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(lastWrite ?? {}));
       return;
     }
 
@@ -239,6 +259,29 @@ serve({
         model: assist.model ?? "stub",
         choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }],
         usage: { prompt_tokens: system.length, completion_tokens: content.length, total_tokens: 0 },
+      });
+      return;
+    }
+
+    let writing = null;
+    try {
+      const parsed = JSON.parse(raw);
+      const data = parsed?.messages?.[1]?.content;
+      if (!parsed?.tools && typeof data === "string" && data.startsWith("<data>\n")) writing = parsed;
+    } catch {
+      // Not a write request; handled below
+    }
+    if (writing) {
+      lastWrite = { model: writing.model, tools: writing.tools ?? null, messages: writing.messages };
+      const material = JSON.parse(writing.messages[1].content.slice("<data>\n".length, -"\n</data>".length));
+      const content = ["## Written by the stub", ...titlesIn(material).map((t) => `- ${t}`)].join("\n");
+      reply(res, {
+        id: "chatcmpl-e2e-write",
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: writing.model ?? "stub",
+        choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }],
+        usage: { prompt_tokens: 500, completion_tokens: 100, total_tokens: 600 },
       });
       return;
     }

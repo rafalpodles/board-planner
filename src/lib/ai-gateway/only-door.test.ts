@@ -54,7 +54,7 @@ describe("the gateway is the only door to a model", () => {
   });
 
   // BP-682: AI the operator runs for an organisation is counted; an agent a person runs on their own machine is theirs, and is never swept in
-  it("is entered from the PM agent's callers, AI Assist's route, the boot warning and the places that show usage or the operator's lock, and nowhere else", () => {
+  it("is entered from the PM agent's callers, AI Assist's route, the Pro AI features, the boot warning and the places that show usage or the operator's lock, and nowhere else", () => {
     const users = whereIs(/@\/lib\/ai-gateway/);
 
     expect(users).toEqual(
@@ -66,6 +66,7 @@ describe("the gateway is the only door to a model", () => {
         "src/app/api/projects/[projectId]/pm/chat/route.ts",
         "src/app/api/projects/[projectId]/pm/review/route.ts",
         "src/app/api/settings/ai-keys/route.ts",
+        "src/ee/ai/release-notes.ts",
         "src/instrumentation-node.ts",
         "src/lib/pm/agent.ts",
         "src/lib/pm/scheduler.ts",
