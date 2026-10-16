@@ -786,7 +786,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         // One run, one worktree in each repository of the project (BP-1072). Each keeps its own
         // checkout's config, worktree root and workspace; the policy is the project's.
         const repositories = several.map((repository, index) => {
-          const repositoryConfig = configFor(task.projectId, index) ?? taskConfig;
+          const repositoryConfig = configFor(task.projectId, index);
+          if (!repositoryConfig) throw new Error(`no checkout is bound for repository ${index} of project ${task.projectId}`);
           return {
             name: repository.name,
             config: repositoryConfig,

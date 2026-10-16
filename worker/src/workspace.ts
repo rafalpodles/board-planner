@@ -190,6 +190,25 @@ export function createWorkspace(
       .map((line) => line.slice("worktree ".length).trim());
   }
 
+  // Two clones in one parent directory share this root, and a run across both holds one entry per
+  // clone under the same task key: a sweep that took every entry with the key removed the sibling's
+  // fresh worktree. An entry whose pointer names another clone's metadata is that sibling's; one
+  // with no readable pointer is a leftover nobody can claim and is still swept.
+  async function belongsToAnotherClone(path: string): Promise<boolean> {
+    const pointer = join(path, ".git");
+    if (files.kind(pointer) !== "file") return false;
+    let text: string;
+    try {
+      text = files.read(pointer);
+    } catch {
+      return false;
+    }
+    const named = /^gitdir:\s*(.+?)\s*$/m.exec(text)?.[1];
+    if (!named) return false;
+    const metadata = files.realpath(dirname(resolve(path, named)));
+    return metadata !== files.realpath(join(await commonDir(), "worktrees"));
+  }
+
   // Every attempt's entry for the key, registered or merely on disk: a leftover symlink that git
   // never registered would otherwise fail every later `worktree add` with "already exists"
   async function clear(taskKey: string): Promise<void> {
@@ -199,8 +218,13 @@ export function createWorkspace(
       (dirname(path) === root || dirname(path) === files.realpath(root)) &&
       taskKeyOf(basename(path)) === taskKey;
     const registered = (await registeredWorktreePaths()).filter(ours);
-    const onDisk = disk.names(root).filter((name) => taskKeyOf(name) === taskKey).map((name) => join(root, name));
-    for (const path of new Set([...registered.map((path) => join(root, basename(path))), ...onDisk])) {
+    const known = registered.map((path) => join(root, basename(path)));
+    const onDisk = [...known];
+    for (const name of disk.names(root).filter((name) => taskKeyOf(name) === taskKey)) {
+      const path = join(root, name);
+      if (!known.includes(path) && !(await belongsToAnotherClone(path))) onDisk.push(path);
+    }
+    for (const path of new Set(onDisk)) {
       disk.discard(root, path);
     }
     for (const name of disk.names(root).filter((name) => name.startsWith(DISCARDED))) disk.discard(root, join(root, name));

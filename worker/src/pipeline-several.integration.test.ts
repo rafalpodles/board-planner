@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiClient } from "./api.js";
@@ -83,6 +83,8 @@ describe("a run across several repositories", () => {
     delivery?: Partial<Record<Name, Partial<Delivery>>>;
     createFails?: Name;
     signal?: AbortSignal;
+    now?: () => number;
+    ceilingMs?: number;
   } = {}) {
     const reporter = {
       blocked: vi.fn<Reporter["blocked"]>(async () => {}),
@@ -105,7 +107,7 @@ describe("a run across several repositories", () => {
     const quarantined: { index: number; reason: string }[] = [];
     const repositories: RepositoryRunDeps[] = names.map((name) => {
       const real = createWorkspace(
-        workerConfig({ repoPath: clones[name], worktreeRoot: join(dir, `${name}-wt`), baseBranch: "main" }),
+        workerConfig({ repoPath: clones[name], worktreeRoot: join(dir, "cp-worktrees"), baseBranch: "main" }),
         createRunner(),
         gitPath,
         () => ({}),
@@ -133,7 +135,7 @@ describe("a run across several repositories", () => {
       deliveries[name] = delivery;
       return {
         name,
-        config: workerConfig({ repoPath: clones[name], worktreeRoot: join(dir, `${name}-wt`), baseBranch: "main" }),
+        config: workerConfig({ repoPath: clones[name], worktreeRoot: join(dir, "cp-worktrees"), baseBranch: "main" }),
         workspace,
         createDelivery: () => delivery,
       };
@@ -150,7 +152,8 @@ describe("a run across several repositories", () => {
     };
 
     const gateRuns: { gate: string; path: string }[] = [];
-    const gateFor: PipelineDeps["gateFor"] = (entry) => ({
+    const gateTimeouts: number[] = [];
+    const gateFor: PipelineDeps["gateFor"] = (entry, _runner, timeoutMs) => (gateTimeouts.push(timeoutMs), {
       name: entry.name,
       run: async (context) => {
         gateRuns.push({ gate: entry.key, path: context.worktreePath });
@@ -159,7 +162,8 @@ describe("a run across several repositories", () => {
     });
 
     const deps: SeveralRepositoriesDeps = {
-      config: workerConfig({ worktreeRoot: join(dir, "api-wt"), repoPath: clones.api }),
+      config: workerConfig({ worktreeRoot: join(dir, "api-wt"), repoPath: clones.api, ...(over.ceilingMs ? { runCeilingMs: over.ceilingMs } : {}) }),
+      now: over.now,
       api,
       boardColumns: async () => [
         { id: "todo", role: "approved" },
@@ -179,7 +183,7 @@ describe("a run across several repositories", () => {
       logError: vi.fn(),
       quarantineCheckout: (_project, index, reason) => quarantined.push({ index, reason }),
     };
-    return { deps, reporter, deliveries, workspaces, seen, gateRuns, quarantined };
+    return { deps, reporter, deliveries, workspaces, seen, gateRuns, gateTimeouts, quarantined };
   }
 
   const write = (path: string, file: string, text: string) => writeFileSync(join(path, file), text);
@@ -245,7 +249,7 @@ describe("a run across several repositories", () => {
   it("pushes nothing anywhere when a gate refuses the change in one repository, and says which", async () => {
     const run = build({
       write: (w) => { write(w.api, "api.txt", "a\n"); write(w.web, "web.txt", "w\n"); },
-      gates: { "diff-size": async (context) => (context.worktreePath.includes("web") ? { ok: false, reason: "too big" } : { ok: true, reason: "" }) },
+      gates: { "diff-size": async (context) => (existsSync(join(context.worktreePath, "web.txt")) ? { ok: false, reason: "too big" } : { ok: true, reason: "" }) },
     });
 
     await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, GATE, PUSH, PR));
@@ -271,6 +275,38 @@ describe("a run across several repositories", () => {
 
     expect(run.gateRuns.map((g) => g.gate)).toEqual(["diff-size", "diff-size"]);
     expect(new Set(run.gateRuns.map((g) => g.path)).size).toBe(2);
+  });
+
+  describe("the run's ceiling across the repositories of one gate", () => {
+    const MINUTE = 60_000;
+    const twoChanged = (spend: number) => {
+      let clock = 0;
+      return build({
+        now: () => clock,
+        ceilingMs: 20 * MINUTE,
+        write: (w) => { write(w.api, "api.txt", "a\n"); write(w.web, "web.txt", "w\n"); },
+        gates: { "diff-size": async () => { clock += spend; return { ok: true, reason: "" }; } },
+      });
+    };
+
+    it("cuts the second repository's time limit to what is left of the run", async () => {
+      const run = twoChanged(15 * MINUTE);
+
+      await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, GATE, PUSH));
+
+      expect(run.gateTimeouts).toEqual([10 * MINUTE, 5 * MINUTE]);
+      expect(run.gateRuns).toHaveLength(2);
+    });
+
+    it("hands the task back, pushing nothing, when the first repository's gate used the run up", async () => {
+      const run = twoChanged(19.8 * MINUTE);
+
+      await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, GATE, PUSH));
+
+      expect(run.gateRuns).toHaveLength(1);
+      expect(run.reporter.requeued).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("before the Size gate reached"));
+      for (const name of names) expect(pushedTo(run, name)).toHaveLength(0);
+    });
   });
 
   it("pushes nothing when the history of one repository is not what the run made", async () => {

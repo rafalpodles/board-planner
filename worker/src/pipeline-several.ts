@@ -545,11 +545,12 @@ export async function runTaskInRepositories(
       await end(ending);
       return ending;
     };
-    const gate = deps.gateFor(entry, runner, budget.forEntry(GATE_CAP_MS), {
+    const gateOptions = {
       maxDiffLines: config.maxDiffLines,
       maxDiffFiles: config.maxDiffFiles,
       reviewModel: config.reviewModel ?? "",
-    });
+    };
+    const gate = deps.gateFor(entry, runner, budget.forEntry(GATE_CAP_MS), gateOptions);
     if (!gate) {
       return done({
         outcome: "failed",
@@ -600,10 +601,25 @@ export async function runTaskInRepositories(
       });
     }
 
-    for (const leg of active) {
+    for (const [index, leg] of active.entries()) {
+      // A gate takes its time limit when it is made, so one shared by every repository would give
+      // each of them the whole of what was left
+      if (index > 0 && (budget.exhausted() || budget.remaining() < MIN_ENTRY_MS)) {
+        return done({
+          outcome: "requeued",
+          detail: "the run hit its ceiling",
+          keep: true,
+          report: () =>
+            reporter.requeued(
+              task,
+              `the run hit its ceiling of ${config.runCeilingMs}ms before the ${gate.name} gate reached ${leg.label}. Nothing was pushed, in any repository${kept()}`,
+            ),
+        });
+      }
+      const legGate = index === 0 ? gate : (deps.gateFor(entry, runner, budget.forEntry(GATE_CAP_MS), gateOptions) ?? gate);
       const diff = await deps.collectDiff(runner, leg.worktree.path, leg.worktree.baseSha);
       const startedGate = now();
-      const verdict = await gate.run({
+      const verdict = await legGate.run({
         worktreePath: leg.worktree.path,
         worktreeDir: leg.worktree.dir,
         task,

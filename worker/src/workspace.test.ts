@@ -766,7 +766,7 @@ describe("createWorkspace", () => {
   });
 
   it("discards every attempt's entry for the key on disk, registered or not, and nothing else", async () => {
-    const { runner, run } = runnerReturning();
+    const { runner, run } = fakeGit({ [GIT_DIR]: { stdout: "/repo/.git\n" } });
     const disk = fakeDisk(["CP-158", "CP-158.old", "CP-1580", "CP-15.x", ".discard-f00"]);
     await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, POINTER_FILES, disk).destroy("CP-158");
 
@@ -776,6 +776,39 @@ describe("createWorkspace", () => {
       "/worktrees/.discard-f00",
     ]);
     expect(disk.forget).not.toHaveBeenCalled();
+  });
+
+  // BP-1072: two clones in one parent directory share the worktree root, and a run across both holds
+  // an entry per clone under one task key
+  describe("a root shared with another clone", () => {
+    const pointers = (gitdirs: Record<string, string>) => ({
+      ...POINTER_FILES,
+      read(path: string): string {
+        const pointer = /^\/worktrees\/([^/]+)\/\.git$/.exec(path);
+        return pointer && gitdirs[pointer[1]] !== undefined ? gitdirs[pointer[1]] : POINTER_FILES.read(path);
+      },
+    });
+
+    it("leaves an entry whose pointer names another clone's metadata", async () => {
+      const { runner } = fakeGit({ [GIT_DIR]: { stdout: "/repo/.git\n" } });
+      const disk = fakeDisk(["CP-158.mine", "CP-158.theirs"]);
+      const files = pointers({ "CP-158.theirs": "gitdir: /sibling/.git/worktrees/CP-158.theirs\n" });
+      await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, files, disk).destroy("CP-158");
+
+      expect(disk.discard.mock.calls.map(([, path]) => path)).toEqual(["/worktrees/CP-158.mine"]);
+    });
+
+    it("still sweeps an unregistered leftover whose pointer is unreadable or names nothing", async () => {
+      const { runner } = fakeGit({ [GIT_DIR]: { stdout: "/repo/.git\n" } });
+      const disk = fakeDisk(["CP-158.empty", "CP-158.junk"]);
+      const files = pointers({ "CP-158.empty": "", "CP-158.junk": "not a pointer\n" });
+      await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, files, disk).destroy("CP-158");
+
+      expect(disk.discard.mock.calls.map(([, path]) => path)).toEqual([
+        "/worktrees/CP-158.empty",
+        "/worktrees/CP-158.junk",
+      ]);
+    });
   });
 
   it("is a no-op when the worktree is already gone", async () => {

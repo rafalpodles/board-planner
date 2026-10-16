@@ -89,7 +89,7 @@ function layoutNote(repositories: readonly WorktreeRef[]): string {
     "",
     "This task spans several repositories. Each is checked out as its own git worktree on its own branch, and you may change any of them:",
     ...lines,
-    "Make each change in the repository it belongs to, using the absolute paths above. A repository you leave unchanged gets no pull request.",
+    "Make each change in the repository it belongs to, using the absolute paths above. A repository you leave unchanged gets no pull request. Your closing summary is published as the description of every pull request this task opens, so write it for readers of each repository: say what changed where, and do not quote code or files of one repository in a way that only makes sense to another.",
   ].join("\n");
 }
 
