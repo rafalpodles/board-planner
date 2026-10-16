@@ -10,7 +10,8 @@ const workerSchema = new Schema<IWorker>(
     platform: { type: String, default: "", maxlength: 200 },
     version: { type: String, default: "", maxlength: 200 },
     protocolVersion: { type: Number, required: true },
-    capabilities: { type: [{ type: String, maxlength: 64 }], default: [], validate: { validator: (list: unknown[]) => list.length <= 16, message: "Too many capabilities" } },
+    // What the worker said it can do (`capabilitiesOf` bounds and cleans it before it is written)
+    capabilities: { type: [String], default: [] },
     credentialHash: { type: String, required: true, select: false },
     // Reported by the worker, never set from the server: this is what that machine says it has
     // on disk. The path is here only so an operator can see which checkout was used.

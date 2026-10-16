@@ -1177,9 +1177,9 @@ describe("a machine the Free plan's limit holds", () => {
   });
 });
 
-// BP-1066. What the app offers to clone and shows as served is about the primary address alone: a
-// machine holding only a later entry serves the project already, and cloning the primary onto it
-// would change which repository its assignment names.
+// BP-1066. What the app offers to clone and shows as served is about the primary address alone, as it
+// was before a project could list several repositories: a machine holding only a later entry is not
+// asked to clone the primary on its own.
 describe("the clone offer and the catalogue on a project with several repositories", () => {
   const API = "https://github.com/owner/api";
   const WEB = "https://github.com/owner/web";
@@ -1244,6 +1244,20 @@ describe("a project that lists several repositories", () => {
     const older = { _id: "w1", name: "first", host: "mac.home", enabled: true, lastSeenAt: fresh, createdAt: new Date("2026-01-01"), repos: checkouts(`${WEB}.git`) };
 
     expect(claim(mine as never, capable, [older as never])).toEqual({ ok: false, reason: "this worker reports no checkout of web" });
+  });
+
+  it("names every repository the machine lacks", () => {
+    expect(claim(holding(), capable)).toEqual({ ok: false, reason: "this worker reports no checkout of api, web" });
+  });
+
+  // A one-entry stored list is still one repository: it must not demand the capability or a list
+  it("treats a project that stores one entry as one repository", () => {
+    const stored = project({ githubRepo: undefined, repositoryUrl: API, repositories: [{ _id: "r-api", url: API, name: "api" }] });
+
+    expect(verdictFor(holding(`${API}.git`), stored, PROTOCOL_VERSION, now, [], [PROJECT_ID], [])).toEqual({ ok: true });
+    const [assignment] = assignmentsFor(checkouts(`${API}.git`), [stored], [PROJECT_ID], []);
+    expect(assignment.remote).toBe(`${API}.git`);
+    expect(assignment).not.toHaveProperty("repositories");
   });
 
   it("is the control: a project with one repository needs no capability and no list", () => {

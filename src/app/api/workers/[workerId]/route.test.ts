@@ -15,6 +15,14 @@ const workerDeleteOne = vi.fn();
 const logInstanceAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+// Honours the projection, so a route that forgets to select `repositories` sees the project as the
+// one-repository project it would be, which is how it would be handed to a worker.
+async function projectedDocs(read: () => Promise<unknown>, fields: string) {
+  const keep = new Set(["_id", ...fields.split(/\s+/).filter(Boolean)]);
+  const docs = (await read()) as Record<string, unknown>[];
+  return docs.map((doc) => Object.fromEntries(Object.entries(doc).filter(([key]) => keep.has(key))));
+}
+
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
@@ -27,7 +35,7 @@ vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, exists: async ()
 const taskFind = vi.fn(() => ({ select: () => ({ lean: async () => [] }) }));
 vi.mock("@/models/task", () => ({ Task: { find: taskFind } }));
 vi.mock("@/models/project", () => ({
-  Project: { find: () => ({ select: () => ({ lean: projectFind }) }), countDocuments },
+  Project: { find: () => ({ select: (fields: string) => ({ lean: () => projectedDocs(projectFind, fields) }) }), countDocuments },
 }));
 vi.mock("@/models/worker", () => ({
   Worker: {
@@ -813,5 +821,55 @@ describe("DELETE removes a machine's record and with it its credential", () => {
     expect((await DELETE(deleteRequest(), ctx())).status).toBe(403);
 
     expect(workerDeleteOne).not.toHaveBeenCalled();
+  });
+});
+
+// BP-1070. The worker reads its assignments from here between heartbeats, so a project that lists
+// several repositories has to be answered the way the heartbeat answers it.
+describe("GET /api/workers/:workerId and a project that lists several repositories", () => {
+  const API = "https://github.com/owner/api";
+  const WEB = "https://github.com/owner/web";
+  const both = [{ remote: `${API}.git`, path: "/api" }, { remote: `${WEB}.git`, path: "/web" }];
+  const read = (capabilities?: string) =>
+    GET(
+      new Request(`http://localhost/api/workers/${WORKER_ID}`, {
+        headers: {
+          authorization: "Bearer cpw_secret",
+          "x-worker-id": WORKER_ID,
+          "x-cp-protocol": "1",
+          ...(capabilities ? { "x-cp-capabilities": capabilities } : {}),
+        },
+      }),
+      ctx()
+    );
+
+  beforeEach(() => {
+    // An earlier describe leaves its own answer in place; this one asks about assignments only
+    taskFind.mockImplementation(() => ({ select: () => ({ lean: async () => [] }) }) as never);
+    verifyWorkerCredential.mockResolvedValue({ ...WORKER, repos: both });
+    projectFind.mockResolvedValue([
+      {
+        _id: "p1",
+        key: "BP",
+        name: "Board Planner",
+        repositoryUrl: API,
+        repositories: [
+          { _id: "r-api", url: API, name: "api" },
+          { _id: "r-web", url: WEB, name: "web" },
+        ],
+        worker: { enabled: true, policy: {}, policyOverrides: [] },
+      },
+    ]);
+  });
+
+  it("lists every repository to a worker that says it can run several", async () => {
+    const { assignments } = await (await read("multi-repository")).json();
+
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0].repositories.map((r: { id: string }) => r.id)).toEqual(["r-api", "r-web"]);
+  });
+
+  it("offers the project to no worker that does not say so", async () => {
+    expect((await (await read()).json()).assignments).toEqual([]);
   });
 });

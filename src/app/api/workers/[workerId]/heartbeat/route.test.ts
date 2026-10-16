@@ -13,13 +13,21 @@ const accessibleProjectIds = vi.fn();
 const userFindOne = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+// Honours the projection, so a route that forgets to select `repositories` sees the project as the
+// one-repository project it would be, which is how it would be handed to a worker.
+async function projectedDocs(read: () => Promise<unknown>, fields: string) {
+  const keep = new Set(["_id", ...fields.split(/\s+/).filter(Boolean)]);
+  const docs = (await read()) as Record<string, unknown>[];
+  return docs.map((doc) => Object.fromEntries(Object.entries(doc).filter(([key]) => keep.has(key))));
+}
+
 vi.mock("@/lib/grants", () => ({ accessibleProjectIds, check: vi.fn() }));
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne, exists: async () => null } }));
 vi.mock("@/models/project", () => ({
   Project: {
     find: (query: unknown) => {
       projectFindQuery(query);
-      return { select: () => ({ lean: projectFind }) };
+      return { select: (fields: string) => ({ lean: () => projectedDocs(projectFind, fields) }) };
     },
   },
 }));

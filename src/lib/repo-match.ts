@@ -82,10 +82,10 @@ export interface ServedRepository {
 }
 
 /**
- * The repository of this project a machine holds a checkout of, and the remote it reported for it.
- * With several the first in the project's own order wins, so every caller names the same one: until
- * the worker can bind more than one checkout per project, an assignment carries exactly this remote
- * and a task is only offered to the machine when it names this entry.
+ * The first repository of this project, in the project's own order, that a machine holds a checkout
+ * of, and the remote it reported for it. It answers "does this machine serve the project at all" for
+ * the screens that ask that; a project that lists several repositories is claimed only with every one
+ * of them (`repositoryCoverage`).
  */
 export function servedRepository(project: MatchableProject, reported: RepoReport[]): ServedRepository | null {
   const entries = storedRepositories(project).filter((r) => normaliseRemote(r.url).length > 0);
@@ -133,7 +133,7 @@ export function repositoryCoverage(
 
   for (const entry of storedRepositories(project)) {
     const name = (entry.name?.trim() || entry.url.trim()).slice(0, 200);
-    const at = normaliseRemote(entry.url).length === 0 ? -1 : reported.findIndex((r, i) => !taken.has(i) && sameRepo(entry.url, r.remote));
+    const at = reported.findIndex((r, i) => !taken.has(i) && sameRepo(entry.url, r.remote));
     if (at < 0) {
       missing.push({ id: entryId(entry), name });
       continue;
