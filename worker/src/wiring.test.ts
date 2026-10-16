@@ -576,7 +576,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // Written into repos.json; defaults to the single REPO every other test uses
       repos?: string[];
       // Replaces the single p1 assignment; each entry binds by remote the way the server's do
-      assignments?: { project: string; remote: string }[];
+      assignments?: { project: string; remote: string; repositories?: { id: string; name: string; remote: string }[] }[];
       // How many passes the loop is allowed before it is stopped. One is a single pass, which is
       // what almost every test here wants; two is what it takes to see whether a project is
       // claimed from AGAIN.
@@ -1699,6 +1699,83 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
       expect(run.api.setStatus).toHaveBeenCalledWith("p1", "t1", "in_review");
       expect(run.logError).not.toHaveBeenCalledWith(expect.stringContaining("no longer has run"));
+    });
+  });
+
+  // BP-1067. A project that lists several repositories is bound in all of them or in none, and is not
+  // claimed until a run can take several (BP-1072).
+  describe("a project that lists several repositories", () => {
+    const BOTH = [
+      { id: "r-demo", name: "demo", remote: REMOTE },
+      { id: "r-other", name: "other", remote: OTHER_REMOTE },
+    ];
+    const several = (repositories = BOTH) => [{ project: "p1", remote: REMOTE, repositories }];
+
+    it("binds every repository, says it is not claimable yet, and claims nothing", async () => {
+      const run = await runOneTask(undefined, undefined, { repos: [REPO, OTHER_REPO], assignments: several() });
+
+      expect(run.bindingErrors.join(" ")).toBe("");
+      const [project] = run.localConfig?.().projects ?? [];
+      expect(project.project).toBe("p1");
+      expect(project.blocked).toBe("this worker cannot run more than one repository of a project yet");
+      expect(run.api.claim).not.toHaveBeenCalled();
+    });
+
+    it("binds none of them when one is not on this machine, and names the repository", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        repos: [REPO],
+        assignments: several([BOTH[0], { id: "r-gone", name: "gone", remote: "git@github.com:someone/else.git" }]),
+      });
+
+      expect(run.localConfig?.().projects).toEqual([]);
+      expect(run.bindingErrors.join(" ")).toMatch(
+        /p1: no checkout of git@github\.com:someone\/else\.git on this machine \(repository gone\)/
+      );
+    });
+
+    it("refuses two entries that resolve to one checkout", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        repos: [REPO],
+        assignments: several([BOTH[0], { id: "r-twin", name: "twin", remote: REMOTE }]),
+      });
+
+      expect(run.localConfig?.().projects).toEqual([]);
+    });
+
+    // checkRepo judges each checkout, and one that cannot pass the gates makes the project unusable
+    it("is unusable when any one checkout fails the gates, saying which", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        repos: [REPO, OTHER_REPO],
+        assignments: several(),
+        readFile: (path) =>
+          path.startsWith(OTHER_REPO) && path.endsWith("package.json")
+            ? JSON.stringify({ scripts: { test: "vitest" } })
+            : path.endsWith("package.json")
+              ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } })
+              : path.endsWith("package-lock.json")
+                ? "{}"
+                : null,
+      });
+
+      const [project] = run.localConfig?.().projects ?? [];
+      expect(project.blocked).toContain("other:");
+      expect(project.blocked).not.toContain("demo:");
+    });
+
+    it("reaps what an earlier run left in every checkout, not only the primary's", async () => {
+      const several = await runOneTask(undefined, undefined, { tasks: [], repos: [REPO, OTHER_REPO], assignments: [{ project: "p1", remote: REMOTE, repositories: BOTH }] });
+      const one = await runOneTask(undefined, undefined, { tasks: [] });
+      const listings = (calls: string[][]) => calls.filter((c) => c.includes("worktree") && c.includes("list")).length;
+
+      expect(listings(one.everyCall)).toBe(1);
+      expect(listings(several.everyCall)).toBe(2);
+    });
+
+    it("leaves a project with one repository exactly as it was", async () => {
+      const run = await runOneTask(undefined, undefined, {});
+
+      expect(run.localConfig?.().projects.map((p) => p.blocked)).toEqual([""]);
+      expect(run.claimed).toBe(true);
     });
   });
 

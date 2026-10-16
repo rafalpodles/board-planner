@@ -71,6 +71,8 @@ import { createReporter, ReleaseMemory } from "./reporter.js";
 import { abortableSleep } from "./sleep.js";
 import { HeartbeatDeps, loadIdentity, PROTOCOL_VERSION, startHeartbeat } from "./registration.js";
 import { bindRepository, createAllowlistReader, repoInventory } from "./repos.js";
+import { bindAssignment, type BoundRepository } from "./assignment-binding.js";
+import { RUNS_SEVERAL_REPOSITORIES } from "./capabilities.js";
 import {
   createTelemetry,
   dropWhenBusy,
@@ -230,6 +232,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // Why the inventory could not be read, surfaced on the heartbeat so a broken repos.json shows up
   // in the console instead of looking like a machine that simply has nothing.
   let inventoryError = "";
+  // The path, worktree root and remote are the PRIMARY repository's, which is what every single-
+  // repository path reads. `repositories` is every checkout of the project, the primary first: one for
+  // a project that lists one repository, several for one that lists several.
   let bound = new Map<
     string,
     {
@@ -239,6 +244,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       remote: string;
       key: string;
       name: string;
+      repositories: BoundRepository[];
     }
   >();
   const reapedProjects = new Set<string>();
@@ -309,13 +315,26 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   const checkoutOf = (projectId: string): string =>
     bound.get(projectId)?.path ?? `project:${projectId}`;
 
+  // Every checkout the project runs in: one, or one per repository it lists. A poisoned one stops the
+  // whole project, since a run needs all of them.
+  const checkoutsOf = (projectId: string): string[] =>
+    bound.get(projectId)?.repositories.map((r) => r.path) ?? [`project:${projectId}`];
+
   const REMOVE_THE_KEY = "Remove the key";
 
   const quarantineReasonFor = (projectId: string): string | undefined =>
-    quarantined.get(checkoutOf(projectId));
+    checkoutsOf(projectId)
+      .map((checkout) => quarantined.get(checkout))
+      .find((reason) => reason !== undefined);
 
-  function quarantineProject(projectId: string, reason: string, repair = REMOVE_THE_KEY): void {
-    const checkout = checkoutOf(projectId);
+  // `checkout` names the one that is poisoned when the caller knows it; without it the primary's is,
+  // which is the only checkout a single-repository project has.
+  function quarantineProject(
+    projectId: string,
+    reason: string,
+    repair = REMOVE_THE_KEY,
+    checkout: string = checkoutOf(projectId)
+  ): void {
     if (quarantined.has(checkout)) return;
     // Stored as the sentence, not as the bare finding. This map answers the cockpit's `blocked`
     // field as well as the preflight check, and next to the gates' detail sentences and the
@@ -345,16 +364,19 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       detail,
     }));
 
-  function configFor(projectId: string): WorkerConfig | null {
+  // `index` picks which of the project's checkouts the config is about; the primary by default, which
+  // is the only one a single-repository project has.
+  function configFor(projectId: string, index = 0): WorkerConfig | null {
     const identity = loadIdentity(identityStore);
     const repo = bound.get(projectId);
-    if (!identity || !repo) return null;
+    const checkout = repo?.repositories[index];
+    if (!identity || !repo || !checkout) return null;
     return {
       apiBaseUrl: bootstrap.apiBaseUrl,
       apiToken: bootstrap.apiToken,
       stateDir: bootstrap.stateDir,
-      repoPath: repo.path,
-      worktreeRoot: repo.worktreeRoot,
+      repoPath: checkout.path,
+      worktreeRoot: checkout.worktreeRoot,
       workerId: identity.workerId,
       baseBranch: repo.config.baseBranch,
       pollIntervalMs: repo.config.pollIntervalMs,
@@ -469,41 +491,40 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         remote: string;
         key: string;
         name: string;
+        repositories: BoundRepository[];
       }
     >();
     const errors: string[] = [];
 
     if (identity) {
       for (const assignment of assignments) {
-        // The server sends a remote, never a path. Resolving it here, against this machine's own
-        // inventory, is what keeps "where anything runs" a local decision.
-        const local = inventory.find((r) => r.remote === assignment.remote);
-        if (!local) {
-          errors.push(`${assignment.project}: no checkout of ${assignment.remote} on this machine`);
-          continue;
-        }
-        const result = await bindRepository(
-          {
-            runner: deps.runner,
-            gitPath: resolvedGitPath(),
-            readAllowlist,
-            realpath: deps.realpath,
-            stat: deps.stat,
-            uid: deps.uid,
-            workerId: identity.workerId,
-          },
-          local.path
+        // Every repository of the project, or none of them: see bindAssignment.
+        const result = await bindAssignment(assignment, inventory, (path) =>
+          bindRepository(
+            {
+              runner: deps.runner,
+              gitPath: resolvedGitPath(),
+              readAllowlist,
+              realpath: deps.realpath,
+              stat: deps.stat,
+              uid: deps.uid,
+              workerId: identity.workerId,
+            },
+            path
+          )
         );
         if (result.ok) {
+          const [primary] = result.repositories;
           // Each project resolves its own policy against this worker's defaults, so two projects on
           // one machine can want different models, limits and merge behaviour.
           nextBound.set(assignment.project, {
-            path: result.path,
-            worktreeRoot: result.worktreeRoot,
+            path: primary.path,
+            worktreeRoot: primary.worktreeRoot,
             config: applyPolicy(policy, assignment.policy),
             remote: assignment.remote,
             key: assignment.key ?? "",
             name: assignment.name ?? "",
+            repositories: result.repositories,
           });
         } else {
           errors.push(`${assignment.project}: ${result.reason}`);
@@ -515,13 +536,21 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     // Kept per project as well as flat: the flat list is what the fleet console renders, and the
     // per-project one is what decides whether that project may be claimed from at all.
     unusable.clear();
-    repoChecks = [...bound.entries()].flatMap(([projectId, repo]) => {
-      const checks = checkRepo(deps.readFile, repo.path);
-      const failing = checks.filter((check) => !check.ok);
-      if (failing.length) {
-        unusable.set(projectId, failing.map((check) => check.detail).join("; "));
-      }
-      return checks;
+    repoChecks = [...bound.entries()].flatMap(([projectId, project]) => {
+      const several = project.repositories.length > 1;
+      const checked = project.repositories.map((repository) => ({
+        repository,
+        checks: checkRepo(deps.readFile, repository.path),
+      }));
+      // One failing checkout makes the project unusable, since a run needs every one of them; the
+      // reason names the repository once there is more than one to tell apart.
+      const failing = checked.flatMap(({ repository, checks }) =>
+        checks
+          .filter((check) => !check.ok)
+          .map((check) => (several ? `${repository.name}: ${check.detail}` : check.detail))
+      );
+      if (failing.length) unusable.set(projectId, failing.join("; "));
+      return checked.flatMap(({ checks }) => checks);
     });
 
     // Said once per reason rather than once per poll: a machine sitting next to a repository the
@@ -538,22 +567,30 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
     heartbeat.reportBindingError([inventoryError, ...errors].filter(Boolean).join("; "));
 
-    for (const projectId of bound.keys()) {
-      if (reapedProjects.has(projectId)) continue;
-      reapedProjects.add(projectId);
-      const taskConfig = configFor(projectId);
-      if (!taskConfig) continue;
-      // reapOrphans only lists and destroys — it never calls create() — so the fetch parameters
-      // stay absent here, same as Ruling 2 intends for any caller that has no use for them.
-      const reaped = await reapOrphans(
-        createWorkspace(taskConfig, deps.runner, resolvedGitPath()),
-        taskConfig.worktreeRoot,
-        // The one exception: a worktree somebody is being asked about. Keyed on the root rather
-        // than on the project, because rebind resolves several projects onto one checkout.
-        heldTaskKeys(markers, taskConfig.worktreeRoot)
-      ).catch(() => 0);
-      if (reaped > 0) {
-        deps.log(`reaped ${reaped} worktree(s) left by an earlier run for project ${projectId}`);
+    for (const [projectId, project] of bound.entries()) {
+      // One per checkout: each repository of a project keeps its own worktree root
+      for (const [index, repository] of project.repositories.entries()) {
+        const reapKey = `${projectId}#${index}`;
+        if (reapedProjects.has(reapKey)) continue;
+        reapedProjects.add(reapKey);
+        const taskConfig = configFor(projectId, index);
+        if (!taskConfig) continue;
+        // reapOrphans only lists and destroys — it never calls create() — so the fetch parameters
+        // stay absent here, same as Ruling 2 intends for any caller that has no use for them.
+        const reaped = await reapOrphans(
+          createWorkspace(taskConfig, deps.runner, resolvedGitPath()),
+          taskConfig.worktreeRoot,
+          // The one exception: a worktree somebody is being asked about. Keyed on the root rather
+          // than on the project, because rebind resolves several projects onto one checkout.
+          heldTaskKeys(markers, taskConfig.worktreeRoot)
+        ).catch(() => 0);
+        if (reaped > 0) {
+          deps.log(
+            `reaped ${reaped} worktree(s) left by an earlier run for project ${projectId}${
+              project.repositories.length > 1 ? ` (${repository.name})` : ""
+            }`
+          );
+        }
       }
     }
   }
@@ -858,13 +895,22 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     return `${missing.join(" and ")} could not be found on this machine, and every task needs ${missing.length > 1 ? "them" : "it"}`;
   }
 
+  // A project bound in several repositories is not claimed until a run can take several: binding and
+  // reporting them first lets the screen say what is missing, and not claiming keeps a task from being
+  // run in one of them (BP-1072 makes the run, BP-1073 turns this on).
+  const cannotRunYet = (projectId: string): string =>
+    !RUNS_SEVERAL_REPOSITORIES && (bound.get(projectId)?.repositories.length ?? 0) > 1
+      ? "this worker cannot run more than one repository of a project yet"
+      : "";
+
   const loop = createLoop({
     pollIntervalMs: () => policy.pollIntervalMs,
     // A project whose checkout cannot pass the gates is not claimed from. The refusal would arrive
     // anyway — at the build gate, after the agent has worked — with the reason this already has.
     assignments: () =>
       [...bound.keys()].filter(
-        (projectId) => !unusable.has(projectId) && !quarantineReasonFor(projectId)
+        (projectId) =>
+          !unusable.has(projectId) && !quarantineReasonFor(projectId) && !cannotRunYet(projectId)
       ),
     api,
     execute,
@@ -964,7 +1010,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         // answer would send the operator to the wrong place.
         blocked:
           claimBlocked() ||
-          (quarantineReasonFor(project) ?? unusable.get(project) ?? loop.unclaimable(project)),
+          (quarantineReasonFor(project) ??
+            unusable.get(project) ??
+            (cannotRunYet(project) || loop.unclaimable(project))),
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,
         reviewModel: repo.config.reviewModel,

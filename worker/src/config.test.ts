@@ -460,3 +460,51 @@ describe("stateDirFrom", () => {
     expect(stateDirFrom(env)).toBe(loadBootstrap(env).stateDir);
   });
 });
+
+// BP-1067. The server lists every repository of a project that has several. A list that is present
+// but wrong must not be read as the single remote: that would run the project in one repository.
+describe("parseAssignments and a project that lists several repositories", () => {
+  const API = "git@github.com:acme/api.git";
+  const WEB = "git@github.com:acme/web.git";
+  const entry = (over: Record<string, unknown> = {}) => ({ project: "p1", remote: API, ...over });
+  const listed = [
+    { id: "r-api", name: "api", remote: API },
+    { id: "r-web", name: "web", remote: WEB },
+  ];
+
+  it("keeps the list, in order", () => {
+    expect(parseAssignments([entry({ repositories: listed })])[0].repositories).toEqual(listed);
+  });
+
+  it("leaves an assignment with no list as it always was", () => {
+    const [assignment] = parseAssignments([entry()]);
+
+    expect(assignment).not.toHaveProperty("repositories");
+    expect(assignment.remote).toBe(API);
+  });
+
+  it("normalises a name that is not a string, like the assignment's own", () => {
+    expect(parseAssignments([entry({ repositories: [{ id: "r", name: 3, remote: API }] })])[0].repositories).toEqual([
+      { id: "r", name: "", remote: API },
+    ]);
+  });
+
+  it.each([
+    ["not an array", "x"],
+    ["empty", []],
+    ["an entry that is not an object", [null]],
+    ["an entry with no id", [{ name: "api", remote: API }]],
+    ["an entry with no remote", [{ id: "r", name: "api" }]],
+    ["a repeated id", [listed[0], { ...listed[1], id: "r-api" }]],
+    ["a repeated remote", [listed[0], { ...listed[1], remote: API }]],
+    ["more than thirty-two", Array.from({ length: 33 }, (_, i) => ({ id: `r${i}`, name: "", remote: `git@github.com:acme/r${i}.git` }))],
+  ])("drops the whole assignment when the list is %s, rather than running one repository of it", (_label, repositories) => {
+    expect(parseAssignments([entry({ repositories })])).toEqual([]);
+  });
+
+  it("drops only that assignment, not the ones beside it", () => {
+    const parsed = parseAssignments([entry({ repositories: "x" }), { project: "p2", remote: WEB }]);
+
+    expect(parsed.map((a) => a.project)).toEqual(["p2"]);
+  });
+});
