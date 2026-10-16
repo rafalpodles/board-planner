@@ -99,6 +99,11 @@ test("creates the board that Review showed, with its workflow, fields and people
   await page.getByRole("button", { name: "Create Project" }).click();
   expect((await created).status()).toBe(201);
   await expect(page).toHaveURL(new RegExp(`/projects/${KEY}$`));
+  // The repository it was created with is the first of its list (BP-986)
+  const createdProject = await (await page.request.get(`/api/projects/${KEY}`)).json();
+  expect(createdProject.repositories).toEqual([
+    { id: expect.stringMatching(/^[a-f\d]{24}$/), url: "https://github.com/acme/zeppelin", name: "" },
+  ]);
 
   // What was chosen on Review is what settings shows: the preset's columns, none of the default
   // ones it replaced, and the person who was added
