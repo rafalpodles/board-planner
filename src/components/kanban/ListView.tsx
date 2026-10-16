@@ -532,6 +532,10 @@ export function ListView({
                 task.assignee && typeof task.assignee === "object"
                   ? task.assignee.fullName
                   : "—";
+              const assigneeUsername =
+                task.assignee && typeof task.assignee === "object"
+                  ? task.assignee.username
+                  : undefined;
 
               return (
                 <SortableRow key={task._id} id={task._id} disabled={!canReorder}>
@@ -716,9 +720,7 @@ export function ListView({
                       ) : (
                         <AssigneeAvatar
                           fullName={assigneeName === "—" ? "" : assigneeName}
-                          username={
-                            typeof task.assignee === "object" ? task.assignee?.username : undefined
-                          }
+                          username={assigneeUsername}
                         />
                       )}
                     </td>
