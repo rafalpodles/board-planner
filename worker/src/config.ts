@@ -374,7 +374,10 @@ export function parseAssignments(value: unknown): Assignment[] {
     // single `remote` it would run the project in one of its repositories and hand the agent a change
     // it cannot make whole. Not claiming it is the safe way to disagree with the server.
     const repositories = parseAssignedRepositories(assignment.repositories);
-    return repositories ? [{ ...normalised, repositories }] : [];
+    // `remote` is the first of them, as the server says: when the two disagree one of them is not
+    // what the server meant, and the project would bind its primary from one remote and fetch from
+    // the other.
+    return repositories && repositories[0].remote === assignment.remote ? [{ ...normalised, repositories }] : [];
   });
 }
 
@@ -387,8 +390,9 @@ function parseAssignedRepositories(value: unknown): AssignedRepository[] | null 
     if (typeof entry !== "object" || entry === null) return null;
     const { id, name, remote } = entry as Record<string, unknown>;
     if (!isNonEmptyString(id) || !isNonEmptyString(remote)) return null;
-    if (out.some((seen) => seen.id === id || seen.remote === remote)) return null;
-    out.push({ id, name: typeof name === "string" ? name : "", remote });
+    // Trimmed before they are compared, so " a" and "a" are one entry rather than two
+    if (out.some((seen) => seen.id === id.trim() || seen.remote === remote.trim())) return null;
+    out.push({ id: id.trim(), name: typeof name === "string" ? name : "", remote: remote.trim() });
   }
   return out;
 }

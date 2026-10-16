@@ -547,7 +547,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       const failing = checked.flatMap(({ repository, checks }) =>
         checks
           .filter((check) => !check.ok)
-          .map((check) => (several ? `${repository.name}: ${check.detail}` : check.detail))
+          .map((check) => (several ? `${repository.remote}: ${check.detail}` : check.detail))
       );
       if (failing.length) unusable.set(projectId, failing.join("; "));
       return checked.flatMap(({ checks }) => checks);
@@ -587,7 +587,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         if (reaped > 0) {
           deps.log(
             `reaped ${reaped} worktree(s) left by an earlier run for project ${projectId}${
-              project.repositories.length > 1 ? ` (${repository.name})` : ""
+              project.repositories.length > 1 ? ` (${repository.remote})` : ""
             }`
           );
         }

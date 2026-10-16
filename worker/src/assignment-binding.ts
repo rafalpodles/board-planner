@@ -46,7 +46,10 @@ export async function bindAssignment(
   const bound: BoundRepository[] = [];
 
   for (const repository of wanted) {
-    const label = several ? ` (repository ${repository.name || repository.remote})` : "";
+    // The remote, never the name: a name is written by whoever edits the project's repositories and
+    // this reason joins a line the server splits on `; <id>: `, so a name could end one project's
+    // error and start another's. A remote is what this machine itself reported and matched on.
+    const label = several ? ` (repository ${repository.remote})` : "";
     const local = inventory.find((r) => r.remote === repository.remote);
     if (!local) {
       return { ok: false, reason: `no checkout of ${repository.remote} on this machine${label}` };
@@ -58,7 +61,7 @@ export async function bindAssignment(
     if (twin) {
       return {
         ok: false,
-        reason: `${repository.name || repository.remote} and ${twin.name || twin.remote} are the same checkout on this machine, and a checkout serves one repository${label}`,
+        reason: `${repository.remote} and ${twin.remote} are the same checkout on this machine, and a checkout serves one repository`,
       };
     }
     bound.push({

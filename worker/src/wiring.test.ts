@@ -1729,7 +1729,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
       expect(run.localConfig?.().projects).toEqual([]);
       expect(run.bindingErrors.join(" ")).toMatch(
-        /p1: no checkout of git@github\.com:someone\/else\.git on this machine \(repository gone\)/
+        /p1: no checkout of git@github\.com:someone\/else\.git on this machine \(repository git@github\.com:someone\/else\.git\)/
       );
     });
 
@@ -1758,8 +1758,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       });
 
       const [project] = run.localConfig?.().projects ?? [];
-      expect(project.blocked).toContain("other:");
-      expect(project.blocked).not.toContain("demo:");
+      expect(project.blocked).toContain(`${OTHER_REMOTE}:`);
+      expect(project.blocked).not.toContain(`${REMOTE}:`);
     });
 
     it("reaps what an earlier run left in every checkout, not only the primary's", async () => {

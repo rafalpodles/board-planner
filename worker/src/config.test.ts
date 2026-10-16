@@ -502,6 +502,17 @@ describe("parseAssignments and a project that lists several repositories", () =>
     expect(parseAssignments([entry({ repositories })])).toEqual([]);
   });
 
+  it("drops an assignment whose remote is not the first of its repositories", () => {
+    expect(parseAssignments([entry({ remote: WEB, repositories: listed })])).toEqual([]);
+  });
+
+  it("reads an id or a remote with spaces round it as the same entry", () => {
+    expect(parseAssignments([entry({ repositories: [listed[0], { ...listed[1], id: " r-api " }] })])).toEqual([]);
+    expect(parseAssignments([entry({ repositories: [{ id: " r-api ", name: "", remote: ` ${API} ` }] })])[0].repositories).toEqual([
+      { id: "r-api", name: "", remote: API },
+    ]);
+  });
+
   it("drops only that assignment, not the ones beside it", () => {
     const parsed = parseAssignments([entry({ repositories: "x" }), { project: "p2", remote: WEB }]);
 

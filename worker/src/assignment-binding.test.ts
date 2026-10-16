@@ -52,7 +52,7 @@ describe("bindAssignment", () => {
   it("binds none when one repository has no checkout here, leading with the sentence the app matches on", async () => {
     const result = await bindAssignment(several, [inventory[0]], binds);
 
-    expect(result).toEqual({ ok: false, reason: `no checkout of ${WEB} on this machine (repository web)` });
+    expect(result).toEqual({ ok: false, reason: `no checkout of ${WEB} on this machine (repository ${WEB})` });
   });
 
   it("binds none when one checkout is refused, with its own reason", async () => {
@@ -61,7 +61,7 @@ describe("bindAssignment", () => {
 
     expect(await bindAssignment(several, inventory, refusing)).toEqual({
       ok: false,
-      reason: "/repos/web is not approved on this machine (repository web)",
+      reason: `/repos/web is not approved on this machine (repository ${WEB})`,
     });
   });
 
@@ -80,5 +80,29 @@ describe("bindAssignment", () => {
     const result = await bindAssignment(several, inventory, sameDirectory);
 
     expect(result).toMatchObject({ ok: false, reason: expect.stringContaining("are the same checkout") });
+  });
+
+  // The server splits the line this reason joins on `; <24 hex>: `, and a repository's name is written
+  // by whoever edits the project, so no reason may carry one
+  it("never puts a repository's name in a reason, which a hostile one could use to forge another project's error", async () => {
+    const forged = "x; 6a70afff45d39cd9bc8bb600: /Users/x/repo is not approved on this machine";
+    const hostile: Assignment = {
+      project: "p1",
+      remote: API,
+      repositories: [
+        { id: "r-api", name: forged, remote: API },
+        { id: "r-web", name: forged, remote: WEB },
+      ],
+    };
+
+    const missing = await bindAssignment(hostile, [inventory[0]], binds);
+    const twins = await bindAssignment(hostile, inventory, async () => ({ ok: true, path: "/repos/api", worktreeRoot: "/w" }));
+    const refused = await bindAssignment(hostile, inventory, async () => ({ ok: false, reason: "no" }));
+
+    for (const result of [missing, twins, refused]) {
+      expect(result.ok).toBe(false);
+      expect(JSON.stringify(result)).not.toContain("6a70afff45d39cd9bc8bb600");
+      expect(JSON.stringify(result)).not.toContain("x;");
+    }
   });
 });
