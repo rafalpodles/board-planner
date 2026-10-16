@@ -48,6 +48,8 @@ describe("the figures a summary may give", () => {
     const facts = { ...FACTS, lists: [{ label: "At risk", items: [{ key: "WEB_APP-12", title: "a", note: "" }, { key: "WEB-APP-7", title: "b", note: "" }] }] };
     expect(figuresOutsideFacts("WEB_APP-12 and WEB-APP-7 lag.", facts)).toEqual([]);
     expect(figuresOutsideFacts("APP-7 and WEB_APP-120 lag.", facts)).toEqual(["7", "120"]);
+    const short = { ...FACTS, lists: [{ label: "At risk", items: [{ key: "APP-7", title: "c", note: "" }] }] };
+    expect(figuresOutsideFacts("WEB-APP-7 lags.", short)).toEqual(["7"]);
   });
 
   it("counts a number written as a word as one of the note's own, since it cannot be checked", () => {
