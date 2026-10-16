@@ -135,7 +135,7 @@ export function ReleaseNotesModal({
               {notes.repositoryUnread && (
                 <p className="text-sm text-warning">The repository could not be read ({notes.repositoryUnread}), so pull requests with no task are missing.</p>
               )}
-              <div className="max-h-[50vh] overflow-y-auto rounded-lg border border-border p-3">
+              <div className="prose prose-sm max-w-none max-h-[50vh] overflow-y-auto rounded-lg border border-border p-3 text-sm leading-relaxed">
                 <MarkdownContent>{notes.markdown}</MarkdownContent>
               </div>
             </div>
