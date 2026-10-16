@@ -253,16 +253,16 @@ test.describe("choosing the repository on the task page", () => {
 
     await row(page).click();
     const saved = page.waitForResponse((res) => res.request().method() === "PUT" && /\/tasks\/[^/]+$/.test(res.url()));
-    await page.getByRole("option", { name: "site" }).click();
+    await page.getByRole("option", { name: "app" }).click();
     const response = await saved;
 
     expect(response.status(), await response.text()).toBe(200);
-    expect((await response.json()).repository).toBe(String(WEB));
+    expect((await response.json()).repository).toBe(String(API));
     await expect(notice(page)).toHaveCount(0);
     await expect(waiting(page)).toBeVisible();
 
     await page.reload();
-    await expect(row(page)).toContainText("site");
+    await expect(row(page)).toContainText("app");
     await expect(notice(page)).toHaveCount(0);
   });
 
