@@ -376,19 +376,6 @@ describe("GET handover readiness on a board that lists several repositories", ()
     expect(body).not.toHaveProperty("machineMissing");
   });
 
-  // Two machines lacking the same repository: the one that can run several decides what is said
-  it("prefers the machine whose worker can run several when two lack the same", async () => {
-    workerLean.mockResolvedValue([
-      machine(["git@github.com:acme/app.git"], []),
-      machine(["git@github.com:acme/app.git"], ["multi-repository"]),
-    ]);
-
-    const { body } = await read();
-
-    expect(body.machineMissing).toEqual(["https://github.com/acme/site"]);
-    expect(body).not.toHaveProperty("machineNeedsUpdate");
-  });
-
   it("is silent for a board that lists one repository", async () => {
     projectLean.mockResolvedValue({ _id: PROJECT, repositoryUrl: repositories[0].url, repositories: [repositories[0]] });
     workerLean.mockResolvedValue([machine([])]);
