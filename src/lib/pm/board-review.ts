@@ -47,6 +47,8 @@ export interface BoardDigest {
   byStatus: { status: string; label: string; count: number }[];
   gaps: BoardGap[];
   stale: BoardStale[];
+  // Before the list is cut to its first few
+  staleTotal: number;
   duplicates: BoardDuplicate[];
   truncated: boolean;
 }
@@ -163,6 +165,7 @@ export async function buildBoardDigest(db: ScopedDb, projectId: string): Promise
     byStatus,
     gaps: gaps.slice(0, MAX_ITEMS_PER_FINDING),
     stale: stale.slice(0, MAX_ITEMS_PER_FINDING),
+    staleTotal: stale.length,
     duplicates: duplicates.slice(0, MAX_ITEMS_PER_FINDING),
     truncated: openTotal > tasks.length,
   };

@@ -69,6 +69,14 @@ test("on Free the summary is an upsell and the route answers 402", async ({ page
   await expect(dialog.getByTestId("pro-upsell")).toContainText("AI summaries");
   const refused = await page.request.post(SUMMARIES, { headers: SAME_ORIGIN, data: { kind: "standup" } });
   expect(refused.status()).toBe(402);
+  const postRefused = await page.request.post(`${SUMMARIES}/post`, { headers: SAME_ORIGIN, data: { sealed: "anything" } });
+  expect(postRefused.status()).toBe(402);
+
+  // On a phone the header has no room for a button that only offers an upgrade
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Filters", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Summary", exact: true })).toBeHidden();
 });
 
 test("a standup is the board's figures with the model's note, and posts to the team channel as written", async ({ page, request }) => {
@@ -94,6 +102,7 @@ test("a standup is the board's figures with the model's note, and posts to the t
   await dialog.getByRole("button", { name: "Post to team channel" }).click();
   expect((await posted).status()).toBe(200);
   await expect(dialog.getByRole("status")).toContainText("Posted to the team channel.");
+  await expect(dialog.getByRole("button", { name: "Posted" })).toBeDisabled();
   await expect(async () => {
     const all: { url: string; body: string }[] = await (await fetch(`${WEBHOOK_RECEIVER_URL}/deliveries`)).json();
     const delivery = all.find((d) => d.url === HOOK);
@@ -103,6 +112,15 @@ test("a standup is the board's figures with the model's note, and posts to the t
   // Only what the board wrote can be posted
   const forged = await page.request.post(`${SUMMARIES}/post`, { headers: SAME_ORIGIN, data: { sealed: "## Anything I like" } });
   expect(forged.status()).toBe(400);
+
+  // A summary of something else is not the one just written, so nothing of it stays to be posted
+  await dialog.getByLabel("Summary of").selectOption("project");
+  await expect(dialog.getByTestId("summary")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: /Post|Posted/ })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Summary", exact: true })).toBeVisible();
 });
 
 test("a note that counts for itself is left out, and the board's figures stand alone", async ({ page, request }) => {

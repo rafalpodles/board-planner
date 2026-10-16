@@ -37,9 +37,16 @@ describe("the figures a summary may give", () => {
     );
   });
 
-  it("finds every number in a note that the server did not count, task keys aside", () => {
-    expect(figuresOutsideFacts("Five of 8 are done; TP-12 and TP-3 lag.", FACTS)).toEqual([]);
-    expect(figuresOutsideFacts("Only 62.5% is done after 3 days.", FACTS)).toEqual([62.5, 3]);
+  it("finds every number in a note that the server did not count, the board's own task keys aside", () => {
+    expect(figuresOutsideFacts("8 in, 5 done; TP-12 lags.", FACTS)).toEqual([]);
+    expect(figuresOutsideFacts("Only 62.5% is done after 3 days, and 2,000 lines.", FACTS)).toEqual(["62.5", "3", "2,000"]);
+    // A key the board did not give is not a key to it
+    expect(figuresOutsideFacts("BP-999 is late.", FACTS)).toEqual(["999"]);
+  });
+
+  it("counts a number written as a word as one of the note's own, since it cannot be checked", () => {
+    expect(figuresOutsideFacts("Three tasks are blocked and half the sprint is left.", FACTS)).toEqual(["Three", "half"]);
+    expect(figuresOutsideFacts("TP-12 needs a decision.", FACTS)).toEqual([]);
   });
 
   it("tells the model to write no figures, so the server's are the only ones", () => {
@@ -51,13 +58,13 @@ describe("writeSummary", () => {
   it("puts the note above the server's figures, through the gateway as a digest", async () => {
     m.gatewayWrite.mockResolvedValue({ ok: true, text: "TP-12 is the one to watch." });
     const result = await writeSummary({ organisation: "org" } as never, { projectId: "p1", userId: "u1" }, FACTS);
-    expect(result).toEqual({ ok: true, markdown: `TP-12 is the one to watch.\n\n${renderFacts(FACTS)}`, noteDropped: false });
+    expect(result).toEqual({ ok: true, markdown: `TP-12 is the one to watch.\n\n${renderFacts(FACTS)}`, note: "TP-12 is the one to watch.", noteDropped: false });
     expect(m.gatewayWrite).toHaveBeenCalledWith(expect.anything(), { projectId: "p1", userId: "u1", source: "digest" }, { model: "openai/gpt-6-luna", instructions: summaryInstructions("sprint"), data: FACTS });
   });
 
   it("drops a note that counts for itself, and keeps the figures", async () => {
     m.gatewayWrite.mockResolvedValue({ ok: true, text: "Nearly 70% done with 2 days to go." });
-    expect(await writeSummary({} as never, { projectId: "p1", userId: "u1" }, FACTS)).toEqual({ ok: true, markdown: renderFacts(FACTS), noteDropped: true });
+    expect(await writeSummary({} as never, { projectId: "p1", userId: "u1" }, FACTS)).toEqual({ ok: true, markdown: renderFacts(FACTS), note: null, noteDropped: true });
   });
 
   it("passes on what the gateway refused", async () => {
@@ -65,6 +72,8 @@ describe("writeSummary", () => {
     expect(await writeSummary({} as never, { projectId: "p1", userId: "u1" }, FACTS)).toEqual({ ok: false, status: 429, body: { reason: "ai_budget" } });
   });
 });
+
+const queries: Record<string, unknown>[] = [];
 
 function fakeDb(data: { tasks?: Record<string, unknown>[]; logs?: Record<string, unknown>[]; users?: Record<string, unknown>[]; sprint?: Record<string, unknown> | null }) {
   const lean = <T>(v: T) => ({ lean: async () => v, sort: () => ({ lean: async () => v }) });
@@ -74,10 +83,13 @@ function fakeDb(data: { tasks?: Record<string, unknown>[]; logs?: Record<string,
     ActivityLog: { find: () => lean(data.logs ?? []) },
     User: { find: () => lean(data.users ?? []) },
     Task: {
+      countDocuments: async (filter: Record<string, unknown>) => (data.tasks ?? []).filter((t) => t.status === filter.status).length,
       find: (filter: Record<string, unknown>) => {
         const all = data.tasks ?? [];
-        if (filter.$or) return lean(all.filter((t) => t.status === "stuck" || (t.blockedBy as unknown[] | undefined)?.length));
-        if (filter._id) return lean(all.filter((t) => ((filter._id as { $in: unknown[] }).$in as unknown[]).some((id) => String(id) === String(t._id))));
+        queries.push(filter);
+        const notIn = (filter.status as { $nin?: string[] } | undefined)?.$nin ?? [];
+        if (filter.$or) return lean(all.filter((t) => !notIn.includes(t.status as string) && (t.status === "stuck" || (t.blockedBy as unknown[] | undefined)?.length)));
+        if (filter._id) return lean(all.filter((t) => !notIn.includes(t.status as string) && ((filter._id as { $in: unknown[] }).$in as unknown[]).some((id) => String(id) === String(t._id))));
         return lean(all);
       },
     },
@@ -85,13 +97,17 @@ function fakeDb(data: { tasks?: Record<string, unknown>[]; logs?: Record<string,
 }
 
 describe("summaryFacts", () => {
-  it("counts a standup's moves by person, and what is blocked", async () => {
-    const [a, b] = [new Types.ObjectId(), new Types.ObjectId()];
+  it("counts a standup's moves by person, and what is blocked by a column or by a blocker not yet done", async () => {
+    queries.length = 0;
+    const [a, b, c, d, e] = [new Types.ObjectId(), new Types.ObjectId(), new Types.ObjectId(), new Types.ObjectId(), new Types.ObjectId()];
     const ann = new Types.ObjectId();
     const db = fakeDb({
       tasks: [
         { _id: a, taskNumber: 1, title: "Export", status: "done" },
         { _id: b, taskNumber: 2, title: "Login", status: "stuck", blockedBy: [] },
+        { _id: c, taskNumber: 3, title: "Waits on an open task", status: "todo", blockedBy: [d] },
+        { _id: d, taskNumber: 4, title: "Open blocker", status: "doing" },
+        { _id: e, taskNumber: 5, title: "Waits on a finished task", status: "todo", blockedBy: [a] },
       ],
       logs: [
         { task: a, user: ann, oldValue: "doing", newValue: "done" },
@@ -104,8 +120,12 @@ describe("summaryFacts", () => {
     expect(facts.figures).toEqual([
       { label: "Moves between columns in the last day", value: 3 },
       { label: "People who moved work", value: 1 },
-      { label: "Blocked tasks", value: 1 },
+      { label: "Blocked tasks", value: 2 },
     ]);
+    expect(facts.lists.at(-1)!.items.map((i) => i.key)).toEqual(["TP-2", "TP-3"]);
+    // A move with nobody behind it is the board's, not a person's
+    expect(facts.lists.map((l) => l.label)).toContain("Moved by The board");
+    expect(queries.every((q) => q.project === "p1" && q.archivedAt === null)).toBe(true);
     expect(facts.lists[0]).toEqual({
       label: "Moved by Ann Lee",
       items: [
@@ -134,19 +154,21 @@ describe("summaryFacts", () => {
   });
 
   it("counts the project's week from the board's own digest and history", async () => {
-    m.digest.mockResolvedValue({ projectKey: "TP", openTotal: 6, byStatus: [{ status: "todo", label: "To Do", count: 6 }], stale: [{ key: "TP-9", title: "Old", status: "To Do", days: 20 }], gaps: [], duplicates: [], truncated: false });
+    m.digest.mockResolvedValue({ projectKey: "TP", openTotal: 6, byStatus: [{ status: "todo", label: "To Do", count: 1 }], stale: [{ key: "TP-9", title: "Old", status: "To Do", days: 20 }], staleTotal: 14, gaps: [], duplicates: [], truncated: true });
     m.histories.mockResolvedValue([
       { taskNumber: 1, title: "Shipped", role: "done", archived: false, createdAt: new Date(NOW.getTime() - 3 * DAY), history: { kind: "recorded", finishedAt: new Date(NOW.getTime() - DAY) } },
       { taskNumber: 2, title: "Shipped long ago", role: "done", archived: false, createdAt: new Date(NOW.getTime() - 30 * DAY), history: { kind: "recorded", finishedAt: new Date(NOW.getTime() - 20 * DAY) } },
       { taskNumber: 3, title: "Archived", role: "done", archived: true, createdAt: new Date(NOW.getTime() - DAY), history: { kind: "recorded", finishedAt: new Date(NOW.getTime() - DAY) } },
     ]);
-    const facts = (await summaryFacts(fakeDb({}), "p1", "project", null, NOW))!;
+    const facts = (await summaryFacts(fakeDb({ tasks: Array.from({ length: 6 }, (_, i) => ({ status: i < 4 ? "todo" : "doing" })) }), "p1", "project", null, NOW))!;
     expect(facts.figures).toEqual([
       { label: "Tasks created", value: 1 },
       { label: "Tasks finished", value: 1 },
       { label: "Open tasks", value: 6 },
-      { label: "Open in To Do", value: 6 },
-      { label: "Stuck in a column", value: 1 },
+      // Counted per column, not from the digest's capped scan, and the stuck count before its list is cut
+      { label: "Open in To Do", value: 4 },
+      { label: "Open in Doing", value: 2 },
+      { label: "Stuck in a column", value: 14 },
     ]);
   });
 });

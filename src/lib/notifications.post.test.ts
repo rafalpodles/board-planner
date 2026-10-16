@@ -20,7 +20,7 @@ beforeEach(() => m.safeFetch.mockReset());
 describe("postToTeamChannels", () => {
   it("posts to each enabled channel in its own shape, escaping Slack's markup and refusing Discord's mentions", async () => {
     m.safeFetch.mockResolvedValue(new Response("ok"));
-    const result = await postToTeamChannels(db, "p1", "## Standup <!channel> @everyone");
+    const result = await postToTeamChannels(db, "p1", { slack: "## Standup <!channel> @everyone", discord: "## Standup <!channel> @everyone" });
     expect(result).toEqual({ channels: 2, delivered: 2 });
     const bodies = Object.fromEntries(m.safeFetch.mock.calls.map(([url, init]) => [url, JSON.parse(init.body)]));
     expect(bodies["https://hooks.slack.com/a"]).toEqual({ text: "## Standup &lt;!channel&gt; @everyone" });
@@ -30,7 +30,7 @@ describe("postToTeamChannels", () => {
 
   it("cuts a long summary to what Discord takes, and counts a channel that refused", async () => {
     m.safeFetch.mockImplementation(async (url: unknown) => new Response("x", { status: String(url).includes("slack") ? 500 : 200 }));
-    const result = await postToTeamChannels(db, "p1", "x".repeat(2500));
+    const result = await postToTeamChannels(db, "p1", { slack: "x", discord: "x".repeat(2500) });
     expect(result).toEqual({ channels: 2, delivered: 1 });
     const discord = m.safeFetch.mock.calls.find(([url]) => String(url).includes("discord"))!;
     expect(JSON.parse(discord[1].body).content).toHaveLength(2000);

@@ -43,7 +43,16 @@ export function SummaryModal({
   const [error, setError] = useState("");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [notice, setNotice] = useState("");
+  const [posted, setPosted] = useState(false);
   const asked = useRef(0);
+
+  function forget() {
+    asked.current++;
+    setSummary(null);
+    setNotice("");
+    setError("");
+    setPosted(false);
+  }
 
   const kinds = (Object.keys(KIND_LABELS) as Kind[]).filter((k) => k !== "sprint" || sprints.length > 0);
 
@@ -53,6 +62,7 @@ export function SummaryModal({
     setError("");
     setNotice("");
     setSummary(null);
+    setPosted(false);
     try {
       const answer: Summary = await api.post(`/api/projects/${projectId}/summaries`, kind === "sprint" ? { kind, sprintId } : { kind });
       if (mine === asked.current) setSummary(answer);
@@ -69,6 +79,7 @@ export function SummaryModal({
     setError("");
     try {
       const answer: { channels: number; delivered: number } = await api.post(`/api/projects/${projectId}/summaries/post`, { sealed: summary.sealed });
+      setPosted(answer.delivered > 0);
       setNotice(
         answer.delivered === answer.channels
           ? `Posted to ${answer.channels === 1 ? "the team channel" : `${answer.channels} team channels`}.`
@@ -102,9 +113,15 @@ export function SummaryModal({
       ) : (
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2">
-            <Select label="Summary of" value={kind} disabled={busy !== null} onChange={(e) => setKind(e.target.value as Kind)} options={kinds.map((k) => ({ value: k, label: KIND_LABELS[k] }))} />
+            <Select label="Summary of" value={kind} disabled={busy !== null} onChange={(e) => {
+                setKind(e.target.value as Kind);
+                forget();
+              }} options={kinds.map((k) => ({ value: k, label: KIND_LABELS[k] }))} />
             {kind === "sprint" && (
-              <Select label="Sprint" value={sprintId} disabled={busy !== null} onChange={(e) => setSprintId(e.target.value)} options={sprints.map((s) => ({ value: s._id, label: s.name }))} />
+              <Select label="Sprint" value={sprintId} disabled={busy !== null} onChange={(e) => {
+                  setSprintId(e.target.value);
+                  forget();
+                }} options={sprints.map((s) => ({ value: s._id, label: s.name }))} />
             )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -117,8 +134,8 @@ export function SummaryModal({
               </Button>
             )}
             {summary?.sealed && (
-              <Button size="sm" variant="secondary" onClick={post} disabled={busy !== null}>
-                {busy === "posting" ? "Posting…" : "Post to team channel"}
+              <Button size="sm" variant="secondary" onClick={post} disabled={busy !== null || posted}>
+                {busy === "posting" ? "Posting…" : posted ? "Posted" : "Post to team channel"}
               </Button>
             )}
           </div>

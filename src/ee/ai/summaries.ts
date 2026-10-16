@@ -42,14 +42,22 @@ async function standupFacts(db: ScopedDb, projectId: string, now: Date): Promise
   const moves = await db.ActivityLog.find({ ...statusChangeFilter(projectId), createdAt: { $gte: new Date(now.getTime() - DAY_MS) } }, "task user oldValue newValue")
     .sort({ createdAt: 1 })
     .lean<{ task: Types.ObjectId; user: Types.ObjectId | null; oldValue: string; newValue: string }[]>();
-  const [tasks, people, blocked] = await Promise.all([
+  const [tasks, people, candidates] = await Promise.all([
     db.Task.find({ project: projectId, _id: { $in: moves.map((m) => m.task) }, ...NOT_ARCHIVED }, "taskNumber title").lean<{ _id: Types.ObjectId; taskNumber: number; title: string }[]>(),
     db.User.find({ _id: { $in: moves.map((m) => m.user).filter(Boolean) } }, "username fullName").lean<{ _id: Types.ObjectId; username: string; fullName?: string }[]>(),
     db.Task.find(
       { project: projectId, ...NOT_ARCHIVED, status: { $nin: done }, $or: [{ status: { $in: blockedColumns } }, { "blockedBy.0": { $exists: true } }] },
-      "taskNumber title"
-    ).lean<{ taskNumber: number; title: string }[]>(),
+      "taskNumber title status blockedBy"
+    ).lean<{ taskNumber: number; title: string; status: string; blockedBy?: Types.ObjectId[] }[]>(),
   ]);
+  // Blocked means in a column of that kind, or waiting on a blocker that is not done yet
+  const blockerIds = candidates.flatMap((t) => t.blockedBy ?? []);
+  const openBlockers = new Set(
+    blockerIds.length
+      ? (await db.Task.find({ project: projectId, _id: { $in: blockerIds }, status: { $nin: done }, ...NOT_ARCHIVED }, "_id").lean<{ _id: Types.ObjectId }[]>()).map((b) => String(b._id))
+      : []
+  );
+  const blocked = candidates.filter((t) => blockedColumns.includes(t.status) || (t.blockedBy ?? []).some((b) => openBlockers.has(String(b))));
   const taskOf = new Map(tasks.map((t) => [String(t._id), t]));
   const nameOf = new Map(people.map((p) => [String(p._id), p.fullName || p.username]));
 
@@ -127,8 +135,11 @@ async function sprintFacts(db: ScopedDb, projectId: string, sprintId: string, no
 
 /** The week: what came in, what finished, what is open, what is stuck */
 async function projectFacts(db: ScopedDb, projectId: string, now: Date): Promise<Facts | null> {
-  const digest = await buildBoardDigest(db, projectId);
-  if (!digest) return null;
+  const [digest, project] = await Promise.all([buildBoardDigest(db, projectId), db.Project.findById(projectId, "columns").lean()]);
+  if (!digest || !project) return null;
+  // Counted per column, not from the digest's scan, which covers only the newest few hundred
+  const open = getProjectColumns(project).filter((c) => c.role !== "done");
+  const perColumn = await Promise.all(open.map(async (c) => ({ label: c.label, count: await db.Task.countDocuments({ project: projectId, status: c.id, ...NOT_ARCHIVED }) })));
   const weekAgo = new Date(now.getTime() - 7 * DAY_MS);
   const histories = (await projectStatusHistories(db, projectId)).filter((t) => !t.archived);
   const finished = histories.filter((t) => t.role === "done" && t.history.kind === "recorded" && t.history.finishedAt && t.history.finishedAt >= weekAgo);
@@ -141,8 +152,8 @@ async function projectFacts(db: ScopedDb, projectId: string, now: Date): Promise
       { label: "Tasks created", value: created.length },
       { label: "Tasks finished", value: finished.length },
       { label: "Open tasks", value: digest.openTotal },
-      ...digest.byStatus.map((s) => ({ label: `Open in ${s.label}`, value: s.count })),
-      { label: "Stuck in a column", value: digest.stale.length },
+      ...perColumn.filter((c) => c.count > 0).map((c) => ({ label: `Open in ${c.label}`, value: c.count })),
+      { label: "Stuck in a column", value: digest.staleTotal },
     ],
     lists: [
       { label: "Finished", items: finished.slice(0, LISTED).map((t) => ({ key: taskKeyOf(digest.projectKey, t.taskNumber), title: t.title })) },
@@ -157,14 +168,21 @@ export async function summaryFacts(db: ScopedDb, projectId: string, kind: Summar
   return projectFacts(db, projectId, now);
 }
 
-/** The figures as the server counted them, in Markdown; the only place a number in a summary comes from */
-export function renderFacts(facts: Facts): string {
-  const lines = [`## ${facts.title}`, "", ...facts.figures.map((f) => `- ${f.label}: **${f.value}**`)];
+/**
+ * The figures as the server counted them, in Markdown; the only place a number in a summary comes from.
+ * `text` escapes what the board's people wrote (titles, names), for a channel that renders markup.
+ */
+export function renderFacts(facts: Facts, text: (s: string) => string = (s) => s): string {
+  const lines = [`## ${text(facts.title)}`, "", ...facts.figures.map((f) => `- ${text(f.label)}: **${f.value}**`)];
   for (const list of facts.lists) {
     if (list.items.length === 0) continue;
-    lines.push("", `**${list.label}**`, ...list.items.map((i) => `- ${i.key} ${i.title}${i.note ? ` (${i.note})` : ""}`));
+    lines.push("", `**${text(list.label)}**`, ...list.items.map((i) => `- ${i.key} ${text(i.title)}${i.note ? ` (${text(i.note)})` : ""}`));
   }
   return lines.join("\n");
+}
+
+export function summaryMarkdown(note: string | null, facts: Facts, text: (s: string) => string = (s) => s): string {
+  return note ? `${text(note)}\n\n${renderFacts(facts, text)}` : renderFacts(facts, text);
 }
 
 export function summaryInstructions(kind: SummaryKind): string {
@@ -177,20 +195,29 @@ export function summaryInstructions(kind: SummaryKind): string {
   ].join(" ");
 }
 
-// A number in the note outside a task key; every one must be a figure the server counted
-export function figuresOutsideFacts(note: string, facts: Facts): number[] {
+const NUMBER_WORDS =
+  /\b(zero|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|dozens?|half|halves|quarter|percent|twice|double|triple)\b/gi;
+
+/**
+ * What in a note counts for itself: a number the server did not count, outside the task keys it was
+ * given, and any number written as a word, which cannot be checked against the figures at all.
+ */
+export function figuresOutsideFacts(note: string, facts: Facts): string[] {
   const allowed = new Set(facts.figures.map((f) => f.value));
-  const withoutKeys = note.replace(/\b[A-Z][A-Z0-9]*-\d+\b/g, "");
-  return [...withoutKeys.matchAll(/\d+(?:[.,]\d+)?/g)].map((m) => Number(m[0].replace(",", "."))).filter((n) => !allowed.has(n));
+  const keys = new Set(facts.lists.flatMap((l) => l.items.map((i) => i.key)));
+  const withoutKeys = note.replace(/\b[A-Z][A-Z0-9]*-\d+\b/g, (key) => (keys.has(key) ? "" : key));
+  const digits = [...withoutKeys.matchAll(/\d+(?:[.,]\d+)*/g)].map((m) => m[0]).filter((n) => !/^\d+$/.test(n) || !allowed.has(Number(n)));
+  const words = [...note.matchAll(NUMBER_WORDS)].map((m) => m[0]);
+  return [...digits, ...words];
 }
 
-export type SummaryResult = { ok: true; markdown: string; noteDropped: boolean } | Extract<WriteResult, { ok: false }>;
+export type SummaryResult = { ok: true; markdown: string; note: string | null; noteDropped: boolean } | Extract<WriteResult, { ok: false }>;
 
 export async function writeSummary(db: ScopedDb, context: { projectId: string; userId: string }, facts: Facts): Promise<SummaryResult> {
-  const figures = renderFacts(facts);
   const written = await gatewayWrite(db, { ...context, source: "digest" }, { model: await resolveAiModel(db), instructions: summaryInstructions(facts.kind), data: facts });
   if (!written.ok) return written;
   // A note that counts for itself is not shown: the figures beside it are the server's, and only those
-  if (figuresOutsideFacts(written.text, facts).length > 0 || !written.text.trim()) return { ok: true, markdown: figures, noteDropped: true };
-  return { ok: true, markdown: `${written.text.trim()}\n\n${figures}`, noteDropped: false };
+  const note = written.text.trim();
+  if (!note || figuresOutsideFacts(note, facts).length > 0) return { ok: true, markdown: renderFacts(facts), note: null, noteDropped: true };
+  return { ok: true, markdown: summaryMarkdown(note, facts), note, noteDropped: false };
 }

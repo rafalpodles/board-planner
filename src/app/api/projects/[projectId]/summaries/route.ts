@@ -5,15 +5,26 @@ import { requireEntitlement, withProjectAccess } from "@/lib/middleware";
 import { readJsonBody } from "@/lib/request-body";
 import { countAttempt, sourceKey } from "@/lib/rate-limit";
 import { encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
-import { SUMMARY_KINDS, summaryFacts, writeSummary, type SummaryKind } from "@/ee/ai/summaries";
+import { randomUUID } from "node:crypto";
+import { SUMMARY_KINDS, summaryFacts, writeSummary, type Facts, type SummaryKind } from "@/ee/ai/summaries";
 
 /** Summaries one person may ask for in the rate limiter's 15-minute window */
 export const SUMMARIES_PER_USER_WINDOW = 20;
 const inFlight = new Set<string>();
 
-// What may be posted to the team's channel later: only what this route wrote, sealed so it cannot be swapped
-export function sealSummary(projectId: string, markdown: string, organisation: Parameters<typeof encryptSecret>[1]): string {
-  return encryptSecret(JSON.stringify({ projectId, markdown, at: Date.now() }), organisation);
+export interface SealedSummary {
+  purpose: "summary";
+  projectId: string;
+  note: string | null;
+  facts: Facts;
+  at: number;
+  nonce: string;
+}
+
+// What may be posted to the team's channel later: only what this route wrote, sealed so it cannot be swapped, and once
+export function sealSummary(projectId: string, note: string | null, facts: Facts, organisation: Parameters<typeof encryptSecret>[1]): string {
+  const sealed: SealedSummary = { purpose: "summary", projectId, note, facts, at: Date.now(), nonce: randomUUID() };
+  return encryptSecret(JSON.stringify(sealed), organisation);
 }
 
 export const POST = withProjectAccess(
@@ -48,7 +59,7 @@ export const POST = withProjectAccess(
         markdown: written.markdown,
         noteDropped: written.noteDropped,
         channels,
-        sealed: channels > 0 && isEncryptionConfigured() ? sealSummary(projectId, written.markdown, db.organisation) : null,
+        sealed: channels > 0 && isEncryptionConfigured() ? sealSummary(projectId, written.note, facts, db.organisation) : null,
       });
     } finally {
       inFlight.delete(holder);

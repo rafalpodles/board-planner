@@ -269,7 +269,11 @@ const DISCORD_MAX = 2000;
  * A summary a person chose to post, to every enabled team channel whatever its events. Awaited, unlike an
  * event's notification, so the person is told how many channels took it.
  */
-export async function postToTeamChannels(db: ScopedDb, projectId: string, markdown: string): Promise<{ channels: number; delivered: number }> {
+export async function postToTeamChannels(
+  db: ScopedDb,
+  projectId: string,
+  text: { slack: string; discord: string }
+): Promise<{ channels: number; delivered: number }> {
   const project = await db.Project.findById(projectId, "notificationChannels").lean();
   const active = (project?.notificationChannels ?? []).filter((ch) => ch.enabled);
   let delivered = 0;
@@ -284,8 +288,8 @@ export async function postToTeamChannels(db: ScopedDb, projectId: string, markdo
     if (!isAllowedWebhookUrl(webhookUrl, WEBHOOK_DESTINATION)) return;
     const body =
       channel.type === "discord"
-        ? { content: markdown.length > DISCORD_MAX ? `${markdown.slice(0, DISCORD_MAX - 1)}…` : markdown, allowed_mentions: DISCORD_NO_MENTIONS }
-        : { text: escapeSlack(markdown) };
+        ? { content: text.discord.length > DISCORD_MAX ? `${text.discord.slice(0, DISCORD_MAX - 1)}…` : text.discord, allowed_mentions: DISCORD_NO_MENTIONS }
+        : { text: escapeSlack(text.slack) };
     const res = await safeFetch(
       webhookUrl,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) },

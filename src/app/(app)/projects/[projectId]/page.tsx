@@ -10,6 +10,7 @@ import { useCanonicalUrl } from "@/hooks/use-canonical-url";
 import { projectPath } from "@/lib/urls";
 import { BoardHeader } from "@/components/kanban/BoardHeader";
 import { SummaryModal } from "@/ee/ai/SummaryModal";
+import { useEntitlement } from "@/hooks/use-entitlement";
 import { sprintScopeFromParam, sprintScopeToQuery, isSprintScopeShape } from "@/lib/sprint-scope";
 import { APP_NAME } from "@/lib/brand";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -35,6 +36,7 @@ export default function KanbanPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [showSummary, setShowSummary] = useState(false);
+  const summaryEntitlement = useEntitlement("ai.digest");
 
   // Scope lives in the URL so it survives a reload and can be shared;
   // filters stay in localStorage
@@ -82,6 +84,7 @@ export default function KanbanPage() {
         onRefresh={board.reload}
         onNewTask={() => board.setShowNewTask(true)}
         onSummary={() => setShowSummary(true)}
+        summaryOnPhone={summaryEntitlement.entitled}
       />
       {showSummary && (
         <SummaryModal
