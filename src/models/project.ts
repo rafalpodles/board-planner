@@ -1,6 +1,7 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { IProject, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, GRANT_RELATIONS, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
+import { MAX_REPOSITORY_URL_LENGTH, REPOSITORY_NAME_MAX_LENGTH } from "@/lib/repositories";
 
 const categorySchema = new Schema(
   {
@@ -237,6 +238,20 @@ const projectSchema = new Schema<IProject>(
       type: String,
       default: "",
       trim: true,
+    },
+    // Every repository the project changes, the first being its primary: `repositoryUrl` above
+    // mirrors that entry until every reader takes the list (BP-986)
+    repositories: {
+      type: [
+        new Schema(
+          {
+            url: { type: String, required: true, trim: true, maxlength: MAX_REPOSITORY_URL_LENGTH },
+            name: { type: String, default: "", trim: true, maxlength: REPOSITORY_NAME_MAX_LENGTH },
+          },
+          { _id: true }
+        ),
+      ],
+      default: [],
     },
     // Superseded by repositoryUrl and no longer read or written by the app; kept so the migration
     // is reversible until scripts/migrate-repository-url.ts has run everywhere.

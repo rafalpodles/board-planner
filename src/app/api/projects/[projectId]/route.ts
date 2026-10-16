@@ -21,6 +21,7 @@ import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { validatePmConfig, pmAvailability, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { PROJECT_ICONS, type IPmMcpServer } from "@/types";
+import { projectRepositories, withPrimaryUrl, type StoredRepository, MAX_REPOSITORY_URL_LENGTH } from "@/lib/repositories";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import { githubWebBase } from "@/lib/github-host";
 import { releaseProjectUploads } from "@/lib/upload-cleanup";
@@ -50,6 +51,7 @@ export const GET = withProjectAccessOrWorker(async (_request, { params, user, db
   const obj: any = sanitizeProjectSecrets(project.toObject(), db.organisation);
   // One repository field, resolved here so no consumer has to know the legacy pair still exists
   obj.repositoryUrl = projectRepositoryUrl(obj);
+  obj.repositories = projectRepositories(obj);
   obj.repositoryProvider = repositoryProvider(obj);
   obj.githubWebBase = githubWebBase();
   delete obj.githubRepo;
@@ -188,6 +190,12 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   }
   if (updates.name !== undefined && !String(updates.name).trim()) {
     return NextResponse.json({ error: "A project needs a name" }, { status: 400 });
+  }
+  if (typeof updates.repositoryUrl === "string" && updates.repositoryUrl.trim().length > MAX_REPOSITORY_URL_LENGTH) {
+    return NextResponse.json(
+      { error: `repositoryUrl must be at most ${MAX_REPOSITORY_URL_LENGTH} characters` },
+      { status: 400 }
+    );
   }
 
   if (body.worker !== undefined) {
@@ -364,6 +372,11 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     }
   }
 
+  if (typeof updates.repositoryUrl === "string") {
+    const current = (await db.Project.findById(projectId).select("repositories")) as { repositories?: StoredRepository[] } | null;
+    updates.repositories = withPrimaryUrl(current?.repositories, updates.repositoryUrl);
+  }
+
   const written = await writeProjectSettings(db, projectId, updates, pmServers);
   if ("error" in written) {
     return NextResponse.json({ error: written.error }, { status: written.status });
@@ -400,7 +413,8 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   let changes: string[];
   try {
     images = projectWriteImages(beforeImage, updates);
-    changes = describeSettingsChanges(images.before, images.after.toObject(), Object.keys(updates));
+    // The list mirrors repositoryUrl here, which is described already
+    changes = describeSettingsChanges(images.before, images.after.toObject(), Object.keys(updates).filter((k) => k !== "repositories"));
   } catch {
     changes = [`Changed: ${Object.keys(updates).join(", ")}`];
   }
@@ -429,6 +443,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   const obj: any = sanitizeProjectSecrets(project.toObject(), db.organisation);
   // One repository field, resolved here so no consumer has to know the legacy pair still exists
   obj.repositoryUrl = projectRepositoryUrl(obj);
+  obj.repositories = projectRepositories(obj);
   obj.repositoryProvider = repositoryProvider(obj);
   obj.githubWebBase = githubWebBase();
   delete obj.githubRepo;

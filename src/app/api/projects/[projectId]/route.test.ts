@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 
@@ -348,6 +349,40 @@ describe("PUT /api/projects/[projectId] deploymentEnvironment", () => {
 
     expect(deploymentDeleteMany).not.toHaveBeenCalled();
     expect(projectUpdateOne).not.toHaveBeenCalled();
+  });
+
+  // BP-986: the list mirrors the address, and its primary keeps the id a task or machine names it by
+  it("writes the primary repository's new address into the list, keeping its id", async () => {
+    const primary = new mongoose.Types.ObjectId();
+    projectFindOne.mockReturnValue({
+      toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
+      select: () => Promise.resolve({ repositories: [{ _id: primary, url: "https://github.com/old/repo", name: "Web" }] }),
+      populate: saved,
+    });
+
+    await PUT(putRequest({ repositoryUrl: "https://github.com/new/repo" }), ctx());
+
+    expect(projectFindOneAndUpdate.mock.calls[0][1]).toMatchObject({
+      repositoryUrl: "https://github.com/new/repo",
+      repositories: [{ _id: primary, url: "https://github.com/new/repo", name: "Web" }],
+    });
+  });
+
+  it("clears the list when the address is cleared", async () => {
+    await PUT(putRequest({ repositoryUrl: "" }), ctx());
+    expect(projectFindOneAndUpdate.mock.calls[0][1]).toMatchObject({ repositoryUrl: "", repositories: [] });
+  });
+
+  it("refuses an address longer than the list can store", async () => {
+    const res = await PUT(putRequest({ repositoryUrl: `https://github.com/${"x".repeat(2048)}` }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("leaves the list alone when the address is not being written", async () => {
+    await PUT(putRequest({ name: "Renamed" }), ctx());
+    expect(projectFindOneAndUpdate.mock.calls[0][1]).not.toHaveProperty("repositories");
   });
 
   it("refuses a name that is not text", async () => {
