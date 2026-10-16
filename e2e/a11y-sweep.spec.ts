@@ -59,7 +59,8 @@ async function withDb<T>(fn: (db: mongoose.mongo.Db) => Promise<T>): Promise<T> 
 async function seedCatalog() {
   await mongoose.connect(E2E_MONGODB_URI);
   const { seedAgents } = await import("@/lib/agent-seed");
-  await seedAgents();
+  const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+  await seedAgents(scopedToDefaultOrganisation());
   await mongoose.disconnect();
 }
 
@@ -86,7 +87,8 @@ const BOARD = `/projects/${PROJECT_KEY}`;
 
 const heading = (page: Page, name: string) => page.getByRole("heading", { name, exact: true });
 const button = (page: Page, name: string) => page.getByRole("button", { name, exact: true });
-const firstCard = (page: Page) => page.locator(`a[href^="${BOARD}/tasks/"]`).first();
+// The sidebar's machines panel links a held task too; a card is the page's own
+const firstCard = (page: Page) => page.locator(`#main-content a[href^="${BOARD}/tasks/"]`).first();
 const statusPicker = (page: Page) => page.getByRole("combobox", { name: "Status", exact: true });
 
 async function onTheBoard(page: Page) {
@@ -192,6 +194,7 @@ const SCREENS: Screen[] = [
     ready: (page) => page.getByRole("main").getByText(SIBLING_TASK_TITLE).first(),
   },
   { name: "dashboard", open: at(`${BOARD}/dashboard`), ready: (page) => heading(page, "Status Breakdown") },
+  { name: "insights", open: at(`${BOARD}/insights`), ready: (page) => page.getByRole("main").getByRole("heading").first() },
   ...(
     [
       ["general", "General"],
@@ -201,6 +204,7 @@ const SCREENS: Screen[] = [
       ["integrations", "Integrations"],
       ["workers", "Workers"],
       ["pm", "PM agent"],
+      ["import", "Import"],
       ["audit", "Audit log"],
     ] as const
   ).map(([section, title]) => ({
@@ -240,8 +244,8 @@ const SCREENS: Screen[] = [
   },
   { name: "settings: run history", open: at("/settings/workers/runs"), ready: (page) => heading(page, "Run history") },
   { name: "settings: machines", open: at("/settings/machines"), ready: (page) => heading(page, "Machines") },
-  { name: "settings: audit", open: at("/settings/audit"), ready: (page) => heading(page, "Instance audit log") },
-  { name: "settings: agents", open: at("/settings/agents"), ready: (page) => heading(page, "PM agent defaults") },
+  { name: "settings: audit", open: at("/settings/audit"), ready: (page) => heading(page, "Audit log") },
+  { name: "settings: agents", open: at("/settings/agents"), ready: (page) => heading(page, "PM agents") },
   { name: "settings: profile", open: at("/settings/profile"), ready: (page) => heading(page, "Profile") },
   { name: "settings: tokens", open: at("/settings/tokens"), ready: (page) => heading(page, "Create New Token") },
   {
@@ -251,6 +255,11 @@ const SCREENS: Screen[] = [
   },
   { name: "settings: security", open: at("/settings/security"), ready: (page) => heading(page, "Change password") },
   { name: "settings: preferences", open: at("/settings/preferences"), ready: (page) => heading(page, "Preferences") },
+  { name: "settings: AI key", open: at("/settings/ai-keys"), ready: (page) => page.getByRole("main").getByRole("heading").first() },
+  { name: "settings: export", open: at("/settings/export"), ready: (page) => page.getByRole("main").getByRole("heading").first() },
+  { name: "settings: licence", open: at("/settings/licence"), ready: (page) => page.getByRole("main").getByRole("heading").first() },
+  { name: "settings: organisation", open: at("/settings/organisation"), ready: (page) => page.getByRole("main").getByRole("heading").first() },
+  { name: "settings: single sign-on", open: at("/settings/sso"), ready: (page) => page.getByRole("main").getByRole("heading").first() },
 ];
 
 test.beforeEach(seed);
