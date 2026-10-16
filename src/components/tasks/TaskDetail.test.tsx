@@ -1528,7 +1528,7 @@ describe("TaskDetail, the browser tab's title", () => {
     });
     renderDetail();
     await screen.findByText("We couldn’t find this page. The link may have changed, or this page may not be available to you.");
-    expect(document.title).toBe(`Page not found — ${APP_NAME}`);
+    await waitFor(() => expect(document.title).toBe(`Page not found — ${APP_NAME}`));
   });
 
   it("gives the tab back to the board beneath it when it closes", async () => {
