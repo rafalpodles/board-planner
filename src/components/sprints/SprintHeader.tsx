@@ -157,7 +157,7 @@ export function SprintHeader({
             server enforces nothing about completed sprints. Reopening one is a separate
             question nobody has decided, so Activate/Complete stay withheld; Edit and Delete
             are ordinary sprint metadata edits and stay available regardless. */}
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
           {!closed && (
             <>
               <div className="mr-1 flex items-center rounded-lg border border-border bg-bg-card p-0.5">
