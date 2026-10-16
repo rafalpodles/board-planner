@@ -7,12 +7,13 @@
 export const MULTI_REPOSITORY = "multi-repository";
 
 /**
- * Whether a run can take several repositories of one project. The assignments are bound and
- * reported already; the run itself (one worktree per repository, every check on every worktree)
- * arrives with BP-1072, and this turns on with BP-1073.
+ * Whether this worker says it can run several repositories of one project. The run itself exists
+ * (`runTaskInRepositories`); what is left before this turns on is the smoke test of a real worker
+ * against two repositories and the docs (BP-1073). Until then no project that lists several is ever
+ * handed to this worker, because the server hands one only to a worker that says so.
  */
-export const RUNS_SEVERAL_REPOSITORIES = false;
+export const SAYS_IT_RUNS_SEVERAL_REPOSITORIES = false;
 
 export function capabilities(): string[] {
-  return RUNS_SEVERAL_REPOSITORIES ? [MULTI_REPOSITORY] : [];
+  return SAYS_IT_RUNS_SEVERAL_REPOSITORIES ? [MULTI_REPOSITORY] : [];
 }

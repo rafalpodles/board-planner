@@ -145,7 +145,7 @@ const MAX_NOTIFICATION_CHARS = 200;
  * where head-only dropped them, so scrub's coverage is now load-bearing over text that never
  * reached Notification Center before.
  */
-function fitDetail(text: string): string {
+export function fitDetail(text: string): string {
   if (text.length <= MAX_NOTIFICATION_CHARS) return text;
   const room = Math.ceil((MAX_NOTIFICATION_CHARS - 1) / 2);
   const head = text.slice(0, room);
@@ -205,7 +205,7 @@ export async function resolveStatusIds(
 
 // GateResult has no third state, so a gate that could not reach a verdict at all because the
 // CLI ran out of subscription is a release, not a rejection a human has to clear
-function hitUsageLimit(verdict: GateResult): boolean {
+export function hitUsageLimit(verdict: GateResult): boolean {
   return (
     /could not be completed/i.test(verdict.reason) &&
     /usage limit reached/i.test(verdict.reason)
@@ -216,13 +216,13 @@ function hitUsageLimit(verdict: GateResult): boolean {
 // the run ceiling is. A model step is bounded by taskTimeoutMs, which is what bounded it before the
 // sequence existed and what the project's "Timeout for one step" setting still means. Folding both
 // into the gate cap silently cut every step from thirty minutes to ten.
-const GATE_CAP_MS = 600_000;
+export const GATE_CAP_MS = 600_000;
 
 // Below this there is no point starting anything: whatever it is would fail on the clock and be
 // reported as its own verdict rather than as the ceiling.
-const MIN_ENTRY_MS = 30_000;
+export const MIN_ENTRY_MS = 30_000;
 
-const EMPTY_RESULT: ExecutionResult = {
+export const EMPTY_RESULT: ExecutionResult = {
   status: "completed",
   summary: "",
   filesChanged: [],
@@ -238,7 +238,7 @@ const DELIVERY_PHASES: Record<string, Phase> = {
   merge: "merge",
 };
 
-function phaseFor(entry: SnapshotEntry): Phase {
+export function phaseFor(entry: SnapshotEntry): Phase {
   if (entry.kind === "gate") return `gates:${entry.key}`;
   return DELIVERY_PHASES[entry.key] ?? `step:${entry.key}`;
 }
@@ -252,7 +252,7 @@ function unpushedWork(state: RunState, worktreePath: string): string {
 
 // A stop between the push and the merge leaves work on the remote, and the release comment is the
 // only place that says so.
-function whatLanded(state: RunState, branch: string): string {
+export function whatLanded(state: RunState, branch: string): string {
   if (state.merged) return "";
   if (state.prUrl)
     return `: \`${branch}\` is pushed and ${state.prUrl} is open, but it was not merged`;
@@ -270,7 +270,7 @@ function tamperedEvidence(state: RunState, branch: string, path: string): string
   return `\n\n${landed} The worktree is kept at \`${path}\` on the worker host as the check found it, until the next attempt on this task, or a restart of the worker, discards it.`;
 }
 
-function keptWorktree(path: string): string {
+export function keptWorktree(path: string): string {
   return `\n\nThe worktree is kept at \`${path}\` on the worker host, with what this run wrote, until the next attempt on this task rebuilds it.`;
 }
 
@@ -327,7 +327,7 @@ async function pushFailure(
   }
 }
 
-async function quietly(work: () => Promise<unknown>): Promise<void> {
+export async function quietly(work: () => Promise<unknown>): Promise<void> {
   try {
     await work();
   } catch {
@@ -339,8 +339,8 @@ async function quietly(work: () => Promise<unknown>): Promise<void> {
 // would charge it and eventually park the task in review as "gave up". Checked on both sides of
 // every phase that spawns: a killed child settles as an ordinary non-zero exit, indistinguishable
 // from a real build failure by the time the verdict is read.
-async function releaseIfAborted(
-  deps: PipelineDeps,
+export async function releaseIfAborted(
+  deps: Pick<PipelineDeps, "signal" | "telemetry">,
   reporter: Reporter,
   task: ClaimedTask,
   detail = "",
