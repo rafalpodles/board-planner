@@ -72,8 +72,8 @@ export function TriageSection({ projectId, project, replaceProject }: SectionPro
         />
       </div>
       <p className="mt-2 text-sm text-text-muted">
-        Suggests an assignee, a category and choice fields for what the person creating the task left empty. Suggestions are shown on the task, or applied
-        and recorded in its history as AI triage.
+        Suggests a category, and an assignee and choice fields where the person creating the task left them empty. Suggestions are shown on the task, or
+        applied and recorded in its history as AI triage.
       </p>
     </SettingsCard>
   );
