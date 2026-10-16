@@ -132,6 +132,7 @@ export const GROUPS = {
     "release-notes.spec.ts",
     "ai-duplicates.spec.ts",
     "ai-triage.spec.ts",
+    "ai-summaries.spec.ts",
     "gitlab-activity.spec.ts",
     "pr-status.spec.ts",
     "project-channel-secret.spec.ts",
