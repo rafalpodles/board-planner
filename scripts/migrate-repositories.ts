@@ -22,9 +22,10 @@ async function main() {
   const db = mongoose.connection.db;
   if (!db) throw new Error("No database handle");
   console.log(`Database: ${db.databaseName} (from ${source}) ${apply ? "APPLYING" : "dry run"}`);
-  const { filled, alreadyListed, noRepository } = await migrateRepositories(db, { apply });
+  const { filled, alreadyListed, noRepository, tooLong } = await migrateRepositories(db, { apply });
   for (const line of filled) console.log(`${line}${apply ? "" : " (dry run)"}`);
   console.log(`${filled.length} filled, ${alreadyListed} already listed, ${noRepository} name no repository`);
+  for (const key of tooLong) console.log(`${key}: address longer than the list stores, left unlisted`);
   await mongoose.disconnect();
 }
 

@@ -1,10 +1,12 @@
 import { Types, type mongo } from "mongoose";
 import { projectRepositoryUrl, type RepositoryFields } from "./repository";
+import { MAX_REPOSITORY_URL_LENGTH } from "./repositories";
 
 export interface RepositoriesMigration {
   filled: string[];
   alreadyListed: number;
   noRepository: number;
+  tooLong: string[];
 }
 
 type StoredProject = RepositoryFields & { _id: Types.ObjectId; key?: string; repositories?: unknown[] };
@@ -15,7 +17,7 @@ type StoredProject = RepositoryFields & { _id: Types.ObjectId; key?: string; rep
  * nothing, and `repositoryUrl` stays as it was, so reads that still use it are unaffected.
  */
 export async function migrateRepositories(db: mongo.Db, { apply }: { apply: boolean }): Promise<RepositoriesMigration> {
-  const result: RepositoriesMigration = { filled: [], alreadyListed: 0, noRepository: 0 };
+  const result: RepositoriesMigration = { filled: [], alreadyListed: 0, noRepository: 0, tooLong: [] };
   const projects = (await db.collection("projects").find({}).toArray()) as unknown as StoredProject[];
   for (const project of projects) {
     if ((project.repositories ?? []).length > 0) {
@@ -25,6 +27,10 @@ export async function migrateRepositories(db: mongo.Db, { apply }: { apply: bool
     const url = projectRepositoryUrl(project);
     if (!url) {
       result.noRepository += 1;
+      continue;
+    }
+    if (url.length > MAX_REPOSITORY_URL_LENGTH) {
+      result.tooLong.push(`${project.key || project._id}`);
       continue;
     }
     result.filled.push(`${project.key || project._id}: ${url}`);
