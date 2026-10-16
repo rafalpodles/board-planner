@@ -145,7 +145,7 @@ const MAX_NOTIFICATION_CHARS = 200;
  * where head-only dropped them, so scrub's coverage is now load-bearing over text that never
  * reached Notification Center before.
  */
-function fitDetail(text: string): string {
+export function fitDetail(text: string): string {
   if (text.length <= MAX_NOTIFICATION_CHARS) return text;
   const room = Math.ceil((MAX_NOTIFICATION_CHARS - 1) / 2);
   const head = text.slice(0, room);
@@ -205,7 +205,7 @@ export async function resolveStatusIds(
 
 // GateResult has no third state, so a gate that could not reach a verdict at all because the
 // CLI ran out of subscription is a release, not a rejection a human has to clear
-function hitUsageLimit(verdict: GateResult): boolean {
+export function hitUsageLimit(verdict: GateResult): boolean {
   return (
     /could not be completed/i.test(verdict.reason) &&
     /usage limit reached/i.test(verdict.reason)
@@ -216,13 +216,13 @@ function hitUsageLimit(verdict: GateResult): boolean {
 // the run ceiling is. A model step is bounded by taskTimeoutMs, which is what bounded it before the
 // sequence existed and what the project's "Timeout for one step" setting still means. Folding both
 // into the gate cap silently cut every step from thirty minutes to ten.
-const GATE_CAP_MS = 600_000;
+export const GATE_CAP_MS = 600_000;
 
 // Below this there is no point starting anything: whatever it is would fail on the clock and be
 // reported as its own verdict rather than as the ceiling.
-const MIN_ENTRY_MS = 30_000;
+export const MIN_ENTRY_MS = 30_000;
 
-const EMPTY_RESULT: ExecutionResult = {
+export const EMPTY_RESULT: ExecutionResult = {
   status: "completed",
   summary: "",
   filesChanged: [],
@@ -238,7 +238,7 @@ const DELIVERY_PHASES: Record<string, Phase> = {
   merge: "merge",
 };
 
-function phaseFor(entry: SnapshotEntry): Phase {
+export function phaseFor(entry: SnapshotEntry): Phase {
   if (entry.kind === "gate") return `gates:${entry.key}`;
   return DELIVERY_PHASES[entry.key] ?? `step:${entry.key}`;
 }
@@ -252,7 +252,7 @@ function unpushedWork(state: RunState, worktreePath: string): string {
 
 // A stop between the push and the merge leaves work on the remote, and the release comment is the
 // only place that says so.
-function whatLanded(state: RunState, branch: string): string {
+export function whatLanded(state: RunState, branch: string): string {
   if (state.merged) return "";
   if (state.prUrl)
     return `: \`${branch}\` is pushed and ${state.prUrl} is open, but it was not merged`;
@@ -270,7 +270,7 @@ function tamperedEvidence(state: RunState, branch: string, path: string): string
   return `\n\n${landed} The worktree is kept at \`${path}\` on the worker host as the check found it, until the next attempt on this task, or a restart of the worker, discards it.`;
 }
 
-function keptWorktree(path: string): string {
+export function keptWorktree(path: string): string {
   return `\n\nThe worktree is kept at \`${path}\` on the worker host, with what this run wrote, until the next attempt on this task rebuilds it.`;
 }
 
@@ -327,7 +327,7 @@ async function pushFailure(
   }
 }
 
-async function quietly(work: () => Promise<unknown>): Promise<void> {
+export async function quietly(work: () => Promise<unknown>): Promise<void> {
   try {
     await work();
   } catch {
@@ -339,8 +339,8 @@ async function quietly(work: () => Promise<unknown>): Promise<void> {
 // would charge it and eventually park the task in review as "gave up". Checked on both sides of
 // every phase that spawns: a killed child settles as an ordinary non-zero exit, indistinguishable
 // from a real build failure by the time the verdict is read.
-async function releaseIfAborted(
-  deps: PipelineDeps,
+export async function releaseIfAborted(
+  deps: Pick<PipelineDeps, "signal" | "telemetry">,
   reporter: Reporter,
   task: ClaimedTask,
   detail = "",
@@ -369,6 +369,184 @@ async function releaseIfAborted(
  * the machine, not the task, that an operator has to be told about.
  */
 export type RunDisposition = void | "machine-fault";
+
+/**
+ * What a run owes the board and the machine when it could not make its worktree. Shared by the run in
+ * one repository and the run in several, so the two refuse a poisoned checkout, a missing identity and
+ * an unreachable base in exactly the same words and with the same settlement.
+ *
+ * `quarantine` is told which checkout is the problem by whoever built it: a run in several
+ * repositories knows which of them the error came from, and the project is stopped on that checkout.
+ */
+export interface WorktreeFailureContext {
+  task: ClaimedTask;
+  reporter: Reporter;
+  settle: (outcome: OutcomeKind, detail?: string, reason?: string) => void;
+  /** Destroys whatever worktrees this run had made, the failed one included. */
+  destroy: () => Promise<void>;
+  quarantine: (reason: string, repair?: string) => void;
+  logError?: (message: string) => void;
+}
+
+export async function refuseWorktree(
+  error: unknown,
+  ctx: WorktreeFailureContext,
+): Promise<RunDisposition> {
+  const { task } = ctx;
+  await ctx.destroy();
+  // The checkout carries a key git runs on checkout, so it was refused before it ran. The task
+  // did nothing — refunded, exactly as a transport fault is — and the loop is told to stop
+  // claiming, because every other task on this machine meets the same key. The project is
+  // quarantined on top of that: without it, refusing is only the old requeue with the charge
+  // taken off, and something hands the same clone to the next run (BP-504).
+  if (error instanceof PoisonedCheckoutError) {
+    ctx.logError?.(`${task.taskKey}: ${String(error)}`);
+    // Only a key somebody planted quarantines the project. `unreadable` is git declining to
+    // answer — a checkout being re-cloned, a machine under load, a 60-second timeout — and
+    // latching a project off until the process restarts on the strength of one bad answer would
+    // turn an ordinary transient into an outage nothing on the machine can lift. The run is
+    // refused either way, and a transient one is refused again next time if it persists.
+    if (error.kind === "planted") {
+      ctx.quarantine(`carries ${error.finding}`);
+    }
+    // Said separately for each kind. The detail is what the AgentRun record keeps and what the
+    // menubar's notification shows, and it outlives the run — so it must not claim a key was
+    // found when the finding was that nothing could be read.
+    ctx.settle(
+      "machineFault",
+      error.kind === "planted"
+        ? "the checkout's git config carries an executable key"
+        : "the checkout's git config could not be read"
+    );
+    await ctx.reporter.released(task, String(error));
+    return "machine-fault";
+  }
+  // Two settlements, because the fault is one of two things and they are owed opposite answers —
+  // the same split, and for the same reason, as BaseUnavailableError's `kind` below.
+  if (error instanceof MissingIdentityError) {
+    ctx.logError?.(`${task.taskKey}: ${String(error)}`);
+    // The checkout's own config leaves no identity — a `user.name = ""` in the shared
+    // `.git/config` does it, well-formed and carrying no program, so no scan refuses it. Handled
+    // exactly as a poisoned checkout is, and for the same reason: the fault is in a file shared
+    // by every project bound to that path, and it repeats until a human edits it. The first
+    // version of this charged the attempt and returned, which let the loop claim task after task
+    // at spawn speed and charge each one — emptying the approved column of every project on that
+    // checkout into escalation, where round two's undistinguished behaviour had cost one idled
+    // pass (BP-516 review).
+    if (error.kind === "checkout") {
+      ctx.quarantine(
+        "leaves no identity to commit as",
+        "Set user.name and user.email there, or remove the empty ones",
+      );
+      ctx.settle("machineFault", "this checkout's git config leaves no identity to commit as");
+      await ctx.reporter.released(task, String(error));
+      return "machine-fault";
+    }
+    // Nothing on this machine will change while the worker runs, and every task it claims meets
+    // the same wall — so the attempt comes back and the loop stops claiming for the rest of the
+    // pass, the way an unreachable remote does below. git's own answer travels with it, which is
+    // where the two commands to run are.
+    ctx.settle("machineFault", "this machine has no git identity to commit as");
+    await ctx.reporter.released(task, String(error));
+    return "machine-fault";
+  }
+  if (error instanceof BaseUnavailableError) {
+    ctx.logError?.(`${task.taskKey}: ${String(error)}`);
+    // The remote answered and this repository has no such base branch — a default branch of
+    // master against a policy default of main, a branch renamed away, an empty repository.
+    // Nothing on this machine will change that, and no other project on it is affected, so the
+    // attempt is spent and the task escalates to whoever can fix the setting.
+    if (error.kind === "configuration") {
+      ctx.settle(
+        "requeued",
+        "the base branch is not configured for this repository",
+      );
+      await ctx.reporter.requeued(task, String(error));
+      return;
+    }
+    // A transport failure is this machine's, not the task's, and it will fail identically for the
+    // next task and the one after it. Charging the attempt would walk the whole approved queue
+    // into the escalation column over one unreachable remote — and nothing ever resets
+    // execution.attempts, so a human moving those tasks back gets cards no worker will look at
+    // again. Released with the attempt refunded, and the loop is told to stop claiming.
+    // With the error, not without it: the detail is the only durable account of the fault — the
+    // card's comment is not reachable from the run history, and the menubar keeps no reason at
+    // all once its notification is gone. A fixed sentence cannot tell a DNS outage from a
+    // revoked token.
+    //
+    // Unprefixed: the error already names the branch, the remote and git's own answer, so it
+    // needs no sentence of ours in front of it. The class names go because they are noise in a
+    // two-hundred-character notification — one `BaseUnavailableError: ` since workspace.ts
+    // stopped wrapping one in another (BP-619), and `String(error)` on anything that reached
+    // there by another route can still carry its own. Readability, not fitting: what makes the
+    // cause survive the cut is fitDetail, and this pattern naming no class in particular is what
+    // keeps a rename from quietly undoing it. `\w+`, not `\w*`, which matched empty and ate a
+    // bare "Error: " out of git's own output too.
+    ctx.settle("machineFault", String(error).replace(/\w+Error: /g, ""));
+    await ctx.reporter.released(task, String(error));
+    return "machine-fault";
+  }
+  ctx.settle("requeued", "could not create a worktree");
+  await ctx.reporter.requeued(
+    task,
+    `could not create a worktree: ${String(error)}`,
+  );
+  return;
+
+}
+
+/**
+ * What a gate must not run over: a checkout that was tampered with, a nested repository, or files git
+ * hides. Ignored files a step wrote are removed first when that can be done safely, and the board is
+ * told; anything else comes back as the refusal, naming what it is and what is left in the tree.
+ * Shared by the run in one repository and the run in several.
+ */
+export interface GateRefusal {
+  over: string;
+  left: string;
+  detail: string;
+}
+
+export async function vetBeforeGate(
+  runner: Runner,
+  gitPath: string,
+  worktree: Worktree,
+  ignoredBeforeSteps: Awaited<ReturnType<typeof ignoredFiles>>,
+  gateName: string,
+  noted: (note: string) => Promise<void>,
+): Promise<GateRefusal | null> {
+  const tampered = await worktree.tampering();
+  let hidden: HiddenFiles | { kind: "tampered"; detail: string } | null = tampered
+    ? { kind: "tampered" as const, detail: `the checkout now has ${tampered}` }
+    : await hiddenFromGit(runner, gitPath, worktree.path, worktree.baseSha, ignoredBeforeSteps);
+  if (hidden?.kind === "written") {
+    const removal = removeFromWorktree(worktree.path, hidden.paths);
+    if (removal.refused.length > 0) {
+      hidden = {
+        kind: "unreviewed",
+        detail: `${hidden.detail}; and not every one could be removed safely: ${removal.refused.slice(0, 5).join(", ")}${
+          removal.removed.length > 0 ? `. Already removed: ${removal.removed.slice(0, 5).join(", ")}${removal.removed.length > 5 ? `, and ${removal.removed.length - 5} more` : ""}` : ""
+        }`,
+      };
+    } else {
+      const count = removal.removed.length;
+      await noted(
+        `Before the **${gateName}** gate the worker removed ${count} ignored ${count === 1 ? "entry" : "entries"} a step wrote, since no commit, diff or reviewer sees them and the gate could still run them: ${hidden.named}`,
+      );
+      hidden = null;
+    }
+  }
+  if (!hidden) return null;
+  const found =
+    hidden.kind === "tampered"
+      ? { over: "a tampered checkout", left: "what the agent changed" }
+      : hidden.kind === "nested"
+        ? { over: "a nested git repository", left: "the nested repository" }
+        : hidden.kind === "unreviewed"
+          ? { over: "ignored files a step wrote", left: "those files" }
+          : { over: "files git hides", left: "the hidden files" };
+  return { ...found, detail: hidden.detail };
+}
 
 export async function runTask(
   deps: PipelineDeps,
@@ -456,106 +634,17 @@ export async function runTask(
     enter("worktree");
     worktree = await workspace.create(task.taskKey, WORKER_BRANCH_SLUG);
   } catch (error) {
-    await quietly(() => workspace.destroy(task.taskKey));
-    // The checkout carries a key git runs on checkout, so it was refused before it ran. The task
-    // did nothing — refunded, exactly as a transport fault is — and the loop is told to stop
-    // claiming, because every other task on this machine meets the same key. The project is
-    // quarantined on top of that: without it, refusing is only the old requeue with the charge
-    // taken off, and something hands the same clone to the next run (BP-504).
-    if (error instanceof PoisonedCheckoutError) {
-      deps.logError?.(`${task.taskKey}: ${String(error)}`);
-      // Only a key somebody planted quarantines the project. `unreadable` is git declining to
-      // answer — a checkout being re-cloned, a machine under load, a 60-second timeout — and
-      // latching a project off until the process restarts on the strength of one bad answer would
-      // turn an ordinary transient into an outage nothing on the machine can lift. The run is
-      // refused either way, and a transient one is refused again next time if it persists.
-      if (error.kind === "planted") {
-        deps.quarantineProject(task.projectId, `carries ${error.finding}`);
-      }
-      // Said separately for each kind. The detail is what the AgentRun record keeps and what the
-      // menubar's notification shows, and it outlives the run — so it must not claim a key was
-      // found when the finding was that nothing could be read.
-      settle(
-        "machineFault",
-        error.kind === "planted"
-          ? "the checkout's git config carries an executable key"
-          : "the checkout's git config could not be read"
-      );
-      await reporter.released(task, String(error));
-      return "machine-fault";
-    }
-    // Two settlements, because the fault is one of two things and they are owed opposite answers —
-    // the same split, and for the same reason, as BaseUnavailableError's `kind` below.
-    if (error instanceof MissingIdentityError) {
-      deps.logError?.(`${task.taskKey}: ${String(error)}`);
-      // The checkout's own config leaves no identity — a `user.name = ""` in the shared
-      // `.git/config` does it, well-formed and carrying no program, so no scan refuses it. Handled
-      // exactly as a poisoned checkout is, and for the same reason: the fault is in a file shared
-      // by every project bound to that path, and it repeats until a human edits it. The first
-      // version of this charged the attempt and returned, which let the loop claim task after task
-      // at spawn speed and charge each one — emptying the approved column of every project on that
-      // checkout into escalation, where round two's undistinguished behaviour had cost one idled
-      // pass (BP-516 review).
-      if (error.kind === "checkout") {
-        deps.quarantineProject(
-          task.projectId,
-          "leaves no identity to commit as",
-          "Set user.name and user.email there, or remove the empty ones",
-        );
-        settle("machineFault", "this checkout's git config leaves no identity to commit as");
-        await reporter.released(task, String(error));
-        return "machine-fault";
-      }
-      // Nothing on this machine will change while the worker runs, and every task it claims meets
-      // the same wall — so the attempt comes back and the loop stops claiming for the rest of the
-      // pass, the way an unreachable remote does below. git's own answer travels with it, which is
-      // where the two commands to run are.
-      settle("machineFault", "this machine has no git identity to commit as");
-      await reporter.released(task, String(error));
-      return "machine-fault";
-    }
-    if (error instanceof BaseUnavailableError) {
-      deps.logError?.(`${task.taskKey}: ${String(error)}`);
-      // The remote answered and this repository has no such base branch — a default branch of
-      // master against a policy default of main, a branch renamed away, an empty repository.
-      // Nothing on this machine will change that, and no other project on it is affected, so the
-      // attempt is spent and the task escalates to whoever can fix the setting.
-      if (error.kind === "configuration") {
-        settle(
-          "requeued",
-          "the base branch is not configured for this repository",
-        );
-        await reporter.requeued(task, String(error));
-        return;
-      }
-      // A transport failure is this machine's, not the task's, and it will fail identically for the
-      // next task and the one after it. Charging the attempt would walk the whole approved queue
-      // into the escalation column over one unreachable remote — and nothing ever resets
-      // execution.attempts, so a human moving those tasks back gets cards no worker will look at
-      // again. Released with the attempt refunded, and the loop is told to stop claiming.
-      // With the error, not without it: the detail is the only durable account of the fault — the
-      // card's comment is not reachable from the run history, and the menubar keeps no reason at
-      // all once its notification is gone. A fixed sentence cannot tell a DNS outage from a
-      // revoked token.
-      //
-      // Unprefixed: the error already names the branch, the remote and git's own answer, so it
-      // needs no sentence of ours in front of it. The class names go because they are noise in a
-      // two-hundred-character notification — one `BaseUnavailableError: ` since workspace.ts
-      // stopped wrapping one in another (BP-619), and `String(error)` on anything that reached
-      // there by another route can still carry its own. Readability, not fitting: what makes the
-      // cause survive the cut is fitDetail, and this pattern naming no class in particular is what
-      // keeps a rename from quietly undoing it. `\w+`, not `\w*`, which matched empty and ate a
-      // bare "Error: " out of git's own output too.
-      settle("machineFault", String(error).replace(/\w+Error: /g, ""));
-      await reporter.released(task, String(error));
-      return "machine-fault";
-    }
-    settle("requeued", "could not create a worktree");
-    await reporter.requeued(
+    return refuseWorktree(error, {
       task,
-      `could not create a worktree: ${String(error)}`,
-    );
-    return;
+      reporter,
+      settle,
+      destroy: () => quietly(() => workspace.destroy(task.taskKey)),
+      quarantine: (reason, repair) =>
+        repair === undefined
+          ? deps.quarantineProject(task.projectId, reason)
+          : deps.quarantineProject(task.projectId, reason, repair),
+      logError: deps.logError,
+    });
   }
 
   const pinned = worktree;
@@ -744,42 +833,20 @@ export async function runTask(
 
         // Before every gate, not only after edit steps: build and test-run execute the agent's own
         // code, which can hide a file from git as well as an Implement step can (BP-640, BP-794)
-        const tampered = await worktree.tampering();
-        let hidden: HiddenFiles | { kind: "tampered"; detail: string } | null = tampered
-          ? { kind: "tampered" as const, detail: `the checkout now has ${tampered}` }
-          : await hiddenFromGit(runner, deps.gitPath, worktree.path, worktree.baseSha, ignoredBeforeSteps);
-        if (hidden?.kind === "written") {
-          const removal = removeFromWorktree(worktree.path, hidden.paths);
-          if (removal.refused.length > 0) {
-            hidden = {
-              kind: "unreviewed",
-              detail: `${hidden.detail}; and not every one could be removed safely: ${removal.refused.slice(0, 5).join(", ")}${
-                removal.removed.length > 0 ? `. Already removed: ${removal.removed.slice(0, 5).join(", ")}${removal.removed.length > 5 ? `, and ${removal.removed.length - 5} more` : ""}` : ""
-              }`,
-            };
-          } else {
-            const count = removal.removed.length;
-            await reporter.noted(
-              task,
-              `Before the **${gate.name}** gate the worker removed ${count} ignored ${count === 1 ? "entry" : "entries"} a step wrote, since no commit, diff or reviewer sees them and the gate could still run them: ${hidden.named}`,
-            );
-            hidden = null;
-          }
-        }
-        if (hidden) {
+        const refused = await vetBeforeGate(
+          runner,
+          deps.gitPath,
+          worktree,
+          ignoredBeforeSteps,
+          gate.name,
+          (note) => reporter.noted(task, note),
+        );
+        if (refused) {
           keepWorktree = true;
-          const found =
-            hidden.kind === "tampered"
-              ? { over: "a tampered checkout", left: "what the agent changed" }
-              : hidden.kind === "nested"
-                ? { over: "a nested git repository", left: "the nested repository" }
-                : hidden.kind === "unreviewed"
-                  ? { over: "ignored files a step wrote", left: "those files" }
-                  : { over: "files git hides", left: "the hidden files" };
-          settle("failed", `refused to run the ${gate.name} gate over ${found.over}`);
+          settle("failed", `refused to run the ${gate.name} gate over ${refused.over}`);
           await reporter.failed(
             task,
-            `refusing to run the ${gate.name} gate: ${hidden.detail}\n\nThe worktree is kept at \`${worktree.path}\` on the worker host, with ${found.left} still in it.`,
+            `refusing to run the ${gate.name} gate: ${refused.detail}\n\nThe worktree is kept at \`${worktree.path}\` on the worker host, with ${refused.left} still in it.`,
           );
           return;
         }

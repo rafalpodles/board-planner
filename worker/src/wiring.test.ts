@@ -1702,8 +1702,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     });
   });
 
-  // BP-1067. A project that lists several repositories is bound in all of them or in none, and is not
-  // claimed until a run can take several (BP-1072).
+  // BP-1067. A project that lists several repositories is bound in all of them or in none.
   describe("a project that lists several repositories", () => {
     const BOTH = [
       { id: "r-demo", name: "demo", remote: REMOTE },
@@ -1711,14 +1710,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     ];
     const several = (repositories = BOTH) => [{ project: "p1", remote: REMOTE, repositories }];
 
-    it("binds every repository, says it is not claimable yet, and claims nothing", async () => {
+    it("binds every repository and claims the project", async () => {
       const run = await runOneTask(undefined, undefined, { repos: [REPO, OTHER_REPO], assignments: several() });
 
       expect(run.bindingErrors.join(" ")).toBe("");
       const [project] = run.localConfig?.().projects ?? [];
       expect(project.project).toBe("p1");
-      expect(project.blocked).toBe("this worker cannot run more than one repository of a project yet");
-      expect(run.api.claim).not.toHaveBeenCalled();
+      expect(project.blocked).toBe("");
+      expect(run.api.claim).toHaveBeenCalled();
     });
 
     it("binds none of them when one is not on this machine, and names the repository", async () => {

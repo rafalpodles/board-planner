@@ -72,7 +72,7 @@ import { abortableSleep } from "./sleep.js";
 import { HeartbeatDeps, loadIdentity, PROTOCOL_VERSION, startHeartbeat } from "./registration.js";
 import { bindRepository, createAllowlistReader, repoInventory } from "./repos.js";
 import { bindAssignment, type BoundRepository } from "./assignment-binding.js";
-import { RUNS_SEVERAL_REPOSITORIES } from "./capabilities.js";
+import { runTaskInRepositories, type SeveralRepositoriesDeps } from "./pipeline-several.js";
 import {
   createTelemetry,
   dropWhenBusy,
@@ -778,9 +778,55 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     // The same value rebind() matched this project's checkout against — the server's own record
     // of the project's repository, never re-read from repoPath/.git at execution time.
     const remoteUrl = bound.get(task.projectId)?.remote;
+    const several = bound.get(task.projectId)?.repositories ?? [];
 
     currentRun = { taskId: task.taskId, runId: task.runId };
     try {
+      if (several.length > 1) {
+        // One run, one worktree in each repository of the project (BP-1072). Each keeps its own
+        // checkout's config, worktree root and workspace; the policy is the project's.
+        const repositories = several.map((repository, index) => {
+          const repositoryConfig = configFor(task.projectId, index);
+          if (!repositoryConfig) throw new Error(`no checkout is bound for repository ${index} of project ${task.projectId}`);
+          return {
+            name: repository.name,
+            config: repositoryConfig,
+            workspace: createWorkspace(
+              repositoryConfig,
+              deps.runner,
+              gitPath,
+              remoteFetchEnv(githubToken, ghPath),
+              repository.remote,
+              commitIdentity
+            ),
+            createDelivery: (runner: Runner, baseBranch?: string) =>
+              createDelivery(runner, gitPath, ghPath, baseBranch, githubToken),
+          };
+        });
+        return await runs.under((signal) => {
+          const pipeline: SeveralRepositoriesDeps = {
+            config: taskConfig,
+            api,
+            boardColumns: (projectId) => api.boardColumns(projectId),
+            createReporter: (client, statusIds) =>
+              createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments),
+            repositories,
+            executor: createExecutor(taskConfig, deps.runner, claudePath),
+            collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
+            gateFor: (entry, runner, timeoutMs, fallbacks) =>
+              gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath }, timeoutMs, fallbacks),
+            gitPath,
+            recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
+            logError: deps.logError,
+            quarantineCheckout: (projectId, index, reason, repair) =>
+              quarantineProject(projectId, reason, repair, bound.get(projectId)?.repositories[index]?.path),
+            runner: deps.runner,
+            signal,
+            telemetry,
+          };
+          return runTaskInRepositories(pipeline, task);
+        });
+      }
       return await runs.under((signal) => {
         const pipeline: PipelineDeps = {
           config: taskConfig,
@@ -895,22 +941,13 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     return `${missing.join(" and ")} could not be found on this machine, and every task needs ${missing.length > 1 ? "them" : "it"}`;
   }
 
-  // A project bound in several repositories is not claimed until a run can take several: binding and
-  // reporting them first lets the screen say what is missing, and not claiming keeps a task from being
-  // run in one of them (BP-1072 makes the run, BP-1073 turns this on).
-  const cannotRunYet = (projectId: string): string =>
-    !RUNS_SEVERAL_REPOSITORIES && (bound.get(projectId)?.repositories.length ?? 0) > 1
-      ? "this worker cannot run more than one repository of a project yet"
-      : "";
-
   const loop = createLoop({
     pollIntervalMs: () => policy.pollIntervalMs,
     // A project whose checkout cannot pass the gates is not claimed from. The refusal would arrive
     // anyway — at the build gate, after the agent has worked — with the reason this already has.
     assignments: () =>
       [...bound.keys()].filter(
-        (projectId) =>
-          !unusable.has(projectId) && !quarantineReasonFor(projectId) && !cannotRunYet(projectId)
+        (projectId) => !unusable.has(projectId) && !quarantineReasonFor(projectId)
       ),
     api,
     execute,
@@ -1010,9 +1047,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         // answer would send the operator to the wrong place.
         blocked:
           claimBlocked() ||
-          (quarantineReasonFor(project) ??
-            unusable.get(project) ??
-            (cannotRunYet(project) || loop.unclaimable(project))),
+          (quarantineReasonFor(project) ?? unusable.get(project) ?? loop.unclaimable(project)),
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,
         reviewModel: repo.config.reviewModel,

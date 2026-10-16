@@ -54,10 +54,43 @@ function checksNote(laterChecks: string[]): string {
   return ` You have no shell and cannot run anything. After this step the worker itself runs ${named.join(" and ")}, before anything is delivered, and lists what passed on the pull request — so do not say in your summary that it was not run.`;
 }
 
-function systemPromptFor(brief: StepBrief): string {
-  const base = SYSTEM_PROMPT + checksNote(brief.laterChecks ?? []);
+function systemPromptFor(brief: StepBrief, repositories: readonly WorktreeRef[] = []): string {
+  const base = SYSTEM_PROMPT + checksNote(brief.laterChecks ?? []) + layoutNote(repositories);
   const step = brief.prompt.trim();
   return step ? `${base}\n\nThis step: ${step}` : base;
+}
+
+/** One worktree of a run that spans several repositories. */
+export interface WorktreeRef {
+  /** What the repository is called on the board. Server-supplied, so it is cleaned before it is read out. */
+  name: string;
+  path: string;
+  /** What the worktree was at creation; the confinement is to this and not to `path` resolved now (BP-804). */
+  dir: RecordedDir;
+}
+
+// A name is member-writable text that lands in the agent's system prompt, so it goes in as a bounded
+// JSON string: no line of its own, no quote that closes the one it is in.
+const MAX_REPOSITORY_NAME = 100;
+function nameFor(ref: WorktreeRef): string {
+  const clean = ref.name.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").trim().slice(0, MAX_REPOSITORY_NAME);
+  return JSON.stringify(clean || "repository");
+}
+
+/**
+ * Written by the worker, not by the task: where each repository is when a run spans several. The
+ * agent may write in all of them; one it leaves untouched gets no pull request.
+ */
+function layoutNote(repositories: readonly WorktreeRef[]): string {
+  if (repositories.length < 2) return "";
+  const lines = repositories.map((ref, index) => `- ${nameFor(ref)}${index === 0 ? " (your working directory)" : ""}: ${ref.path}`);
+  return [
+    "",
+    "",
+    "This task spans several repositories. Each is checked out as its own git worktree on its own branch, and you may change any of them:",
+    ...lines,
+    "Make each change in the repository it belongs to, using the absolute paths above. A repository you leave unchanged gets no pull request. Your closing summary is published as the description of every pull request this task opens, so write it for readers of each repository: assume any repository's pull request may be public, and describe only that repository's own changes in it.",
+  ].join("\n");
 }
 
 function isUsageLimit(text: string): boolean {
@@ -210,6 +243,11 @@ export interface ExecuteOptions {
   /** What the worktree was at creation; the confinement is to this and not to `worktreePath` resolved now (BP-804). */
   worktreeDir: RecordedDir;
   brief: StepBrief;
+  /**
+   * Every worktree of a run that spans several repositories, the working directory's first. The
+   * agent is confined to all of them and told where they are; absent, to `worktreeDir` alone.
+   */
+  repositories?: readonly WorktreeRef[];
   signal?: AbortSignal;
   onEvent?: StreamListener;
 }
@@ -220,7 +258,7 @@ export interface Executor {
 
 export function createExecutor(config: WorkerConfig, runner: Runner, claudePath: string): Executor {
   return {
-    async execute({ task, worktreePath, worktreeDir, brief, signal, onEvent }) {
+    async execute({ task, worktreePath, worktreeDir, brief, repositories, signal, onEvent }) {
       // The CLI authenticates from its logged-in session under HOME, so the allowlist both keeps
       // ANTHROPIC_API_KEY out (which would bill per token) and keeps CP_API_TOKEN out of the
       // hands of the agent it is about to run with bypassPermissions
@@ -245,7 +283,7 @@ export function createExecutor(config: WorkerConfig, runner: Runner, claudePath:
           // unattended agent could move the task it is working on, and no gate or diff would see it.
           "--strict-mcp-config",
           "--append-system-prompt",
-          systemPromptFor(brief),
+          systemPromptFor(brief, repositories),
           // The block's model wins over the worker's, so one agent can spend Opus on the change and
           // Sonnet on the step that only reads
           "--model",
@@ -259,7 +297,9 @@ export function createExecutor(config: WorkerConfig, runner: Runner, claudePath:
       // CLI needs no write access to `~/.claude` or `~/.claude.json` to run, so the allowance is
       // one directory rather than a denylist of the instruction channels inside the operator's
       // home. See sandbox.ts for why this is not a per-run HOME.
-      const spawn = confineTool("claude", claudePath, claudeArgs, { writable: [worktreeDir] });
+      const spawn = confineTool("claude", claudePath, claudeArgs, {
+        writable: repositories && repositories.length > 1 ? repositories.map((ref) => ref.dir) : [worktreeDir],
+      });
 
       // Before the spawn, not after: a step that cannot be confined does not run half-confined and
       // does not run at all. A machine fault rather than an error, because it is the machine that

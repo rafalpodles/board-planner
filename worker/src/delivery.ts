@@ -15,6 +15,9 @@ const MAX_BODY_CHARS = 30_000;
 const MAX_OUTPUT_CHARS = 2000;
 
 const PR_URL = /https?:\/\/[^\s"'<>]*\/pull\/\d+/g;
+// A whole url and nothing else: what is written into a description is checked against this, not
+// against whatever a caller thought was one.
+const PR_URL_EXACT = /^https?:\/\/[^\s"'<>@]+\/pull\/\d+$/;
 
 export interface Delivery {
   push(worktreePath: string, branch: string, commit: string): Promise<void>;
@@ -28,6 +31,17 @@ export interface Delivery {
     checks?: PassedCheck[],
   ): Promise<string>;
   merge(worktreePath: string, prUrl: string): Promise<void>;
+  /**
+   * Whether the repository a pull request lives in is private. Null when gh cannot say, which a
+   * caller must read as "do not assume it is": the answer decides what may be written into a public
+   * repository's pull request.
+   */
+  isPrivate(worktreePath: string, prUrl: string): Promise<boolean | null>;
+  /**
+   * Adds the worker's own list of the pull requests the same run opened in the task's other
+   * repositories to the end of this one's description (BP-1072).
+   */
+  linkRelated(worktreePath: string, prUrl: string, related: string[]): Promise<void>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -90,11 +104,18 @@ export function prBody(summary: string, checks: PassedCheck[] = []): string {
 }
 
 const CHECKS_HEADING = "### Checks run by the worker, not written by the agent";
+const RELATED_HEADING = "### Pull requests in the task's other repositories, listed by the worker";
 // A heading, not a sentence: a Markdown heading or a whole line in bold, about checks and the
 // worker. The rule above the worker's own section and the "not written by the agent" label are
 // what a reader goes by; this keeps the obvious impostor out of the body (BP-780 review).
-const WORKER_HEADING =
-  /^\s*(?:#{1,6}\s*checks?\b[^\n]*|(?:\*\*|__)\s*checks?\b[^\n]*(?:\*\*|__))\s*$/i;
+// What the worker writes under its rules: the checks it ran, and the pull requests it listed from the
+// same run. "Related" alone is enough for the second; "pull request(s) ... other" catches the
+// worker's own wording being copied.
+const WORKER_HEADING_TEXT = String.raw`(?:checks?\b|related\s+pull\s+requests?\b|pull requests?\b[^\n]*\bother\b)[^\n]*`;
+const WORKER_HEADING = new RegExp(
+  String.raw`^\s*(?:#{1,6}\s*${WORKER_HEADING_TEXT}|(?:\*\*|__)\s*${WORKER_HEADING_TEXT}(?:\*\*|__))\s*$`,
+  "i",
+);
 
 export function formatDuration(ms: number): string {
   const seconds = Math.round(ms / 1000);
@@ -389,6 +410,49 @@ export function createDelivery(
       if (existing && /already exists/i.test(output)) return existing;
 
       throw failure("gh pr create", result);
+    },
+
+    async isPrivate(worktreePath, prUrl) {
+      const repo = repoArgs(prUrl);
+      if (repo.length === 0) return null;
+      const result = await run(
+        requireToolPath("gh", ghPath),
+        ["repo", "view", repo[1], "--json", "isPrivate"],
+        worktreePath,
+      );
+      if (result.code !== 0) return null;
+      try {
+        const parsed: unknown = JSON.parse(result.stdout);
+        return isRecord(parsed) && typeof parsed.isPrivate === "boolean" ? parsed.isPrivate : null;
+      } catch {
+        return null;
+      }
+    },
+
+    async linkRelated(worktreePath, prUrl, related) {
+      const urls = related.filter((url) => PR_URL_EXACT.test(url) && url !== prUrl);
+      if (urls.length === 0) return;
+      const repo = repoArgs(prUrl);
+      if (repo.length === 0) {
+        throw new Error(`refusing to edit ${prUrl}: it names no repository, so gh would read the local checkout`);
+      }
+      const gh = requireToolPath("gh", ghPath);
+      const view = await run(gh, ["pr", "view", prUrl, "--json", "body", ...repo], worktreePath);
+      if (view.code !== 0) throw failure("gh pr view", view);
+      let body: unknown;
+      try {
+        const parsed: unknown = JSON.parse(view.stdout);
+        body = isRecord(parsed) ? parsed.body : undefined;
+      } catch {
+        body = undefined;
+      }
+      if (typeof body !== "string") throw new Error(`gh pr view printed no description for ${prUrl}`);
+      // Named by the repository in the url gh printed, never by anything the server or the agent wrote
+      const lines = urls.map((url) => `- ${url}`);
+      const section = ["---", "", RELATED_HEADING, "", ...lines].join("\n");
+      const edited = `${body.replace(/\s+$/, "")}\n\n${section}`;
+      const result = await run(gh, ["pr", "edit", prUrl, "--body", edited, ...repo], worktreePath);
+      if (result.code !== 0) throw failure("gh pr edit", result);
     },
 
     async merge(worktreePath, prUrl) {
