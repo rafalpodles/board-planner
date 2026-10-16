@@ -140,7 +140,7 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
         <>
           A machine takes the tasks of one repository per board — the first listed one it holds a checkout of,
           here {held.join(", ") || "another repository"}. Pick it for this task, or use a machine whose
-          checkouts start with this task&apos;s repository.
+          first listed checkout is this task&apos;s repository.
         </>
       );
     }

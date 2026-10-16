@@ -328,10 +328,11 @@ export function assignmentsFor(
 }
 
 // The offer and the catalogue are about the one address a machine is handed to clone, the primary
-// repository's. A machine holding only a later entry serves the project, but cloning the primary onto
-// it would make that the entry its assignment names, and every task naming the later one would stop
-// being claimable there — so these two keep answering about the primary alone until the worker binds
-// several checkouts per project (BP-1067).
+// repository's, and they answer exactly as they did before a project could list several. A machine
+// holding only a later entry is therefore not asked to clone the primary on its own (`wanted` defaults
+// to `servedHere`). A person who ticks the project there still gets it, and that clone makes the
+// primary the entry the machine's assignment names, so tasks naming the later one stop being claimable
+// on it. Closing that needs the worker to bind several checkouts per project (BP-1067).
 function holdsPrimary(project: MatchableProject, reported: RepoReport[]): boolean {
   return !!matchRepo({ ...project, repositories: null }, reported);
 }
