@@ -29,7 +29,7 @@ describe("postToTeamChannels", () => {
   });
 
   it("cuts a long summary to what Discord takes, and counts a channel that refused", async () => {
-    m.safeFetch.mockImplementation(async (url: string) => new Response("x", { status: url.includes("slack") ? 500 : 200 }));
+    m.safeFetch.mockImplementation(async (url: unknown) => new Response("x", { status: String(url).includes("slack") ? 500 : 200 }));
     const result = await postToTeamChannels(db, "p1", "x".repeat(2500));
     expect(result).toEqual({ channels: 2, delivered: 1 });
     const discord = m.safeFetch.mock.calls.find(([url]) => String(url).includes("discord"))!;
