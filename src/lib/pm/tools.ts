@@ -237,7 +237,7 @@ function whyThisProblem({ reason, blockers }: HandoverProblem, key: string): str
       return `it waits on unfinished blockers (${(blockers ?? []).map((n) => `${key}-${n}`).join(", ")})`;
     case "no-agent":
       return "no agent is named on it, so nothing will run it — a task naming none is one a person is doing";
-    case "no-repository":
+    case "repository-not-chosen":
       return "this project lists several repositories and the task names none, so no machine takes it — set its repository";
     case "not-approved-yet":
       return "it is not in a column a machine claims from, so nothing will run it yet";

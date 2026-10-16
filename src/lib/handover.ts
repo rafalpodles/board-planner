@@ -22,7 +22,7 @@ export type HandoverReason =
   | "assigned-by-someone-else"
   | "pm-assigned-for-someone-else"
   | "blocked"
-  | "no-repository"
+  | "repository-not-chosen"
   | "attempts-exhausted";
 
 export interface HandoverProblem {
@@ -153,7 +153,7 @@ export function handoverOf(task: Judged, columns?: AnyColumn[], repositories?: n
   }
   const assignee = assigneeProblem(task);
   if (assignee) problems.push(assignee);
-  if ((repositories ?? 0) > 1 && !task.repository) problems.push({ reason: "no-repository", by: null });
+  if ((repositories ?? 0) > 1 && !task.repository) problems.push({ reason: "repository-not-chosen", by: null });
   // The claim leaves a task with an unfinished blocker alone until that blocker reaches a done column
   const blockers = columns ? openBlockers(task, columns) : [];
   if (blockers.length > 0) problems.push({ reason: "blocked", by: null, blockers });

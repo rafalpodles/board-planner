@@ -1645,3 +1645,65 @@ describe("PropertyRail before the agent list has answered", () => {
     expect(screen.queryByTestId("agents-unread")).toBeNull();
   });
 });
+
+// BP-1066. A board with several repositories needs each task to name the one it changes.
+describe("the repository of a task", () => {
+  const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" } as ApiUser;
+  const AGENT = [{ _id: "a1", name: "Default" }] as React.ComponentProps<typeof PropertyRail>["agents"];
+  const REPOSITORIES = [
+    { id: "r1", name: "app" },
+    { id: "r2", name: "site" },
+  ];
+  const board = (repositories: { id: string; name: string }[]) => ({
+    repositoryUrl: "https://github.com/acme/app",
+    workerEnabled: true,
+    lockedByInstance: false,
+    canAdmin: false,
+    columns: BOARD.map((c) => ({ role: c.role })),
+    machine: "live" as const,
+    bindingError: "",
+    haltedBy: null,
+    repositories,
+  });
+  const rail = (repositories: { id: string; name: string }[], taskRepository: string | null = null) =>
+    renderRail({
+      agents: AGENT,
+      columns: BOARD,
+      board: board(repositories),
+      draft: { ...draft, agent: "a1", assignee: "owner", repository: taskRepository },
+      stored: { agent: "a1", assignee: OWNER, assignedBy: OWNER, status: "ready" as never, repository: taskRepository },
+    });
+
+  it("is not asked for on a board with one repository", () => {
+    rail([REPOSITORIES[0]]);
+
+    expect(screen.queryByText("Repository")).toBeNull();
+  });
+
+  it("offers each repository by name once the board lists several, and writes the one picked", async () => {
+    const set = rail(REPOSITORIES);
+    await openRow("Repository");
+
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining("app"), expect.stringContaining("site")])
+    );
+    await pick(/site/);
+    expect(set).toHaveBeenCalledWith("repository", "r2");
+  });
+
+  it("shows the repository a task names", () => {
+    rail(REPOSITORIES, "r2");
+
+    expect(screen.getByText("site")).toBeTruthy();
+    expect(screen.queryByText("Choose one")).toBeNull();
+  });
+
+  it("says a machine will not take a task that names none, and stops saying it once it does", () => {
+    rail(REPOSITORIES);
+    expect(screen.getByText(/lists several repositories and the task names none/)).toBeTruthy();
+    cleanup();
+
+    rail(REPOSITORIES, "r1");
+    expect(screen.queryByText(/lists several repositories and the task names none/)).toBeNull();
+  });
+});

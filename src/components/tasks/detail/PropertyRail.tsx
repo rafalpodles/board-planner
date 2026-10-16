@@ -129,6 +129,8 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
           work its owner assigned to themselves.
         </>
       );
+    case "repository-not-chosen":
+      return <>This board lists several repositories and the task names none — choose the one it changes, and a machine can take it.</>;
     case "blocked": {
       const keys = (("blockers" in blocker && blocker.blockers) || []).map((n) =>
         ctx.projectKey ? `${ctx.projectKey}-${n}` : `#${n}`
@@ -408,7 +410,7 @@ interface PropertyRailProps {
    * describe a state that has never existed.
    */
   stored: Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "status"> &
-    Partial<Pick<ApiTask, "pmAssignedFor" | "blockedBy">>;
+    Partial<Pick<ApiTask, "pmAssignedFor" | "blockedBy" | "repository">>;
   /** The board's own columns — a claim is defined in terms of their roles, not their names */
   columns?: AnyColumn[];
   /** What the board itself lacks for any run; null until read, and then nothing is judged */
@@ -497,7 +499,7 @@ export function PropertyRail({
   const pending =
     (draft.agent ?? null) !== storedAgent ||
     (draft.assignee ?? null) !== (stored.assignee?.username ?? null);
-  const handover = pending ? null : handoverOf(stored, columns);
+  const handover = pending ? null : handoverOf(stored, columns, board?.repositories?.length);
   const awaiting = !columns || awaitingClaim(columns, stored.status);
   // Read off the stored task rather than off `handover`, which is suppressed mid-edit and orders
   // the column requirement first: the repair is about what the document is missing, not about
