@@ -23,6 +23,7 @@ export type HandoverReason =
   | "pm-assigned-for-someone-else"
   | "blocked"
   | "repository-not-chosen"
+  | "repository-not-served"
   | "attempts-exhausted";
 
 export interface HandoverProblem {
@@ -136,8 +137,17 @@ export function finalProblem(handover: Handover): HandoverProblem | null {
  * Omitted where the caller does not know them, and then this requirement is not judged.
  * @param repositories how many repositories the board lists. With several, a claim takes only a task
  * that names one; omitted where the caller does not know, and then this is not judged either.
+ * @param served the repositories the reader's own machines hold a checkout of, for a reader whose
+ * machines would take this task. A machine takes only the tasks of the repository its assignment
+ * names, so a task naming another waits for a machine that is not coming. Judged only when some
+ * machine serves something: with none, the board's own readiness already says so.
  */
-export function handoverOf(task: Judged, columns?: AnyColumn[], repositories?: number): Handover {
+export function handoverOf(
+  task: Judged,
+  columns?: AnyColumn[],
+  repositories?: number,
+  served?: string[] | null
+): Handover {
   if (!task.agent) return { runs: false, problems: [{ reason: "no-agent", by: null }] };
   // Nothing resets a task's attempts and the claim skips one that has spent them, so no other
   // advice would make it run: the reason stands alone, like choosing no agent
@@ -153,7 +163,12 @@ export function handoverOf(task: Judged, columns?: AnyColumn[], repositories?: n
   }
   const assignee = assigneeProblem(task);
   if (assignee) problems.push(assignee);
-  if ((repositories ?? 0) > 1 && !task.repository) problems.push({ reason: "repository-not-chosen", by: null });
+  if ((repositories ?? 0) > 1) {
+    if (!task.repository) problems.push({ reason: "repository-not-chosen", by: null });
+    else if (served && served.length > 0 && !served.includes(task.repository)) {
+      problems.push({ reason: "repository-not-served", by: null });
+    }
+  }
   // The claim leaves a task with an unfinished blocker alone until that blocker reaches a done column
   const blockers = columns ? openBlockers(task, columns) : [];
   if (blockers.length > 0) problems.push({ reason: "blocked", by: null, blockers });

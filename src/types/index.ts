@@ -2103,6 +2103,8 @@ export interface ApiHandoverReadiness {
   haltedBy: WorkerHaltSource | null;
   /** The board's repositories, which a task names one of once there are several */
   repositories?: { id: string; name: string }[];
+  /** Which of them the reader's own machines hold a checkout of, as their assignments name it */
+  machineRepositories?: string[];
 }
 
 export type SetupGuideStepId =

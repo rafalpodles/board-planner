@@ -239,6 +239,8 @@ function whyThisProblem({ reason, blockers }: HandoverProblem, key: string): str
       return "no agent is named on it, so nothing will run it — a task naming none is one a person is doing";
     case "repository-not-chosen":
       return "this project lists several repositories and the task names none, so no machine takes it — set its repository";
+    case "repository-not-served":
+      return "a machine takes only the tasks of the repository it holds a checkout of, and this task names another";
     case "not-approved-yet":
       return "it is not in a column a machine claims from, so nothing will run it yet";
     case "unassigned":

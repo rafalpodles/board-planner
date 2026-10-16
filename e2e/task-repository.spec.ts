@@ -266,6 +266,30 @@ test.describe("choosing the repository on the task page", () => {
     await expect(notice(page)).toHaveCount(0);
   });
 
+  async function taskNames(repository: mongoose.Types.ObjectId) {
+    const handle = await db();
+    await handle.collection("tasks").updateOne({ taskNumber: MEMBER_HANDOVER_TASK_NUMBER }, { $set: { repository: String(repository) } });
+  }
+
+  // The machine holds the checkout of "app" only, so a machine will never take a task for "site"
+  test("says the reader's machine will not take a task naming a repository it does not hold", async ({ page }) => {
+    await taskNames(WEB);
+    await openAsMember(page);
+
+    await expect(notice(page)).toHaveAttribute("data-reason", "repository-not-served");
+    await expect(notice(page)).toContainText("Your machine holds the checkout of app");
+    await expect(waiting(page)).toHaveCount(0);
+  });
+
+  // The control: the same machine and board, a task naming the repository the machine holds
+  test("waits for the machine, and says so, when the task names the repository it holds", async ({ page }) => {
+    await taskNames(API);
+    await openAsMember(page);
+
+    await expect(waiting(page)).toBeVisible();
+    await expect(notice(page)).toHaveCount(0);
+  });
+
   test("offers no repository row on a board with one", async ({ page }) => {
     await listRepositories([{ _id: API, url: HANDOVER_REPOSITORY, name: "app" }]);
     await openAsMember(page);

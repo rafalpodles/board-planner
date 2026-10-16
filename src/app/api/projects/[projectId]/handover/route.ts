@@ -7,6 +7,7 @@ import { projectRepositoryUrl } from "@/lib/repository";
 import { projectRepositories } from "@/lib/repositories";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import { machineReadinessFor } from "@/lib/worker-service";
+import { servedRepository } from "@/lib/repo-match";
 import type { ApiHandoverReadiness } from "@/types";
 import { claimingMachineIds } from "@/lib/machine-limit";
 
@@ -41,6 +42,9 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
     bindingError: machine.bindingError,
     haltedBy: machine.haltedBy,
     repositories: projectRepositories(project).map((r) => ({ id: r.id, name: r.name || r.url })),
+    machineRepositories: [
+      ...new Set(workers.flatMap((w) => servedRepository(project, w.repos ?? [])?.id ?? [])),
+    ],
   };
   return NextResponse.json(body);
 });

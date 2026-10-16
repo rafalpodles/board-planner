@@ -1665,11 +1665,15 @@ describe("the repository of a task", () => {
     haltedBy: null,
     repositories,
   });
-  const rail = (repositories: { id: string; name: string }[], taskRepository: string | null = null) =>
+  const rail = (
+    repositories: { id: string; name: string }[],
+    taskRepository: string | null = null,
+    machineRepositories: string[] = []
+  ) =>
     renderRail({
       agents: AGENT,
       columns: BOARD,
-      board: board(repositories),
+      board: { ...board(repositories), machineRepositories },
       draft: { ...draft, agent: "a1", assignee: "owner", repository: taskRepository },
       stored: { agent: "a1", assignee: OWNER, assignedBy: OWNER, status: "ready" as never, repository: taskRepository },
     });
@@ -1705,5 +1709,30 @@ describe("the repository of a task", () => {
 
     rail(REPOSITORIES, "r1");
     expect(screen.queryByText(/lists several repositories and the task names none/)).toBeNull();
+  });
+
+  it("says the reader's machine will not take a task naming a repository it does not hold", () => {
+    rail(REPOSITORIES, "r2", ["r1"]);
+
+    expect(screen.getByText(/Your machine holds the checkout of app, and a machine takes only that repository's tasks/)).toBeTruthy();
+  });
+
+  it("says nothing of it for the repository the machine holds", () => {
+    rail(REPOSITORIES, "r1", ["r1"]);
+
+    expect(screen.queryByText(/Your machine holds the checkout/)).toBeNull();
+  });
+
+  it("does not say it to somebody who is not the task's assignee, whose machine would not take it anyway", () => {
+    renderRail({
+      agents: AGENT,
+      columns: BOARD,
+      board: { ...board(REPOSITORIES), machineRepositories: ["r1"] },
+      draft: { ...draft, agent: "a1", assignee: "owner", repository: "r2" },
+      stored: { agent: "a1", assignee: OWNER, assignedBy: OWNER, status: "ready" as never, repository: "r2" },
+      currentUsername: "claude",
+    });
+
+    expect(screen.queryByText(/Your machine holds the checkout/)).toBeNull();
   });
 });

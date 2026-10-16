@@ -97,6 +97,9 @@ interface BlockerContext {
   bindingError: string;
   /** Who paused or stopped the reader's own machine: the board, or somebody at the machine */
   haltedBy: WorkerHaltSource | null;
+  repositories: { id: string; name: string }[];
+  /** The ids of those the reader's own machines hold a checkout of */
+  machineRepositories: string[];
 }
 
 function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }) {
@@ -129,6 +132,17 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
           work its owner assigned to themselves.
         </>
       );
+    case "repository-not-served": {
+      const held = (ctx.repositories ?? [])
+        .filter((r) => ctx.machineRepositories?.includes(r.id))
+        .map((r) => r.name);
+      return (
+        <>
+          Your machine holds the checkout of {held.join(", ") || "another repository"}, and a machine takes only
+          that repository&apos;s tasks — pick it here, or clone this task&apos;s repository on the machine.
+        </>
+      );
+    }
     case "repository-not-chosen":
       return <>This board lists several repositories and the task names none — choose the one it changes, and a machine can take it.</>;
     case "blocked": {
@@ -324,6 +338,8 @@ function HandoverNotice({
     locked: gaps.includes("runs-locked"),
     bindingError: board?.bindingError ?? "",
     haltedBy: board?.haltedBy ?? null,
+    repositories: board?.repositories ?? [],
+    machineRepositories: board?.machineRepositories ?? [],
   };
 
   if (blockers.length === 0) {
@@ -499,7 +515,15 @@ export function PropertyRail({
   const pending =
     (draft.agent ?? null) !== storedAgent ||
     (draft.assignee ?? null) !== (stored.assignee?.username ?? null);
-  const handover = pending ? null : handoverOf(stored, columns, board?.repositories?.length);
+  const viewerIsAssignee = !!currentUsername && stored.assignee?.username === currentUsername;
+  const handover = pending
+    ? null
+    : handoverOf(
+        stored,
+        columns,
+        board?.repositories?.length,
+        viewerIsAssignee ? board?.machineRepositories : null
+      );
   const awaiting = !columns || awaitingClaim(columns, stored.status);
   // Read off the stored task rather than off `handover`, which is suppressed mid-edit and orders
   // the column requirement first: the repair is about what the document is missing, not about
