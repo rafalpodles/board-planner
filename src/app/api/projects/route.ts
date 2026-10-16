@@ -1,4 +1,5 @@
 import { readAuthenticatedJsonBody } from "@/lib/request-body";
+import { withPrimaryUrl } from "@/lib/repositories";
 import { NextResponse } from "next/server";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { isValidProjectKey, PROJECT_KEY_RULE } from "@/lib/identifiers";
@@ -124,7 +125,7 @@ export const POST = withAdmin(async (request, { user, db }) => {
       ...(setup.icon !== undefined && { icon: setup.icon }),
       ...(setup.columns && { columns: setup.columns }),
       ...(setup.categories && { categories: setup.categories }),
-      ...(setup.repositoryUrl && { repositoryUrl: setup.repositoryUrl }),
+      ...(setup.repositoryUrl && { repositoryUrl: setup.repositoryUrl, repositories: withPrimaryUrl([], setup.repositoryUrl) }),
       ...(setup.pmEnabled !== undefined && { pm: { enabled: setup.pmEnabled } }),
     });
   } catch (e) {

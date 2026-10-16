@@ -1030,6 +1030,7 @@ export interface IProject {
   notificationChannels: INotificationChannel[];
   worker: ProjectWorkerConfig;
   repositoryUrl: string;
+  repositories: { _id: Types.ObjectId; url: string; name?: string }[];
   /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   githubRepo: string;
   githubToken: string;
@@ -1336,6 +1337,8 @@ export interface ApiProject {
   webhooks: ApiWebhook[];
   notificationChannels: ApiNotificationChannel[];
   repositoryUrl: string;
+  /** The first is the primary, which repositoryUrl mirrors (BP-986) */
+  repositories?: { id: string; url: string; name: string }[];
   // Which of the two integrations that URL's host resolves to, "" when neither
   repositoryProvider: "github" | "gitlab" | "";
   // This instance's GitHub web origin, so a draft URL is classified the way the server will
