@@ -5,6 +5,7 @@ const findOneAndUpdate = vi.fn();
 const runPmTurn = vi.fn();
 const buildBoardDigest = vi.fn();
 const drainPmTriggers = vi.fn();
+const drainTriage = vi.fn(async (..._args: unknown[]) => {});
 
 const servedOrganisations = vi.hoisted(() => ({ list: null as null | { _id: unknown; digestHour?: number; timezone?: string }[] }));
 // The gateway's counters are its own tests' business (src/lib/ai-gateway): these only need the door to open
@@ -33,6 +34,7 @@ vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({ Project: { find: projectFind, findOneAndUpdate } }));
 vi.mock("./agent", () => ({ runPmTurn }));
 vi.mock("./triggers", () => ({ drainPmTriggers }));
+vi.mock("@/ee/ai/triage", () => ({ drainTriage }));
 vi.mock("./pm-user", () => ({ getPmUser: async () => ({ _id: "pm-user" }) }));
 const resolveModelKey = vi.hoisted(() => vi.fn(async () => ({ ok: true, key: "k", source: "own" }) as unknown));
 vi.mock("@/lib/model-keys", async (importOriginal) => ({
@@ -92,6 +94,18 @@ describe("pmSchedulerTick", () => {
 
     expect(drainPmTriggers).toHaveBeenCalledWith(expect.anything(), { limit: TRIGGERS_PER_ORGANISATION_PER_TICK });
     expect(TRIGGERS_PER_ORGANISATION_PER_TICK).toBeLessThan(10);
+  });
+
+  it("retries the triage queue each tick, bounded, and carries on when it fails (BP-871)", async () => {
+    const { pmSchedulerTick, TRIAGE_PER_ORGANISATION_PER_TICK } = await import("./scheduler");
+    drainTriage.mockRejectedValueOnce(new Error("down"));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await pmSchedulerTick();
+
+    expect(drainTriage).toHaveBeenCalledWith(expect.anything(), { limit: TRIAGE_PER_ORGANISATION_PER_TICK });
+    expect(errors).toHaveBeenCalledWith("Triage drain failed:", expect.any(Error));
+    errors.mockRestore();
   });
 
   it("runs one project's review at a time", async () => {

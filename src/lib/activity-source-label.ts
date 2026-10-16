@@ -3,6 +3,7 @@ import type { ShownActivitySource } from "@/types";
 const LABELS: Record<ShownActivitySource, string> = {
   "web-ui": "Web",
   "pm-agent": "PM agent",
+  "ai-triage": "AI triage",
   worker: "Worker",
   mcp: "MCP",
   api: "API",
@@ -31,6 +32,8 @@ export function sourceTitle(source: ShownActivitySource, detail?: string): strin
       return "Through the web app";
     case "pm-agent":
       return detail ? `By the PM agent (${detail})` : "By the PM agent";
+    case "ai-triage":
+      return "By AI triage, from a suggestion on a new task";
     case "worker":
       return detail ? `By the worker ${detail}` : "By a worker";
     case "mcp":

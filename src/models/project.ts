@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { IProject, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, GRANT_RELATIONS, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES } from "@/types";
+import { IProject, DEFAULT_PROJECT_CATEGORIES, DEFAULT_PROJECT_COLUMNS, COLUMN_ROLES, GRANT_RELATIONS, WEBHOOK_EVENTS, NOTIFICATION_CHANNEL_TYPES, CUSTOM_FIELD_TYPES, TRIAGE_MODES } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
 import { MAX_REPOSITORY_URL_LENGTH, REPOSITORY_NAME_MAX_LENGTH } from "@/lib/repositories";
 
@@ -269,6 +269,7 @@ const projectSchema = new Schema<IProject>(
       default: "production",
       trim: true,
     },
+    triageMode: { type: String, enum: TRIAGE_MODES, default: "off" },
     deploymentSync: {
       type: {
         syncedThrough: { type: Date, default: null },

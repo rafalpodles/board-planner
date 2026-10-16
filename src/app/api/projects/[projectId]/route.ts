@@ -20,7 +20,7 @@ import { encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { validatePmConfig, pmAvailability, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
-import { PROJECT_ICONS, type IPmMcpServer } from "@/types";
+import { PROJECT_ICONS, TRIAGE_MODES, type IPmMcpServer } from "@/types";
 import { projectRepositories, withPrimaryUrl, type StoredRepository, MAX_REPOSITORY_URL_LENGTH } from "@/lib/repositories";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import { githubWebBase } from "@/lib/github-host";
@@ -141,6 +141,16 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   if (CODA_SETTINGS_FIELDS.some((field) => field in updates) && !onlyClearsCoda(updates)) {
     const refusal = await entitlementRefusal(db, "integrations.coda");
     if (refusal) return refusal;
+  }
+  if (body.triageMode !== undefined) {
+    if (!(TRIAGE_MODES as readonly unknown[]).includes(body.triageMode)) {
+      return NextResponse.json({ error: `triageMode must be one of ${TRIAGE_MODES.join(", ")}` }, { status: 400 });
+    }
+    if (body.triageMode !== "off") {
+      const refusal = await entitlementRefusal(db, "ai.triage");
+      if (refusal) return refusal;
+    }
+    updates.triageMode = body.triageMode;
   }
   if (body.key !== undefined) {
     return NextResponse.json(

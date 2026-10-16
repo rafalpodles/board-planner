@@ -68,6 +68,7 @@ describe("the gateway is the only door to a model", () => {
         "src/app/api/settings/ai-keys/route.ts",
         "src/ee/ai/release-notes.ts",
         "src/ee/ai/duplicates.ts",
+        "src/ee/ai/triage.ts",
         "src/instrumentation-node.ts",
         "src/lib/pm/agent.ts",
         "src/lib/pm/scheduler.ts",

@@ -594,6 +594,23 @@ describe("PUT /api/projects/[projectId] and Coda on a free instance", () => {
 
     expect(res.status).toBe(200);
   });
+
+  // BP-871: triage is Pro to turn on, and free to turn off
+  it.each([["suggest"], ["auto"]])("refuses triage %s with 402, writing nothing", async (triageMode) => {
+    const res = await PUT(putRequest({ triageMode }), ctx());
+
+    expect(res.status).toBe(402);
+    expect(await res.json()).toMatchObject({ feature: "ai.triage" });
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("lets triage be turned off, and on once the plan is Pro, and refuses a mode that is not one", async () => {
+    expect((await PUT(putRequest({ triageMode: "off" }), ctx())).status).toBe(200);
+    expect((await PUT(putRequest({ triageMode: "always" }), ctx())).status).toBe(400);
+    plan.value = "pro";
+    expect((await PUT(putRequest({ triageMode: "auto" }), ctx())).status).toBe(200);
+    expect(projectFindOneAndUpdate.mock.calls.at(-1)?.[1]).toMatchObject({ triageMode: "auto" });
+  });
 });
 
 /**

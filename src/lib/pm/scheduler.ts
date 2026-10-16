@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { runPmTurn } from "./agent";
 import { acquireTurnLock, isTurnRunning, releaseTurnLock } from "./turn-lock";
 import { drainPmTriggers } from "./triggers";
+import { drainTriage } from "@/ee/ai/triage";
 import { getPmUser } from "./pm-user";
 import { BOARD_REVIEW_DISALLOWED_TOOLS, buildBoardReviewPrompt, dueReviewSlot } from "./autonomy";
 import { buildBoardDigest, digestHeadline, renderBoardDigest } from "./board-review";
@@ -14,6 +15,7 @@ const TICK_MS = Number(process.env.PM_SCHEDULER_TICK_MS) || 5 * 60 * 1000;
 
 // Triggers one organisation may run in a tick: a queue that never empties must not hold back the rest
 export const TRIGGERS_PER_ORGANISATION_PER_TICK = 3;
+export const TRIAGE_PER_ORGANISATION_PER_TICK = 10;
 
 let started = false;
 let ticking = false;
@@ -43,6 +45,7 @@ export async function pmSchedulerTick(): Promise<void> {
 
 async function pmSchedulerTickFor(db: ScopedDb): Promise<void> {
   await drainPmTriggers(db, { limit: TRIGGERS_PER_ORGANISATION_PER_TICK });
+  await drainTriage(db, { limit: TRIAGE_PER_ORGANISATION_PER_TICK }).catch((err) => console.error("Triage drain failed:", err));
 
   const now = new Date();
   const projects = await db.Project.find(
