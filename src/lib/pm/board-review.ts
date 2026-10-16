@@ -12,7 +12,7 @@ const STALE_DAYS_BY_ROLE: Partial<Record<ColumnRole, number>> = {
 };
 const REFINABLE_ROLES: ColumnRole[] = ["approved", "active", "review", "blocked"];
 const DUPLICATE_SIMILARITY = 0.6;
-const MAX_TASKS_SCANNED = 500;
+export const MAX_TASKS_SCANNED = 500;
 const MAX_ITEMS_PER_FINDING = 10;
 const DAY_MS = 24 * 60 * 60 * 1000;
 

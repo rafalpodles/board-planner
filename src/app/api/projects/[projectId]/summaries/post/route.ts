@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { requireEntitlement, withProjectAccess } from "@/lib/middleware";
 import { readJsonBody } from "@/lib/request-body";
 import { decryptSecret } from "@/lib/encryption";
-import { countAttempt, sourceKey } from "@/lib/rate-limit";
+import { clearAttempts, countAttempt, sourceKey } from "@/lib/rate-limit";
 import { postToTeamChannels } from "@/lib/notifications";
 import { escapeDiscord } from "@/lib/chat-markup";
 import { summaryMarkdown } from "@/ee/ai/summaries";
@@ -35,7 +35,8 @@ export const POST = withProjectAccess(
     if ((await countAttempt(sourceKey(`user:${String(user._id)}`, "ai-summary-post"))) > POSTS_PER_USER_WINDOW) {
       return NextResponse.json({ error: "Too many summaries posted. Try again in 15 minutes." }, { status: 429 });
     }
-    if ((await countAttempt(sourceKey(`summary:${summary.nonce}`, "ai-summary-posted"), SEALED_SUMMARY_MS)) > 1) {
+    const postedKey = sourceKey(`summary:${summary.nonce}`, "ai-summary-posted");
+    if ((await countAttempt(postedKey, SEALED_SUMMARY_MS)) > 1) {
       return NextResponse.json({ error: "That summary has been posted already" }, { status: 409 });
     }
     await connectDB();
@@ -45,6 +46,7 @@ export const POST = withProjectAccess(
       // Discord renders a masked link written into a title; what the board's people wrote is escaped
       discord: summaryMarkdown(note, summary.facts, escapeDiscord),
     });
+    if (result.delivered === 0) await clearAttempts(postedKey);
     if (result.channels === 0) return NextResponse.json({ error: "This project has no team channel" }, { status: 409 });
     return NextResponse.json(result);
   })

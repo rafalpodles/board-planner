@@ -4,7 +4,7 @@ import type { ScopedDb } from "@/lib/db-scope";
 import { getProjectColumns } from "@/lib/columns";
 import { taskKeyOf } from "@/lib/task-key";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
-import { buildBoardDigest } from "@/lib/pm/board-review";
+import { buildBoardDigest, MAX_TASKS_SCANNED } from "@/lib/pm/board-review";
 import { projectStatusHistories, statusChangeFilter } from "@/lib/status-history";
 import { gatewayWrite, type WriteResult } from "@/lib/ai-gateway";
 import { resolveAiModel } from "@/lib/pm/availability";
@@ -153,7 +153,7 @@ async function projectFacts(db: ScopedDb, projectId: string, now: Date): Promise
       { label: "Tasks finished", value: finished.length },
       { label: "Open tasks", value: digest.openTotal },
       ...perColumn.filter((c) => c.count > 0).map((c) => ({ label: `Open in ${c.label}`, value: c.count })),
-      { label: "Stuck in a column", value: digest.staleTotal },
+      { label: digest.truncated ? `Stuck in a column, of the ${MAX_TASKS_SCANNED} newest open tasks` : "Stuck in a column", value: digest.staleTotal },
     ],
     lists: [
       { label: "Finished", items: finished.slice(0, LISTED).map((t) => ({ key: taskKeyOf(digest.projectKey, t.taskNumber), title: t.title })) },
@@ -196,7 +196,7 @@ export function summaryInstructions(kind: SummaryKind): string {
 }
 
 const NUMBER_WORDS =
-  /\b(zero|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|dozens?|half|halves|quarter|percent|twice|double|triple)\b/gi;
+  /\b(zero|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|dozens?|half|halves|percent|twice)\b/gi;
 
 /**
  * What in a note counts for itself: a number the server did not count, outside the task keys it was
@@ -205,7 +205,9 @@ const NUMBER_WORDS =
 export function figuresOutsideFacts(note: string, facts: Facts): string[] {
   const allowed = new Set(facts.figures.map((f) => f.value));
   const keys = new Set(facts.lists.flatMap((l) => l.items.map((i) => i.key)));
-  const withoutKeys = note.replace(/\b[A-Z][A-Z0-9]*-\d+\b/g, (key) => (keys.has(key) ? "" : key));
+  const withoutKeys = [...keys]
+    .sort((a, b) => b.length - a.length)
+    .reduce((text, key) => text.replace(new RegExp(`(?<![\\w-])${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`, "g"), ""), note);
   const digits = [...withoutKeys.matchAll(/\d+(?:[.,]\d+)*/g)].map((m) => m[0]).filter((n) => !/^\d+$/.test(n) || !allowed.has(Number(n)));
   const words = [...note.matchAll(NUMBER_WORDS)].map((m) => m[0]);
   return [...digits, ...words];

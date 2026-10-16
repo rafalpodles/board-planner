@@ -4,7 +4,7 @@ import { Types } from "mongoose";
 const m = vi.hoisted(() => ({ gatewayWrite: vi.fn(), digest: vi.fn(), histories: vi.fn() }));
 vi.mock("@/lib/ai-gateway", () => ({ gatewayWrite: m.gatewayWrite }));
 vi.mock("@/lib/pm/availability", () => ({ resolveAiModel: async () => "openai/gpt-6-luna" }));
-vi.mock("@/lib/pm/board-review", () => ({ buildBoardDigest: m.digest }));
+vi.mock("@/lib/pm/board-review", () => ({ buildBoardDigest: m.digest, MAX_TASKS_SCANNED: 500 }));
 vi.mock("@/lib/status-history", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/status-history")>()), projectStatusHistories: m.histories }));
 
 const { figuresOutsideFacts, renderFacts, summaryFacts, summaryInstructions, writeSummary } = await import("./summaries");
@@ -44,9 +44,15 @@ describe("the figures a summary may give", () => {
     expect(figuresOutsideFacts("BP-999 is late.", FACTS)).toEqual(["999"]);
   });
 
+  it("strips a board's own key whole, whatever its key is made of", () => {
+    const facts = { ...FACTS, lists: [{ label: "At risk", items: [{ key: "WEB_APP-12", title: "a", note: "" }, { key: "WEB-APP-7", title: "b", note: "" }] }] };
+    expect(figuresOutsideFacts("WEB_APP-12 and WEB-APP-7 lag.", facts)).toEqual([]);
+    expect(figuresOutsideFacts("APP-7 and WEB_APP-120 lag.", facts)).toEqual(["7", "120"]);
+  });
+
   it("counts a number written as a word as one of the note's own, since it cannot be checked", () => {
     expect(figuresOutsideFacts("Three tasks are blocked and half the sprint is left.", FACTS)).toEqual(["Three", "half"]);
-    expect(figuresOutsideFacts("TP-12 needs a decision.", FACTS)).toEqual([]);
+    expect(figuresOutsideFacts("TP-12 needs a decision; double-check it this quarter.", FACTS)).toEqual([]);
   });
 
   it("tells the model to write no figures, so the server's are the only ones", () => {
@@ -165,10 +171,10 @@ describe("summaryFacts", () => {
       { label: "Tasks created", value: 1 },
       { label: "Tasks finished", value: 1 },
       { label: "Open tasks", value: 6 },
-      // Counted per column, not from the digest's capped scan, and the stuck count before its list is cut
+      // Counted per column, not from the digest's capped scan; the stuck count says the scan it came from
       { label: "Open in To Do", value: 4 },
       { label: "Open in Doing", value: 2 },
-      { label: "Stuck in a column", value: 14 },
+      { label: "Stuck in a column, of the 500 newest open tasks", value: 14 },
     ]);
   });
 });

@@ -100,14 +100,27 @@ describe("POST summaries/post", () => {
     expect((await send({ sealed: sealSummary("p1", null, FACTS, new Types.ObjectId()) })).status).toBe(400);
     const { encryptSecret } = await import("@/lib/encryption");
     expect((await send({ sealed: encryptSecret(JSON.stringify({ projectId: "p1", facts: FACTS, at: Date.now(), nonce: "n" }), ORG) })).status).toBe(400);
-    const sealed = sealSummary("p1", null, FACTS, ORG);
-    vi.useFakeTimers({ now: Date.now() + post.SEALED_SUMMARY_MS, toFake: ["Date"] });
+    const sealedAt = Date.now();
+    vi.useFakeTimers({ now: sealedAt, toFake: ["Date"] });
     try {
+      const sealed = sealSummary("p1", null, FACTS, ORG);
+      vi.setSystemTime(sealedAt + post.SEALED_SUMMARY_MS - 1);
+      const lastMoment = sealSummary("p1", null, FACTS, ORG);
+      vi.setSystemTime(sealedAt + post.SEALED_SUMMARY_MS);
       expect((await send({ sealed })).status).toBe(410);
+      expect((await send({ sealed: lastMoment })).status).toBe(200);
     } finally {
       vi.useRealTimers();
     }
-    expect(m.postToTeamChannels).not.toHaveBeenCalled();
+    expect(m.postToTeamChannels).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a summary no channel accepted be posted again", async () => {
+    const sealed = sealSummary("p1", null, FACTS, ORG);
+    m.postToTeamChannels.mockResolvedValueOnce({ channels: 1, delivered: 0 });
+    expect((await send({ sealed })).status).toBe(200);
+    expect((await send({ sealed })).status).toBe(200);
+    expect((await send({ sealed })).status).toBe(409);
   });
 
   it("holds each person to so many posts", async () => {
