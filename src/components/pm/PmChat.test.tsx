@@ -549,9 +549,48 @@ describe("a turn that streams its answer (BP-1037)", () => {
   it("starts the text again when the agent makes another call, because only the last call's text is the answer", async () => {
     const stream = await startTurn();
 
-    await act(async () => stream.push(event("delta", { text: "Let me look." }) + event("round", {})));
+    await act(async () => stream.push(event("delta", { text: "Let me look." })));
+    expect((await screen.findByTestId("pm-live-text")).textContent).toBe("Let me look.");
+    await act(async () => stream.push(event("round", {})));
 
     expect(screen.queryByTestId("pm-live-text")).toBeNull();
+    await act(async () => stream.close());
+  });
+
+  it("drops the text in front of a tool call as soon as the call begins, since it cannot be the answer", async () => {
+    const stream = await startTurn();
+
+    await act(async () => stream.push(event("delta", { text: "I will add that." })));
+    expect(await screen.findByTestId("pm-live-text")).toBeTruthy();
+    await act(async () => stream.push(event("tool", { tool: "create_task", phase: "preparing" })));
+
+    expect(screen.queryByTestId("pm-live-text")).toBeNull();
+    await act(async () => stream.close());
+  });
+
+  it("keeps saying Stopping… while the stream goes on until the abort lands", async () => {
+    api.post.mockResolvedValue({});
+    const stream = await startTurn();
+    await act(async () => stream.push(event("delta", { text: "Writing" })));
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Stop the PM turn" }).click();
+    });
+    expect(screen.getByRole("status").textContent).toBe("Stopping…");
+    await act(async () => stream.push(event("delta", { text: " more" }) + event("tool", { tool: "list_tasks", phase: "running" })));
+
+    expect(screen.getByRole("status").textContent).toBe("Stopping…");
+    await act(async () => stream.close());
+  });
+
+  it("does not announce each chunk of the answer to a screen reader", async () => {
+    const stream = await startTurn();
+
+    await act(async () => stream.push(event("delta", { text: "Writing" })));
+    expect(screen.getByRole("status").getAttribute("aria-live")).toBe("off");
+
+    await act(async () => stream.push(event("tool", { tool: "create_task", phase: "preparing" })));
+    expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite");
     await act(async () => stream.close());
   });
 
@@ -566,13 +605,14 @@ describe("a turn that streams its answer (BP-1037)", () => {
     await act(async () => stream.close());
   });
 
-  it("recovers the answer from the thread when the stream drops after some text", async () => {
+  it("keeps the text it had on screen under the recovery notice when the stream drops", async () => {
     const stream = await startTurn();
     await act(async () => stream.push(event("delta", { text: "Half an ans" })));
 
     await act(async () => stream.close());
 
     expect(await screen.findByText(/Connection lost/)).toBeTruthy();
+    expect(screen.getByTestId("pm-live-text").textContent).toBe("Half an ans");
   });
 });
 

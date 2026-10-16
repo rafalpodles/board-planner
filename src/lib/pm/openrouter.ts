@@ -180,7 +180,8 @@ export async function chatCompletion(opts: {
     return { type: "error", error: `OpenRouter HTTP ${response.status}: ${withoutKey(bodyText).slice(0, 300)}` };
   }
 
-  if (streaming) {
+  const answersWithJson = /application\/json/i.test(response.headers.get("content-type") ?? "");
+  if (streaming && !answersWithJson) {
     return readStream(response, opts.onDelta!, { signal: opts.signal, idle: idle!, idleMs: opts.idleMs ?? STREAM_IDLE_MS, withoutKey });
   }
 
@@ -198,6 +199,8 @@ export async function chatCompletion(opts: {
     const apiError = data?.error?.message;
     return { type: "error", error: apiError ? `OpenRouter error: ${withoutKey(String(apiError))}` : "OpenRouter returned no choices" };
   }
+
+  if (streaming && message.content) opts.onDelta!({ type: "text", text: message.content });
 
   const rawCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
   if (rawCalls.length > 0) {
@@ -241,6 +244,8 @@ async function readStream(
   if (!response.body) return { type: "error", error: "OpenRouter returned no stream" };
 
   let content = "";
+  let reasoning = "";
+  const reasoningDetails: unknown[] = [];
   let usage: OrUsage | undefined;
   let finished = false;
   let failure: string | null = null;
@@ -253,6 +258,15 @@ async function readStream(
       timedOut = true;
       idle.abort();
     }, idleMs);
+  };
+
+  // A provider that leaves `index` off puts each parallel call's id on its first fragment, so a new id is a new call
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const slotOf = (part: any) => {
+    const index = Number.isInteger(part?.index) ? (part.index as number) : 0;
+    const known = calls.get(index);
+    if (known && part?.id && known.id && part.id !== known.id) return Math.max(...calls.keys()) + 1;
+    return index;
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -269,18 +283,42 @@ async function readStream(
       content += delta.content;
       onDelta({ type: "text", text: delta.content });
     }
+    if (typeof delta.reasoning === "string") reasoning += delta.reasoning;
+    if (Array.isArray(delta.reasoning_details)) reasoningDetails.push(...delta.reasoning_details);
     for (const part of Array.isArray(delta.tool_calls) ? delta.tool_calls : []) {
-      const index = Number.isInteger(part?.index) ? part.index : 0;
-      const call = calls.get(index) ?? { id: "", name: "", args: "" };
-      const named = Boolean(call.name);
+      const slot = slotOf(part);
+      const call = calls.get(slot) ?? { id: "", name: "", args: "" };
       if (part?.id) call.id = part.id;
-      if (part?.function?.name) call.name += part.function.name;
+      if (part?.function?.name && !call.name) {
+        call.name = part.function.name;
+        onDelta({ type: "tool", name: call.name });
+      }
       if (typeof part?.function?.arguments === "string") call.args += part.function.arguments;
-      calls.set(index, call);
-      if (!named && call.name) onDelta({ type: "tool", name: call.name });
+      calls.set(slot, call);
     }
     if (choice.finish_reason === "error") failure = failure ?? "OpenRouter error: the provider failed mid-answer";
     if (choice.finish_reason) finished = true;
+  };
+
+  const handle = (event: string) => {
+    const data = event
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n");
+    if (!data) return;
+    if (data === "[DONE]") {
+      finished = true;
+      return;
+    }
+    let chunk;
+    try {
+      chunk = JSON.parse(data);
+    } catch {
+      failure = failure ?? "OpenRouter sent an unreadable chunk";
+      return;
+    }
+    take(chunk);
   };
 
   const reader = response.body.getReader();
@@ -294,27 +332,16 @@ async function readStream(
       rearm();
       buffer += decoder.decode(value, { stream: true });
       let end;
-      while ((end = buffer.search(/\r?\n\r?\n/)) !== -1) {
+      while (!failure && (end = buffer.search(/\r?\n\r?\n/)) !== -1) {
         const event = buffer.slice(0, end);
         buffer = buffer.slice(end).replace(/^\r?\n\r?\n/, "");
-        const data = event
-          .split(/\r?\n/)
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trimStart())
-          .join("\n");
-        if (!data) continue;
-        if (data === "[DONE]") {
-          finished = true;
-          continue;
-        }
-        try {
-          take(JSON.parse(data));
-        } catch {
-          failure = failure ?? "OpenRouter sent an unreadable chunk";
-        }
-        if (failure) break;
+        handle(event);
       }
       if (failure) break;
+    }
+    if (!failure) {
+      buffer += decoder.decode();
+      if (buffer.trim()) handle(buffer);
     }
   } catch {
     if (signal?.aborted) return { type: "aborted" };
@@ -333,12 +360,18 @@ async function readStream(
   if (calls.size > 0) {
     const raw = [...calls.entries()]
       .sort(([a], [b]) => a - b)
-      .map(([, c], i) => ({ id: c.id || `call_${i}`, type: "function", function: { name: c.name, arguments: c.args } }));
+      .map(([, c], i) => ({ id: c.id || `call_${i}`, type: "function", function: { name: c.name, arguments: c.args || "{}" } }));
     return {
       type: "tool_calls",
       content,
       calls: parseToolCalls(raw),
-      assistantMessage: { role: "assistant", content, tool_calls: raw },
+      assistantMessage: {
+        role: "assistant",
+        content,
+        tool_calls: raw,
+        ...(reasoning ? { reasoning } : {}),
+        ...(reasoningDetails.length > 0 ? { reasoning_details: reasoningDetails } : {}),
+      },
       usage,
     };
   }

@@ -755,15 +755,6 @@ describe("a turn someone is watching (BP-1037)", () => {
     expect(result.message?.content).toMatch(/step limit/);
   });
 
-  it("ends in the error the stream ended in", async () => {
-    chatCompletion.mockResolvedValueOnce({ type: "error", error: "The connection to the model was cut off.", sent: true });
-
-    const result = await watched(() => {});
-
-    expect(result).toMatchObject({ ok: false, error: "The connection to the model was cut off." });
-    expect(createdMessages.at(-1)!.content).toBe("⚠️ The connection to the model was cut off.");
-  });
-
   it("asks for no stream when nobody is watching", async () => {
     chatCompletion.mockResolvedValue({ type: "text", content: "done" });
 

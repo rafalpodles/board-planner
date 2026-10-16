@@ -65,7 +65,7 @@ test.describe("an answer that is still being written", () => {
 });
 
 test.describe("a tool the agent is about to use", () => {
-  test("is named while it is prepared, and its chip appears once it has run", async ({ page }) => {
+  test("is named while it is prepared, and its chip appears once it has run", async ({ page, request }) => {
     await say(page, "Leave a note.", {
       name: "add_comment",
       arguments: { taskKey: SIBLING_TASK_KEY, body: "Split this into two smaller tasks." },
@@ -75,6 +75,9 @@ test.describe("a tool the agent is about to use", () => {
     await expect(page.getByRole("status").filter({ hasText: "Preparing a comment…" })).toBeVisible();
     await expect(page.getByRole("link", { name: new RegExp(SIBLING_TASK_KEY) })).toBeVisible({ timeout: 30_000 });
     await expect(reply(page)).toContainText("Done.");
+
+    const comments = await request.get(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}/comments`, { headers: ADMIN_AUTH });
+    expect(JSON.stringify(await comments.json()), "the tool this test's cut variant leaves unrun did run here").toContain("Split this into two smaller tasks.");
   });
 });
 
@@ -84,7 +87,7 @@ test.describe("a stream the provider cuts off", () => {
 
     await expect(page.getByText(/The connection to the model was cut off/).first()).toBeVisible({ timeout: 30_000 });
     await expect(reply(page)).toContainText(/⚠️ The connection to the model was cut off/);
-    await expect(reply(page)).not.toContainText("This answer will");
+    await expect(reply(page)).not.toContainText("This ans");
     await expect(liveText(page)).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
   });
@@ -99,5 +102,19 @@ test.describe("a stream the provider cuts off", () => {
     await expect(page.getByText(/The connection to the model was cut off/).first()).toBeVisible({ timeout: 30_000 });
     const comments = await request.get(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}/comments`, { headers: ADMIN_AUTH });
     expect(JSON.stringify(await comments.json())).not.toContain("Never to be written.");
+  });
+});
+
+test.describe("a Stop pressed while the answer is arriving", () => {
+  test("ends the turn as stopped and does not keep the half-written text", async ({ page }) => {
+    await say(page, "Plan it.", { say: "The plan has three steps: scope it, build it, and then ship it to everyone.", chunkDelayMs: 400 });
+    await expect(liveText(page)).toBeVisible();
+
+    await page.getByRole("button", { name: "Stop the PM turn" }).click();
+
+    await expect(page.getByText("⏹ Stopped by user.")).toBeVisible({ timeout: 15_000 });
+    await expect(reply(page)).not.toContainText("The plan has");
+    await expect(liveText(page)).toHaveCount(0);
+    await expect(sendButton(page)).toBeVisible();
   });
 });

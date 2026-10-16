@@ -190,7 +190,7 @@ describe("gatewayChat", () => {
     );
   });
 
-  it("counts a stream that broke after the provider began to answer, but not a call it refused", async () => {
+  it("counts a stream that broke after the provider began to answer", async () => {
     const messages = [{ role: "user", content: "x".repeat(100) }];
     m.chatCompletion.mockResolvedValue({ type: "error", error: "The connection to the model was cut off.", sent: true });
 

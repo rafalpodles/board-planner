@@ -21,6 +21,18 @@ function streamOf(pieces: string[], { endsOpen = false }: { endsOpen?: boolean }
     });
 }
 
+function heldBody() {
+  let controller!: ReadableStreamDefaultController;
+  const body: Body = (signal) =>
+    new ReadableStream({
+      start(c) {
+        controller = c;
+        signal?.addEventListener("abort", () => c.error(new DOMException("aborted", "AbortError")));
+      },
+    });
+  return { body, push: (piece: string) => controller.enqueue(encoder.encode(piece)), close: () => controller.close() };
+}
+
 function respondWith(body: Body) {
   const fetchMock = vi.fn(
     async (_url: string, init: RequestInit) =>
@@ -155,6 +167,119 @@ describe("a streamed completion", () => {
   });
 });
 
+describe("a stream as providers really send it", () => {
+  it("reads CRLF separators", async () => {
+    respondWith(streamOf([text("a").replaceAll("\n", "\r\n"), text("b").replaceAll("\n", "\r\n"), finish().replaceAll("\n", "\r\n"), "data: [DONE]\r\n\r\n"]));
+
+    expect(await ask().result).toMatchObject({ type: "text", content: "ab" });
+  });
+
+  it("keeps a character that arrives in two network chunks whole", async () => {
+    const bytes = encoder.encode(text("zażółć"));
+    const cut = bytes.indexOf(0xc5) + 1;
+    respondWith(() => new ReadableStream({
+      start(c) {
+        c.enqueue(bytes.slice(0, cut));
+        c.enqueue(bytes.slice(cut));
+        c.enqueue(encoder.encode(finish() + "data: [DONE]\n\n"));
+        c.close();
+      },
+    }));
+
+    expect(await ask().result).toMatchObject({ content: "zażółć" });
+  });
+
+  it("reads the last event when the stream ends without a blank line after it", async () => {
+    respondWith(streamOf([text("ok"), finish().trimEnd(), ]));
+
+    expect(await ask().result).toMatchObject({ type: "text", content: "ok" });
+  });
+
+  it("counts the usage that comes in an unterminated last event", async () => {
+    respondWith(streamOf([text("ok"), finish(), usage.trimEnd()]));
+
+    expect(await ask().result).toMatchObject({ usage: expect.objectContaining({ totalTokens: 15 }) });
+  });
+
+  it("hands the provider's reasoning back with the tool calls it belongs to", async () => {
+    respondWith(
+      streamOf([
+        data({ choices: [{ delta: { reasoning: "I should ", reasoning_details: [{ type: "reasoning.encrypted", data: "sig-1" }] } }] }),
+        data({ choices: [{ delta: { reasoning: "look.", reasoning_details: [{ type: "reasoning.text", text: "x" }] } }] }),
+        data({ choices: [{ delta: { tool_calls: [{ index: 0, id: "a", function: { name: "list_tasks", arguments: "{}" } }] } }] }),
+        finish("tool_calls"),
+        "data: [DONE]\n\n",
+      ])
+    );
+
+    expect(await ask().result).toMatchObject({
+      assistantMessage: {
+        reasoning: "I should look.",
+        reasoning_details: [{ type: "reasoning.encrypted", data: "sig-1" }, { type: "reasoning.text", text: "x" }],
+      },
+    });
+  });
+
+  it("separates two parallel calls from a provider that sends no index", async () => {
+    respondWith(
+      streamOf([
+        data({ choices: [{ delta: { tool_calls: [{ id: "a", function: { name: "get_task", arguments: '{"taskKey":"BP-1"}' } }] } }] }),
+        data({ choices: [{ delta: { tool_calls: [{ id: "b", function: { name: "list_tasks", arguments: "{}" } }] } }] }),
+        finish("tool_calls"),
+        "data: [DONE]\n\n",
+      ])
+    );
+
+    expect(await ask().result).toMatchObject({
+      calls: [
+        { id: "a", name: "get_task", args: { taskKey: "BP-1" } },
+        { id: "b", name: "list_tasks", args: {} },
+      ],
+    });
+  });
+
+  it("does not double a tool's name that the provider repeats on every fragment", async () => {
+    respondWith(
+      streamOf([
+        data({ choices: [{ delta: { tool_calls: [{ index: 0, id: "a", function: { name: "get_task", arguments: '{"taskKey":' } }] } }] }),
+        data({ choices: [{ delta: { tool_calls: [{ index: 0, function: { name: "get_task", arguments: '"BP-1"}' } }] } }] }),
+        finish("tool_calls"),
+        "data: [DONE]\n\n",
+      ])
+    );
+    const { result, deltas } = ask();
+
+    expect(await result).toMatchObject({ calls: [{ name: "get_task", args: { taskKey: "BP-1" } }] });
+    expect(deltas).toEqual([{ type: "tool", name: "get_task" }]);
+  });
+
+  it("echoes a call that took no arguments as an empty object, not an empty string", async () => {
+    respondWith(
+      streamOf([
+        data({ choices: [{ delta: { tool_calls: [{ index: 0, id: "a", function: { name: "list_tasks" } }] } }] }),
+        finish("tool_calls"),
+        "data: [DONE]\n\n",
+      ])
+    );
+
+    expect(await ask().result).toMatchObject({
+      calls: [{ name: "list_tasks", args: {} }],
+      assistantMessage: { tool_calls: [{ function: { arguments: "{}" } }] },
+    });
+  });
+
+  it("takes an answer sent as plain JSON from a provider that ignored the request to stream", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: "whole" } }] }), { headers: { "Content-Type": "application/json" } }))
+    );
+    const { result, deltas } = ask();
+
+    expect(await result).toMatchObject({ type: "text", content: "whole" });
+    expect(deltas).toEqual([{ type: "text", text: "whole" }]);
+  });
+});
+
 describe("a stream that does not finish", () => {
   it("ends as an error that says the request was sent, when the connection closes before a finish", async () => {
     respondWith(streamOf([text("Half an ans")]));
@@ -196,21 +321,31 @@ describe("a stream that does not finish", () => {
     expect(await result).toEqual({ type: "error", error: expect.stringMatching(/stopped responding/), sent: true });
   });
 
-  it("does not time out a stream that keeps talking", async () => {
+  it("does not time out a stream that keeps talking, whether it sends text or only keep-alives", async () => {
     vi.useFakeTimers();
-    let controller!: ReadableStreamDefaultController;
-    respondWith(() => new ReadableStream({ start: (c) => (controller = c) }));
+    const held = heldBody();
+    respondWith(held.body);
     const { result } = ask({ idleMs: 5_000 });
 
-    for (const piece of [text("a"), text("b"), text("c")]) {
+    for (const piece of [text("a"), ": OPENROUTER PROCESSING\n\n", text("b"), ": OPENROUTER PROCESSING\n\n"]) {
       await vi.advanceTimersByTimeAsync(4_000);
-      controller.enqueue(encoder.encode(piece));
+      held.push(piece);
     }
-    controller.enqueue(encoder.encode(finish()));
-    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-    controller.close();
+    held.push(finish() + "data: [DONE]\n\n");
+    held.close();
 
-    expect(await result).toMatchObject({ type: "text", content: "abc" });
+    expect(await result).toMatchObject({ type: "text", content: "ab" });
+  });
+
+  it("gives up after a minute of silence when the caller names no limit", async () => {
+    vi.useFakeTimers();
+    respondWith(streamOf([text("start")], { endsOpen: true }));
+    const { result } = ask();
+
+    await vi.advanceTimersByTimeAsync(59_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(await result).toMatchObject({ type: "error", error: expect.stringMatching(/stopped responding.*60 s/), sent: true });
   });
 
   it("is a stop, not an error, when the caller aborts", async () => {

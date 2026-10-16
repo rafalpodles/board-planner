@@ -9,9 +9,11 @@ describe("what the chat says a tool is doing", () => {
     expect(toolStatus("create_task", "running")).toBe("Applying a new task…");
   });
 
-  it("says something for every tool the PM has, rather than falling back to its internal name", () => {
-    for (const name of Object.keys(PM_TOOLS)) {
-      expect(toolStatus(name, "running"), name).not.toContain(name);
+  it("says something for every tool the PM has, and calls exactly the ones that change nothing reads", () => {
+    for (const [name, tool] of Object.entries(PM_TOOLS)) {
+      const said = toolStatus(name, "running");
+      expect(said, name).not.toContain(name);
+      expect(said.startsWith("Reading"), `${name} is ${tool.write ? "a write" : "a read"}`).toBe(!tool.write);
     }
   });
 
