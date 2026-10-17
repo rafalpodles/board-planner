@@ -136,7 +136,10 @@ export function IntegrationsSection({
       save: async () => {
         try {
           const updated = await api.put(`/api/projects/${projectId}`, {
-            additionalRepositories: more.value.rows.map((row) => ({ url: row.url.trim(), name: row.name.trim() })),
+            // A row nothing was typed into is not a repository, and would only come back as a refusal
+            additionalRepositories: more.value.rows
+              .filter((row) => row.url.trim() || row.name.trim())
+              .map((row) => ({ url: row.url.trim(), name: row.name.trim() })),
           });
           replaceProject(updated);
           more.commit({ rows: additionalRows(updated) });

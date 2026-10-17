@@ -23,11 +23,8 @@ import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { PROJECT_ICONS, TRIAGE_MODES, type IPmMcpServer } from "@/types";
 import {
   projectRepositories,
-  withPrimaryUrl,
-  withAdditionalRepositories,
-  parseAdditionalRepositories,
+  planRepositories,
   describeRepositoryChanges,
-  type AdditionalRepository,
   type StoredRepository,
   MAX_REPOSITORY_URL_LENGTH,
 } from "@/lib/repositories";
@@ -99,26 +96,32 @@ async function writeProjectSettings(
   db: ScopedDb,
   projectId: string,
   updates: Record<string, unknown>,
-  pmServers: { incoming: IPmMcpServer[]; stored: unknown } | null
+  pmServers: { incoming: IPmMcpServer[]; stored: unknown } | null,
+  // The list the new one was worked out from: the whole array is replaced, so a save that raced this
+  // one would otherwise lose its entries without either of them knowing
+  repositoriesBefore?: StoredRepository[]
 ) {
   for (let attempt = 1; ; attempt++) {
+    const conditions: unknown[] = [];
+    if (pmServers) conditions.push({ $eq: [{ $ifNull: ["$pm.mcpServers", []] }, { $literal: pmServers.stored }] });
+    if (repositoriesBefore) conditions.push({ $eq: [{ $ifNull: ["$repositories", []] }, { $literal: repositoriesBefore }] });
     const before = await db.Project.findOneAndUpdate(
-      pmServers
-        ? {
-            _id: projectId,
-            $expr: {
-              $eq: [{ $ifNull: ["$pm.mcpServers", []] }, { $literal: pmServers.stored }],
-            },
-          }
-        : { _id: projectId },
+      conditions.length > 0 ? { _id: projectId, $expr: conditions.length === 1 ? conditions[0] : { $and: conditions } } : { _id: projectId },
       updates,
       { returnDocument: "before" }
     ).lean();
     if (before) return { before };
-    if (!pmServers) return { error: "Project not found", status: 404 as const };
+    if (!pmServers && !repositoriesBefore) return { error: "Project not found", status: 404 as const };
 
-    const fresh = await db.Project.findById(projectId).select("pm.mcpServers").lean();
+    const fresh = await db.Project.findById(projectId).select("pm.mcpServers repositories").lean();
     if (!fresh) return { error: "Project not found", status: 404 as const };
+    if (repositoriesBefore && JSON.stringify(fresh.repositories ?? []) !== JSON.stringify(repositoriesBefore)) {
+      return {
+        error: "The repositories changed while this was saved. Nothing was saved; reload and save again.",
+        status: 409 as const,
+      };
+    }
+    if (!pmServers) return { error: "Project not found", status: 404 as const };
     if (attempt === MCP_SERVERS_WRITE_ATTEMPTS) {
       return {
         error: "The PM agent's MCP connections kept changing while this was saved. Nothing was saved; save again.",
@@ -215,17 +218,6 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
       { error: `repositoryUrl must be at most ${MAX_REPOSITORY_URL_LENGTH} characters` },
       { status: 400 }
     );
-  }
-
-  let additionalRepositories: AdditionalRepository[] | undefined;
-  if (body.additionalRepositories !== undefined) {
-    const current = await db.Project.findById(projectId).select("repositories repositoryUrl githubRepo gitlabRepo");
-    if (!current) return NextResponse.json({ error: "Project not found" }, { status: 404 });
-    const primary =
-      typeof updates.repositoryUrl === "string" ? updates.repositoryUrl.trim() : projectRepositoryUrl(current as never);
-    const parsed = parseAdditionalRepositories(body.additionalRepositories, primary);
-    if ("error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
-    additionalRepositories = parsed.value;
   }
 
   if (body.worker !== undefined) {
@@ -402,29 +394,25 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     }
   }
 
-  if (typeof updates.repositoryUrl === "string" || additionalRepositories) {
-    const current = (await db.Project.findById(projectId).select("repositories repositoryUrl githubRepo gitlabRepo")) as
-      | ({ repositories?: StoredRepository[] } & Record<string, unknown>)
-      | null;
-    let repositories = current?.repositories;
-    // withPrimaryUrl drops an emptied primary and the next entry would take its place, which nobody asked for
-    const othersKept = additionalRepositories ? additionalRepositories.length : (repositories?.length ?? 0) - 1;
-    if (updates.repositoryUrl === "" && othersKept > 0) {
-      return NextResponse.json(
-        { error: "Remove the additional repositories before clearing the repository URL" },
-        { status: 400 }
-      );
-    }
-    if (typeof updates.repositoryUrl === "string") repositories = withPrimaryUrl(repositories, updates.repositoryUrl);
-    if (additionalRepositories) {
-      const primary =
-        typeof updates.repositoryUrl === "string" ? updates.repositoryUrl : projectRepositoryUrl((current as never) ?? ({} as never));
-      repositories = withAdditionalRepositories(repositories, primary, additionalRepositories);
-    }
-    updates.repositories = repositories;
+  let repositoriesBefore: StoredRepository[] | undefined;
+  if (typeof updates.repositoryUrl === "string" || body.additionalRepositories !== undefined) {
+    const found = await db.Project.findById(projectId).select("repositories repositoryUrl githubRepo gitlabRepo gitlabHost");
+    if (!found) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    const current = (typeof found.toObject === "function" ? found.toObject() : found) as unknown as {
+      repositories?: StoredRepository[];
+    };
+    repositoriesBefore = current.repositories ?? [];
+    const plan = planRepositories({
+      stored: repositoriesBefore,
+      legacyPrimary: projectRepositoryUrl(current as never),
+      primary: typeof updates.repositoryUrl === "string" ? updates.repositoryUrl : undefined,
+      additional: body.additionalRepositories,
+    });
+    if ("error" in plan) return NextResponse.json({ error: plan.error }, { status: 400 });
+    updates.repositories = plan.repositories;
   }
 
-  const written = await writeProjectSettings(db, projectId, updates, pmServers);
+  const written = await writeProjectSettings(db, projectId, updates, pmServers, repositoriesBefore);
   if ("error" in written) {
     return NextResponse.json({ error: written.error }, { status: written.status });
   }
@@ -465,7 +453,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   } catch {
     changes = [`Changed: ${Object.keys(updates).join(", ")}`];
   }
-  if (additionalRepositories) {
+  if (body.additionalRepositories !== undefined || typeof updates.repositoryUrl === "string") {
     changes.push(
       ...describeRepositoryChanges(
         (beforeImage as { repositories?: StoredRepository[] }).repositories,

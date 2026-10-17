@@ -237,6 +237,17 @@ describe("IntegrationsSection additional repositories", () => {
     await waitFor(() => expect(group().count).toBe(0));
   });
 
+  it("does not send a row nothing was typed into", async () => {
+    const { group } = renderWith([WEB]);
+    api.put.mockResolvedValue({ _id: "p1", repositories: [WEB] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a repository" }));
+    await waitFor(() => expect(group().count).toBe(1));
+    await group().save();
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1", { additionalRepositories: [] });
+  });
+
   it("removes a row and saves the list without it", async () => {
     const { group } = renderWith([WEB, API]);
     api.put.mockResolvedValue({ _id: "p1", repositories: [WEB] });

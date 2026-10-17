@@ -4,6 +4,7 @@ import {
   describeRepositoryChanges,
   hasSeveralRepositories,
   parseAdditionalRepositories,
+  planRepositories,
   projectRepositories,
   withAdditionalRepositories,
   withPrimaryUrl,
@@ -116,5 +117,55 @@ describe("describeRepositoryChanges", () => {
   it("says nothing when the entries after the primary are the same", () => {
     const list = [primary, entry("https://github.com/acme/api", "API")];
     expect(describeRepositoryChanges(list, list)).toEqual([]);
+  });
+});
+
+describe("planRepositories", () => {
+  const entry = (url: string, name = "") => ({ _id: new Types.ObjectId(), url, name });
+  const web = entry("https://github.com/acme/web", "Web");
+  const api = entry("https://github.com/acme/api", "API");
+
+  it("moves the primary and keeps the others as they are", () => {
+    const plan = planRepositories({ stored: [web, api], legacyPrimary: "", primary: "https://github.com/acme/web2" });
+    expect(plan).toEqual({ repositories: [{ ...web, url: "https://github.com/acme/web2" }, api] });
+  });
+
+  it("refuses a primary that is one of the others, though the others are not sent", () => {
+    expect(planRepositories({ stored: [web, api], legacyPrimary: "", primary: "git@github.com:acme/api.git" })).toEqual({
+      error: expect.stringContaining("already listed"),
+    });
+  });
+
+  it("clears everything in one request, and refuses to clear only the primary", () => {
+    expect(planRepositories({ stored: [web, api], legacyPrimary: "", primary: "", additional: [] })).toEqual({ repositories: [] });
+    expect(planRepositories({ stored: [web, api], legacyPrimary: "", primary: "" })).toEqual({
+      error: expect.stringContaining("Remove the additional repositories"),
+    });
+    expect(planRepositories({ stored: [web, api], legacyPrimary: "", primary: "", additional: [{ url: "https://github.com/acme/api" }] })).toEqual({
+      error: expect.stringContaining("set the repository URL"),
+    });
+  });
+
+  it("gives a project that has not been migrated a stored primary from its legacy address", () => {
+    const plan = planRepositories({ stored: [], legacyPrimary: "https://gitlab.example.com/acme/web", additional: [{ url: "https://github.com/acme/api" }] });
+    expect(plan).toEqual({
+      repositories: [
+        expect.objectContaining({ url: "https://gitlab.example.com/acme/web" }),
+        expect.objectContaining({ url: "https://github.com/acme/api" }),
+      ],
+    });
+  });
+
+  it("keeps an id only for the same host and path", () => {
+    const sameHost = planRepositories({ stored: [web, api], legacyPrimary: "", additional: [{ url: "https://github.com/acme/api.git", name: "" }] });
+    expect(sameHost).toMatchObject({ repositories: [web, { _id: api._id }] });
+    const otherHost = planRepositories({ stored: [web, api], legacyPrimary: "", additional: [{ url: "https://git.example.com/acme/api", name: "" }] });
+    expect("repositories" in otherHost && otherHost.repositories[1]._id).not.toEqual(api._id);
+  });
+
+  it("accepts the same path on two hosts as two repositories", () => {
+    expect(parseAdditionalRepositories([{ url: "https://git.example.com/acme/web" }], "https://github.com/acme/web")).toEqual({
+      value: [{ url: "https://git.example.com/acme/web", name: "" }],
+    });
   });
 });
