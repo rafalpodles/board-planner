@@ -893,7 +893,7 @@ describe("an agent that works across several repositories", () => {
     expect(prompt).toContain('"api" (your working directory):');
     expect(prompt).toContain(`"web": ${second}`);
     expect(prompt).toContain("gets no pull request");
-    expect(prompt).toContain("published as the description of every pull request");
+    expect(prompt).toContain("may be published as the description of the pull requests");
   });
 
   // A name is written by whoever edits the project's repositories and lands in the agent's system prompt

@@ -759,7 +759,7 @@ describe("the pull requests a run in several repositories lists in each other", 
       const { delivery: d, run } = delivery({ "gh repo view": { stdout: JSON.stringify({ isPrivate }) } });
 
       expect(await d.isPrivate("/wt", REMOTE)).toBe(isPrivate);
-      expect(argsOf(run)).toEqual(["repo", "view", "acme/api", "--json", "isPrivate"]);
+      expect(argsOf(run)).toEqual(["repo", "view", "--json", "isPrivate", "--", "acme/api"]);
     });
 
     it("answers null when gh cannot say, or says something else, so a caller does not assume", async () => {
@@ -771,7 +771,18 @@ describe("the pull requests a run in several repositories lists in each other", 
     it("never runs gh for a remote it does not understand", async () => {
       const { delivery: d, run } = delivery({ "gh repo view": { stdout: JSON.stringify({ isPrivate: false }) } });
 
-      for (const remote of ["not-a-url", "git@github-acme:acme/api.git", "--repo=evil/x", "https://github.com/-evil/x", ""]) {
+      for (const remote of [
+        "not-a-url",
+        "git@github-acme:acme/api.git",
+        "--repo=evil/x",
+        "https://github.com/-evil/x",
+        "https://-bx.com/o/r",
+        "git@-bx.com:o/r",
+        "https://.evil.com/o/r",
+        "https://a..com/o/r",
+        "https://github.com:8443/o/r",
+        "",
+      ]) {
         expect(await d.isPrivate("/wt", remote)).toBeNull();
       }
       expect(run).not.toHaveBeenCalled();

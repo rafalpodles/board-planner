@@ -138,7 +138,7 @@ function checksSection(checks: PassedCheck[]): string {
 }
 
 const SCP_REMOTE = /^[\w.-]+@([a-z0-9.-]+\.[a-z]{2,}):([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i;
-const URL_REMOTE = /^(?:https?|ssh|git):\/\/(?:[^@/\s]+@)?([a-z0-9.-]+\.[a-z]{2,})(?::\d+)?\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i;
+const URL_REMOTE = /^(?:https?|ssh|git):\/\/(?:[^@/\s]+@)?([a-z0-9.-]+\.[a-z]{2,})\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i;
 
 /**
  * `owner/repo`, or `host/owner/repo` for any host but github.com, from a remote the server named, in
@@ -150,6 +150,7 @@ export function repositoryOf(remote: string): string | null {
   const match = SCP_REMOTE.exec(trimmed) ?? URL_REMOTE.exec(trimmed);
   if (!match) return null;
   const [, host, owner, repo] = match;
+  if (host.startsWith("-") || host.startsWith(".") || host.includes("..")) return null;
   if (owner.startsWith(".") || repo.startsWith(".") || owner.startsWith("-") || repo.startsWith("-")) return null;
   return host.toLowerCase() === "github.com" ? `${owner}/${repo}` : `${host.toLowerCase()}/${owner}/${repo}`;
 }
@@ -435,7 +436,7 @@ export function createDelivery(
       if (!repository) return null;
       const result = await run(
         requireToolPath("gh", ghPath),
-        ["repo", "view", repository, "--json", "isPrivate"],
+        ["repo", "view", "--json", "isPrivate", "--", repository],
         worktreePath,
       );
       if (result.code !== 0) return null;

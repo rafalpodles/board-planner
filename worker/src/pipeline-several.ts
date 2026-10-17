@@ -30,6 +30,7 @@ import { scrub } from "./scrub.js";
 import { RunState } from "./steps.js";
 import { isResultEvent, StreamEvent } from "./stream.js";
 import { OutcomeKind } from "./telemetry.js";
+import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
 import { pinGit } from "./worktree-pin.js";
 import { Workspace, Worktree } from "./workspace.js";
 import { ClaimedTask, SnapshotEntry } from "./types.js";
@@ -73,7 +74,7 @@ interface Leg {
 }
 
 const GENERIC_SUMMARY =
-  "This is one part of a task that changed several repositories. Its description is limited to this repository's own part because another repository of the task is not known to be public.";
+  "This is one part of a task that changed several repositories. Its description is limited to this repository's own part because not every repository of the task is known to be public.";
 
 const MAX_LABEL = 100;
 // A name is member-writable and ends up in a board comment: one line, no backtick to close a span
@@ -433,13 +434,13 @@ export async function runTaskInRepositories(
 
         case "pull-request": {
           if (active.length === 0) return { kind: "error", message: "refusing to open a pull request: the agent changed no repository" };
-          const privacy = await visibilityOf(active);
-          for (const [index, leg] of active.entries()) {
-            // The agent writes one summary about all of its work. A description is as public as its
-            // repository, so one that is not known to be private carries it only when every other
-            // repository of the run is known to be public: otherwise there may be prose about a
-            // private one in it.
-            const mayCarryProse = privacy[index] === true || privacy.every((each, at) => at === index || each === false);
+          const privacy = await visibilityOf();
+          for (const leg of active) {
+            // The agent writes one summary about all of its work, and it has read every repository of
+            // the run, whether or not it changed one. A description is as public as its repository, so
+            // one that is not known to be private carries the summary only when every other repository
+            // of the run is known to be public: otherwise there may be prose about a private one in it.
+            const mayCarryProse = privacy.get(leg) === true || legs.every((other) => other === leg || privacy.get(other) === false);
             const summary = mayCarryProse ? leg.state.summary : GENERIC_SUMMARY;
             try {
               leg.state.prUrl = await leg.delivery.openPr(leg.worktree.path, task, summary, leg.state.checks);
@@ -480,19 +481,41 @@ export async function runTaskInRepositories(
     }
   }
 
+  // Asked of every repository of the run, the unchanged ones included, and before any pull request
+  // exists. The remote is the one the server named and this machine reported; the pull request goes
+  // where the checkout's origin is NOW, so a verdict is used only while the two are still the same
+  // address.
+  async function visibilityOf(): Promise<Map<Leg, boolean | null>> {
+    const answers = await Promise.all(
+      legs.map(async (leg): Promise<boolean | null> => {
+        try {
+          if ((await liveOrigin(leg)) !== leg.repo.remote) return null;
+          return await leg.delivery.isPrivate(leg.worktree.path, leg.repo.remote);
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return new Map(legs.map((leg, index) => [leg, answers[index]]));
+  }
+
+  async function liveOrigin(leg: Leg): Promise<string | null> {
+    const result = await runner.run(requireGitPath(deps.gitPath), gitArgs(["remote", "get-url", "origin"]), {
+      cwd: leg.worktree.path,
+      timeoutMs: 30_000,
+      env: localGitEnv(),
+    });
+    return result.code === 0 && !result.timedOut ? result.stdout.trim() : null;
+  }
+
   // Each pull request lists the others, unless that would put a repository that is not known to be
   // public into the description of one that is not known to be private: the description of a public
   // pull request is public.
-  async function visibilityOf(active: Leg[]): Promise<(boolean | null)[]> {
-    if (active.length < 2) return active.map(() => null);
-    return Promise.all(active.map((leg) => leg.delivery.isPrivate(leg.worktree.path, leg.repo.remote).catch(() => null)));
-  }
-
-  async function listRelated(active: Leg[], privacy: (boolean | null)[]): Promise<void> {
+  async function listRelated(active: Leg[], privacy: Map<Leg, boolean | null>): Promise<void> {
     if (active.length < 2) return;
-    for (const [index, leg] of active.entries()) {
+    for (const leg of active) {
       const related = active
-        .filter((other, at) => at !== index && (privacy[index] === true || privacy[at] === false))
+        .filter((other) => other !== leg && (privacy.get(leg) === true || privacy.get(other) === false))
         .map((other) => other.state.prUrl);
       if (related.length === 0) continue;
       try {
