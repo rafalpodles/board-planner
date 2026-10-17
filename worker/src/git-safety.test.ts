@@ -104,6 +104,7 @@ const FILES_THAT_RUN_GIT = [
   "gates/review.ts",
   "hidden-files.ts",
   "pipeline.ts",
+  "pipeline-several.ts",
   "provenance.ts",
   "repos.ts",
   "workspace.ts",
