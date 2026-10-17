@@ -58,12 +58,35 @@ case "$1" in
   auth) echo '{"loggedIn":true,"authMethod":"claude.ai","email":"smoke@example.test","subscriptionType":"max"}'; exit 0 ;;
 esac
 prompt=""
+sys=""
 while [ $# -gt 0 ]; do
   if [ "$1" = "-p" ]; then prompt="$2"; shift; fi
+  if [ "$1" = "--append-system-prompt" ]; then sys="$2"; shift; fi
   shift
 done
 case "$prompt" in
   *"[stall]"*) : > ${STALL_MARKER}; exec sleep 600 ;;
+esac
+case "$sys" in
+  *"spans several repositories"*)
+    web=$(printf '%s\\n' "$sys" | sed -n 's/^- "smoke-web": //p')
+    mkdir -p src test "$web/src" "$web/test"
+    printf '%s\\n' 'module.exports = (name) => "Hello, " + name;' > src/greet.js
+    printf '%s\\n' 'module.exports = (name) => "Goodbye, " + name;' > "$web/src/farewell.js"
+    cat > test/greet.test.js <<'JS'
+const test = require("node:test");
+const assert = require("node:assert");
+const greet = require("../src/greet.js");
+test("greets by name", () => assert.strictEqual(greet("Ada"), "Hello, Ada"));
+JS
+    cat > "$web/test/farewell.test.js" <<'JS'
+const test = require("node:test");
+const assert = require("node:assert");
+const farewell = require("../src/farewell.js");
+test("says goodbye by name", () => assert.strictEqual(farewell("Ada"), "Goodbye, Ada"));
+JS
+    echo '{"type":"result","subtype":"success","is_error":false,"result":"{\\"status\\":\\"completed\\",\\"summary\\":\\"Added a greeting and a farewell\\",\\"filesChanged\\":[\\"src/greet.js\\"],\\"testsAdded\\":[\\"test/greet.test.js\\"],\\"blockedReason\\":\\"\\"}"}'
+    exit 0 ;;
 esac
 mkdir -p src test
 printf '%s\\n' 'module.exports = (name) => "Hello, " + name;' > src/greet.js
@@ -81,7 +104,7 @@ printf '%s\\n' "$*" >> '${GH_LOG}'
 case "$1 $2" in
   "--version "*) echo "gh version 2.99.0 (stub)" ;;
   "auth status") echo "github.com"; echo "  Logged in to github.com account e2e-smoke (keyring)"; echo "  - Active account: true" ;;
-  "pr create") echo "${PR_URL}" ;;
+  "pr create") echo "https://github.com/e2e/$(basename "$(git config remote.origin.url)" .git)/pull/1" ;;
   *) echo "gh stub: unsupported: $*" >&2; exit 1 ;;
 esac
 `;
@@ -187,9 +210,9 @@ async function seedBoard() {
   }
 }
 
-function layDownRepository(): string {
-  const bare = join(GIT_ROOT, `${REPO}.git`);
-  const seedClone = join(ROOT, "seed-clone");
+function layDownRepository(repo: string = REPO): string {
+  const bare = join(GIT_ROOT, `${repo}.git`);
+  const seedClone = join(ROOT, `seed-clone-${repo.replace(/\W+/g, "-")}`);
   mkdirSync(bare, { recursive: true });
   git(bare, "init", "--bare", "-q", "-b", "main");
   mkdirSync(seedClone, { recursive: true });
@@ -218,13 +241,13 @@ function layDownRepository(): string {
   return bare;
 }
 
-function cloneCheckout(port: number) {
-  git(ROOT, "clone", "-q", `git://127.0.0.1:${port}/${REPO}.git`, CHECKOUT);
-  git(CHECKOUT, "config", "user.name", "BP-711 smoke");
-  git(CHECKOUT, "config", "user.email", "smoke@example.test");
+function cloneCheckout(port: number, repo: string = REPO, into: string = CHECKOUT) {
+  git(ROOT, "clone", "-q", `git://127.0.0.1:${port}/${repo}.git`, into);
+  git(into, "config", "user.name", "BP-711 smoke");
+  git(into, "config", "user.email", "smoke@example.test");
 }
 
-async function startDaemon(port: number): Promise<ChildProcess> {
+async function startDaemon(port: number, repo: string = REPO): Promise<ChildProcess> {
   const daemon = spawn(
     "git",
     ["daemon", "--reuseaddr", "--export-all", "--enable=receive-pack", `--base-path=${GIT_ROOT}`, `--port=${port}`, "--listen=127.0.0.1", GIT_ROOT],
@@ -234,7 +257,7 @@ async function startDaemon(port: number): Promise<ChildProcess> {
     await expect
       .poll(() => {
         try {
-          execFileSync("git", ["ls-remote", `git://127.0.0.1:${port}/${REPO}.git`], { env: OWN_GIT_ENV, stdio: "pipe" });
+          execFileSync("git", ["ls-remote", `git://127.0.0.1:${port}/${repo}.git`], { env: OWN_GIT_ENV, stdio: "pipe" });
           return true;
         } catch {
           return false;
@@ -387,4 +410,80 @@ test("the real worker claims, runs, delivers and reports a task, and releases th
   expect(released?.execution?.runId).toBeUndefined();
   expect(released?.execution?.attempts).toBe(0);
   expect(await commentsOn(STOPPED.id)).toContainEqual(expect.stringContaining("Returned to the queue: the run was stopped"));
+});
+
+// BP-1073. One task, one project that lists two repositories: the worker takes it only with a checkout of
+// each and says so in X-CP-Capabilities, runs the agent in one worktree per repository, passes the gates in
+// both, pushes both and opens a pull request in each. The two checkouts sit in one parent directory, so
+// their worktrees share a root, which is how an operator lays them out.
+const API = { repo: "e2e/smoke-api", name: "smoke-api", id: new mongoose.Types.ObjectId() };
+const WEB = { repo: "e2e/smoke-web", name: "smoke-web", id: new mongoose.Types.ObjectId() };
+const SEVERAL = { id: new mongoose.Types.ObjectId(), number: 713, title: "Greet and say goodbye" };
+
+test("the real worker runs one task in two repositories and opens a pull request in each", async ({ request }) => {
+  await withDb(async (db) => {
+    await db.collection("tasks").deleteMany({ _id: { $in: [DELIVERED.id, STOPPED.id] } });
+    await db.collection("projects").updateOne(
+      { _id: PROJECT_ID },
+      {
+        $set: {
+          repositoryUrl: API.repo,
+          repositories: [API, WEB].map((r) => ({ _id: r.id, url: r.repo, name: r.name })),
+          taskCounter: SEVERAL.number,
+        },
+        $unset: { githubRepo: "", gitlabRepo: "" },
+      }
+    );
+    await db.collection("tasks").insertOne(
+      taskFactory(new Date())({
+        _id: SEVERAL.id,
+        taskNumber: SEVERAL.number,
+        title: SEVERAL.title,
+        status: "todo",
+        order: 0,
+        assignee: ADMIN_ID,
+        assignedBy: ADMIN_ID,
+        agent: AGENT_ID,
+      })
+    );
+  });
+  const bares = { api: layDownRepository(API.repo), web: layDownRepository(WEB.repo) };
+  const port = await freePort();
+  daemon = await startDaemon(port, API.repo);
+  const checkouts = { api: join(ROOT, "checkout-api"), web: join(ROOT, "checkout-web") };
+  cloneCheckout(port, API.repo, checkouts.api);
+  cloneCheckout(port, WEB.repo, checkouts.web);
+  write(join(STATE, "repos.json"), JSON.stringify({ repos: [checkouts.api, checkouts.web] }) + "\n", 0o600);
+
+  worker = startWorker(await mintEnrolmentToken(request));
+
+  const key = `${PROJECT_KEY}-${SEVERAL.number}`;
+  await expect
+    .poll(async () => (await storedTask(SEVERAL.id))?.status, {
+      message: `${key} should reach the escalation review column; see worker.log`,
+      timeout: 4 * 60_000,
+      intervals: [2_000],
+    })
+    .toBe("needs_human_review");
+
+  const delivered = await storedTask(SEVERAL.id);
+  expect(delivered?.execution?.runId).toBeUndefined();
+  expect(delivered?.execution?.attempts).toBe(1);
+  const urls = [API, WEB].map((r) => `https://github.com/e2e/${r.name}/pull/1`);
+  expect(await commentsOn(SEVERAL.id)).toContainEqual(expect.stringContaining(`Opened ${urls.join(", ")} for review`));
+
+  const branch = `refs/heads/${key}/worker`;
+  expect(git(bares.api, "ls-tree", "-r", "--name-only", branch).split("\n")).toEqual(expect.arrayContaining(["src/greet.js", "test/greet.test.js"]));
+  expect(git(bares.web, "ls-tree", "-r", "--name-only", branch).split("\n")).toEqual(expect.arrayContaining(["src/farewell.js", "test/farewell.test.js"]));
+  for (const bare of Object.values(bares)) {
+    expect(git(bare, "rev-parse", `${branch}^`).trim()).toBe(git(bare, "rev-parse", "refs/heads/main").trim());
+  }
+
+  const ghCalls = readFileSync(GH_LOG, "utf8");
+  expect(ghCalls.match(/^pr create /gm)).toHaveLength(2);
+  // No visibility could be asked of a loopback git daemon, so neither description carries the agent's prose
+  expect(ghCalls.match(/limited to this repository's own part/g)).toHaveLength(2);
+  expect(ghCalls).not.toContain("Added a greeting and a farewell");
+  // ...nor lists the other pull request, for the same reason
+  expect(ghCalls).not.toContain("pr edit");
 });
