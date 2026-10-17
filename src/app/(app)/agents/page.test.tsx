@@ -88,6 +88,7 @@ const IMPLEMENT: ApiAgentBlock = {
   params: {},
   prompt: "Make the change.",
   capability: "edit",
+      provider: "claude",
   model: "opus",
   fallbackModel: "sonnet",
   deterministic: false,

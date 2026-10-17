@@ -1,5 +1,6 @@
 import { normaliseComposition, sequenceOf } from "./agent-rules";
-import { StepCapability } from "@/types";
+import { ProviderId, StepCapability } from "@/types";
+import { DEFAULT_PROVIDER } from "./agent-kinds";
 import type { ScopedDb } from "@/lib/db-scope";
 
 /**
@@ -17,6 +18,7 @@ export interface SnapshotEntry {
   /** step only */
   prompt?: string;
   capability?: StepCapability;
+  provider?: ProviderId;
   model?: string;
   fallbackModel?: string;
   deterministic?: boolean;
@@ -100,6 +102,7 @@ export async function snapshotFor(
             name: block.name,
             prompt: block.prompt,
             capability: block.capability,
+            provider: block.provider ?? DEFAULT_PROVIDER,
             model: block.model,
             fallbackModel: block.fallbackModel,
             deterministic: block.deterministic,

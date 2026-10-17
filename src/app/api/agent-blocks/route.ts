@@ -5,10 +5,13 @@ import { withAdmin, withAuth } from "@/lib/middleware";
 import { allBlocks, freeBlockKey, toApiBlock } from "@/lib/agent-service";
 import {
   capabilityRefusal,
+  fallbackForProviderRefusal,
+  modelForProviderRefusal,
+  providerRefusal,
   gateKindRefusal,
   gateParams,
-  modelRefusal,
 } from "@/lib/agent-block-input";
+import { DEFAULT_PROVIDER, isProvider, ProviderId } from "@/lib/agent-kinds";
 import { BLOCK_KINDS, STEP_CAPABILITIES, StepCapability } from "@/types";
 
 export const GET = withAuth(async (_request, { db }) => {
@@ -35,12 +38,14 @@ export const POST = withAdmin(async (request, { user, db }) => {
   if (!name) return NextResponse.json({ error: "A name is required" }, { status: 400 });
 
   const gate = kind === "gate" ? gateParams(body.gateKind, body.params) : null;
+  const provider: ProviderId = isProvider(body.provider) ? body.provider : DEFAULT_PROVIDER;
   const refusal =
     kind === "gate"
       ? (gateKindRefusal(body.gateKind) ?? gate!.refusal)
       : (capabilityRefusal(body.capability) ??
-        modelRefusal(body.model, "model") ??
-        modelRefusal(body.fallbackModel, "fallbackModel"));
+        providerRefusal(body.provider) ??
+        modelForProviderRefusal(provider, body.model, "model") ??
+        fallbackForProviderRefusal(provider, body.fallbackModel));
   if (refusal) return NextResponse.json({ error: refusal }, { status: 400 });
 
   const key = await freeBlockKey(db, name);
@@ -59,6 +64,7 @@ export const POST = withAdmin(async (request, { user, db }) => {
     params: gate?.params ?? {},
     prompt: kind === "step" && typeof body.prompt === "string" ? body.prompt.trim() : "",
     capability: kind === "step" ? capability : "read-only",
+    provider: kind === "step" ? provider : DEFAULT_PROVIDER,
     model: kind === "step" && typeof body.model === "string" ? body.model : "",
     fallbackModel:
       kind === "step" && typeof body.fallbackModel === "string" ? body.fallbackModel : "",

@@ -10,7 +10,9 @@ import {
   IProject,
   IUser,
 } from "@/types";
-import { brokenProblems, keysOf, normaliseComposition } from "./agent-rules";
+import { brokenProblems, keysOf, normaliseComposition, sequenceOf } from "./agent-rules";
+import { DEFAULT_PROVIDER } from "./agent-kinds";
+import { gateParams } from "./agent-block-input";
 import type { ScopedDb } from "@/lib/db-scope";
 
 /**
@@ -35,6 +37,15 @@ export async function compositionRefusal(
       ? `No block called ${named}. The worker refuses a key it cannot resolve, so this would fail on a machine mid-task.`
       : "An entry names no block at all.";
     return { error: message, problems: [message] };
+  }
+
+  // A position's own parameters override the gate's and reach the worker as written, so the pair the
+  // worker is handed (provider and model together) is what is judged, not each half on its own
+  for (const entry of sequenceOf(composition)) {
+    const block = lookup(entry.key);
+    if (block?.kind !== "gate" || !entry.params) continue;
+    const refusal = gateParams(block.gateKind, { ...block.params, ...entry.params }).refusal;
+    if (refusal) return { error: `${block.name}: ${refusal}`, problems: [`${block.name}: ${refusal}`] };
   }
 
   const broken = brokenProblems(composition, lookup);
@@ -72,6 +83,7 @@ export function toApiBlock(block: IAgentBlock): ApiAgentBlock {
     params: block.params ?? {},
     prompt: block.prompt,
     capability: block.capability,
+    provider: block.provider ?? DEFAULT_PROVIDER,
     model: block.model,
     fallbackModel: block.fallbackModel,
     deterministic: block.deterministic,

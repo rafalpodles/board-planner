@@ -73,3 +73,21 @@ describe("snapshotFor with composition entries", () => {
     expect(snapshot?.sequence.map((e) => e.key)).toEqual(["implement"]);
   });
 });
+
+describe("snapshotFor and the provider of a step (BP-987)", () => {
+  it("carries a step's provider, Claude for a block stored without one", async () => {
+    blockFind.mockReturnValue(
+      lean([
+        { ...BLOCKS[1], key: "on-codex", provider: "codex", model: "gpt-5", fallbackModel: "" },
+        { ...BLOCKS[1], key: "old" },
+      ])
+    );
+    agentFindOne.mockReturnValue(
+      lean({ _id: "a1", name: "Mixed", scope: "global", composition: { implementation: [{ key: "on-codex" }, { key: "old" }] } })
+    );
+
+    const snapshot = await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER);
+
+    expect(snapshot?.sequence.map((entry) => entry.provider)).toEqual(["codex", "claude"]);
+  });
+});
