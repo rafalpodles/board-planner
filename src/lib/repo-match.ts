@@ -1,5 +1,6 @@
 import {
   entryId,
+  repositoryProvider,
   repositoryCandidates,
   repositoryUrlCandidates,
   storedRepositories,
@@ -196,4 +197,23 @@ export function prUrlNamesProjectRepo(prUrl: string, project: MatchableProject):
   if (repo === prUrl) return false;
 
   return wanted.some((candidate) => sameRepo(candidate, repo));
+}
+
+/**
+ * The repositories of one provider that a project lists several of, in order: what a sync reads. A
+ * project that lists one has its one, whatever the provider says — the sync names that case in its own
+ * words — so callers look at `storedRepositories` first.
+ */
+export function repositoriesOfProvider(project: RepositoryFields, provider: "github" | "gitlab"): string[] {
+  const urls = storedRepositories(project)
+    .map((r) => r.url.trim())
+    .filter((url) => repositoryProvider({ repositoryUrl: url, gitlabHost: project.gitlabHost }) === provider);
+  // One round for a repository however many entries spell it, or the spend and the counts double
+  return urls.filter((url, at) => {
+    const mine = parseRemote(url);
+    return urls.findIndex((other) => {
+      const theirs = parseRemote(other);
+      return theirs.repo === mine.repo && theirs.host === mine.host;
+    }) === at;
+  });
 }

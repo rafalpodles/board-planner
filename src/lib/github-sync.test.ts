@@ -1138,6 +1138,92 @@ describe("a project that lists several repositories", () => {
     ).rejects.toThrow("GitHub answered 401");
   });
 
+  it("counts a task once however many of the repositories link it", async () => {
+    fetchPullRequests.mockImplementation(async (_owner: string, repo: string) => [fromRepo(repo === "api" ? 3 : 9, repo)]);
+
+    const result = await syncGithubPullRequests(db, several("https://github.com/o/web", "https://github.com/o/api"), "u1");
+
+    expect(result).toMatchObject({ prsLinked: 2, tasksLinked: 1 });
+    expect(result).not.toHaveProperty("taskNumbers");
+  });
+
+  it("reads one round for a repository however many entries spell it", async () => {
+    fetchPullRequests.mockResolvedValue([fromRepo(1, "web")]);
+
+    await syncGithubPullRequests(db, several("https://github.com/o/web", "git@github.com:o/web.git", "https://github.com/o/api"), "u1");
+
+    expect(fetchPullRequests.mock.calls.map(([, repo]) => repo)).toEqual(["web", "api"]);
+  });
+
+  it("stops asking once GitHub's rate limit is reached, and says which repositories it did not read", async () => {
+    const { GitHubRateLimited } = await import("@/lib/github");
+    fetchPullRequests.mockRejectedValue(new GitHubRateLimited("limited", new Date()));
+
+    const run = syncGithubPullRequests(db, several("https://github.com/o/web", "https://github.com/o/api", "https://github.com/o/docs"), "u1");
+
+    await expect(run).rejects.toThrow("limited");
+    expect(fetchPullRequests).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers with what it read when the limit is reached after some of the repositories", async () => {
+    const { GitHubRateLimited } = await import("@/lib/github");
+    fetchPullRequests.mockImplementation(async (_owner: string, repo: string) => {
+      if (repo === "api") throw new GitHubRateLimited("limited", new Date());
+      return [fromRepo(9, repo)];
+    });
+
+    const result = await syncGithubPullRequests(
+      db,
+      several("https://github.com/o/web", "https://github.com/o/api", "https://github.com/o/docs"),
+      "u1"
+    );
+
+    expect(fetchPullRequests).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      prsLinked: 1,
+      failed: [
+        { repository: "https://github.com/o/api", error: "limited" },
+        { repository: "https://github.com/o/docs", error: expect.stringContaining("rate limit") },
+      ],
+    });
+  });
+
+  it("says in the log which repository the tick could not read, which nothing else would", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    fetchPullRequests.mockImplementation(async (_owner: string, repo: string) => {
+      if (repo === "api") throw new Error("GitHub answered 404");
+      return [fromRepo(9, repo)];
+    });
+    projectFind.mockReturnValue({
+      lean: () => Promise.resolve([several("https://github.com/o/web", "https://github.com/o/api")]),
+    });
+
+    await githubSyncTick();
+
+    expect(error).toHaveBeenCalledWith("GitHub sync could not read https://github.com/o/api of BP: GitHub answered 404");
+    error.mockRestore();
+  });
+
+  it("writes nothing the second time when a task holds a link from each repository and nothing changed", async () => {
+    fetchPullRequests.mockImplementation(async (_owner: string, repo: string) => [fromRepo(repo === "api" ? 3 : 9, repo)]);
+    const both = several("https://github.com/o/web", "https://github.com/o/api");
+    await syncGithubPullRequests(db, both, "u1");
+    const written = taskUpdateOne.mock.calls.flatMap(([, update]) => {
+      const [stage] = update as { $set: { linkedPRs: { $concatArrays: [unknown, { $literal: Record<string, unknown>[] }] } } }[];
+      return stage.$set.linkedPRs.$concatArrays[1].$literal;
+    });
+    expect(written).toHaveLength(2);
+
+    taskUpdateOne.mockClear();
+    logActivity.mockClear();
+    taskFindOne.mockResolvedValue({ _id: "t5", taskNumber: 5, status: "todo", linkedPRs: written });
+    const result = await syncGithubPullRequests(db, both, "u1");
+
+    expect(taskUpdateOne).not.toHaveBeenCalled();
+    expect(logActivity).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ prsLinked: 2, tasksWritten: 0 });
+  });
+
   it("is the one round it always was for a project that lists one", async () => {
     fetchPullRequests.mockResolvedValue([fromRepo(1, "r")]);
 

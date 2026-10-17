@@ -545,6 +545,27 @@ describe("POST .../gitlab/sync — a project that lists several repositories", (
     expect(await res.json()).toMatchObject({ prsLinked: 1, failed: [{ repository: "https://gitlab.com/g/docs", error: "GitLab answered 404" }] });
   });
 
+  it("counts a task once however many of the repositories link it", async () => {
+    projectFindOne.mockReturnValue({ lean: () => several("https://gitlab.com/g/api", "https://gitlab.com/g/docs") });
+    fetchMergeRequests.mockImplementation(async (_host: string, path: string) => [inProject(path === "g/api" ? 3 : 9, path)]);
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(body).toMatchObject({ prsLinked: 2, tasksLinked: 1 });
+    expect(body).not.toHaveProperty("taskNumbers");
+  });
+
+  it("keeps what the first repository's round did when the second's write fails, and names it", async () => {
+    projectFindOne.mockReturnValue({ lean: () => several("https://gitlab.com/g/api", "https://gitlab.com/g/docs") });
+    fetchMergeRequests.mockImplementation(async (_host: string, path: string) => [inProject(path === "g/api" ? 3 : 9, path)]);
+    taskUpdateOne.mockResolvedValueOnce({ modifiedCount: 1 }).mockRejectedValueOnce(new Error("write failed"));
+
+    const res = await POST(request(), ctx());
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ prsLinked: 1, failed: [{ repository: "https://gitlab.com/g/docs", error: "write failed" }] });
+  });
+
   it("answers as a single repository does when none of them can be read", async () => {
     projectFindOne.mockReturnValue({ lean: () => several("https://gitlab.com/g/api", "https://gitlab.com/g/docs") });
     fetchMergeRequests.mockRejectedValue(new Error("GitLab answered 401"));

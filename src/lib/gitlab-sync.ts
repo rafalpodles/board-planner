@@ -3,7 +3,8 @@ import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { mergedReviewDestination } from "@/lib/columns";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
-import { projectRepositoryUrl, repositoriesOfProvider, repositoryProvider, storedRepositories } from "@/lib/repository";
+import { projectRepositoryUrl, repositoryProvider, storedRepositories } from "@/lib/repository";
+import { repositoriesOfProvider } from "@/lib/repo-match";
 import type { RepositoryFields } from "@/lib/repository";
 import type { ScopedDb } from "@/lib/db-scope";
 import {
@@ -17,6 +18,8 @@ import {
 /** What a GitLab sync needs of a project: the route reads the whole document, so this is only a floor */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type GitlabSyncProject = RepositoryFields & { _id: any; key: string; formerKeys?: string[] | null; gitlabToken?: string | null } & Record<string, any>;
+
+type GitlabRound = GitlabSyncResult & { taskNumbers?: number[] };
 
 export type GitlabSyncResult =
   | {
@@ -38,17 +41,24 @@ export type GitlabSyncResult =
  */
 export async function syncGitlabMergeRequests(db: ScopedDb, project: GitlabSyncProject, actor: string): Promise<GitlabSyncResult> {
   if (storedRepositories(project).length <= 1) {
-    return syncGitlabRepository(db, project, projectRepositoryUrl(project), actor);
+    return withoutTasks(await syncGitlabRepository(db, project, projectRepositoryUrl(project), actor));
   }
   const urls = repositoriesOfProvider(project, "gitlab");
-  if (urls.length === 0) return syncGitlabRepository(db, project, projectRepositoryUrl(project), actor);
+  if (urls.length === 0) return withoutTasks(await syncGitlabRepository(db, project, projectRepositoryUrl(project), actor));
 
-  const total = { prsFound: 0, tasksLinked: 0, prsLinked: 0, prsUnlinked: 0, autoTransitioned: 0 };
+  const total = { prsFound: 0, prsLinked: 0, prsUnlinked: 0, autoTransitioned: 0 };
+  const tasks = new Set<number>();
   const failed: { repository: string; error: string }[] = [];
   let first: GitlabSyncResult | undefined;
   let any = false;
   for (const url of urls) {
-    const result = await syncGitlabRepository(db, project, url, actor);
+    let result: GitlabRound;
+    try {
+      result = await syncGitlabRepository(db, project, url, actor);
+    } catch (err) {
+      // A write that failed in this round; the rounds before it have landed and are kept
+      result = { ok: false, status: 500, error: (err instanceof Error ? err.message : "the sync failed").split("\n")[0].slice(0, 200) };
+    }
     if (!result.ok) {
       failed.push({ repository: url, error: result.error });
       first ??= result;
@@ -56,12 +66,19 @@ export async function syncGitlabMergeRequests(db: ScopedDb, project: GitlabSyncP
     }
     any = true;
     for (const key of Object.keys(total) as (keyof typeof total)[]) total[key] += result[key];
+    for (const number of result.taskNumbers ?? []) tasks.add(number);
   }
   if (!any && first) return first;
-  return { ok: true, ...total, ...(failed.length > 0 ? { failed } : {}) };
+  return { ok: true, ...total, tasksLinked: tasks.size, ...(failed.length > 0 ? { failed } : {}) };
 }
 
-async function syncGitlabRepository(db: ScopedDb, project: GitlabSyncProject, repositoryUrl: string, actor: string): Promise<GitlabSyncResult> {
+function withoutTasks(result: GitlabRound): GitlabSyncResult {
+  if (!result.ok) return result;
+  const { taskNumbers: _taskNumbers, ...answer } = result;
+  return answer;
+}
+
+async function syncGitlabRepository(db: ScopedDb, project: GitlabSyncProject, repositoryUrl: string, actor: string): Promise<GitlabRound> {
   if (!repositoryUrl || !project.gitlabToken) {
     return { ok: false, status: 400, error: "A repository URL and a GitLab token must be configured in project settings" };
   }
@@ -183,6 +200,7 @@ async function syncGitlabRepository(db: ScopedDb, project: GitlabSyncProject, re
     ok: true,
     prsFound: matchedMRs.length,
     tasksLinked: mrsByTask.size,
+    taskNumbers: [...mrsByTask.keys()],
     prsLinked: linked,
     prsUnlinked: unlinked,
     autoTransitioned,
