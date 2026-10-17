@@ -121,6 +121,8 @@ test("a repository that is not GitHub's is left to the GitLab sync, and never as
   const result = await sync(request);
 
   expect(result).toMatchObject({ prsLinked: 1 });
+  // not a failure either: nothing is wrong with a repository another provider's sync reads
+  expect(result).not.toHaveProperty("failed");
   const asked: string[] = await (await request.get(`${GITHUB_STUB_URL}/asked`)).json();
   expect(asked.every((path) => path.startsWith("/repos/example/web/"))).toBe(true);
   expect(await linkedUrls()).toEqual([`${WEB}/pull/41`]);
