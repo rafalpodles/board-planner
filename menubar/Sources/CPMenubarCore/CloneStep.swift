@@ -104,6 +104,12 @@ public struct CloneStep: Sendable {
         return pushable(at: target) ?? .cloned(path: target)
     }
 
+    static let probeBranchPrefix = "refs/heads/cp-push-probe-"
+
+    static func probeRefspec() -> String {
+        "HEAD:\(probeBranchPrefix)\(UUID().uuidString.lowercased())"
+    }
+
     private func quoted(_ value: String) -> String {
         value.isEmpty ? "(empty)" : "\"\(value)\""
     }
@@ -116,8 +122,9 @@ public struct CloneStep: Sendable {
     // contacts the server and a refusal really is caught here. It did almost nothing against a
     // LOCAL path — a bare repository chmod'd read-only still reported success — and that gap is
     // now moot rather than fixed: BP-399 refuses a local path as a remote outright.
+    // Pushes HEAD to a branch that does not exist: the branch HEAD tracks may be behind origin, and that is not an access problem.
     private func pushable(at path: String) -> CloneOutcome? {
-        let probe = run("git", ["-C", path, "push", "--dry-run", "origin", "HEAD"], nil)
+        let probe = run("git", ["-C", path, "push", "--dry-run", "origin", CloneStep.probeRefspec()], nil)
         guard probe.code != 0 else { return nil }
         return .failed(
             reason: "Cloned, but this machine cannot push to it: \(probe.output.trimmingCharacters(in: .whitespacesAndNewlines))")

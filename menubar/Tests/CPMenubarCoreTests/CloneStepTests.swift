@@ -69,6 +69,80 @@ final class CloneStepTests: XCTestCase {
         XCTAssertTrue(push!.contains("--dry-run"), "the check must not write to anyone's repository")
     }
 
+    func testTheProbeTargetsABranchThatDoesNotExistRatherThanTheOneHeadTracks() {
+        let git = Git()
+
+        _ = git.step().run(repositoryURL: "https://github.com/o/r", parent: "/p", projectKey: "TP")
+
+        let target = git.calls.first { $0.contains("push") }?.last ?? ""
+        XCTAssertTrue(target.hasPrefix("HEAD:\(CloneStep.probeBranchPrefix)"), "got \(target)")
+    }
+
+    private static func sh(_ args: [String], in dir: String? = nil) -> (code: Int32, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = args
+        if let dir { process.currentDirectoryURL = URL(fileURLWithPath: dir) }
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try? process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(decoding: data, as: UTF8.self))
+    }
+
+    // The mocked runner above cannot reproduce this: only a real git refuses to fast-forward.
+    func testAReusedCheckoutBehindOriginIsNotMistakenForOneItCannotPushTo() throws {
+        let root = NSTemporaryDirectory() + "cp-probe-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let bare = root + "/origin.git"
+        let parent = root + "/checkouts"
+        let ahead = root + "/ahead"
+        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
+        let identity = ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+
+        XCTAssertEqual(CloneStepTests.sh(["init", "--bare", "-b", "main", bare]).code, 0)
+        XCTAssertEqual(CloneStepTests.sh(["clone", bare, parent + "/TP"]).code, 0)
+        XCTAssertEqual(CloneStepTests.sh(identity + ["commit", "--allow-empty", "-m", "one"], in: parent + "/TP").code, 0)
+        XCTAssertEqual(CloneStepTests.sh(["push", "origin", "HEAD:main"], in: parent + "/TP").code, 0)
+        XCTAssertEqual(CloneStepTests.sh(["clone", bare, ahead]).code, 0)
+        XCTAssertEqual(CloneStepTests.sh(identity + ["commit", "--allow-empty", "-m", "two"], in: ahead).code, 0)
+        XCTAssertEqual(CloneStepTests.sh(["push", "origin", "HEAD:main"], in: ahead).code, 0)
+
+        let behind = CloneStepTests.sh(["push", "--dry-run", "origin", "HEAD"], in: parent + "/TP")
+        XCTAssertNotEqual(behind.code, 0, "the control: pushing HEAD is refused, and that is what BP-1076 was")
+
+        let step = CloneStep(run: { tool, args, cwd in
+            CloneStepTests.sh(args, in: cwd)
+        })
+        let outcome = step.run(repositoryURL: "https://github.com/o/r", parent: parent, projectKey: "TP")
+
+        XCTAssertEqual(outcome, .reused(path: parent + "/TP"))
+    }
+
+    func testARemoteItCannotReachIsStillRefusedByTheNewProbe() throws {
+        let root = NSTemporaryDirectory() + "cp-probe-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let bare = root + "/origin.git"
+        let parent = root + "/checkouts"
+        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
+        let identity = ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+        XCTAssertEqual(CloneStepTests.sh(["init", "--bare", "-b", "main", bare]).code, 0)
+        XCTAssertEqual(CloneStepTests.sh(["clone", bare, parent + "/TP"]).code, 0)
+        XCTAssertEqual(CloneStepTests.sh(identity + ["commit", "--allow-empty", "-m", "one"], in: parent + "/TP").code, 0)
+        XCTAssertEqual(CloneStepTests.sh(["remote", "set-url", "origin", "https://127.0.0.1:1/none.git"], in: parent + "/TP").code, 0)
+
+        let step = CloneStep(run: { tool, args, cwd in
+            if args.contains("fetch") { return (0, "") }
+            return CloneStepTests.sh(args, in: cwd)
+        })
+        let outcome = step.run(repositoryURL: "https://github.com/o/r", parent: parent, projectKey: "TP")
+
+        guard case .failed(let reason) = outcome else { return XCTFail("expected a refusal, got \(outcome)") }
+        XCTAssertTrue(reason.contains("cannot push"))
+    }
+
     // Re-entering the step must not fail on its own earlier success — the whole flow is resumable
     func testAnExistingCloneIsReusedAndRefreshed() {
         let git = Git()
