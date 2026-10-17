@@ -221,28 +221,41 @@ test("a mention lands in the mentioned user's feed", async ({ page, request }) =
     .toBe(true);
 });
 
-// A mention renders as bold code, and the typography plugin fences inline code with a backtick on
-// each side, so every mention read `@member`, fences and all
-test("a mention reads as a name, without the backticks inline code gets", async ({ page }) => {
+// The typography plugin fences inline code with a backtick on each side and bolds it. A mention
+// renders as bold code, so it read `@member`; ordinary inline code read the same way, unstyled (BP-1064)
+test("inline code is a badge and a mention a plain name, neither fenced in backticks", async ({ page }) => {
   await openTask(page, FINISHED_TASK_NUMBER);
 
   const posted = taskWrite(page, "POST", `/tasks/${FINISHED_TASK_ID}/comments`);
-  await composer(page).fill("@member could you run `npm test` on this?");
+  await composer(page).fill("@member could you run `npm test` on this?\n\n```\nnpm run build\n```");
   await page.getByRole("button", { name: "Comment" }).click();
   await expectWritten(posted, 201);
 
-  const fences = (element: Locator) =>
-    element.evaluate((node) => [
-      getComputedStyle(node, "::before").content,
-      getComputedStyle(node, "::after").content,
-    ]);
+  const look = (element: Locator) =>
+    element.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        fences: [getComputedStyle(node, "::before").content, getComputedStyle(node, "::after").content],
+        background: style.backgroundColor,
+        weight: style.fontWeight,
+        mono: /mono|courier/i.test(style.fontFamily),
+      };
+    });
+  const clear = "rgba(0, 0, 0, 0)";
+
   const mention = page.locator("strong > code", { hasText: "@member" });
   await expect(mention).toBeVisible();
-  expect(await fences(mention)).toEqual(["none", "none"]);
-  // The control: ordinary inline code in the same comment keeps its fences
-  const code = page.locator("code", { hasText: "npm test" });
+  expect(await look(mention)).toMatchObject({ fences: ["none", "none"], background: clear });
+
+  const code = page.locator("p > code", { hasText: "npm test" });
   await expect(code).toBeVisible();
-  expect(await fences(code)).toEqual(['"`"', '"`"']);
+  const inline = await look(code);
+  expect(inline).toMatchObject({ fences: ["none", "none"], weight: "400", mono: true });
+  expect(inline.background).not.toBe(clear);
+
+  const block = page.locator("pre > code", { hasText: "npm run build" });
+  await expect(block).toBeVisible();
+  expect(await look(block)).toMatchObject({ fences: ["none", "none"], background: clear });
 });
 
 test("watching puts a person on the list and their feed keeps following the task", async ({

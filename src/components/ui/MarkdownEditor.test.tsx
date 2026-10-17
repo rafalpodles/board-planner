@@ -142,3 +142,34 @@ describe("the preview", () => {
     expect(screen.getByRole("textbox")).toBeTruthy();
   });
 });
+
+describe("the field's name", () => {
+  it("is its label, with the hint as its description", () => {
+    render(<MarkdownEditor label="Description" value="" onChange={() => {}} placeholder="Markdown supported" />);
+
+    const field = screen.getByRole("textbox", { name: "Description" });
+    expect(field.tagName).toBe("TEXTAREA");
+    expect(screen.getByLabelText("Description")).toBe(field);
+    expect(document.getElementById(field.getAttribute("aria-describedby") ?? "")?.textContent).toBe("Markdown supported");
+  });
+
+  it("describes nothing when it has a label but no placeholder", () => {
+    render(<MarkdownEditor label="Description" value="" onChange={() => {}} />);
+
+    expect(screen.getByLabelText("Description").getAttribute("aria-describedby")).toBeNull();
+  });
+
+  it("describes nothing when it has no label, the placeholder staying its only hint", () => {
+    render(<MarkdownEditor value="" onChange={() => {}} placeholder="Markdown supported" />);
+
+    expect(screen.getByPlaceholderText("Markdown supported").getAttribute("aria-describedby")).toBeNull();
+    expect(screen.queryByText("Markdown supported")).toBeNull();
+  });
+
+  it("leaves no stray hint behind while the preview stands in for the field", () => {
+    render(<MarkdownEditor label="Description" value="text" onChange={() => {}} placeholder="Markdown supported" previewFirst />);
+
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByText("Markdown supported")).toBeNull();
+  });
+});

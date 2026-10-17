@@ -35,6 +35,9 @@ const components = {
         {children}
       </a>
     ),
+  code: ({ children, className }: React.HTMLAttributes<HTMLElement>) => (
+    <code className={className ? `md-code ${className}` : "md-code"}>{children}</code>
+  ),
   img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => (
     // eslint-disable-next-line @next/next/no-img-element
     <img

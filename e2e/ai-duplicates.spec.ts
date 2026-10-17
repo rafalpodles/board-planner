@@ -32,7 +32,7 @@ async function openNewTask(page: Page, title: string, description: string) {
   const modal = page.getByRole("dialog", { name: "New Task" });
   await expect(modal.getByPlaceholder("Describe what you need")).toBeVisible();
   await modal.getByLabel("Title").fill(title);
-  await modal.getByRole("textbox", { name: /^Markdown supported/ }).fill(description);
+  await modal.getByLabel("Description", { exact: true }).fill(description);
   return modal;
 }
 

@@ -33,7 +33,7 @@ async function createTask(page: Page, title: string, description: string): Promi
   const modal = page.getByRole("dialog", { name: "New Task" });
   await expect(modal.getByPlaceholder("Describe what you need")).toBeVisible();
   await modal.getByLabel("Title").fill(title);
-  await modal.getByRole("textbox", { name: /^Markdown supported/ }).fill(description);
+  await modal.getByLabel("Description", { exact: true }).fill(description);
   const created = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname.endsWith("/tasks"));
   await modal.getByRole("button", { name: "Create Task" }).click();
   const response = await created;
