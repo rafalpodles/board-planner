@@ -69,6 +69,94 @@ final class CloneStepTests: XCTestCase {
         XCTAssertTrue(push!.contains("--dry-run"), "the check must not write to anyone's repository")
     }
 
+    func testTheProbeTargetsABranchThatDoesNotExistRatherThanTheOneHeadTracks() {
+        let git = Git()
+
+        _ = git.step().run(repositoryURL: "https://github.com/o/r", parent: "/p", projectKey: "TP")
+
+        let target = git.calls.first { $0.contains("push") }?.last ?? ""
+        XCTAssertTrue(target.hasPrefix("HEAD:\(CloneStep.probeBranchPrefix)"), "got \(target)")
+        XCTAssertTrue(git.calls.first { $0.contains("push") }?.contains("--no-verify") ?? false, "the real push skips hooks, so the probe does too")
+    }
+
+    private struct FixtureFailed: Error { let step: String }
+
+    // Hermetic like SubmoduleLayoutTests' fixtureGit: the developer's own gitconfig (hooks,
+    // insteadOf, signing) must not decide whether this passes. A missing cwd answers instead of
+    // hanging in readDataToEndOfFile.
+    private static func git(_ args: [String], in dir: String? = nil) -> (code: Int32, output: String) {
+        if let dir, !FileManager.default.fileExists(atPath: dir) { return (-1, "no such directory \(dir)") }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git"] + args
+        if let dir { process.currentDirectoryURL = URL(fileURLWithPath: dir) }
+        process.environment = [
+            "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin",
+            "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
+            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+        ]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try? process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(decoding: data, as: UTF8.self))
+    }
+
+    private static func mustGit(_ args: [String], in dir: String? = nil) throws {
+        let result = git(args, in: dir)
+        guard result.code == 0 else { throw FixtureFailed(step: "git \(args.joined(separator: " ")): \(result.output)") }
+    }
+
+    /// A bare origin holding one commit on main, and `<parent>/TP` cloned from it.
+    private static func originWithCheckout(root: String) throws -> (bare: String, parent: String) {
+        let bare = root + "/origin.git"
+        let parent = root + "/checkouts"
+        try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true)
+        try mustGit(["init", "--bare", "-b", "main", bare])
+        try mustGit(["clone", "-q", bare, parent + "/TP"])
+        try mustGit(["symbolic-ref", "HEAD", "refs/heads/main"], in: parent + "/TP")
+        try mustGit(["commit", "-q", "--allow-empty", "-m", "one"], in: parent + "/TP")
+        try mustGit(["push", "-q", "origin", "HEAD:main"], in: parent + "/TP")
+        return (bare, parent)
+    }
+
+    // The mocked runner above cannot reproduce this: only a real git refuses to fast-forward.
+    func testAReusedCheckoutBehindOriginIsNotMistakenForOneItCannotPushTo() throws {
+        let root = NSTemporaryDirectory() + "cp-probe-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let (bare, parent) = try CloneStepTests.originWithCheckout(root: root)
+        let other = root + "/other"
+        try CloneStepTests.mustGit(["clone", "-q", bare, other])
+        try CloneStepTests.mustGit(["commit", "-q", "--allow-empty", "-m", "two"], in: other)
+        try CloneStepTests.mustGit(["push", "-q", "origin", "HEAD:main"], in: other)
+
+        let behind = CloneStepTests.git(["push", "--dry-run", "origin", "HEAD"], in: parent + "/TP")
+        XCTAssertNotEqual(behind.code, 0, "the control: pushing HEAD is refused, and that is what BP-1076 was")
+
+        let step = CloneStep(run: { _, args, cwd in CloneStepTests.git(args, in: cwd) })
+        let outcome = step.run(repositoryURL: "https://github.com/o/r", parent: parent, projectKey: "TP")
+
+        XCTAssertEqual(outcome, .reused(path: parent + "/TP"))
+    }
+
+    // What a server that will not take a push does to the probe, with git's own wording for it.
+    func testARemoteThatRefusesPushesIsStillRefusedByTheNewProbe() throws {
+        let root = NSTemporaryDirectory() + "cp-probe-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let (_, parent) = try CloneStepTests.originWithCheckout(root: root)
+        try CloneStepTests.mustGit(["config", "remote.origin.receivepack", "/usr/bin/false"], in: parent + "/TP")
+
+        let step = CloneStep(run: { _, args, cwd in CloneStepTests.git(args, in: cwd) })
+        let outcome = step.run(repositoryURL: "https://github.com/o/r", parent: parent, projectKey: "TP")
+
+        guard case .failed(let reason) = outcome else { return XCTFail("expected a refusal, got \(outcome)") }
+        XCTAssertTrue(reason.contains("cannot push"), reason)
+        XCTAssertTrue(reason.contains("Could not read from remote repository"), "the refusal must come from the remote, not from a malformed probe: \(reason)")
+    }
+
     // Re-entering the step must not fail on its own earlier success — the whole flow is resumable
     func testAnExistingCloneIsReusedAndRefreshed() {
         let git = Git()
