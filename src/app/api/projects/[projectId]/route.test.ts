@@ -368,6 +368,108 @@ describe("PUT /api/projects/[projectId] deploymentEnvironment", () => {
     });
   });
 
+  describe("additional repositories", () => {
+    const primary = new mongoose.Types.ObjectId();
+    const api = new mongoose.Types.ObjectId();
+    const stored = [
+      { _id: primary, url: "https://github.com/acme/web", name: "Web" },
+      { _id: api, url: "https://github.com/acme/api", name: "API" },
+    ];
+    const listed = (repositories: typeof stored) =>
+      projectFindOne.mockReturnValue({
+        toObject: () => ({ _id: PROJECT_ID, name: "Test Project", repositories }),
+        select: () => Promise.resolve({ repositories, repositoryUrl: repositories[0]?.url ?? "" }),
+        populate: saved,
+      });
+
+    it("stores the entries after the primary, keeping the id of an address that was already listed", async () => {
+      listed(stored);
+
+      const res = await PUT(
+        putRequest({ additionalRepositories: [{ url: " https://github.com/acme/api ", name: "Backend" }, { url: "https://github.com/acme/docs" }] }),
+        ctx()
+      );
+
+      expect(res.status).toBe(200);
+      const written = projectFindOneAndUpdate.mock.calls[0][1].repositories;
+      expect(written).toHaveLength(3);
+      expect(written[0]).toEqual(stored[0]);
+      expect(written[1]).toEqual({ _id: api, url: "https://github.com/acme/api", name: "Backend" });
+      expect(written[2]).toMatchObject({ url: "https://github.com/acme/docs", name: "" });
+      expect(written[2]._id).toBeInstanceOf(mongoose.Types.ObjectId);
+    });
+
+    it("removes every extra entry when the list is empty, leaving the primary", async () => {
+      listed(stored);
+
+      await PUT(putRequest({ additionalRepositories: [] }), ctx());
+
+      expect(projectFindOneAndUpdate.mock.calls[0][1].repositories).toEqual([stored[0]]);
+    });
+
+    it("writes the audit trail naming what was added, renamed and removed", async () => {
+      listed(stored);
+      projectFindOneAndUpdate.mockReturnValue({
+        lean: () => Promise.resolve({ _id: PROJECT_ID, name: "Test Project", repositories: stored }),
+      });
+      logProjectAudit.mockClear();
+
+      await PUT(putRequest({ additionalRepositories: [{ url: "https://github.com/acme/docs", name: "Docs" }] }), ctx());
+
+      const said = logProjectAudit.mock.calls.flatMap(([, , , , detail]) => (Array.isArray(detail) ? detail : [String(detail)]));
+      expect(said).toContain("Added repository https://github.com/acme/docs (Docs)");
+      expect(said).toContain("Removed repository https://github.com/acme/api");
+    });
+
+    it.each([
+      ["a list that is not a list", "nope", /must be a list/],
+      ["more than ten repositories in all", Array.from({ length: 10 }, (_, i) => ({ url: `https://github.com/acme/r${i}` })), /at most 10/],
+      ["an entry with no address", [{ url: "  " }], /url is empty/],
+      ["an entry that is not an object", ["https://github.com/acme/api"], /must be an object/],
+      ["an address that repeats the primary", [{ url: "https://github.com/ACME/web.git" }], /already listed/],
+      ["an address listed twice", [{ url: "https://github.com/acme/api" }, { url: "git@github.com:acme/api.git" }], /already listed/],
+      ["a name that runs to a second line", [{ url: "https://github.com/acme/api", name: "A\nB" }], /name must be at most/],
+      ["an address with a control character", [{ url: "https://github.com/acme/api\u0000" }], /not a valid address/],
+    ])("refuses %s", async (_label, additionalRepositories, error) => {
+      listed(stored);
+
+      const res = await PUT(putRequest({ additionalRepositories }), ctx());
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(error);
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("refuses extras on a project that has no primary repository", async () => {
+      listed([]);
+
+      const res = await PUT(putRequest({ additionalRepositories: [{ url: "https://github.com/acme/api" }] }), ctx());
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/set the repository URL/);
+    });
+
+    it("refuses to clear the primary address while others are listed, instead of promoting the next one", async () => {
+      listed(stored);
+
+      const res = await PUT(putRequest({ repositoryUrl: "" }), ctx());
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/Remove the additional repositories/);
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("lets the primary be replaced in the same request that lists the others", async () => {
+      listed(stored);
+
+      await PUT(putRequest({ repositoryUrl: "https://github.com/acme/web2", additionalRepositories: [{ url: "https://github.com/acme/api" }] }), ctx());
+
+      const written = projectFindOneAndUpdate.mock.calls[0][1].repositories;
+      expect(written.map((r: { url: string }) => r.url)).toEqual(["https://github.com/acme/web2", "https://github.com/acme/api"]);
+      expect(written[0]._id).toEqual(primary);
+    });
+  });
+
   it("clears the list when the address is cleared", async () => {
     await PUT(putRequest({ repositoryUrl: "" }), ctx());
     expect(projectFindOneAndUpdate.mock.calls[0][1]).toMatchObject({ repositoryUrl: "", repositories: [] });

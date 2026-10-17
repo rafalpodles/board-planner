@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { Types } from "mongoose";
-import { hasSeveralRepositories, projectRepositories, withPrimaryUrl } from "./repositories";
+import {
+  describeRepositoryChanges,
+  hasSeveralRepositories,
+  parseAdditionalRepositories,
+  projectRepositories,
+  withAdditionalRepositories,
+  withPrimaryUrl,
+} from "./repositories";
 
 const id = new Types.ObjectId();
 
@@ -57,5 +64,57 @@ describe("hasSeveralRepositories", () => {
     expect(hasSeveralRepositories({ repositories: entries })).toBe(true);
     expect(hasSeveralRepositories({ repositories: [entries[0]] })).toBe(false);
     expect(hasSeveralRepositories({ repositoryUrl: "https://github.com/acme/api" })).toBe(false);
+  });
+});
+
+describe("parseAdditionalRepositories", () => {
+  const primary = "https://github.com/acme/web";
+
+  it("trims, and keeps the order given", () => {
+    expect(parseAdditionalRepositories([{ url: " https://github.com/acme/b ", name: " B " }, { url: "https://github.com/acme/a" }], primary)).toEqual({
+      value: [
+        { url: "https://github.com/acme/b", name: "B" },
+        { url: "https://github.com/acme/a", name: "" },
+      ],
+    });
+  });
+
+  it("sees the same repository through every spelling of its address", () => {
+    for (const same of ["git@github.com:acme/web.git", "https://github.com/ACME/web/", "ssh://git@github.com/acme/web"]) {
+      expect(parseAdditionalRepositories([{ url: same }], primary)).toEqual({ error: expect.stringContaining("already listed") });
+    }
+  });
+
+  it("allows nothing after a primary that does not exist, and an empty list without one", () => {
+    expect(parseAdditionalRepositories([{ url: "https://github.com/acme/a" }], "  ")).toEqual({ error: expect.stringContaining("set the repository URL") });
+    expect(parseAdditionalRepositories([], "")).toEqual({ value: [] });
+  });
+});
+
+describe("withAdditionalRepositories", () => {
+  it("builds the primary from the address when the project stored none yet", () => {
+    const [first, second] = withAdditionalRepositories(undefined, "https://github.com/acme/web", [{ url: "https://github.com/acme/api", name: "" }]);
+    expect(first).toMatchObject({ url: "https://github.com/acme/web" });
+    expect(second).toMatchObject({ url: "https://github.com/acme/api" });
+  });
+});
+
+describe("describeRepositoryChanges", () => {
+  const entry = (url: string, name = "") => ({ _id: new Types.ObjectId(), url, name });
+  const primary = entry("https://github.com/acme/web");
+
+  it("says what was added, renamed and removed, and nothing of the primary", () => {
+    const before = [primary, entry("https://github.com/acme/api", "API"), entry("https://github.com/acme/old")];
+    const after = [entry("https://github.com/acme/moved"), entry("https://github.com/acme/api", "Backend"), entry("https://github.com/acme/new", "New")];
+    expect(describeRepositoryChanges(before, after)).toEqual([
+      'Renamed repository https://github.com/acme/api to "Backend"',
+      "Added repository https://github.com/acme/new (New)",
+      "Removed repository https://github.com/acme/old",
+    ]);
+  });
+
+  it("says nothing when the entries after the primary are the same", () => {
+    const list = [primary, entry("https://github.com/acme/api", "API")];
+    expect(describeRepositoryChanges(list, list)).toEqual([]);
   });
 });

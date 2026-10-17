@@ -21,7 +21,16 @@ import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { validatePmConfig, pmAvailability, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { PROJECT_ICONS, TRIAGE_MODES, type IPmMcpServer } from "@/types";
-import { projectRepositories, withPrimaryUrl, type StoredRepository, MAX_REPOSITORY_URL_LENGTH } from "@/lib/repositories";
+import {
+  projectRepositories,
+  withPrimaryUrl,
+  withAdditionalRepositories,
+  parseAdditionalRepositories,
+  describeRepositoryChanges,
+  type AdditionalRepository,
+  type StoredRepository,
+  MAX_REPOSITORY_URL_LENGTH,
+} from "@/lib/repositories";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import { githubWebBase } from "@/lib/github-host";
 import { releaseProjectUploads } from "@/lib/upload-cleanup";
@@ -208,6 +217,17 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     );
   }
 
+  let additionalRepositories: AdditionalRepository[] | undefined;
+  if (body.additionalRepositories !== undefined) {
+    const current = await db.Project.findById(projectId).select("repositories repositoryUrl githubRepo gitlabRepo");
+    if (!current) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    const primary =
+      typeof updates.repositoryUrl === "string" ? updates.repositoryUrl.trim() : projectRepositoryUrl(current as never);
+    const parsed = parseAdditionalRepositories(body.additionalRepositories, primary);
+    if ("error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
+    additionalRepositories = parsed.value;
+  }
+
   if (body.worker !== undefined) {
     // withProjectOwner has already required the project-admin grant: the owner, or an instance
     // admin. A machine credential is refused because enabling commits somebody's machine to
@@ -382,9 +402,26 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     }
   }
 
-  if (typeof updates.repositoryUrl === "string") {
-    const current = (await db.Project.findById(projectId).select("repositories")) as { repositories?: StoredRepository[] } | null;
-    updates.repositories = withPrimaryUrl(current?.repositories, updates.repositoryUrl);
+  if (typeof updates.repositoryUrl === "string" || additionalRepositories) {
+    const current = (await db.Project.findById(projectId).select("repositories repositoryUrl githubRepo gitlabRepo")) as
+      | ({ repositories?: StoredRepository[] } & Record<string, unknown>)
+      | null;
+    let repositories = current?.repositories;
+    // withPrimaryUrl drops an emptied primary and the next entry would take its place, which nobody asked for
+    const othersKept = additionalRepositories ? additionalRepositories.length : (repositories?.length ?? 0) - 1;
+    if (updates.repositoryUrl === "" && othersKept > 0) {
+      return NextResponse.json(
+        { error: "Remove the additional repositories before clearing the repository URL" },
+        { status: 400 }
+      );
+    }
+    if (typeof updates.repositoryUrl === "string") repositories = withPrimaryUrl(repositories, updates.repositoryUrl);
+    if (additionalRepositories) {
+      const primary =
+        typeof updates.repositoryUrl === "string" ? updates.repositoryUrl : projectRepositoryUrl((current as never) ?? ({} as never));
+      repositories = withAdditionalRepositories(repositories, primary, additionalRepositories);
+    }
+    updates.repositories = repositories;
   }
 
   const written = await writeProjectSettings(db, projectId, updates, pmServers);
@@ -427,6 +464,14 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     changes = describeSettingsChanges(images.before, images.after.toObject(), Object.keys(updates).filter((k) => k !== "repositories"));
   } catch {
     changes = [`Changed: ${Object.keys(updates).join(", ")}`];
+  }
+  if (additionalRepositories) {
+    changes.push(
+      ...describeRepositoryChanges(
+        (beforeImage as { repositories?: StoredRepository[] }).repositories,
+        (updates.repositories as StoredRepository[] | undefined) ?? undefined
+      )
+    );
   }
   if (changes.length > 0) {
     logProjectAudit(db, projectId, user._id, "settings_updated", changes);
