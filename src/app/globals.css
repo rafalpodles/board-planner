@@ -303,10 +303,17 @@ body {
   --tw-prose-td-borders: var(--color-border);
 }
 
-/* Bold code drops the backticks the plugin puts around code: it is what a mention renders as, and a name is not code */
-.prose strong > code::before,
-.prose strong > code::after {
+/* The plugin fences inline code with backticks and bolds it; a badge says "code" without either.
+   A mention renders as bold code and stays a plain bold name */
+.prose :not(pre) > code::before,
+.prose :not(pre) > code::after {
   content: none;
+}
+:not(pre, strong) > code.md-code {
+  background-color: color-mix(in srgb, var(--color-text) 10%, transparent);
+  border-radius: 0.25rem;
+  padding: 0.1em 0.35em;
+  font-weight: 400;
 }
 
 .prose table {
