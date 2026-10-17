@@ -66,3 +66,90 @@ test("a project read before the migration still answers its one repository", asy
   const project = await (await request.get(`/api/projects/${PROJECT_KEY}`, { headers: ADMIN_AUTH })).json();
   expect(project.repositories).toEqual([{ id: "primary", url: "https://github.com/acme/legacy", name: "" }]);
 });
+
+// BP-1069. The repositories after the primary one: every task of the project runs in all of them.
+async function saveChanges(page: Page) {
+  const saved = page.waitForResponse(
+    (r) => r.url().endsWith(`/api/projects/${PROJECT_KEY}`) && r.request().method() === "PUT"
+  );
+  await page.getByRole("button", { name: "Save changes" }).click();
+  return saved;
+}
+
+async function storedNames(): Promise<string[]> {
+  await mongoose.connect(E2E_MONGODB_URI);
+  try {
+    const project = await mongoose.connection.db!.collection("projects").findOne({ _id: PROJECT_ID });
+    return ((project?.repositories ?? []) as { name?: string }[]).map((r) => r.name ?? "");
+  } finally {
+    await mongoose.disconnect();
+  }
+}
+
+test("a second repository is added on Integrations, survives a reload and is removed again", async ({ page }) => {
+  await signIn(page);
+  await page.goto(SETTINGS);
+  await saveRepository(page, "https://github.com/acme/web");
+  const [primary] = await stored();
+  await expect(page.getByLabel("Additional repository 1 URL")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Add a repository" }).click();
+  await page.getByLabel("Additional repository 1 name").fill("API");
+  await page.getByLabel("Additional repository 1 URL").fill("https://github.com/acme/api");
+  await expect(page.getByText(/holds a checkout of every one/)).toBeVisible();
+  const added = await saveChanges(page);
+  expect(added.status()).toBe(200);
+
+  expect(await stored()).toEqual([primary, expect.objectContaining({ url: "https://github.com/acme/api" })]);
+  expect(await storedNames()).toEqual(["", "API"]);
+
+  await page.reload();
+  await expect(page.getByLabel("Additional repository 1 URL")).toHaveValue("https://github.com/acme/api");
+  await expect(page.getByLabel("Additional repository 1 name")).toHaveValue("API");
+  await expect(page.getByLabel("Repository URL")).toHaveValue("https://github.com/acme/web");
+
+  await page.getByRole("button", { name: "Remove additional repository 1" }).click();
+  const removed = await saveChanges(page);
+  expect(removed.status()).toBe(200);
+  expect(await stored()).toEqual([primary]);
+  await expect(page.getByLabel("Additional repository 1 URL")).toHaveCount(0);
+
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=audit`);
+  await expect(page.getByText("Added repository https://github.com/acme/api (API)")).toBeVisible();
+  await expect(page.getByText("Removed repository https://github.com/acme/api")).toBeVisible();
+});
+
+test("the screen says why a repository that is already listed is refused, and stores nothing", async ({ page }) => {
+  await signIn(page);
+  await page.goto(SETTINGS);
+  await saveRepository(page, "https://github.com/acme/web");
+
+  await page.getByRole("button", { name: "Add a repository" }).click();
+  await page.getByLabel("Additional repository 1 URL").fill("git@github.com:acme/web.git");
+  const refused = await saveChanges(page);
+
+  expect(refused.status()).toBe(400);
+  await expect(page.getByText(/is already listed/)).toBeVisible();
+  expect(await stored()).toHaveLength(1);
+  await expect(page.getByLabel("Additional repository 1 URL")).toHaveValue("git@github.com:acme/web.git");
+});
+
+test("a list whose entries were stored without a name still saves, so a hand-made or imported project is not stuck", async ({ page }) => {
+  await mongoose.connect(E2E_MONGODB_URI);
+  await mongoose.connection.db!
+    .collection("projects")
+    .updateOne(
+      { _id: PROJECT_ID },
+      { $set: { repositoryUrl: "https://github.com/acme/web", repositories: [{ url: "https://github.com/acme/web", _id: new mongoose.Types.ObjectId() }] } }
+    );
+  await mongoose.disconnect();
+  await signIn(page);
+  await page.goto(SETTINGS);
+
+  await page.getByRole("button", { name: "Add a repository" }).click();
+  await page.getByLabel("Additional repository 1 URL").fill("https://github.com/acme/api");
+  const saved = await saveChanges(page);
+
+  expect(saved.status()).toBe(200);
+  expect(await stored()).toHaveLength(2);
+});
