@@ -1,7 +1,10 @@
 import { readdirSync, statSync, utimesSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
+// Measured on Linux with Next 16.3.8 (BP-1061): routes of six segments or more are lost, shallower ones are not
 export const DEEP_ROUTE_SEGMENTS = 6;
+
+const PROBE_TIMEOUT_MS = 60_000;
 
 export interface DeepRoute {
   file: string;
@@ -31,9 +34,13 @@ export function deepRoutes(appDir: string, depth = DEEP_ROUTE_SEGMENTS): DeepRou
 }
 
 async function isLost(origin: string, url: string): Promise<boolean> {
-  const response = await fetch(origin + url, { method: "OPTIONS" });
-  await response.text();
-  return response.status === 404 && (response.headers.get("content-type") ?? "").includes("html");
+  try {
+    const response = await fetch(origin + url, { method: "OPTIONS", signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    await response.text();
+    return response.status === 404 && (response.headers.get("content-type") ?? "").includes("html");
+  } catch (error) {
+    throw new Error(`OPTIONS ${origin}${url} did not answer: ${error instanceof Error ? error.message : error}`);
+  }
 }
 
 export async function resurrectLostRoutes(

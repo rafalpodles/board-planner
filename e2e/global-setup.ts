@@ -22,12 +22,18 @@ export default async function globalSetup() {
     ...(RUN_PASSWORDLESS_SERVER ? [PASSWORDLESS_BASE_URL] : []),
     ...(RUN_ORGANISATIONS_SERVER ? [`http://127.0.0.1:${ORGANISATIONS_PORT}`] : []),
   ];
-  for (const origin of origins) {
-    const revived = await resurrectLostRoutes(origin, APP_DIR);
-    if (revived.length > 0) {
+  // Every server watches the same files, so a touch made for one can reach the others after they were
+  // checked: go round again until a whole round touches nothing
+  for (let round = 0; round < 3; round++) {
+    let touched = false;
+    for (const origin of origins) {
+      const revived = await resurrectLostRoutes(origin, APP_DIR);
+      if (revived.length === 0) continue;
+      touched = true;
       console.warn(
         `::warning title=dev server lost routes::${origin} answered its 404 page for ${revived.length} route(s) of six segments or more and found them again once their files were touched (BP-1061): ${revived.join(", ")}`
       );
     }
+    if (!touched) return;
   }
 }

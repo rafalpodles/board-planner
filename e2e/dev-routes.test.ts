@@ -95,3 +95,15 @@ describe("a dev server that lost a route", () => {
     await expect(resurrectLostRoutes(origin, dir, { attempts: 2, settleMs: 1 })).rejects.toThrow("/a/b/c/d/e/f");
   });
 });
+
+describe("a dev server that does not answer", () => {
+  it("fails naming the route instead of waiting on it", async () => {
+    route("a", "b", "c", "d", "e", "f");
+    const closed = createServer();
+    await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+    const deadOrigin = `http://127.0.0.1:${(closed.address() as AddressInfo).port}`;
+    await new Promise((resolve) => closed.close(resolve));
+
+    await expect(resurrectLostRoutes(deadOrigin, dir, { settleMs: 1 })).rejects.toThrow(`OPTIONS ${deadOrigin}/a/b/c/d/e/f did not answer`);
+  });
+});

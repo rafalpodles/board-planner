@@ -233,9 +233,9 @@ function devServerEnv(origin: string) {
 
 export default defineConfig({
   testDir: "./e2e",
+  globalSetup: "./e2e/global-setup.ts",
   // Seeding is per test (see run-conflict.spec.ts) so a retry or --repeat-each starts from the
   // same board; teardown only clears what the last run left behind.
-  globalSetup: "./e2e/global-setup.ts",
   globalTeardown: "./e2e/global-teardown.ts",
   fullyParallel: false,
   workers: 1,
