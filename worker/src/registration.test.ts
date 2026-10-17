@@ -171,6 +171,7 @@ describe("startHeartbeat", () => {
     const [, init] = calls(deps).find(([url]) => String(url).endsWith("/api/workers/register"))!;
     expect(init.headers.Authorization).toBe("Bearer cpe_one_time");
     expect(init.headers["X-CP-Protocol"]).toBe("1");
+    expect(init.headers["X-CP-Capabilities"]).toBe("multi-repository");
   });
 
   it("removes the spent enrolment token once the credential is safely on disk", async () => {
@@ -328,6 +329,7 @@ describe("startHeartbeat", () => {
     expect(init.headers.Authorization).toBe("Bearer cpw_existing");
     expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
     expect(init.headers["X-CP-Protocol"]).toBe("1");
+    expect(init.headers["X-CP-Capabilities"]).toBe("multi-repository");
   });
 
   it("aborts the run in flight when the heartbeat is refused", async () => {

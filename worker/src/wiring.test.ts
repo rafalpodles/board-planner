@@ -1868,6 +1868,21 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(failures).toHaveLength(1);
     });
 
+    // BP-1073. The server decides a claim from the capabilities of the request itself, and the policy
+    // read is one of the requests that has to say them.
+    it("says what it can do when it asks the server for its policy", async () => {
+      const seen: Record<string, string>[] = [];
+      await runOneTask(undefined, undefined, {
+        fetchImpl: async (url, init) => {
+          if (/\/api\/workers\/[0-9a-f]{24}$/.test(String(url)) && init?.headers) seen.push(init.headers as Record<string, string>);
+          throw new Error("fetch failed: ECONNREFUSED");
+        },
+      });
+
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((headers) => headers["X-CP-Capabilities"] === "multi-repository")).toBe(true);
+    });
+
     // BP-688. The third site of the same class: a server this worker cannot reach at all (as
     // opposed to one that answers 403) is asked about again every refresh too.
     it("says an unreachable server once while the reason has not changed, not once every refresh", async () => {
