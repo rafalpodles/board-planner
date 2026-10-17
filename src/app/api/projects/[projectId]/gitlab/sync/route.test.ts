@@ -497,3 +497,61 @@ describe("POST .../gitlab/sync — what a round may contradict, and what it reco
     ]);
   });
 });
+
+// BP-1068. A project that lists several repositories is synced in a round per GitLab repository
+describe("POST .../gitlab/sync — a project that lists several repositories", () => {
+  const several = (...urls: string[]) =>
+    project({ repositoryUrl: urls[0], repositories: urls.map((url, i) => ({ _id: `r${i}`, url, name: "" })) });
+  const inProject = (iid: number, path: string) => ({
+    ...mr({ iid }),
+    web_url: `https://gitlab.com/${path}/-/merge_requests/${iid}`,
+  });
+
+  it("reads each GitLab repository, skips one that is GitHub's, and adds the answers up", async () => {
+    projectFindOne.mockReturnValue({
+      lean: () => several("https://gitlab.com/g/api", "https://github.com/o/web", "https://gitlab.com/g/docs"),
+    });
+    fetchMergeRequests.mockImplementation(async (_host: string, path: string) => [inProject(path === "g/api" ? 3 : 9, path)]);
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(fetchMergeRequests.mock.calls.map(([, path]) => path)).toEqual(["g/api", "g/docs"]);
+    expect(body).toMatchObject({ synced: true, prsFound: 2, prsLinked: 2 });
+    expect(body).not.toHaveProperty("failed");
+  });
+
+  it("names what each round saw by address, so the other repository's links are left alone", async () => {
+    projectFindOne.mockReturnValue({ lean: () => several("https://gitlab.com/g/api", "https://gitlab.com/g/docs") });
+    fetchMergeRequests.mockImplementation(async (_host: string, path: string) => [inProject(path === "g/api" ? 3 : 9, path)]);
+
+    await POST(request(), ctx());
+
+    const seen = taskUpdateOne.mock.calls.map(([, update]) => JSON.stringify(update));
+    expect(seen[0]).toContain("https://gitlab.com/g/api/-/merge_requests/3");
+    expect(seen[0]).not.toContain("g/docs");
+    expect(seen[1]).toContain("https://gitlab.com/g/docs/-/merge_requests/9");
+  });
+
+  it("syncs the repositories it can read and names the one it could not", async () => {
+    projectFindOne.mockReturnValue({ lean: () => several("https://gitlab.com/g/api", "https://gitlab.com/g/docs") });
+    fetchMergeRequests.mockImplementation(async (_host: string, path: string) => {
+      if (path === "g/docs") throw new Error("GitLab answered 404");
+      return [inProject(3, path)];
+    });
+
+    const res = await POST(request(), ctx());
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ prsLinked: 1, failed: [{ repository: "https://gitlab.com/g/docs", error: "GitLab answered 404" }] });
+  });
+
+  it("answers as a single repository does when none of them can be read", async () => {
+    projectFindOne.mockReturnValue({ lean: () => several("https://gitlab.com/g/api", "https://gitlab.com/g/docs") });
+    fetchMergeRequests.mockRejectedValue(new Error("GitLab answered 401"));
+
+    const res = await POST(request(), ctx());
+
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toBe("GitLab answered 401");
+  });
+});

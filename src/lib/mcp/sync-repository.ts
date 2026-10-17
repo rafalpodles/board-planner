@@ -37,6 +37,7 @@ type Answer = {
   prsLinked?: number;
   prsUnlinked?: number;
   autoTransitioned?: number;
+  failed?: unknown[];
 };
 
 /** What the sync did, in a handful of numbers and a sentence; the route's own counters, nothing from the provider */
@@ -49,14 +50,21 @@ export function syncSummary(provider: "github" | "gitlab", answer: Answer) {
   const moved = answer.autoTransitioned ?? 0;
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+  // A count only: the answer names each repository by its address, which can carry credentials
+  const unreadable = answer.failed?.length ?? 0;
+  const unreadableNote =
+    unreadable > 0
+      ? ` ${plural(unreadable, "repository")} of this board could not be read, which the Sync button in the app names.`.replace("repositorys", "repositories")
+      : "";
+
   const summary =
-    found === 0
+    (found === 0
       ? `No ${noun} names a task of this board (in its branch or title), so there was nothing to refresh.`
       : [
           `Refreshed ${plural(linked, noun)} on ${plural(tasks, "task")}`,
           ...(unlinked > 0 ? [`${plural(unlinked, "stale link")} removed`] : []),
           ...(moved > 0 ? [`${plural(moved, "task")} moved to the next review column because its ${noun} merged`] : []),
-        ].join("; ") + ".";
+        ].join("; ") + ".") + unreadableNote;
 
   return {
     provider,
@@ -66,6 +74,7 @@ export function syncSummary(provider: "github" | "gitlab", answer: Answer) {
     tasksLinked: tasks,
     linksRemoved: unlinked,
     tasksMoved: moved,
+    repositoriesUnreadable: unreadable,
     summary,
   };
 }

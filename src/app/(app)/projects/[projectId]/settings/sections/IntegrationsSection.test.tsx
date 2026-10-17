@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
-import { deploymentsNote, IntegrationsSection } from "./IntegrationsSection";
+import { deploymentsNote, IntegrationsSection, repositoriesNote } from "./IntegrationsSection";
 import { SettingsProvider } from "@/components/settings/settings-context";
 import { ApiProject } from "@/types";
 
@@ -289,5 +289,18 @@ describe("deploymentsNote", () => {
     expect(deploymentsNote({ ran: false, reason: "failed", error: "GitHub answered 403" })).toBe(
       "; deployments could not be read: GitHub answered 403"
     );
+  });
+});
+
+describe("repositoriesNote", () => {
+  it("names a repository a sync could not read, and nothing when it read them all", () => {
+    expect(repositoriesNote(undefined)).toBe("");
+    expect(repositoriesNote([])).toBe("");
+    expect(
+      repositoriesNote([
+        { repository: "https://github.com/acme/api", error: "GitHub answered 404" },
+        { repository: "https://github.com/acme/docs", error: "no answer" },
+      ])
+    ).toBe("; could not read https://github.com/acme/api (GitHub answered 404), https://github.com/acme/docs (no answer)");
   });
 });

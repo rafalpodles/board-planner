@@ -58,6 +58,7 @@ describe("syncSummary", () => {
       tasksLinked: 2,
       linksRemoved: 0,
       tasksMoved: 0,
+      repositoriesUnreadable: 0,
       summary: "Refreshed 3 pull requests on 2 tasks.",
     });
     expect(syncSummary("gitlab", { prsFound: 1, tasksLinked: 1, prsLinked: 1 }).summary).toBe("Refreshed 1 merge request on 1 task.");
@@ -67,6 +68,19 @@ describe("syncSummary", () => {
     expect(syncSummary("github", { prsFound: 2, tasksLinked: 2, prsLinked: 2, prsUnlinked: 1, autoTransitioned: 1 }).summary).toBe(
       "Refreshed 2 pull requests on 2 tasks; 1 stale link removed; 1 task moved to the next review column because its pull request merged."
     );
+  });
+
+  it("says how many repositories could not be read, without naming one", () => {
+    const answer = syncSummary("github", {
+      prsFound: 1,
+      tasksLinked: 1,
+      prsLinked: 1,
+      failed: [{ repository: "https://user:secret@git.example.com/o/r", error: "GitHub answered 404" }],
+    });
+    expect(answer.repositoriesUnreadable).toBe(1);
+    expect(answer.summary).toBe("Refreshed 1 pull request on 1 task. 1 repository of this board could not be read, which the Sync button in the app names.");
+    expect(JSON.stringify(answer)).not.toContain("secret");
+    expect(syncSummary("github", { prsFound: 0, failed: [{}, {}] }).summary).toContain("2 repositories of this board could not be read");
   });
 
   it("says why nothing was refreshed when no request names a task", () => {

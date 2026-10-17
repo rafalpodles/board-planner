@@ -15,7 +15,7 @@ import {
   unseenLinks,
   writeProviderLinks,
 } from "@/lib/pr-links";
-import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
+import { projectRepositoryUrl, repositoriesOfProvider, repositoryProvider, storedRepositories } from "@/lib/repository";
 import type { RepositoryFields } from "@/lib/repository";
 import type { CiState, ILinkedPR, IProjectColumn } from "@/types";
 import { type ScopedDb } from "@/lib/db-scope";
@@ -223,6 +223,8 @@ export type SyncResult =
       /** How many tasks those came off, which is not `tasksWritten` — most writes remove nothing. */
       tasksUnlinked: number;
       autoTransitioned: number;
+      /** Repositories of a project that lists several which could not be read; the others were synced. */
+      failed?: { repository: string; error: string }[];
     }
   | { ok: false; status: number; error: string };
 
@@ -242,6 +244,48 @@ export async function syncGithubPullRequests(
   db: ScopedDb,
   project: SyncableProject,
   actor: string | null,
+  transitionOnly?: number
+): Promise<SyncResult> {
+  if (storedRepositories(project).length <= 1) {
+    return syncGithubRepository(db, project, projectRepositoryUrl(project), actor, transitionOnly);
+  }
+  const urls = repositoriesOfProvider(project, "github");
+  if (urls.length === 0) return syncGithubRepository(db, project, projectRepositoryUrl(project), actor, transitionOnly);
+
+  // Each repository is a round of its own: what a round saw is named by url, so one repository's round
+  // never touches the links another's pull requests gave a task. One that cannot be read does not stop
+  // the others, and is named in the answer.
+  const total = { prsFound: 0, tasksLinked: 0, prsLinked: 0, tasksWritten: 0, prsUnlinked: 0, tasksUnlinked: 0, autoTransitioned: 0 };
+  const failed: { repository: string; error: string }[] = [];
+  let first: { thrown: unknown } | { result: SyncResult } | undefined;
+  let any = false;
+  for (const url of urls) {
+    try {
+      const result = await syncGithubRepository(db, project, url, actor, transitionOnly);
+      if (!result.ok) {
+        failed.push({ repository: url, error: result.error });
+        first ??= { result };
+        continue;
+      }
+      any = true;
+      for (const key of Object.keys(total) as (keyof typeof total)[]) total[key] += result[key];
+    } catch (err) {
+      failed.push({ repository: url, error: (err instanceof Error ? err.message : "no answer").split("\n")[0].slice(0, 200) });
+      first ??= { thrown: err };
+    }
+  }
+  if (!any && first) {
+    if ("thrown" in first) throw first.thrown;
+    return first.result;
+  }
+  return { ok: true, ...total, ...(failed.length > 0 ? { failed } : {}) };
+}
+
+async function syncGithubRepository(
+  db: ScopedDb,
+  project: SyncableProject,
+  repositoryUrl: string,
+  actor: string | null,
   /**
    * When set, only this task number may be moved out of review. The task detail's Refresh is
    * about one task, and one GitHub request answers for every branch anyway — so it refreshes
@@ -250,7 +294,6 @@ export async function syncGithubPullRequests(
    */
   transitionOnly?: number
 ): Promise<SyncResult> {
-  const repositoryUrl = projectRepositoryUrl(project);
   if (!repositoryUrl || !project.githubToken) {
     return {
       ok: false,
@@ -258,7 +301,7 @@ export async function syncGithubPullRequests(
       error: "A repository URL and a GitHub token must be configured in project settings",
     };
   }
-  if (repositoryProvider(project) !== "github") {
+  if (repositoryProvider({ ...project, repositoryUrl }) !== "github") {
     return {
       ok: false,
       status: 400,
@@ -466,7 +509,7 @@ async function githubSyncTickFor(db: ScopedDb): Promise<void> {
     { githubToken: { $nin: [null, ""] } },
     // `gitlabHost` because `repositoryProvider` reads it for a self-hosted GitLab; a projection
     // that omits a field the shared helper consults is a bug waiting for that helper to change
-    "key formerKeys githubRepo repositoryUrl gitlabRepo gitlabHost githubToken columns deploymentEnvironment deploymentSync"
+    "key formerKeys githubRepo repositoryUrl repositories gitlabRepo gitlabHost githubToken columns deploymentEnvironment deploymentSync"
   ).lean();
   const readsDeployments = can(await getOrganisation(db.organisation), "reports.insights");
 

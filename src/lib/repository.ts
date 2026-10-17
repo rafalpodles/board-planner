@@ -150,3 +150,14 @@ export function entryId(entry: RepositoryEntry): string {
 export function storedRepositories(project: { repositories?: RepositoryEntry[] | null }): RepositoryEntry[] {
   return (project.repositories ?? []).filter((r) => r.url?.trim());
 }
+
+/**
+ * The repositories of one provider that a project lists several of, in order: what a sync reads. A
+ * project that lists one has its one, whatever the provider says — the sync names that case in its own
+ * words — so callers look at `storedRepositories` first.
+ */
+export function repositoriesOfProvider(project: RepositoryFields, provider: "github" | "gitlab"): string[] {
+  return storedRepositories(project)
+    .map((r) => r.url.trim())
+    .filter((url) => repositoryProvider({ repositoryUrl: url, gitlabHost: project.gitlabHost }) === provider);
+}

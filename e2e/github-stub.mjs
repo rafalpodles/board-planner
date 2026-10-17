@@ -13,6 +13,8 @@ import { readBody, serve } from "./stub-guard.mjs";
  * What the stub serves is set by the spec, through `POST /control` with `{ pulls, checks }`:
  *
  *   pulls  — the array `GET /repos/:owner/:repo/pulls` answers, in GitHub's own shape
+ *   repositories — `{ "owner/repo": pulls[] }` for a project that lists several: each answers its own
+ *                  listing and any other repository is a 404 (BP-1068)
  *   checks — `{ [sha]: { check_runs: [...], status: {...} } }`, what each commit's checks say
  *   deployments — `[{ id, sha, ref, environment, created_at, statuses: [...] }]`, what the
  *                  deployments listing and each deployment's statuses answer (BP-878)
@@ -47,6 +49,8 @@ let checks = {};
 let deployments = [];
 let deploymentsLimited = false;
 let deploymentsRefused = false;
+/** When a spec names several repositories: `{ "owner/repo": pulls[] }`, each answering its own listing (BP-1068). */
+let repositories = null;
 let asked = [];
 let bearers = [];
 /** The one repository this stub is GitHub for, as `owner/repo`. */
@@ -97,6 +101,7 @@ serve({
       deploymentsLimited = body.deploymentsLimited === true;
       deploymentsRefused = body.deploymentsRefused === true;
       repository = body.repository ?? "example/board";
+      repositories = body.repositories ?? null;
       asked = [];
       bearers = [];
       json(res, { ok: true });
@@ -165,6 +170,7 @@ serve({
       deployments = [];
       deploymentsLimited = false;
       deploymentsRefused = false;
+      repositories = null;
       asked = [];
       bearers = [];
       json(res, { ok: true });
@@ -188,7 +194,7 @@ serve({
     // Anything not addressed to the repository the spec named is a mis-parsed owner or repo, and
     // answering it would let a spec matching on a commit sha pass against `/repos/undefined/...`
     const addressed = /^\/repos\/([^/]+\/[^/]+)\//.exec(`${pathname}/`);
-    if (addressed && addressed[1] !== repository) {
+    if (addressed && (repositories ? !(addressed[1] in repositories) : addressed[1] !== repository)) {
       json(res, { message: `github stub is not ${addressed[1]}` }, 404);
       return;
     }
@@ -235,9 +241,10 @@ serve({
     const listing = /^\/repos\/[^/]+\/[^/]+\/pulls$/.exec(pathname);
     if (listing) {
       const state = searchParams.get("state") ?? "open";
+      const own = repositories ? repositories[addressed[1]] : pulls;
       json(
         res,
-        pulls.filter((pull) => (state === "open" ? pull.state === "open" : pull.state !== "open"))
+        own.filter((pull) => (state === "open" ? pull.state === "open" : pull.state !== "open"))
       );
       return;
     }
