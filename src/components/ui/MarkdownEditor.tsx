@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Textarea } from "./Textarea";
 import { MarkdownContent } from "./MarkdownContent";
 import { useTriggerAutocomplete, type Trigger } from "@/hooks/use-trigger-autocomplete";
@@ -195,9 +195,22 @@ export function MarkdownEditor({
     );
   }
 
+  const fieldId = useId();
+  const hintId = `${fieldId}-hint`;
+  const hinted = Boolean(label && placeholder) && !preview;
+
   return (
     <div ref={containerRef} className="w-full">
-      {label && <label className="block text-sm font-medium text-text-muted mb-1">{label}</label>}
+      {label && (
+        <label htmlFor={fieldId} className="block text-sm font-medium text-text-muted mb-1">
+          {label}
+        </label>
+      )}
+      {hinted && (
+        <span id={hintId} className="sr-only">
+          {placeholder}
+        </span>
+      )}
 
       <div className="flex items-center gap-0.5 flex-wrap border border-border border-b-0 rounded-t-lg bg-bg-card px-1.5 py-1">
         {TOOLBAR.map((item) => (
@@ -254,6 +267,8 @@ export function MarkdownEditor({
           />
           <Textarea
           ref={textareaRef}
+          id={fieldId}
+          aria-describedby={hinted ? hintId : undefined}
           value={value}
           onChange={(e) => {
             onChange(e.target.value);
