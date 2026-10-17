@@ -208,7 +208,7 @@ export function createExecutor(config: WorkerConfig, runner: Runner, claude: str
         resultSchema: RESULT_SCHEMA,
       });
 
-      // The worktree and nothing else. the claude adapter's `bypassPermissions` is what makes an unattended step
+      // The worktree and nothing else. The claude adapter's `bypassPermissions` is what makes an unattended step
       // possible and also what makes `Write` reach any absolute path this uid can — measured, the
       // CLI needs no write access to `~/.claude` or `~/.claude.json` to run, so the allowance is
       // one directory rather than a denylist of the instruction channels inside the operator's

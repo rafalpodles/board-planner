@@ -138,7 +138,7 @@ export function claudeAgent(path: string): CodingAgent {
         "--strict-mcp-config",
         // Every instruction channel the CLI would otherwise discover: CLAUDE.md from the cwd
         // AND from every directory above it, ~/.claude/CLAUDE.md, settings hooks, skills,
-        // plugins, custom agents. The clean checkout below cannot close those on its own —
+        // plugins, custom agents. The clean checkout the review gate makes cannot close those on its own —
         // measured on 2.1.248, a CLAUDE.md planted in the checkout's PARENT was obeyed, and
         // at the time the agent was handed TMPDIR and wrote with no filesystem sandbox, so
         // choosing a directory was never going to be enough (BP-404 review). BP-349 confines

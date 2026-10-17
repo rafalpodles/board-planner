@@ -275,7 +275,7 @@ export function reviewGate(
         });
 
         // Defence in depth, and it closes nothing that is open today: the reviewer holds no write
-        // tool, and `--safe-mode` below already disables hooks — so there is no writer here to
+        // tool, and the adapter's `--safe-mode` already disables hooks — so there is no writer here to
         // confine. It is what keeps the gate shut if either of those changes: a write tool added to
         // the reviewer's capability, or `--safe-mode` narrowed. Confined to the clean checkout,
         // which is a throwaway directory, so nothing it leaves survives the gate that made it.

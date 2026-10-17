@@ -39,12 +39,30 @@ describe("the agent's tool surface", () => {
     expect(occurrences(source(ADAPTER), '"--strict-mcp-config"')).toBe(2);
   });
 
-  it.each(CALL_SITES)("%s builds no argv of its own", (file) => {
-    const text = source(file);
-    expect(text).not.toContain('"--tools"');
-    expect(text).not.toContain('"--permission-mode"');
-    expect(text).toMatch(/agent\.(editArgs|reviewArgs)\(/);
-  });
+  // Not only the flags that matter most: any claude flag spelt at a call site is an argv built
+  // outside the adapter, which is where the two contract tests above cannot see it
+  const CLAUDE_FLAGS = [
+    "--allowedTools",
+    "--tools",
+    "--permission-mode",
+    "--dangerously-skip-permissions",
+    "--mcp-config",
+    "--strict-mcp-config",
+    "--safe-mode",
+    "--append-system-prompt",
+    "--json-schema",
+    "--model",
+    "--fallback-model",
+  ];
+
+  it.each(CALL_SITES.map((file) => [file, file === "executor.ts" ? "editArgs" : "reviewArgs"]))(
+    "%s builds no argv of its own and asks the adapter for %s",
+    (file, method) => {
+      const text = source(file);
+      for (const flag of CLAUDE_FLAGS) expect(text, flag).not.toContain(`"${flag}"`);
+      expect(text).toContain(`agent.${method}(`);
+    },
+  );
 
   it("gives the reviewer no way to write to the tree it is judging", () => {
     const text = source(ADAPTER);
