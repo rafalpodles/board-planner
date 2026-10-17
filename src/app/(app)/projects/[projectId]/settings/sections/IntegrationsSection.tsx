@@ -501,19 +501,7 @@ export function IntegrationsSection({
           >
             <div className="space-y-2">
               {more.value.rows.map((row, index) => (
-                <div key={row.key} className="grid gap-2 sm:grid-cols-[1fr_2fr_auto]">
-                  <Input
-                    value={row.name}
-                    aria-label={`Additional repository ${index + 1} name`}
-                    placeholder="Name (optional)"
-                    maxLength={100}
-                    onChange={(e) =>
-                      more.set(
-                        "rows",
-                        more.value.rows.map((each) => (each.key === row.key ? { ...each, name: e.target.value } : each)),
-                      )
-                    }
-                  />
+                <div key={row.key} className="space-y-1.5 rounded-md border border-border p-2">
                   <Input
                     value={row.url}
                     aria-label={`Additional repository ${index + 1} URL`}
@@ -525,14 +513,30 @@ export function IntegrationsSection({
                       )
                     }
                   />
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    aria-label={`Remove additional repository ${index + 1}`}
-                    onClick={() => more.set("rows", more.value.rows.filter((each) => each.key !== row.key))}
-                  >
-                    Remove
-                  </Button>
+                  <div className="flex gap-2">
+                    <div className="min-w-0 flex-1">
+                    <Input
+                      value={row.name}
+                      aria-label={`Additional repository ${index + 1} name`}
+                      placeholder="Name (optional)"
+                      maxLength={100}
+                      onChange={(e) =>
+                        more.set(
+                          "rows",
+                          more.value.rows.map((each) => (each.key === row.key ? { ...each, name: e.target.value } : each)),
+                        )
+                      }
+                    />
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      aria-label={`Remove additional repository ${index + 1}`}
+                      onClick={() => more.set("rows", more.value.rows.filter((each) => each.key !== row.key))}
+                    >
+                      Remove
+                    </Button>
+                  </div>
                 </div>
               ))}
               {more.value.rows.length < MAX_ADDITIONAL_REPOSITORIES && (
