@@ -1063,12 +1063,15 @@ task of such a project inherits all of them; there is no per-task choice.
 - **All or none.** Nothing is pushed until every changed repository has passed every gate before the
   push, and a refusal in any of them pushes nothing anywhere. A repository the agent left unchanged
   gets no gate, no push and no pull request. A run that changed none is refused.
-- **One pull request per changed repository**, opened by the Pull request step. Each lists the others
-  when that cannot expose a repository that is not known to be public in the description of one that is
-  not known to be private. The agent's summary goes into a description only under the same rule;
-  otherwise the description says it is limited to its repository's own part. The visibility is read from
-  the server's remote, before any pull request exists, and a repository whose visibility cannot be read
-  counts as not known to be public.
+- **One pull request per changed repository**, opened by the Pull request step. The worker first asks
+  GitHub whether each repository of the run is private — every one, the unchanged ones included,
+  because the agent has read them all — using the remote the server named, and only while the
+  checkout's `origin` is still that address. A repository whose visibility cannot be read counts as
+  not known to be public. The agent's summary goes into a pull request's description only when its
+  repository is private or every other repository of the run is public; otherwise the description
+  says it is limited to its repository's own part. Each pull request lists the others only when that
+  cannot put a repository that is not known to be public into the description of one that is not
+  known to be private.
 - **Merge** follows the project's order and stops at the first refusal; the comment names what merged and
   what did not, and nothing is rolled back.
 
