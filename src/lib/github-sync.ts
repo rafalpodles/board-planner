@@ -476,7 +476,8 @@ async function syncGithubRepository(
 /**
  * Refreshes every project that has a GitHub repository and a token.
  *
- * The rate-limit arithmetic. One tick costs two requests for the pull-request listing, plus **two
+ * The rate-limit arithmetic, for ONE repository: a project that lists several is read in a round
+ * each (BP-1068), so multiply by how many of them are GitHub's. One tick costs two requests for the pull-request listing, plus **two
  * to four** per open pull request up to `MAX_CHECKED_PULL_REQUESTS` — one commit-status call and up
  * to `MAX_CHECK_RUN_PAGES` pages of check runs. So at most 2 + 20 × 4 = **82** per project, about
  * 1,000 an hour at the default interval; the ordinary case, one page of check runs, is 42 and about
