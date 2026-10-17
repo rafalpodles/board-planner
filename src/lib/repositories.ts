@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import { hasControlCharacters } from "./identifiers";
 import { normaliseRemote } from "./repo-match";
+import { MAX_ADDITIONAL_REPOSITORIES } from "./repository-limits";
 import { entryId, projectRepositoryUrl, storedRepositories, type RepositoryEntry, type RepositoryFields } from "./repository";
 
 export const REPOSITORY_NAME_MAX_LENGTH = 100;
@@ -50,7 +51,6 @@ export function hasSeveralRepositories(project: WithRepositories): boolean {
   return storedRepositories(project).length > 1;
 }
 
-export const MAX_ADDITIONAL_REPOSITORIES = 9;
 
 export interface AdditionalRepository {
   url: string;

@@ -6,6 +6,7 @@ import { webhookDeliveryStatus } from "@/lib/webhook-delivery-status";
 import { useDraft } from "@/hooks/use-draft";
 import { clearsStoredToken } from "@/lib/host-bound-secrets";
 import { repositoryProvider } from "@/lib/repository";
+import { MAX_ADDITIONAL_REPOSITORIES } from "@/lib/repository-limits";
 import { useToast } from "@/components/ui/Toast";
 import {
   ApiWebhook,
@@ -28,6 +29,16 @@ import { CodaPanel, useCodaSettings } from "@/ee/connectors/coda/settings";
 import { WebhookSigningSecret } from "@/components/settings/WebhookSigningSecret";
 import { SectionProps } from "./types";
 
+interface RepositoryRow {
+  key: string;
+  url: string;
+  name: string;
+}
+
+function additionalRows(project: { repositories?: { id: string; url: string; name: string }[] }): RepositoryRow[] {
+  return (project.repositories ?? []).slice(1).map((r) => ({ key: r.id, url: r.url, name: r.name }));
+}
+
 type ChannelDraft = ApiNotificationChannel & {
   webhookUrl?: string;
   tempId?: string;
@@ -44,6 +55,8 @@ export function IntegrationsSection({
   const { toast } = useToast();
 
   const repository = useDraft({ repositoryUrl: project.repositoryUrl || "" });
+  // Everything after the primary, which is the field above
+  const more = useDraft<{ rows: RepositoryRow[] }>({ rows: additionalRows(project) });
   const github = useDraft({
     githubToken: "",
     deploymentEnvironment: project.deploymentEnvironment || "production",
@@ -109,6 +122,30 @@ export function IntegrationsSection({
         }
       },
       discard: repository.discard,
+    },
+  );
+
+  useDirtyGroup(
+    {
+      id: "integrations-more-repositories",
+      section: "integrations",
+      label: "Integrations · Additional repositories",
+      count: more.count,
+    },
+    {
+      save: async () => {
+        try {
+          const updated = await api.put(`/api/projects/${projectId}`, {
+            additionalRepositories: more.value.rows.map((row) => ({ url: row.url.trim(), name: row.name.trim() })),
+          });
+          replaceProject(updated);
+          more.commit({ rows: additionalRows(updated) });
+          toast("Repositories saved", "success");
+        } catch (err) {
+          fail(err, "Failed to save the repositories");
+        }
+      },
+      discard: more.discard,
     },
   );
 
@@ -457,6 +494,68 @@ export function IntegrationsSection({
             </p>
           )}
         </SettingRow>
+        {repository.value.repositoryUrl.trim() && (
+          <SettingRow
+            label="Additional repositories"
+            hint="A task of this project runs in all of them"
+          >
+            <div className="space-y-2">
+              {more.value.rows.map((row, index) => (
+                <div key={row.key} className="grid gap-2 sm:grid-cols-[1fr_2fr_auto]">
+                  <Input
+                    value={row.name}
+                    aria-label={`Additional repository ${index + 1} name`}
+                    placeholder="Name (optional)"
+                    maxLength={100}
+                    onChange={(e) =>
+                      more.set(
+                        "rows",
+                        more.value.rows.map((each) => (each.key === row.key ? { ...each, name: e.target.value } : each)),
+                      )
+                    }
+                  />
+                  <Input
+                    value={row.url}
+                    aria-label={`Additional repository ${index + 1} URL`}
+                    placeholder="https://github.com/owner/other-repo"
+                    onChange={(e) =>
+                      more.set(
+                        "rows",
+                        more.value.rows.map((each) => (each.key === row.key ? { ...each, url: e.target.value } : each)),
+                      )
+                    }
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    aria-label={`Remove additional repository ${index + 1}`}
+                    onClick={() => more.set("rows", more.value.rows.filter((each) => each.key !== row.key))}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+              {more.value.rows.length < MAX_ADDITIONAL_REPOSITORIES && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() =>
+                    more.set("rows", [...more.value.rows, { key: makeTempId(), url: "", name: "" }])
+                  }
+                >
+                  Add a repository
+                </Button>
+              )}
+              {more.value.rows.length > 0 && (
+                <p className="text-xs text-text-muted">
+                  With several repositories a task is claimed only by a machine that holds a checkout of every one,
+                  and a worker new enough to run them together (from 1.10.0). Project settings → Workers shows which
+                  machines do.
+                </p>
+              )}
+            </div>
+          </SettingRow>
+        )}
       </SettingsCard>
 
       <Connections

@@ -171,6 +171,103 @@ describe("IntegrationsSection and Coda on a free instance (BP-651)", () => {
   });
 });
 
+// BP-1069. The repositories after the primary one, which every task of the project runs in
+describe("IntegrationsSection additional repositories", () => {
+  const WEB = { id: "r1", url: "https://github.com/acme/web", name: "Web" };
+  const API = { id: "r2", url: "https://github.com/acme/api", name: "API" };
+
+  function renderWith(repositories: { id: string; url: string; name: string }[]) {
+    const register = vi.fn();
+    const replaceProject = vi.fn();
+    const project = {
+      _id: "p1",
+      key: "TP",
+      name: "Test Project",
+      repositoryUrl: repositories[0]?.url ?? "",
+      repositories,
+      repositoryProvider: repositories.length ? "github" : "",
+      githubTokenSet: false,
+      notificationChannels: [],
+      webhooks: [],
+      canAdmin: true,
+    } as unknown as ApiProject;
+    render(
+      <SettingsProvider register={register} unregister={vi.fn()}>
+        <IntegrationsSection projectId="p1" project={project} patchProject={vi.fn()} replaceProject={replaceProject} isAdmin stats={null} />
+      </SettingsProvider>
+    );
+    const group = () => register.mock.calls.map(([g]) => g).filter((g) => g.id === "integrations-more-repositories").pop();
+    return { group, replaceProject };
+  }
+
+  it("offers no list until there is a primary repository to follow", () => {
+    renderWith([]);
+    expect(screen.queryByText("Additional repositories")).toBeNull();
+  });
+
+  it("lists the repositories after the primary, each with its name and address", () => {
+    renderWith([WEB, API]);
+
+    expect((screen.getByLabelText("Additional repository 1 URL") as HTMLInputElement).value).toBe(API.url);
+    expect((screen.getByLabelText("Additional repository 1 name") as HTMLInputElement).value).toBe("API");
+    expect(screen.queryByLabelText("Additional repository 2 URL")).toBeNull();
+  });
+
+  it("says what a second repository changes only once there is one", () => {
+    renderWith([WEB]);
+    expect(screen.queryByText(/holds a checkout of every one/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a repository" }));
+
+    expect(screen.getByText(/holds a checkout of every one/)).toBeTruthy();
+  });
+
+  it("saves the list it shows, without the primary, and shows what the server kept", async () => {
+    const { group, replaceProject } = renderWith([WEB]);
+    api.put.mockResolvedValue({ _id: "p1", repositories: [WEB, API] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a repository" }));
+    fireEvent.change(screen.getByLabelText("Additional repository 1 URL"), { target: { value: " https://github.com/acme/api " } });
+    fireEvent.change(screen.getByLabelText("Additional repository 1 name"), { target: { value: "API" } });
+    await waitFor(() => expect(group().count).toBe(1));
+    await group().save();
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1", { additionalRepositories: [{ url: "https://github.com/acme/api", name: "API" }] });
+    expect(replaceProject).toHaveBeenCalled();
+    await waitFor(() => expect(group().count).toBe(0));
+  });
+
+  it("removes a row and saves the list without it", async () => {
+    const { group } = renderWith([WEB, API]);
+    api.put.mockResolvedValue({ _id: "p1", repositories: [WEB] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove additional repository 1" }));
+    await waitFor(() => expect(group().count).toBe(1));
+    await group().save();
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1", { additionalRepositories: [] });
+    expect(screen.queryByLabelText("Additional repository 1 URL")).toBeNull();
+  });
+
+  it("keeps what was typed and says why when the server refuses the list", async () => {
+    const { group } = renderWith([WEB]);
+    api.put.mockRejectedValue(new Error("additionalRepositories[0].url is already listed"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a repository" }));
+    fireEvent.change(screen.getByLabelText("Additional repository 1 URL"), { target: { value: WEB.url } });
+    await waitFor(() => expect(group().count).toBe(1));
+    await group().save();
+
+    expect(toast).toHaveBeenCalledWith("additionalRepositories[0].url is already listed", "error");
+    expect((screen.getByLabelText("Additional repository 1 URL") as HTMLInputElement).value).toBe(WEB.url);
+  });
+
+  it("stops offering to add at ten repositories in all", () => {
+    renderWith([WEB, ...Array.from({ length: 9 }, (_, i) => ({ id: `x${i}`, url: `https://github.com/acme/x${i}`, name: "" }))]);
+    expect(screen.queryByRole("button", { name: "Add a repository" })).toBeNull();
+  });
+});
+
 describe("deploymentsNote", () => {
   it("says what a manual sync did with deployments, and nothing when it did not read them", () => {
     expect(deploymentsNote(undefined)).toBe("");
