@@ -105,6 +105,7 @@ vi.mock("@/lib/organisation", () => ({
 
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { DELETE, GET, PUT } = await import("./route");
+const { STORED_REPOSITORY_FINGERPRINT } = await import("@/lib/repositories");
 
 const OWNER = { _id: "u1", role: "member" };
 const MEMBER = { _id: "u2", role: "member" };
@@ -501,7 +502,9 @@ describe("PUT /api/projects/[projectId] deploymentEnvironment", () => {
       await PUT(putRequest({ additionalRepositories: [] }), ctx());
 
       const [filter] = projectFindOneAndUpdate.mock.calls[0];
-      expect(filter.$expr).toEqual({ $eq: [{ $ifNull: ["$repositories", []] }, { $literal: stored }] });
+      expect(filter.$expr).toEqual({
+        $eq: [STORED_REPOSITORY_FINGERPRINT, { $literal: [`${primary}|https://github.com/acme/web|Web`, `${api}|https://github.com/acme/api|API`] }],
+      });
     });
 
     it("answers 409 and stores nothing when somebody else changed the list in between", async () => {

@@ -25,6 +25,8 @@ import {
   projectRepositories,
   planRepositories,
   describeRepositoryChanges,
+  repositoryFingerprint,
+  STORED_REPOSITORY_FINGERPRINT,
   type StoredRepository,
   MAX_REPOSITORY_URL_LENGTH,
 } from "@/lib/repositories";
@@ -104,7 +106,9 @@ async function writeProjectSettings(
   for (let attempt = 1; ; attempt++) {
     const conditions: unknown[] = [];
     if (pmServers) conditions.push({ $eq: [{ $ifNull: ["$pm.mcpServers", []] }, { $literal: pmServers.stored }] });
-    if (repositoriesBefore) conditions.push({ $eq: [{ $ifNull: ["$repositories", []] }, { $literal: repositoriesBefore }] });
+    if (repositoriesBefore) {
+      conditions.push({ $eq: [STORED_REPOSITORY_FINGERPRINT, { $literal: repositoryFingerprint(repositoriesBefore) }] });
+    }
     const before = await db.Project.findOneAndUpdate(
       conditions.length > 0 ? { _id: projectId, $expr: conditions.length === 1 ? conditions[0] : { $and: conditions } } : { _id: projectId },
       updates,
@@ -115,11 +119,15 @@ async function writeProjectSettings(
 
     const fresh = await db.Project.findById(projectId).select("pm.mcpServers repositories").lean();
     if (!fresh) return { error: "Project not found", status: 404 as const };
-    if (repositoriesBefore && JSON.stringify(fresh.repositories ?? []) !== JSON.stringify(repositoriesBefore)) {
-      return {
-        error: "The repositories changed while this was saved. Nothing was saved; reload and save again.",
-        status: 409 as const,
-      };
+    if (repositoriesBefore) {
+      const now = repositoryFingerprint(fresh.repositories ?? []);
+      const was = repositoryFingerprint(repositoriesBefore);
+      if (now.length !== was.length || now.some((entry, at) => entry !== was[at])) {
+        return {
+          error: "The repositories changed while this was saved. Nothing was saved; reload and save again.",
+          status: 409 as const,
+        };
+      }
     }
     if (!pmServers) return { error: "Project not found", status: 404 as const };
     if (attempt === MCP_SERVERS_WRITE_ATTEMPTS) {

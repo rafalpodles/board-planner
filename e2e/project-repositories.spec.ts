@@ -133,3 +133,23 @@ test("the screen says why a repository that is already listed is refused, and st
   expect(await stored()).toHaveLength(1);
   await expect(page.getByLabel("Additional repository 1 URL")).toHaveValue("git@github.com:acme/web.git");
 });
+
+test("a list whose entries were stored without a name still saves, so a hand-made or imported project is not stuck", async ({ page }) => {
+  await mongoose.connect(E2E_MONGODB_URI);
+  await mongoose.connection.db!
+    .collection("projects")
+    .updateOne(
+      { _id: PROJECT_ID },
+      { $set: { repositoryUrl: "https://github.com/acme/web", repositories: [{ url: "https://github.com/acme/web", _id: new mongoose.Types.ObjectId() }] } }
+    );
+  await mongoose.disconnect();
+  await signIn(page);
+  await page.goto(SETTINGS);
+
+  await page.getByRole("button", { name: "Add a repository" }).click();
+  await page.getByLabel("Additional repository 1 URL").fill("https://github.com/acme/api");
+  const saved = await saveChanges(page);
+
+  expect(saved.status()).toBe(200);
+  expect(await stored()).toHaveLength(2);
+});

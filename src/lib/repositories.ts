@@ -177,3 +177,29 @@ export function planRepositories(input: {
   if ("error" in checked) return checked;
   return { repositories: withAdditionalRepositories(withPrimaryUrl(stored, primary), primary, checked.value) };
 }
+
+/**
+ * What a write is guarded on: each entry as its id, address and name, in order. Compared as text rather
+ * than as the stored documents, whose key order and missing optional fields differ between whatever wrote
+ * them, so a guard on the documents themselves could refuse a save no one raced.
+ */
+export function repositoryFingerprint(list: ReadonlyArray<{ _id?: unknown; url?: string; name?: string }>): string[] {
+  return list.map((r) => `${String(r._id)}|${r.url ?? ""}|${r.name ?? ""}`);
+}
+
+/** The same fingerprint, worked out by MongoDB over the stored array (4.4 has `$toString`) */
+export const STORED_REPOSITORY_FINGERPRINT = {
+  $map: {
+    input: { $ifNull: ["$repositories", []] },
+    as: "r",
+    in: {
+      $concat: [
+        { $toString: "$$r._id" },
+        "|",
+        { $ifNull: ["$$r.url", ""] },
+        "|",
+        { $ifNull: ["$$r.name", ""] },
+      ],
+    },
+  },
+};
