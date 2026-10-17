@@ -132,8 +132,6 @@ final class SubmoduleLayoutTests: XCTestCase {
         _ = git(superproject, ["commit", "-qm", "add submodule"])
         _ = git(superproject, ["remote", "add", "origin", superOrigin])
         _ = git(superproject, ["push", "-q", "-u", "origin", "HEAD"])
-        // A detached HEAD fails CloneStep's `push --dry-run origin HEAD`, which would refuse the
-        // submodule for a reason that has nothing to do with it being one
         _ = git(submodulePath, ["checkout", "-q", "main"])
 
         if layout == .symlinkedGitDir {
