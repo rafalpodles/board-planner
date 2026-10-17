@@ -12,6 +12,7 @@ const sprintFindOneAndDelete = vi.fn();
 const sprintUpdateMany = vi.fn();
 const taskUpdateMany = vi.fn();
 const taskCountDocuments = vi.fn();
+const caller = { isOwner: true };
 
 // The mock answers from the FILTER it was given, not from a queue the test primed. That is the
 // whole point: a lookup that forgot `project` finds nothing here, so dropping that term — which is
@@ -49,12 +50,15 @@ vi.mock("@/models/project", () => ({
 vi.mock("@/lib/columns", () => ({ columnIdsWithRole: () => ["done"] }));
 vi.mock("@/lib/middleware", async () => {
   const { scopedToDefaultOrganisation } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
-  return {
-    withProjectAccess:
-      (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
-      (req: Request, ctx: unknown) =>
-        handler(req, { ...(ctx as object), user: { _id: "u1" }, db: scopedToDefaultOrganisation() }),
-  };
+  const passThrough =
+    (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
+    (req: Request, ctx: unknown) =>
+      handler(req, { ...(ctx as object), user: { _id: "u1" }, db: scopedToDefaultOrganisation() });
+  const ownerOnly =
+    (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
+    (req: Request, ctx: unknown) =>
+      caller.isOwner ? passThrough(handler)(req, ctx) : Promise.resolve(Response.json({ error: "Forbidden" }, { status: 403 }));
+  return { withProjectAccess: passThrough, withProjectOwner: ownerOnly };
 });
 
 const { PUT, DELETE, GET } = await import("./route");
@@ -73,6 +77,7 @@ const ctx = (sprintId: string) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  caller.isOwner = true;
   sprintFindOneAndUpdate.mockResolvedValue({ _id: OUR_SPRINT });
   sprintFindOneAndDelete.mockResolvedValue({ _id: OUR_SPRINT });
   taskCountDocuments.mockResolvedValue(0);
@@ -211,6 +216,15 @@ describe("the other two handlers", () => {
       { project: PROJECT, sprint: OUR_SPRINT, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { sprint: null } }
     );
+  });
+
+  it("DELETE refuses a member who is not the board's owner, and deletes nothing", async () => {
+    caller.isOwner = false;
+    const res = await DELETE(new Request("https://app.example.com/x", { method: "DELETE" }), ctx(OUR_SPRINT));
+
+    expect(res.status).toBe(403);
+    expect(sprintFindOneAndDelete).not.toHaveBeenCalled();
+    expect(taskUpdateMany).not.toHaveBeenCalled();
   });
 
   it("GET asks by project and counts only this project's tasks", async () => {

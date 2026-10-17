@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page, type Response } from "@playwright/test";
-import { ADMIN_AUTH } from "./api";
+import { ADMIN_AUTH, SAME_ORIGIN } from "./api";
 import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
@@ -355,6 +355,22 @@ test.describe("creating and editing a sprint from the form", () => {
 
     await page.reload();
     await expect(sprintRow(page, LIFECYCLE_CURRENT_NAME)).toHaveCount(0);
+  });
+
+  // BP-247: deleting a sprint is the board owner's, as deleting a field, category or template is
+  test("a member is offered Edit but no Delete, and the server refuses the delete anyway", async ({ page }) => {
+    await signIn(page, "member");
+    await openSprints(page);
+
+    await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: `Delete sprint ${LIFECYCLE_CURRENT_NAME}` })).toHaveCount(0);
+
+    const refused = await page.request.delete(`/api/projects/${PROJECT_KEY}/sprints/${LIFECYCLE_CURRENT_ID}`, {
+      headers: SAME_ORIGIN,
+    });
+    expect(refused.status()).toBe(403);
+    expect(await refused.json()).toEqual({ error: "Forbidden" });
+    expect((await storedSprint(LIFECYCLE_CURRENT_ID))?.name).toBe(LIFECYCLE_CURRENT_NAME);
   });
 });
 

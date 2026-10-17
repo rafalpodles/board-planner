@@ -214,6 +214,11 @@ const RECIPES: Record<string, Recipe> = {
     send: get,
     handled: { status: 200, body: /"maxCallsPerTurn"/ },
   },
+  "DELETE /api/projects/[projectId]/sprints/[sprintId]": {
+    // A well-formed id no sprint has: the handler looks and deletes nothing
+    send: (request, path) => request.delete(path, { headers: SAME_ORIGIN }),
+    handled: { status: 404, body: /Sprint not found/ },
+  },
   "DELETE /api/projects/[projectId]/templates": {
     send: withBody("delete", {}),
     handled: { status: 400, body: /templateId is required/ },
@@ -239,6 +244,7 @@ function concrete(path: string): string {
     .replace("[projectId]", PROJECT_KEY)
     .replace("[columnId]", "done")
     .replace("[fieldId]", new mongoose.Types.ObjectId().toString())
+    .replace("[sprintId]", new mongoose.Types.ObjectId().toString())
     .replace("[invitationId]", new mongoose.Types.ObjectId().toString());
 }
 
