@@ -3,7 +3,7 @@ import { agentEnv } from "./env.js";
 import { PROTECTED_PATHS_BRIEF } from "./gates/protected-paths.js";
 import { Runner } from "./exec.js";
 import { confineTool, RecordedDir } from "./sandbox.js";
-import { CodingAgent } from "./agents/agent.js";
+import { AgentRun, CodingAgent } from "./agents/agent.js";
 import { claudeAgent } from "./agents/claude.js";
 import { StreamEvent } from "./stream.js";
 import { ClaimedTask, RunOutcome } from "./types.js";
@@ -193,10 +193,21 @@ export function createExecutor(config: WorkerConfig, runner: Runner, claude: str
   const agent = typeof claude === "string" ? claudeAgent(claude) : claude;
   return {
     async execute({ task, worktreePath, worktreeDir, brief, repositories, signal, onEvent }) {
+      // Made before anything is spawned and torn down after, whatever the step does: it may hold a
+      // copy of the operator's login, which nothing may leave behind
+      const run = await agent.prepare(RESULT_SCHEMA);
+      if ("refusal" in run) return { kind: "machine_fault", message: run.refusal };
+      try {
+        return await runStep(run);
+      } finally {
+        await run.cleanup();
+      }
+
+      async function runStep(run: AgentRun): Promise<RunOutcome> {
       // The CLI authenticates from its logged-in session under HOME, so the allowlist both keeps
       // ANTHROPIC_API_KEY out (which would bill per token) and keeps CP_API_TOKEN out of the
       // hands of the agent it is about to run with bypassPermissions
-      const env = agentEnv();
+      const env = { ...agentEnv(), ...run.env };
       const parser = onEvent ? incrementalParser(agent.parseEvents, onEvent) : undefined;
 
       const agentArgs = agent.editArgs({
@@ -206,6 +217,7 @@ export function createExecutor(config: WorkerConfig, runner: Runner, claude: str
         model: modelOr(brief.model || config.model, DEFAULT_MODEL),
         fallbackModel: modelOr(brief.fallbackModel || config.fallbackModel, DEFAULT_FALLBACK_MODEL),
         resultSchema: RESULT_SCHEMA,
+        run,
       });
 
       // The worktree and nothing else. The claude adapter's `bypassPermissions` is what makes an unattended step
@@ -213,8 +225,9 @@ export function createExecutor(config: WorkerConfig, runner: Runner, claude: str
       // CLI needs no write access to `~/.claude` or `~/.claude.json` to run, so the allowance is
       // one directory rather than a denylist of the instruction channels inside the operator's
       // home. See sandbox.ts for why this is not a per-run HOME.
+      const worktrees = repositories && repositories.length > 1 ? repositories.map((ref) => ref.dir) : [worktreeDir];
       const spawn = confineTool(agent.tool, agent.path, agentArgs, {
-        writable: repositories && repositories.length > 1 ? repositories.map((ref) => ref.dir) : [worktreeDir],
+        writable: [...(agent.worktreeWritable(brief.capability) ? worktrees : []), ...run.writable],
       });
 
       // Before the spawn, not after: a step that cannot be confined does not run half-confined and
@@ -245,6 +258,7 @@ export function createExecutor(config: WorkerConfig, runner: Runner, claude: str
       if (result.timedOut) return { kind: "timeout" };
 
       return agent.interpretEdit(result);
+      }
     },
   };
 }

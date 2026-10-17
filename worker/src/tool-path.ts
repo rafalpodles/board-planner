@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
 
-export type ResolvedTool = "git" | "gh" | "claude" | "npm";
+export type ResolvedTool = "git" | "gh" | "claude" | "codex" | "npm";
 
 export function unresolvedToolReason(tool: ResolvedTool): string {
   return `no absolute ${tool} path was resolved — refusing to run ${tool} by name on PATH`;

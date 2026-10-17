@@ -77,3 +77,13 @@ export function npmCacheOverride(source: NodeJS.ProcessEnv = process.env): strin
 export function tempDirOverride(source: NodeJS.ProcessEnv = process.env): string {
   return source.TMPDIR?.trim() ?? "";
 }
+
+/**
+ * Where the operator's Codex login lives. Read here because this module owns what of the worker's
+ * own environment is allowed to matter; a Codex run is handed a copy of `auth.json` and nothing
+ * else of this directory, and is told where its own home is, never where this one is.
+ */
+export function codexSourceHome(source: NodeJS.ProcessEnv = process.env): string {
+  const set = source.CODEX_HOME?.trim();
+  return set || `${source.HOME ?? ""}/.codex`;
+}

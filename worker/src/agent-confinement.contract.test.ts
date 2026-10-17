@@ -36,7 +36,7 @@ describe("every spawn of the agent is confined", () => {
   // Both call sites hand `runner.run` what `confine` gave back, so the CLI's own name survives only
   // as confine's first argument. A spawn that names it directly has not been through anything.
   it("no source file hands the CLI's name straight to the runner", () => {
-    expect(filesMatching(/\.run\(\s*"claude"/)).toEqual([]);
+    expect(filesMatching(/\.run\(\s*"(claude|codex)"/)).toEqual([]);
   });
 
   // The control for the assertion above, which is "nothing matches" and would stay green for ever

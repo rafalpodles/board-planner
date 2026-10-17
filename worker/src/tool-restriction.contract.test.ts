@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -53,6 +53,12 @@ describe("the agent's tool surface", () => {
     "--json-schema",
     "--model",
     "--fallback-model",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--ephemeral",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--output-schema",
+    "--disable",
   ];
 
   it.each(CALL_SITES.map((file) => [file, file === "executor.ts" ? "editArgs" : "reviewArgs"]))(
@@ -70,5 +76,33 @@ describe("the agent's tool surface", () => {
     const tools = reviewer.slice(reviewer.indexOf('"--tools"'), reviewer.indexOf('"--tools"') + 120);
     expect(tools).toContain("Read Grep Glob");
     expect(tools).not.toMatch(/Edit|Write|Bash/);
+  });
+});
+
+// Codex has no tool list to restrict, so what keeps its surface small is spelt once, in its adapter
+describe("the codex adapter's surface", () => {
+  const CODEX = "agents/codex.ts";
+
+  it("runs under our own sandbox and never relies on Codex's", () => {
+    const text = source(CODEX);
+    expect(text).toContain('"--dangerously-bypass-approvals-and-sandbox"');
+    for (const flag of ["--sandbox", "-s", "--full-auto", "--approve-for-me"]) expect(text, flag).not.toContain(`"${flag}"`);
+  });
+
+  it("is the only file that spells the flag that turns Codex's own sandbox off", () => {
+    const spellers = (readdirSync(join(import.meta.dirname), { recursive: true }) as string[])
+      .filter((file) => file.endsWith(".ts") && !file.includes(".test."))
+      .filter((file) => source(file).includes("--dangerously-bypass-approvals-and-sandbox"));
+    expect(spellers).toEqual([CODEX]);
+  });
+
+  it("switches off web search, which runs on the provider's side where no sandbox reaches", () => {
+    expect(source(CODEX)).toContain('web_search="disabled"');
+  });
+
+  it("starts from no user config and no rules of the operator's", () => {
+    const text = source(CODEX);
+    expect(text).toContain('"--ignore-user-config"');
+    expect(text).toContain('"--ignore-rules"');
   });
 });

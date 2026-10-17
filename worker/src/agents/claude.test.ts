@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { NO_RUN } from "./agent.js";
 import { claudeAgent } from "./claude.js";
 
 const agent = claudeAgent("/opt/bin/claude");
@@ -10,6 +11,7 @@ const EDIT = {
   model: "opus",
   fallbackModel: "sonnet",
   resultSchema: { type: "object" },
+  run: NO_RUN,
 };
 
 describe("the claude adapter's argv", () => {
@@ -39,7 +41,7 @@ describe("the claude adapter's argv", () => {
   });
 
   it("gives the reviewer read tools only, the operator's servers dropped and every instruction channel closed", () => {
-    const args = agent.reviewArgs({ prompt: "p", systemPrompt: "s", model: "opus", verdictSchema: {} });
+    const args = agent.reviewArgs({ prompt: "p", systemPrompt: "s", model: "opus", verdictSchema: {}, run: NO_RUN });
 
     expect(value(args, "--tools")).toBe("Read Grep Glob");
     expect(args).toContain("--strict-mcp-config");

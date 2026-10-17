@@ -1,7 +1,8 @@
 import { CommandResult } from "../exec.js";
 import { isRateLimitEvent, lastResultEvent, parseStream, ResultEvent, StreamEvent } from "../stream.js";
-import { ExecutionResult, RunOutcome } from "../types.js";
-import { Capability, CodingAgent, EditCall, ReviewCall, Verdict } from "./agent.js";
+import { RunOutcome } from "../types.js";
+import { Capability, CodingAgent, EditCall, NO_RUN, ReviewCall, Verdict } from "./agent.js";
+import { isExecutionResult, isRecord, isVerdict } from "./shapes.js";
 
 // --tools, not --allowedTools. Measured 2026-08-15: under --permission-mode bypassPermissions,
 // --allowedTools "Read Grep Glob" still ran Bash, because it is an allowlist for *skipping the
@@ -32,25 +33,6 @@ function reportsUsageLimit(final: ResultEvent | undefined): boolean {
   return typeof final?.result === "string" && USAGE_LIMIT_SENTINEL.test(final.result.trim());
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-function isExecutionResult(value: unknown): value is ExecutionResult {
-  return (
-    isRecord(value) &&
-    (value.status === "completed" || value.status === "blocked") &&
-    typeof value.summary === "string" &&
-    isStringArray(value.filesChanged) &&
-    isStringArray(value.testsAdded) &&
-    typeof value.blockedReason === "string"
-  );
-}
-
 function extractResultPayload(final: ResultEvent): unknown {
   if (!("result" in final)) {
     throw new Error("result event has no result field");
@@ -72,10 +54,6 @@ function parseExecutionResult(final: ResultEvent | undefined): RunOutcome {
   }
 }
 
-function isVerdict(value: unknown): value is Verdict {
-  return isRecord(value) && typeof value.approved === "boolean" && typeof value.reason === "string";
-}
-
 function extractEnvelope(stdout: string): unknown {
   try {
     return JSON.parse(stdout);
@@ -92,6 +70,9 @@ export function claudeAgent(path: string): CodingAgent {
     id: "claude",
     tool: "claude",
     path,
+    worktreeWritable: () => true,
+    reviewerWritesCheckout: true,
+    prepare: async () => NO_RUN,
 
     editArgs(call: EditCall) {
       return [

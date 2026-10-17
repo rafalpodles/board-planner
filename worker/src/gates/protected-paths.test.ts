@@ -130,9 +130,14 @@ describe("protectedPathsGate", () => {
     "CLAUDE.md",
     "CLAUDE.local.md",
     "AGENTS.md",
+    "AGENTS.override.md",
+    "sub/AGENTS.override.md",
     ".mcp.json",
     ".claude/settings.json",
     "sub/.claude/agents/x.md",
+    ".codex/config.toml",
+    ".codex/hooks.json",
+    ".agents/skills/x/SKILL.md",
   ])("refuses the agent's own instructions: %s", async (file) => {
     expect((await gate.run(context([file]))).ok).toBe(false);
   });
