@@ -790,6 +790,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           if (!repositoryConfig) throw new Error(`no checkout is bound for repository ${index} of project ${task.projectId}`);
           return {
             name: repository.name,
+            remote: repository.remote,
             config: repositoryConfig,
             workspace: createWorkspace(
               repositoryConfig,

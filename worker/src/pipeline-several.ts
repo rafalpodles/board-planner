@@ -43,6 +43,8 @@ import { StepOutcome } from "./steps.js";
 export interface RepositoryRunDeps {
   /** What the board calls it. Server-supplied, so it is cleaned before it reaches a comment. */
   name: string;
+  /** The server's address for it, which is what its visibility is asked of; never the checkout's own config. */
+  remote: string;
   config: WorkerConfig;
   workspace: Workspace;
   createDelivery: (runner: Runner, baseBranch?: string) => Delivery;
@@ -69,6 +71,9 @@ interface Leg {
   state: RunState;
   ignoredBeforeSteps: Awaited<ReturnType<typeof ignoredFiles>>;
 }
+
+const GENERIC_SUMMARY =
+  "This is one part of a task that changed several repositories. Its description is limited to this repository's own part because another repository of the task is not known to be public.";
 
 const MAX_LABEL = 100;
 // A name is member-writable and ends up in a board comment: one line, no backtick to close a span
@@ -428,14 +433,21 @@ export async function runTaskInRepositories(
 
         case "pull-request": {
           if (active.length === 0) return { kind: "error", message: "refusing to open a pull request: the agent changed no repository" };
-          for (const leg of active) {
+          const privacy = await visibilityOf(active);
+          for (const [index, leg] of active.entries()) {
+            // The agent writes one summary about all of its work. A description is as public as its
+            // repository, so one that is not known to be private carries it only when every other
+            // repository of the run is known to be public: otherwise there may be prose about a
+            // private one in it.
+            const mayCarryProse = privacy[index] === true || privacy.every((each, at) => at === index || each === false);
+            const summary = mayCarryProse ? leg.state.summary : GENERIC_SUMMARY;
             try {
-              leg.state.prUrl = await leg.delivery.openPr(leg.worktree.path, task, leg.state.summary, leg.state.checks);
+              leg.state.prUrl = await leg.delivery.openPr(leg.worktree.path, task, summary, leg.state.checks);
             } catch (error) {
               return { kind: "error", message: `${leg.label}: ${String(error)}` };
             }
           }
-          await listRelated(active);
+          await listRelated(active, privacy);
           return { kind: "ok" };
         }
 
@@ -471,9 +483,13 @@ export async function runTaskInRepositories(
   // Each pull request lists the others, unless that would put a repository that is not known to be
   // public into the description of one that is not known to be private: the description of a public
   // pull request is public.
-  async function listRelated(active: Leg[]): Promise<void> {
+  async function visibilityOf(active: Leg[]): Promise<(boolean | null)[]> {
+    if (active.length < 2) return active.map(() => null);
+    return Promise.all(active.map((leg) => leg.delivery.isPrivate(leg.worktree.path, leg.repo.remote).catch(() => null)));
+  }
+
+  async function listRelated(active: Leg[], privacy: (boolean | null)[]): Promise<void> {
     if (active.length < 2) return;
-    const privacy = await Promise.all(active.map((leg) => leg.delivery.isPrivate(leg.worktree.path, leg.state.prUrl)));
     for (const [index, leg] of active.entries()) {
       const related = active
         .filter((other, at) => at !== index && (privacy[index] === true || privacy[at] === false))

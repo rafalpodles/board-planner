@@ -32,11 +32,12 @@ export interface Delivery {
   ): Promise<string>;
   merge(worktreePath: string, prUrl: string): Promise<void>;
   /**
-   * Whether the repository a pull request lives in is private. Null when gh cannot say, which a
-   * caller must read as "do not assume it is": the answer decides what may be written into a public
-   * repository's pull request.
+   * Whether the repository the server names by `remote` is private, asked before any pull request
+   * exists. The remote is the server's word for the repository, never the checkout's own config,
+   * which the agent can write. Null when it cannot be said, which a caller must read as "do not
+   * assume it is": the answer decides what may be written into a public repository's pull request.
    */
-  isPrivate(worktreePath: string, prUrl: string): Promise<boolean | null>;
+  isPrivate(worktreePath: string, remote: string): Promise<boolean | null>;
   /**
    * Adds the worker's own list of the pull requests the same run opened in the task's other
    * repositories to the end of this one's description (BP-1072).
@@ -134,6 +135,23 @@ function checksSection(checks: PassedCheck[]): string {
     return `- **${check.name}**${ran} (${formatDuration(check.durationMs)})`;
   });
   return ["---", "", CHECKS_HEADING, "", ...lines].join("\n");
+}
+
+const SCP_REMOTE = /^[\w.-]+@([a-z0-9.-]+\.[a-z]{2,}):([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i;
+const URL_REMOTE = /^(?:https?|ssh|git):\/\/(?:[^@/\s]+@)?([a-z0-9.-]+\.[a-z]{2,})(?::\d+)?\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i;
+
+/**
+ * `owner/repo`, or `host/owner/repo` for any host but github.com, from a remote the server named, in
+ * the form `gh repo view` takes. Null for anything else, an alias only this machine's ssh config can
+ * resolve included: gh must never be pointed at a string this did not understand.
+ */
+export function repositoryOf(remote: string): string | null {
+  const trimmed = remote.trim();
+  const match = SCP_REMOTE.exec(trimmed) ?? URL_REMOTE.exec(trimmed);
+  if (!match) return null;
+  const [, host, owner, repo] = match;
+  if (owner.startsWith(".") || repo.startsWith(".") || owner.startsWith("-") || repo.startsWith("-")) return null;
+  return host.toLowerCase() === "github.com" ? `${owner}/${repo}` : `${host.toLowerCase()}/${owner}/${repo}`;
 }
 
 function repoArgs(prUrl: string): string[] {
@@ -412,12 +430,12 @@ export function createDelivery(
       throw failure("gh pr create", result);
     },
 
-    async isPrivate(worktreePath, prUrl) {
-      const repo = repoArgs(prUrl);
-      if (repo.length === 0) return null;
+    async isPrivate(worktreePath, remote) {
+      const repository = repositoryOf(remote);
+      if (!repository) return null;
       const result = await run(
         requireToolPath("gh", ghPath),
-        ["repo", "view", repo[1], "--json", "isPrivate"],
+        ["repo", "view", repository, "--json", "isPrivate"],
         worktreePath,
       );
       if (result.code !== 0) return null;
