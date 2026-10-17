@@ -16,8 +16,8 @@ export const PROTECTED_PATHS_BRIEF = [
   "You may not create, edit or delete files that a later step executes or loads as instructions:",
   "package manifests and lockfiles (package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, .npmrc),",
   "build and test tool configs (vite, vitest, next, webpack, jest, babel, playwright, tailwind and the like),",
-  "anything under scripts/, .husky/, .github/workflows/, .github/actions/ or .claude/,",
-  "agent instruction files (CLAUDE.md, AGENTS.md, .mcp.json),",
+  "anything under scripts/, .husky/, .github/workflows/, .github/actions/, .claude/, .codex/ or .agents/,",
+  "agent instruction files (CLAUDE.md, AGENTS.md, AGENTS.override.md, .mcp.json),",
   "the repository's own git metadata (.gitattributes, .gitmodules),",
   "container and CI manifests (Dockerfile, docker-compose.yml, .gitlab-ci.yml, Jenkinsfile),",
   "and the build manifests of other ecosystems (pyproject.toml, Cargo.toml, go.mod, pom.xml, Gemfile and their lockfiles).",
@@ -26,7 +26,7 @@ export const PROTECTED_PATHS_BRIEF = [
 ].join(" ");
 
 export const AGENT_INSTRUCTION_FILE =
-  /(^|\/)(CLAUDE(\.local)?\.md|AGENTS(\.local)?\.md|\.mcp\.json)$|(^|\/)\.claude\//i;
+  /(^|\/)(CLAUDE(\.local)?\.md|AGENTS(\.local|\.override)?\.md|\.mcp\.json)$|(^|\/)\.(claude|codex|agents)\//i;
 
 // Files whose contents a later gate executes. package.json is the sharp one: the build gate runs
 // npm on the worktree, so a lifecycle script added here would run before any reviewer sees it.

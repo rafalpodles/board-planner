@@ -6,7 +6,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { DEFAULT_REVIEW_MODEL, modelOr } from "../config.js";
 import { agentEnv } from "../env.js";
 import { CommandResult, Runner } from "../exec.js";
-import { CodingAgent, Verdict } from "../agents/agent.js";
+import { AgentRun, CodingAgent } from "../agents/agent.js";
 import { claudeAgent } from "../agents/claude.js";
 import { confineTool } from "../sandbox.js";
 import { nodeWorktreeDisk, WorktreeDisk } from "../worktree-disk.js";
@@ -266,12 +266,17 @@ export function reviewGate(
       );
       if ("refusal" in checkout) return { ok: false, reason: checkout.refusal };
 
+      let run: AgentRun | undefined;
       try {
+        const prepared = await agent.prepare(VERDICT_SCHEMA);
+        if ("refusal" in prepared) return { ok: false, reason: prepared.refusal, machineFault: true };
+        run = prepared;
         const reviewArgs = agent.reviewArgs({
           prompt: buildPrompt(context),
           systemPrompt: prompt,
           model,
           verdictSchema: VERDICT_SCHEMA,
+          run,
         });
 
         // Defence in depth, and it closes nothing that is open today: the reviewer holds no write
@@ -279,7 +284,9 @@ export function reviewGate(
         // confine. It is what keeps the gate shut if either of those changes: a write tool added to
         // the reviewer's capability, or `--safe-mode` narrowed. Confined to the clean checkout,
         // which is a throwaway directory, so nothing it leaves survives the gate that made it.
-        const spawn = confineTool(agent.tool, agent.path, reviewArgs, { writable: [checkout.path] });
+        const spawn = confineTool(agent.tool, agent.path, reviewArgs, {
+          writable: [...(agent.reviewerWritesCheckout ? [checkout.path] : []), ...run.writable],
+        });
         // machineFault, not a plain refusal: an unconfinable machine has not judged the change, and
         // reporting it as the reviewer rejecting one would blame the diff and push its branch.
         if ("refusal" in spawn) {
@@ -289,7 +296,7 @@ export function reviewGate(
         const result = await runner.run(
           spawn.command,
           spawn.args,
-          { cwd: checkout.path, timeoutMs, env, signal: context.signal },
+          { cwd: checkout.path, timeoutMs, env: { ...env, ...run.env }, signal: context.signal },
         );
         if (result.machineFault) return { ok: false, reason: result.machineFault, machineFault: true };
 
@@ -321,6 +328,7 @@ export function reviewGate(
               reason: `the reviewer rejected the change: ${capped(verdict.reason)}`,
             };
       } finally {
+        await run?.cleanup();
         await discardCheckout(runner, gitPath, context.worktreePath, checkout.path);
       }
     },

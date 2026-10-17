@@ -37,7 +37,7 @@ function filesMatching(pattern: RegExp): string[] {
 
 describe("every preflight-resolved tool is spawned by its path", () => {
   it("names none of them to a runner or to confine", () => {
-    expect(filesMatching(/\b(run|confine)\(\s*["'](git|gh|claude|npm)["']/)).toEqual([]);
+    expect(filesMatching(/\b(run|confine)\(\s*["'](git|gh|claude|codex|npm)["']/)).toEqual([]);
   });
 
   // The controls: the assertion above is "nothing matches", which a scan that stopped reading the
