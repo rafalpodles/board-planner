@@ -54,8 +54,14 @@ describe("every spawn of the agent is confined", () => {
     ].sort());
   });
 
+  // The agent is named by its adapter and never spelt out at the spawn, so a call that does is one
+  // that skipped the adapter (and with it the argv the contract tests below read).
+  it("no spawn names a coding agent by its literal name", () => {
+    expect(filesMatching(/confineTool\(\s*"(claude|codex|cursor-agent)"/)).toEqual([]);
+  });
+
   it("only the implementer step and the review gate run the agent at all", () => {
-    expect(filesMatching(/confineTool\(\s*"claude"/)).toEqual(MAY_SPAWN_THE_AGENT);
+    expect(filesMatching(/confineTool\(\s*agent\.tool/)).toEqual(MAY_SPAWN_THE_AGENT);
   });
 
   // What each of them does with a refusal is behaviour, and asserted as behaviour: executor.test.ts

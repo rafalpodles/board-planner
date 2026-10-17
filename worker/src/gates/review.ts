@@ -6,6 +6,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { DEFAULT_REVIEW_MODEL, modelOr } from "../config.js";
 import { agentEnv } from "../env.js";
 import { CommandResult, Runner } from "../exec.js";
+import { CodingAgent, Verdict } from "../agents/agent.js";
+import { claudeAgent } from "../agents/claude.js";
 import { confineTool } from "../sandbox.js";
 import { nodeWorktreeDisk, WorktreeDisk } from "../worktree-disk.js";
 import { gitArgs, localGitEnv, requireGitPath } from "../git-safety.js";
@@ -46,49 +48,6 @@ const FOCUS: Record<string, string> = {
   acceptance:
     " Judge only whether the change satisfies the task's acceptance criteria, and say which one it misses.",
 };
-
-interface Verdict {
-  approved: boolean;
-  reason: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isVerdict(value: unknown): value is Verdict {
-  return (
-    isRecord(value) &&
-    typeof value.approved === "boolean" &&
-    typeof value.reason === "string"
-  );
-}
-
-function extractEnvelope(stdout: string): unknown {
-  try {
-    return JSON.parse(stdout);
-  } catch {
-    const start = stdout.indexOf("{");
-    const end = stdout.lastIndexOf("}");
-    if (start === -1 || end <= start)
-      throw new Error("no JSON object found in claude output");
-    return JSON.parse(stdout.slice(start, end + 1));
-  }
-}
-
-function parseVerdict(stdout: string): Verdict | null {
-  try {
-    const envelope = extractEnvelope(stdout);
-    if (!isRecord(envelope) || !("result" in envelope)) return null;
-    const payload =
-      typeof envelope.result === "string"
-        ? JSON.parse(envelope.result)
-        : envelope.result;
-    return isVerdict(payload) ? payload : null;
-  } catch {
-    return null;
-  }
-}
 
 function outputTail(result: CommandResult): string {
   const output = [result.stdout, result.stderr]
@@ -257,11 +216,12 @@ async function discardCheckout(
 export function reviewGate(
   runner: Runner,
   gitPath: string,
-  claudePath: string,
+  claude: string | CodingAgent,
   timeoutMs: number,
   reviewModel?: string,
   focus?: string,
 ): Gate {
+  const agent = typeof claude === "string" ? claudeAgent(claude) : claude;
   const model = modelOr(reviewModel, DEFAULT_REVIEW_MODEL);
   const prompt = `${REVIEWER_PROMPT}${FOCUS[focus ?? "general"] ?? ""}`;
   return {
@@ -307,43 +267,19 @@ export function reviewGate(
       if ("refusal" in checkout) return { ok: false, reason: checkout.refusal };
 
       try {
-        const reviewArgs = [
-            "-p",
-            buildPrompt(context),
-            "--output-format",
-            "json",
-            "--json-schema",
-            JSON.stringify(VERDICT_SCHEMA),
-            "--append-system-prompt",
-            prompt,
-            // The reviewer's whole value is that it only reads; --allowedTools did not make that true
-            "--tools",
-            "Read Grep Glob",
-            "--strict-mcp-config",
-            // Every instruction channel the CLI would otherwise discover: CLAUDE.md from the cwd
-            // AND from every directory above it, ~/.claude/CLAUDE.md, settings hooks, skills,
-            // plugins, custom agents. The clean checkout below cannot close those on its own —
-            // measured on 2.1.248, a CLAUDE.md planted in the checkout's PARENT was obeyed, and
-            // at the time the agent was handed TMPDIR and wrote with no filesystem sandbox, so
-            // choosing a directory was never going to be enough (BP-404 review). BP-349 confines
-            // the writer now; this flag stays, because it is what closes the channel by name
-            // rather than by reach — including on a machine where the operator turned the sandbox
-            // off.
-            //
-            // --safe-mode rather than --bare: --bare closes the same channels and also makes auth
-            // "strictly ANTHROPIC_API_KEY or apiKeyHelper", which this gate deliberately withholds.
-            // --safe-mode says auth works normally, and measured, it does.
-            "--safe-mode",
-            "--model",
-            model,
-        ];
+        const reviewArgs = agent.reviewArgs({
+          prompt: buildPrompt(context),
+          systemPrompt: prompt,
+          model,
+          verdictSchema: VERDICT_SCHEMA,
+        });
 
         // Defence in depth, and it closes nothing that is open today: the reviewer holds no write
         // tool, and `--safe-mode` below already disables hooks — so there is no writer here to
         // confine. It is what keeps the gate shut if either of those changes: a write tool added to
         // the reviewer's capability, or `--safe-mode` narrowed. Confined to the clean checkout,
         // which is a throwaway directory, so nothing it leaves survives the gate that made it.
-        const spawn = confineTool("claude", claudePath, reviewArgs, { writable: [checkout.path] });
+        const spawn = confineTool(agent.tool, agent.path, reviewArgs, { writable: [checkout.path] });
         // machineFault, not a plain refusal: an unconfinable machine has not judged the change, and
         // reporting it as the reviewer rejecting one would blame the diff and push its branch.
         if ("refusal" in spawn) {
@@ -366,11 +302,11 @@ export function reviewGate(
         if (result.code !== 0) {
           return {
             ok: false,
-            reason: `the review could not be completed: claude exited ${result.code}\n${outputTail(result)}`,
+            reason: `the review could not be completed: ${agent.id} exited ${result.code}\n${outputTail(result)}`,
           };
         }
 
-        const verdict = parseVerdict(result.stdout);
+        const verdict = agent.parseVerdict(result.stdout);
         if (!verdict) {
           return {
             ok: false,

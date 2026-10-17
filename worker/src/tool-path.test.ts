@@ -44,7 +44,7 @@ describe("every preflight-resolved tool is spawned by its path", () => {
   // right files would satisfy for ever.
   it("finds each spawn where it goes through the composition point", () => {
     expect(filesMatching(/\brun\(\s*requireToolPath\("gh"/)).toEqual(["delivery.ts"]);
-    expect(filesMatching(/confineTool\(\s*"claude"/)).toEqual(["executor.ts", "gates/review.ts"]);
+    expect(filesMatching(/confineTool\(\s*agent\.tool/)).toEqual(["executor.ts", "gates/review.ts"]);
     expect(filesMatching(/confineTool\(\s*"npm"/)).toEqual(["gates/confined-npm.ts"]);
   });
 });
