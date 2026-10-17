@@ -292,7 +292,7 @@ export default function SprintsPage() {
                   onComplete={() => setCompleting(selected)}
                   onEdit={() => openForm(selected)}
                   onSummary={() => setShowSummary(true)}
-                  onDelete={() => setConfirmDelete(selected)}
+                  onDelete={board.project.canAdmin ? () => setConfirmDelete(selected) : undefined}
                   onSelectSprint={(id) => router.push(sprintUrl(id, view))}
                 />
                 {view === "planning" ? (

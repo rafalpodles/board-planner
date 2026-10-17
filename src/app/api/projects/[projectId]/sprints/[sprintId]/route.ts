@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
-import { withProjectAccess } from "@/lib/middleware";
+import { withProjectAccess, withProjectOwner } from "@/lib/middleware";
 import { columnIdsWithRole } from "@/lib/columns";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
 
@@ -140,7 +140,7 @@ export const PUT = withProjectAccess(async (request, { params, db }) => {
   return NextResponse.json(sprint);
 });
 
-export const DELETE = withProjectAccess(async (_request, { params, db }) => {
+export const DELETE = withProjectOwner(async (_request, { params, db }) => {
   const { projectId, sprintId } = await params;
   await connectDB();
 

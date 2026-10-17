@@ -1273,7 +1273,7 @@ export function registerPlannerTools(server: McpServer): void {
     "delete_sprint",
     {
       description:
-        "Delete a sprint. Its tasks are not deleted: every one goes back to the backlog, finished or not. To carry " +
+        "Delete a sprint; only the board's owner may. Its tasks are not deleted: every one goes back to the backlog, finished or not. To carry " +
         "the unfinished ones to another sprint instead, complete it with update_sprint and moveIncomplete first. " +
         "confirmName has to repeat the sprint's name, so a wrong name or id cannot delete the wrong sprint.",
       inputSchema: strictInput(

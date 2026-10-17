@@ -68,6 +68,7 @@ const project = {
   categories: [],
   customFields: [],
   taskTemplates: [],
+  canAdmin: true,
 } as unknown as ApiProject;
 
 // doneCount/taskCount disagree with the task list on purpose: they are what the sprint
@@ -538,6 +539,13 @@ describe("Sprint lifecycle from the header", () => {
     await click(screen.getByRole("button", { name: "Delete" }));
 
     expect(api.del).toHaveBeenCalledWith("/api/projects/p1/sprints/s1");
+  });
+
+  it("offers a member Edit but no Delete, since deleting a sprint is the board owner's", async () => {
+    await renderSprints(sprints, { project: { ...project, canAdmin: false } });
+
+    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Delete sprint/ })).toBeNull();
   });
 
   it("opens the edit form on the selected sprint", async () => {

@@ -292,3 +292,18 @@ describe("the countdown", () => {
     expect(text).not.toContain("ends today");
   });
 });
+
+describe("SprintHeader delete", () => {
+  it("offers Delete when given a handler, and calls it", () => {
+    const onDelete = vi.fn();
+    renderHeader({ onDelete });
+    fireEvent.click(screen.getByRole("button", { name: "Delete sprint Sprint 6" }));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers no Delete without a handler, and keeps Edit", () => {
+    renderHeader({ onDelete: undefined });
+    expect(screen.queryByRole("button", { name: /Delete sprint/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+  });
+});
