@@ -1042,6 +1042,40 @@ checkout (BP-777).
 An entry that has gone missing, or has no `origin`, is skipped rather than failing the whole list —
 one stale line must not cost this machine every other checkout it could serve.
 
+## A project that lists several repositories
+
+From 1.10.0 the worker runs a task in every repository of a project that lists more than one. Every
+task of such a project inherits all of them; there is no per-task choice.
+
+- **Who takes it.** Only a machine with a usable checkout in `repos.json` of **every** repository,
+  each one a different directory, and a worker that says so: it sends `X-CP-Capabilities:
+  multi-repository` on every request, and the server hands such a project to no worker that does not.
+  A worker up to 1.9.x never claims one. A repository this machine lacks leaves the project unbound
+  here, and the binding error names the repository by its remote.
+- **One worktree per repository.** Each gets its own branch `<KEY>/worker`, under that checkout's own
+  `cp-worktrees/<workerId>` — two checkouts in one parent directory share it, and each sweeps only its
+  own entries. The agent starts in the first repository, is told where the others are, may write in all
+  of them, and is confined to exactly those worktrees.
+- **Every check, on every worktree.** After every step the tamper, commit-scan, unfinished-work and
+  ignored-file checks run on all of them, including one the agent was not meant to touch. Gates run in
+  each repository the agent changed, one gate at a time across the repositories, each with the time
+  that is left of the run's ceiling.
+- **All or none.** Nothing is pushed until every changed repository has passed every gate before the
+  push, and a refusal in any of them pushes nothing anywhere. A repository the agent left unchanged
+  gets no gate, no push and no pull request. A run that changed none is refused.
+- **One pull request per changed repository**, opened by the Pull request step. Each lists the others
+  when that cannot expose a repository that is not known to be public in the description of one that is
+  not known to be private. The agent's summary goes into a description only under the same rule;
+  otherwise the description says it is limited to its repository's own part. The visibility is read from
+  the server's remote, before any pull request exists, and a repository whose visibility cannot be read
+  counts as not known to be public.
+- **Merge** follows the project's order and stops at the first refusal; the comment names what merged and
+  what did not, and nothing is rolled back.
+
+What it does not do yet: a refusal in a run across several repositories offers no decision to accept
+(the worktrees are kept and the change is in the comment), the Review gate reads one repository's diff,
+and one base branch and one set of diff limits apply to all of them.
+
 ## What a worker's credential grants
 
 **Exactly what its owner can reach, and nothing else.** A worker is offered a project when three
