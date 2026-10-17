@@ -135,6 +135,7 @@ describe("a run across several repositories", () => {
       deliveries[name] = delivery;
       return {
         name,
+        remote: origins[name],
         config: workerConfig({ repoPath: clones[name], worktreeRoot: join(dir, "cp-worktrees"), baseBranch: "main" }),
         workspace,
         createDelivery: () => delivery,
@@ -446,6 +447,97 @@ describe("a run across several repositories", () => {
       // api is public: it does not name the private web. web is private: it may name the public api.
       expect(vi.mocked(run.deliveries.api.linkRelated)).not.toHaveBeenCalled();
       expect(vi.mocked(run.deliveries.web.linkRelated)).toHaveBeenCalledWith(expect.any(String), "https://github.com/acme/web/pull/9", ["https://github.com/acme/api/pull/3"]);
+    });
+
+    describe("the agent's summary", () => {
+      const summaryOf = (run: ReturnType<typeof build>, name: Name) => vi.mocked(run.deliveries[name].openPr).mock.calls[0][2];
+
+      it("goes into a pull request only when no private prose could be in it", async () => {
+        const run = build({ ...both, delivery: { api: { isPrivate: vi.fn(async () => false) }, web: { isPrivate: vi.fn(async () => true) } } });
+
+        await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, PUSH, PR));
+
+        // api is public and web is private: api's description is public and may not carry a summary of both
+        expect(summaryOf(run, "api")).toContain("limited to this repository's own part");
+        expect(summaryOf(run, "api")).not.toContain("Changed it.");
+        // web is private: its readers may see everything
+        expect(summaryOf(run, "web")).toBe("Changed it.");
+      });
+
+      it("goes into every pull request when every repository is public", async () => {
+        const run = build({ ...both });
+
+        await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, PUSH, PR));
+
+        expect(summaryOf(run, "api")).toBe("Changed it.");
+        expect(summaryOf(run, "web")).toBe("Changed it.");
+      });
+
+      it("is withheld from the pull request of a repository whose neighbour's visibility is unknown", async () => {
+        const run = build({ ...both, delivery: { api: { isPrivate: vi.fn(async () => null) }, web: { isPrivate: vi.fn(async () => false) } } });
+
+        await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, PUSH, PR));
+
+        // api (unknown) has only a public neighbour; web (public) has a neighbour not known to be public
+        expect(summaryOf(run, "api")).toBe("Changed it.");
+        expect(summaryOf(run, "web")).toContain("limited to this repository's own part");
+      });
+
+      it("treats a visibility lookup that throws as unknown", async () => {
+        const run = build({ ...both, delivery: { api: { isPrivate: vi.fn(async () => { throw new Error("gh is down"); }) } } });
+
+        await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, PUSH, PR));
+
+        expect(summaryOf(run, "web")).toContain("limited to this repository's own part");
+        expect(run.reporter.delivered).toHaveBeenCalled();
+      });
+
+      it("is asked of a repository the agent did not change too, because the agent read it", async () => {
+        const run = build({
+          write: (w) => write(w.api, "api.txt", "a\n"),
+          delivery: { api: { isPrivate: vi.fn(async () => false) }, web: { isPrivate: vi.fn(async () => true) } },
+        });
+
+        await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, PUSH, PR));
+
+        expect(vi.mocked(run.deliveries.web.isPrivate)).toHaveBeenCalled();
+        expect(vi.mocked(run.deliveries.web.openPr)).not.toHaveBeenCalled();
+        // api is public and the repository the agent read is private
+        expect(summaryOf(run, "api")).toContain("limited to this repository's own part");
+      });
+
+      it("carries the summary of the only repository changed when the one the agent read is public", async () => {
+        const run = build({ write: (w) => write(w.api, "api.txt", "a\n") });
+
+        await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, PUSH, PR));
+
+        expect(summaryOf(run, "api")).toBe("Changed it.");
+      });
+
+      it("trusts a verdict only while the checkout's origin is still the address the server named", async () => {
+        const run = build({ ...both, delivery: { api: { isPrivate: vi.fn(async () => true) }, web: { isPrivate: vi.fn(async () => true) } } });
+        // the origin moves between the inventory and the pull request, as an agent that can write the shared config would move it
+        git(clones.api, "remote", "set-url", "origin", "https://github.com/elsewhere/api.git");
+
+        await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, PUSH, PR));
+
+        expect(vi.mocked(run.deliveries.api.isPrivate)).not.toHaveBeenCalled();
+        // api's verdict is unknown now, so web (private) may carry the summary and api (unknown) may not
+        expect(summaryOf(run, "web")).toBe("Changed it.");
+        expect(summaryOf(run, "api")).toContain("limited to this repository's own part");
+      });
+
+      it("is decided from the server's remote for each repository, before any pull request exists", async () => {
+        const run = build({ ...both });
+
+        await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, PUSH, PR));
+
+        expect(vi.mocked(run.deliveries.api.isPrivate)).toHaveBeenCalledWith(expect.any(String), origins.api);
+        expect(vi.mocked(run.deliveries.web.isPrivate)).toHaveBeenCalledWith(expect.any(String), origins.web);
+        const asked = Math.max(...names.map((name) => vi.mocked(run.deliveries[name].isPrivate).mock.invocationCallOrder[0]));
+        const opened = Math.min(...names.map((name) => vi.mocked(run.deliveries[name].openPr).mock.invocationCallOrder[0]));
+        expect(asked).toBeLessThan(opened);
+      });
     });
 
     it("treats a repository whose visibility is unknown as public, and as not known to be public", async () => {

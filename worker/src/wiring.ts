@@ -1,3 +1,4 @@
+import { capabilityHeaders } from "./capabilities.js";
 import {
   accessSync,
   constants,
@@ -623,6 +624,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           Authorization: `Bearer ${identity.credential}`,
           "X-Worker-Id": identity.workerId,
           "X-CP-Protocol": String(PROTOCOL_VERSION),
+          ...capabilityHeaders(),
         },
       });
       // A locked or disabled machine is refused here with 403, and the previous list must not
@@ -790,6 +792,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           if (!repositoryConfig) throw new Error(`no checkout is bound for repository ${index} of project ${task.projectId}`);
           return {
             name: repository.name,
+            remote: repository.remote,
             config: repositoryConfig,
             workspace: createWorkspace(
               repositoryConfig,

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createDelivery, prBody } from "./delivery.js";
+import { createDelivery, prBody, repositoryOf } from "./delivery.js";
 import { CommandResult, RunOpts } from "./exec.js";
 import { ClaimedTask } from "./types.js";
 import { claimedTask } from "./__fixtures__/task.js";
@@ -753,19 +753,60 @@ describe("the pull requests a run in several repositories lists in each other", 
   });
 
   describe("isPrivate", () => {
+    const REMOTE = "git@github.com:acme/api.git";
+
     it.each([[true], [false]])("answers %s as gh does", async (isPrivate) => {
       const { delivery: d, run } = delivery({ "gh repo view": { stdout: JSON.stringify({ isPrivate }) } });
 
-      expect(await d.isPrivate("/wt", A)).toBe(isPrivate);
-      expect(argsOf(run)).toEqual(["repo", "view", "acme/api", "--json", "isPrivate"]);
+      expect(await d.isPrivate("/wt", REMOTE)).toBe(isPrivate);
+      expect(argsOf(run)).toEqual(["repo", "view", "--json", "isPrivate", "--", "acme/api"]);
     });
 
     it("answers null when gh cannot say, or says something else, so a caller does not assume", async () => {
-      expect(await delivery({ "gh repo view": { code: 1 } }).delivery.isPrivate("/wt", A)).toBeNull();
-      expect(await delivery({ "gh repo view": { stdout: "not json" } }).delivery.isPrivate("/wt", A)).toBeNull();
-      expect(await delivery({ "gh repo view": { stdout: JSON.stringify({ isPrivate: "yes" }) } }).delivery.isPrivate("/wt", A)).toBeNull();
-      expect(await delivery({}).delivery.isPrivate("/wt", "not-a-url")).toBeNull();
+      expect(await delivery({ "gh repo view": { code: 1 } }).delivery.isPrivate("/wt", REMOTE)).toBeNull();
+      expect(await delivery({ "gh repo view": { stdout: "not json" } }).delivery.isPrivate("/wt", REMOTE)).toBeNull();
+      expect(await delivery({ "gh repo view": { stdout: JSON.stringify({ isPrivate: "yes" }) } }).delivery.isPrivate("/wt", REMOTE)).toBeNull();
     });
+
+    it("never runs gh for a remote it does not understand", async () => {
+      const { delivery: d, run } = delivery({ "gh repo view": { stdout: JSON.stringify({ isPrivate: false }) } });
+
+      for (const remote of [
+        "not-a-url",
+        "git@github-acme:acme/api.git",
+        "--repo=evil/x",
+        "https://github.com/-evil/x",
+        "https://-bx.com/o/r",
+        "git@-bx.com:o/r",
+        "https://.evil.com/o/r",
+        "https://a..com/o/r",
+        "https://github.com:8443/o/r",
+        "",
+      ]) {
+        expect(await d.isPrivate("/wt", remote)).toBeNull();
+      }
+      expect(run).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("repositoryOf", () => {
+    it.each([
+      ["git@github.com:acme/api.git", "acme/api"],
+      ["https://github.com/acme/api", "acme/api"],
+      ["https://user@github.com/acme/api.git/", "acme/api"],
+      ["ssh://git@github.com/acme/api.git", "acme/api"],
+      ["https://ghe.example.com/acme/api.git", "ghe.example.com/acme/api"],
+      ["git@GitHub.com:Acme/Api.git", "Acme/Api"],
+    ])("reads %s as %s", (remote, expected) => {
+      expect(repositoryOf(remote)).toBe(expected);
+    });
+
+    it.each(["", "acme/api", "git@github-acme:acme/api.git", "https://github.com/acme", "https://github.com/acme/api/extra", "-x", "https://github.com/acme/ap i"])(
+      "reads %j as nothing",
+      (remote) => {
+        expect(repositoryOf(remote)).toBeNull();
+      },
+    );
   });
 
   describe("what the agent's summary may not say", () => {

@@ -1,3 +1,4 @@
+import { capabilityHeaders } from "./capabilities.js";
 import { RepoInventory } from "./config.js";
 import { CommandHandlers, HaltReport, isWorkerCommand } from "./commands.js";
 import { PreflightCheck } from "./preflight.js";
@@ -160,6 +161,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
           Authorization: `Bearer ${deps.enrolmentToken}`,
           "Content-Type": "application/json",
           "X-CP-Protocol": String(PROTOCOL_VERSION),
+          ...capabilityHeaders(),
         },
         body: JSON.stringify(deps.registration),
       });
@@ -243,6 +245,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
           "Content-Type": "application/json",
           "X-Worker-Id": identity.workerId,
           "X-CP-Protocol": String(PROTOCOL_VERSION),
+          ...capabilityHeaders(),
         },
         body: JSON.stringify({
           version: deps.registration.version,

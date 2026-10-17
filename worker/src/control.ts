@@ -1,3 +1,4 @@
+import { capabilityHeaders } from "./capabilities.js";
 import { CommandHandlers, isWorkerCommand, WorkerCommand } from "./commands.js";
 import { loadIdentity, PROTOCOL_VERSION, Store } from "./registration.js";
 
@@ -106,6 +107,7 @@ export function connectControl(deps: ControlDeps): Control {
           Authorization: `Bearer ${identity.credential}`,
           "X-Worker-Id": identity.workerId,
           "X-CP-Protocol": String(PROTOCOL_VERSION),
+          ...capabilityHeaders(),
         },
         signal: abortController.signal,
       });

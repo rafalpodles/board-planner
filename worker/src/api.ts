@@ -1,3 +1,4 @@
+import { capabilityHeaders } from "./capabilities.js";
 import { existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { Bootstrap } from "./config.js";
@@ -300,6 +301,7 @@ export function createApiClient(
       Authorization: `Bearer ${identity.credential}`,
       "X-Worker-Id": identity.workerId,
       "X-CP-Protocol": String(PROTOCOL_VERSION),
+      ...capabilityHeaders(),
     };
 
     const response = await fetchImpl(`${config.apiBaseUrl}${path}`, {

@@ -7,13 +7,22 @@
 export const MULTI_REPOSITORY = "multi-repository";
 
 /**
- * Whether this worker says it can run several repositories of one project. The run itself exists
- * (`runTaskInRepositories`); what is left before this turns on is the smoke test of a real worker
- * against two repositories and the docs (BP-1073). Until then no project that lists several is ever
- * handed to this worker, because the server hands one only to a worker that says so.
+ * Whether this worker says it can run several repositories of one project: `runTaskInRepositories`
+ * exists, is exercised against real git by `pipeline-several.integration.test.ts` and, in CI, by a
+ * real worker carrying a task through two repositories (e2e/smoke/worker.smoke.ts). It turns false
+ * only to take the capability back, in which case the server stops handing such a project to this
+ * worker.
  */
-export const SAYS_IT_RUNS_SEVERAL_REPOSITORIES = false;
+export const SAYS_IT_RUNS_SEVERAL_REPOSITORIES = true;
 
-export function capabilities(): string[] {
-  return SAYS_IT_RUNS_SEVERAL_REPOSITORIES ? [MULTI_REPOSITORY] : [];
+export const CAPABILITIES_HEADER = "X-CP-Capabilities";
+
+export function capabilities(says: boolean = SAYS_IT_RUNS_SEVERAL_REPOSITORIES): string[] {
+  return says ? [MULTI_REPOSITORY] : [];
+}
+
+/** Spread into the headers of every request to the server, next to `X-CP-Protocol` */
+export function capabilityHeaders(says: boolean = SAYS_IT_RUNS_SEVERAL_REPOSITORIES): Record<string, string> {
+  const named = capabilities(says);
+  return named.length > 0 ? { [CAPABILITIES_HEADER]: named.join(",") } : {};
 }
