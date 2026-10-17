@@ -1,11 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { summarise } from "../telemetry.js";
 import { AgentRun, NO_RUN } from "./agent.js";
 import { RESULT_SCHEMA } from "../executor.js";
-import { codexAgent, strictSchema } from "./codex.js";
+import { codexAgent, removeRunHome, strictSchema, sweepRunHomes } from "./codex.js";
 
 const scratch: string[] = [];
 function dir(): string {
@@ -49,8 +49,11 @@ describe("the codex adapter's argv", () => {
     const disabled = args.flatMap((arg, i) => (arg === "--disable" ? [args[i + 1]] : []));
 
     expect(args).toContain('web_search="disabled"');
-    expect(disabled).toEqual(
-      expect.arrayContaining(["browser_use", "computer_use", "hooks", "plugins", "multi_agent", "apps", "image_generation", "memories"]),
+    expect([...disabled].sort()).toEqual(
+      [
+        "apps", "browser_use", "computer_use", "hooks", "image_generation", "in_app_browser", "memories",
+        "multi_agent", "plugin_sharing", "plugins", "remote_plugin", "skill_search", "sleep_tool", "tool_suggest",
+      ].sort(),
     );
   });
 
@@ -66,6 +69,20 @@ describe("the codex adapter's argv", () => {
 
     expect(args.at(-2)).toBe("--");
     expect(args.at(-1)).toBe("the rules\n\n---\n\n--dangerously-do-something");
+  });
+
+  it("gives the reviewer the rules before the diff, after a --, and the same run home", () => {
+    const args = agent.reviewArgs(REVIEW);
+
+    expect(args.at(-2)).toBe("--");
+    expect(args.at(-1)).toBe("judge it\n\n---\n\nthe diff");
+    expect(value(args, "--output-schema")).toBe("/run/home/schema.json");
+    expect(value(args, "-m")).toBe("gpt-x");
+  });
+
+  it("refuses to build an argv for a run that was never prepared", () => {
+    expect(() => agent.editArgs({ ...EDIT, run: NO_RUN })).toThrow(/prepare/);
+    expect(() => agent.reviewArgs({ ...REVIEW, run: NO_RUN })).toThrow(/prepare/);
   });
 
   it("tells the reviewer to load no instructions from the checkout, and the implementer nothing of the kind", () => {
@@ -135,6 +152,23 @@ describe("the codex adapter's run home", () => {
     const made = await codexAgent("/x", { sourceHome: dir(), tmp: dir() }).prepare({});
 
     expect(made).toEqual({ refusal: expect.stringMatching(/not signed in.*codex login/) });
+  });
+
+  it("keeps the schema to its owner too", async () => {
+    const run = (await codexAgent("/x", { sourceHome: operatorHome(), tmp: dir() }).prepare({})) as AgentRun;
+
+    expect(statSync(join(run.dir!, "schema.json")).mode & 0o777).toBe(0o600);
+  });
+
+  it("leaves no half-made home behind when the copy fails", async () => {
+    const source = dir();
+    mkdirSync(join(source, "auth.json"));
+    const tmp = dir();
+
+    const made = await codexAgent("/x", { sourceHome: source, tmp }).prepare({});
+
+    expect(made).toEqual({ refusal: expect.stringMatching(/could not make a home/) });
+    expect(readdirSync(tmp)).toEqual([]);
   });
 
   it("makes a home of its own for every run", async () => {
@@ -252,5 +286,68 @@ describe("strictSchema", () => {
 
     expect(input).toEqual({ type: "object", properties: { n: { type: "number" } } });
     expect(strictSchema({ type: "string", enum: ["a"] })).toEqual({ type: "string", enum: ["a"] });
+  });
+});
+
+describe("removing a run's home", () => {
+  it("removes a home the run made unreadable, nested directories and the login copy included", () => {
+    const home = dir();
+    mkdirSync(join(home, "sub", "deeper"), { recursive: true });
+    writeFileSync(join(home, "auth.json"), "{}");
+    writeFileSync(join(home, "sub", "deeper", "x"), "x");
+    chmodSync(join(home, "sub", "deeper"), 0o000);
+    chmodSync(join(home, "sub"), 0o000);
+    chmodSync(home, 0o000);
+
+    removeRunHome(home);
+
+    expect(existsSync(home)).toBe(false);
+  });
+
+  it("does not follow a link out of the home, to make it writable or to delete it", () => {
+    const home = dir();
+    const elsewhere = dir();
+    writeFileSync(join(elsewhere, "keep"), "k");
+    chmodSync(join(elsewhere, "keep"), 0o444);
+    symlinkSync(elsewhere, join(home, "link"));
+    chmodSync(home, 0o000);
+
+    removeRunHome(home);
+
+    expect(existsSync(home)).toBe(false);
+    expect(readFileSync(join(elsewhere, "keep"), "utf8")).toBe("k");
+    expect(statSync(join(elsewhere, "keep")).mode & 0o777).toBe(0o444);
+  });
+
+  it("says nothing, and throws nothing, for a home that is already gone", () => {
+    const logged: string[] = [];
+
+    expect(() => removeRunHome(join(dir(), "never-made"), (m) => logged.push(m))).not.toThrow();
+    expect(logged).toEqual([]);
+  });
+});
+
+describe("sweeping the homes a killed worker left", () => {
+  const aged = (path: string, ageMs: number) => {
+    const when = new Date(Date.now() - ageMs);
+    utimesSync(path, when, when);
+  };
+
+  it("removes an old run home, and leaves a young one, and anything else in the directory", () => {
+    const tmp = dir();
+    for (const name of ["cp-codex-old", "cp-codex-young", "cp-review-old", "other"]) {
+      mkdirSync(join(tmp, name));
+      writeFileSync(join(tmp, name, "auth.json"), "{}");
+    }
+    aged(join(tmp, "cp-codex-old"), 2 * 3_600_000);
+    aged(join(tmp, "cp-review-old"), 2 * 3_600_000);
+
+    sweepRunHomes(tmp);
+
+    expect(readdirSync(tmp).sort()).toEqual(["cp-codex-young", "cp-review-old", "other"]);
+  });
+
+  it("is not stopped by a directory it cannot read", () => {
+    expect(() => sweepRunHomes(join(dir(), "missing"))).not.toThrow();
   });
 });

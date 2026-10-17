@@ -43,6 +43,10 @@ const SECRET = new RegExp(
     "glpat-[A-Za-z0-9_-]{20,}",
     // What sits in the checkout the agent is told to work in, not only on the disk around it (BP-324)
     "sk-proj-[A-Za-z0-9_-]{20,}",
+    // The login a Codex run is handed a copy of (BP-987): three-part JWTs, and the same fields as
+    // JSON where a token is not a JWT (the refresh token is opaque)
+    "eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}",
+    '"?(?:refresh|access|id)_token"\\s*:\\s*"[^"]{20,}"',
     "hooks\\.slack\\.com/(?:services|workflows|triggers)/[A-Za-z0-9/_-]{20,}",
     "(?:discord|discordapp)\\.com/api/webhooks/\\d+/[A-Za-z0-9_-]{20,}",
   ].join("|"),

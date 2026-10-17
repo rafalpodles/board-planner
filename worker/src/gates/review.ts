@@ -328,8 +328,12 @@ export function reviewGate(
               reason: `the reviewer rejected the change: ${capped(verdict.reason)}`,
             };
       } finally {
-        await run?.cleanup();
-        await discardCheckout(runner, gitPath, context.worktreePath, checkout.path);
+        // Whatever the run's own cleanup does, the checkout still goes
+        try {
+          await run?.cleanup();
+        } finally {
+          await discardCheckout(runner, gitPath, context.worktreePath, checkout.path);
+        }
       }
     },
   };

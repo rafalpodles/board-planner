@@ -19,7 +19,7 @@ export interface AgentRun {
   writable: string[];
   /** Where this run keeps what it needs; the argv may name files in it */
   dir?: string;
-  /** Removes whatever was made, credentials included; called once, whether the run ended well or not */
+  /** Removes whatever was made, credentials included; called once, whether the run ended well or not, and must not throw */
   cleanup(): Promise<void>;
 }
 

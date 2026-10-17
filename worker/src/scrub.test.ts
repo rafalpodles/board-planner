@@ -380,4 +380,23 @@ describe("scrubPatch", () => {
   it("still redacts a token by its shape", () => {
     expect(scrubPatch("+const t = 'ghp_0123456789abcdefghijklmnopqrstuvwxyz';")).not.toContain("ghp_0123");
   });
+
+  // BP-987: a Codex run is handed a copy of the operator's login, which an agent with a shell can quote
+  describe("a Codex login", () => {
+    const jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ.c2lnbmF0dXJlLXNpZ25hdHVyZS1zaWduYXR1cmU";
+
+    it("is redacted as a bare JWT", () => {
+      expect(scrub(`the token was ${jwt} and nothing else`)).toBe("the token was [redacted] and nothing else");
+    });
+
+    it("is redacted by field, where the refresh token is not a JWT", () => {
+      const refresh = '"refresh_token": "rt_abcdefghijklmnopqrstuvwxyz0123456789"';
+
+      expect(scrub(`{${refresh}, "account_id": "a"}`)).toBe('{[redacted], "account_id": "a"}');
+    });
+
+    it("leaves prose that merely says token alone", () => {
+      expect(scrub("refresh_token handling was rewritten")).toBe("refresh_token handling was rewritten");
+    });
+  });
 });

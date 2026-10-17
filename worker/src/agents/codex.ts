@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { codexSourceHome } from "../env.js";
@@ -119,11 +119,79 @@ export function strictSchema(schema: unknown): unknown {
   return out;
 }
 
+const RUN_HOME_PREFIX = "cp-codex-";
+
+// The run is allowed to write its own home, and `chmod 000` on it is a write: an agent that can be
+// told to may leave a directory its own uid cannot delete. The worker is that uid, so it makes the
+// tree writable again first (never following a link out of it) and then removes it.
+function makeWritable(path: string): void {
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    return;
+  }
+  if (stat.isSymbolicLink()) return;
+  try {
+    chmodSync(path, stat.isDirectory() ? 0o700 : 0o600);
+    if (stat.isDirectory()) for (const name of readdirSync(path)) makeWritable(join(path, name));
+  } catch {
+    // whatever is left is reported below
+  }
+}
+
+/** Removes a run's home, the login copy in it included. Never throws; says so when something stays. */
+export function removeRunHome(dir: string, logError: (message: string) => void = console.error): void {
+  const attempt = () => {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // checked below
+    }
+  };
+  attempt();
+  if (existsSync(dir)) {
+    makeWritable(dir);
+    attempt();
+  }
+  if (existsSync(dir)) logError(`could not remove ${dir}, which holds a copy of the Codex login: delete it by hand`);
+}
+
+/**
+ * Homes a worker that was killed never got to remove. Called once at boot, so a hard stop leaves a
+ * login copy behind only until the next start; an hour's grace keeps it off a sibling's live run.
+ */
+export function sweepRunHomes(tmp: string = tmpdir(), olderThanMs = 3_600_000, logError?: (message: string) => void): void {
+  let names: string[];
+  try {
+    names = readdirSync(tmp);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith(RUN_HOME_PREFIX)) continue;
+    const path = join(tmp, name);
+    try {
+      const stat = lstatSync(path);
+      if (!stat.isDirectory() || Date.now() - stat.mtimeMs < olderThanMs) continue;
+    } catch {
+      continue;
+    }
+    removeRunHome(path, logError);
+  }
+}
+
 export interface CodexOptions {
   /** Where the login is copied from; defaults to the operator's own Codex home */
   sourceHome?: string;
   /** Where each run's home is made; defaults to the temp directory */
   tmp?: string;
+  logError?: (message: string) => void;
+}
+
+function runDir(run: AgentRun): string {
+  if (!run.dir) throw new Error("a codex run has no home: prepare() was not called for it");
+  return run.dir;
 }
 
 export function codexAgent(path: string, options: CodexOptions = {}): CodingAgent {
@@ -141,7 +209,7 @@ export function codexAgent(path: string, options: CodexOptions = {}): CodingAgen
     "-m",
     model,
     "--output-schema",
-    join(run.dir ?? "", "schema.json"),
+    join(runDir(run), "schema.json"),
   ];
 
   return {
@@ -156,22 +224,24 @@ export function codexAgent(path: string, options: CodexOptions = {}): CodingAgen
       if (!existsSync(source)) {
         return { refusal: `codex is not signed in as this user: there is no ${source} (run \`codex login\` as the user the worker runs as)` };
       }
-      // Resolved, because the profile matches the resolved path and the CLI is told this one
-      const dir = realpathSync(mkdtempSync(join(options.tmp ?? tmpdir(), "cp-codex-")));
+      const made = mkdtempSync(join(options.tmp ?? tmpdir(), RUN_HOME_PREFIX));
+      let dir = made;
       try {
+        // Resolved, because the profile matches the resolved path and the CLI is told this one
+        dir = realpathSync(made);
         chmodSync(dir, 0o700);
         copyFileSync(source, join(dir, "auth.json"));
         chmodSync(join(dir, "auth.json"), 0o600);
         writeFileSync(join(dir, "schema.json"), JSON.stringify(strictSchema(schema)), { mode: 0o600 });
       } catch (error) {
-        rmSync(dir, { recursive: true, force: true });
+        removeRunHome(made, options.logError);
         return { refusal: `could not make a home for the codex run: ${String(error)}` };
       }
       return {
         env: { CODEX_HOME: dir },
         writable: [dir],
         dir,
-        cleanup: async () => rmSync(dir, { recursive: true, force: true }),
+        cleanup: async () => removeRunHome(dir, options.logError),
       };
     },
 

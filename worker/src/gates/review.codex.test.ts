@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { UNCONFINED_REASON } from "../sandbox.js";
 import { reviewGate } from "./review.js";
 import { codexAgent } from "../agents/codex.js";
 import { Runner } from "../exec.js";
@@ -47,10 +48,14 @@ const context: GateContext = {
 const jsonl = (verdict: unknown) =>
   `${JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(verdict) } })}\n${JSON.stringify({ type: "turn.completed" })}\n`;
 
+const homes = new Map<string, string>();
+const sourceOf = (tmp: string) => homes.get(tmp)!;
+
 function setup(verdict: unknown) {
   const home = made();
   writeFileSync(join(home, "auth.json"), "{}");
   const tmp = made();
+  homes.set(tmp, home);
   const run = vi.fn<Runner["run"]>(async (command) =>
     command === gitPath ? { code: 0, stdout: "", stderr: "", timedOut: false } : { code: 0, stdout: jsonl(verdict), stderr: "", timedOut: false },
   );
@@ -115,5 +120,81 @@ describe("the review gate on codex", () => {
     const gate = reviewGate({ run }, gitPath, codexAgent(CODEX, { sourceHome: made(), tmp: made() }), 5000, "gpt-x");
 
     expect(await gate.run(context)).toMatchObject({ ok: false, machineFault: true, reason: expect.stringMatching(/not signed in/) });
+  });
+
+  it("names the schema in the reviewer's own home", async () => {
+    const { gate, run } = setup({ approved: true, reason: "ok" });
+    await gate.run(context);
+
+    const [, args, options] = spawnOf(run);
+    expect(args[args.indexOf("--output-schema") + 1]).toBe(join(options!.env!.CODEX_HOME!, "schema.json"));
+  });
+
+  it("hands the reviewer the rules, before the task and after a --", async () => {
+    const { gate, run } = setup({ approved: true, reason: "ok" });
+    await gate.run(context);
+
+    const [, args] = spawnOf(run);
+    expect(args.at(-2)).toBe("--");
+    expect(args.at(-1)).toMatch(/^You are reviewing a diff produced by another agent[\s\S]*\n\n---\n\n/);
+  });
+
+  describe("the reviewer's home and the clean checkout, whatever happens to the review", () => {
+    const checkoutOf = (run: ReturnType<typeof setup>["run"]) => spawnOf(run)[2]!.cwd as string;
+
+    it("go when the reviewer times out", async () => {
+      const { run, tmp } = setup({ approved: true, reason: "ok" });
+      run.mockImplementation(async (command) => ({ code: command === gitPath ? 0 : 1, stdout: "", stderr: "", timedOut: command !== gitPath }));
+      const gate = reviewGate({ run }, gitPath, codexAgent(CODEX, { sourceHome: sourceOf(tmp), tmp }), 5000, "gpt-x");
+
+      expect(await gate.run(context)).toMatchObject({ ok: false, reason: expect.stringMatching(/timed out/) });
+      expect(readdirSync(tmp).filter((name) => name.startsWith("cp-codex-"))).toEqual([]);
+      expect(existsSync(checkoutOf(run))).toBe(false);
+    });
+
+    it("go when the runner throws, and the throw is not swallowed", async () => {
+      const { run, tmp } = setup({ approved: true, reason: "ok" });
+      run.mockImplementation(async (command) => {
+        if (command === gitPath) return { code: 0, stdout: "", stderr: "", timedOut: false };
+        throw new Error("spawn exploded");
+      });
+      const gate = reviewGate({ run }, gitPath, codexAgent(CODEX, { sourceHome: sourceOf(tmp), tmp }), 5000, "gpt-x");
+
+      await expect(gate.run(context)).rejects.toThrow("spawn exploded");
+      expect(readdirSync(tmp).filter((name) => name.startsWith("cp-codex-"))).toEqual([]);
+      const checkouts = run.mock.calls.filter(([command]) => command === gitPath).map(([, args]) => String(args[args.indexOf("--detach") + 2]));
+      expect(checkouts.filter((path) => path && existsSync(path))).toEqual([]);
+    });
+
+    it("go even when the run's own cleanup throws", async () => {
+      const { run, tmp } = setup({ approved: true, reason: "ok" });
+      const base = codexAgent(CODEX, { sourceHome: sourceOf(tmp), tmp });
+      const agent = {
+        ...base,
+        prepare: async (schema: object) => {
+          const prepared = await base.prepare(schema);
+          if ("refusal" in prepared) return prepared;
+          return { ...prepared, cleanup: async () => { await prepared.cleanup(); throw new Error("cleanup failed"); } };
+        },
+      };
+      const gate = reviewGate({ run }, gitPath, agent, 5000, "gpt-x");
+
+      await expect(gate.run(context)).rejects.toThrow("cleanup failed");
+      expect(existsSync(checkoutOf(run))).toBe(false);
+    });
+
+    it("go when the machine cannot confine the reviewer, which spawns nothing", async () => {
+      const { run, tmp } = setup({ approved: true, reason: "ok" });
+      const gate = reviewGate({ run }, gitPath, codexAgent(CODEX, { sourceHome: sourceOf(tmp), tmp }), 5000, "gpt-x");
+      const real = Object.getOwnPropertyDescriptor(process, "platform")!;
+      Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+      try {
+        expect(await gate.run(context)).toEqual({ ok: false, reason: UNCONFINED_REASON, machineFault: true });
+      } finally {
+        Object.defineProperty(process, "platform", real);
+      }
+      expect(run.mock.calls.some(([command]) => command === SANDBOX_COMMAND)).toBe(false);
+      expect(readdirSync(tmp).filter((name) => name.startsWith("cp-codex-"))).toEqual([]);
+    });
   });
 });
