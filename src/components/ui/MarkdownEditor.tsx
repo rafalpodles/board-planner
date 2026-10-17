@@ -207,7 +207,7 @@ export function MarkdownEditor({
         </label>
       )}
       {hinted && (
-        <span id={hintId} className="sr-only">
+        <span id={hintId} hidden>
           {placeholder}
         </span>
       )}

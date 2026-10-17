@@ -153,6 +153,12 @@ describe("the field's name", () => {
     expect(document.getElementById(field.getAttribute("aria-describedby") ?? "")?.textContent).toBe("Markdown supported");
   });
 
+  it("describes nothing when it has a label but no placeholder", () => {
+    render(<MarkdownEditor label="Description" value="" onChange={() => {}} />);
+
+    expect(screen.getByLabelText("Description").getAttribute("aria-describedby")).toBeNull();
+  });
+
   it("describes nothing when it has no label, the placeholder staying its only hint", () => {
     render(<MarkdownEditor value="" onChange={() => {}} placeholder="Markdown supported" />);
 
