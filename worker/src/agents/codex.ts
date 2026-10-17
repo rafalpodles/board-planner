@@ -134,6 +134,8 @@ function makeWritable(path: string): void {
   }
   if (stat.isSymbolicLink()) return;
   try {
+    // Follows a link swapped in between the lstat and here, which takes a process that outlived its
+    // reap; lchmod would close that and cannot open the `chmod 000` directory this exists for
     chmodSync(path, stat.isDirectory() ? 0o700 : 0o600);
     if (stat.isDirectory()) for (const name of readdirSync(path)) makeWritable(join(path, name));
   } catch {
@@ -163,9 +165,14 @@ export function removeRunHome(dir: string, logError: (message: string) => void =
     }
   };
   attempt();
-  if (existsSync(dir)) {
+  // Each undoes what the other cannot reach: a directory that is both `chmod 000` and immutable
+  // cannot be listed until its flag is cleared and cannot have its flag cleared recursively until it
+  // is listable, so it takes a round for every layer the run stacked
+  for (let round = 0; round < 3 && existsSync(dir); round += 1) {
+    makeWritable(dir);
     clearFlags(dir);
     makeWritable(dir);
+    clearFlags(dir);
     attempt();
   }
   if (existsSync(dir)) logError(`could not remove ${dir}, which holds a copy of the Codex login: delete it by hand`);

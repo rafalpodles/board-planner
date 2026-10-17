@@ -395,6 +395,31 @@ describe("a home the run made impossible to remove", () => {
     expect(existsSync(home)).toBe(false);
   });
 
+  it.skipIf(process.platform !== "darwin")("is removed when an immutable login copy sits in a directory the run made unreadable", () => {
+    const home = dir();
+    mkdirSync(join(home, "sub"));
+    writeFileSync(join(home, "sub", "auth.json"), "{}");
+    execFileSync("/usr/bin/chflags", ["uchg", join(home, "sub", "auth.json")]);
+    chmodSync(join(home, "sub"), 0o000);
+
+    removeRunHome(home);
+
+    expect(existsSync(home)).toBe(false);
+  });
+
+  it.skipIf(process.platform !== "darwin")("is removed when a directory is both unreadable and immutable, with an immutable file inside", () => {
+    const home = dir();
+    mkdirSync(join(home, "sub"));
+    writeFileSync(join(home, "sub", "auth.json"), "{}");
+    execFileSync("/usr/bin/chflags", ["uchg", join(home, "sub", "auth.json")]);
+    chmodSync(join(home, "sub"), 0o000);
+    execFileSync("/usr/bin/chflags", ["uchg", join(home, "sub")]);
+
+    removeRunHome(home);
+
+    expect(existsSync(home)).toBe(false);
+  });
+
   it("says where the login copy is, and that it must go by hand, when it cannot be removed", () => {
     const parent = dir();
     const home = join(parent, "cp-codex-1-x");
