@@ -123,8 +123,9 @@ public struct CloneStep: Sendable {
     // LOCAL path — a bare repository chmod'd read-only still reported success — and that gap is
     // now moot rather than fixed: BP-399 refuses a local path as a remote outright.
     //
-    // BP-1076: the probe pushes HEAD to a branch that does not exist, because the one it tracks may be behind origin and that is
-    // not an access problem; --no-verify because the real push runs without hooks, and a local pre-push policy is not one either.
+    // BP-1076: the probe pushes HEAD to a branch that does not exist, because the one it tracks may
+    // be behind origin and that is not an access problem; --no-verify because the real push runs
+    // without hooks, and a local pre-push policy is not an access problem either.
     private func pushable(at path: String) -> CloneOutcome? {
         let probe = run("git", ["-C", path, "push", "--dry-run", "--no-verify", "origin", CloneStep.probeRefspec()], nil)
         guard probe.code != 0 else { return nil }
