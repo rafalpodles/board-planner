@@ -24,12 +24,14 @@ export function TriagePanel({
   taskId,
   triage: initial,
   customFields,
+  onTriage,
   onChanged,
 }: {
   projectId: string;
   taskId: string;
   triage?: ApiTaskTriage;
   customFields: ApiCustomField[];
+  onTriage: (triage: ApiTaskTriage) => void;
   onChanged: () => void;
 }) {
   const api = useApi();
@@ -78,6 +80,7 @@ export function TriagePanel({
     try {
       const answer: { triage: ApiTaskTriage } = await api.post(`/api/projects/${projectId}/tasks/${taskId}/triage`, { suggestionId: s._id, action });
       setTriage(answer.triage);
+      onTriage(answer.triage);
       if (action !== "dismiss") changed.current();
     } catch (e) {
       setError(e instanceof Error ? e.message : "That did not work");

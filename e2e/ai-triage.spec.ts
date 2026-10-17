@@ -84,6 +84,48 @@ test("on Free the setting is an upsell, and turning triage on or acting on a sug
   expect(acted.status()).toBe(402);
 });
 
+test("a read of the task that was under way when a suggestion was dismissed does not bring it back", async ({ page, request }) => {
+  await useLicenceKey(request, e2eLicence());
+  await signIn(page, "owner");
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=triage`);
+  await page.getByLabel("AI triage").selectOption("suggest");
+  const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith(PROJECT));
+  await page.getByRole("button", { name: "Save" }).click();
+  expect((await saved).status()).toBe(200);
+
+  const number = await createTask(page, "Login loops on Safari", `stub-assignee: ${MEMBER_USERNAME}\nstub-category: bug`);
+  const panel = await openTask(page, number);
+  await expect(panel.getByText("Category: bug")).toBeVisible();
+
+  // Applying one suggestion makes the page read the task again. That read is served now and delivered
+  // only after the other suggestion has been dismissed, as a busy server can make it
+  const release = Promise.withResolvers<void>();
+  let held = false;
+  await page.route(
+    (url) => /^\/api\/projects\/[^/]+\/tasks\/[^/]+$/.test(url.pathname),
+    async (route) => {
+      if (route.request().method() !== "GET" || held) return route.continue();
+      held = true;
+      const response = await route.fetch();
+      await release.promise;
+      await route.fulfill({ response });
+    }
+  );
+  await panel.getByRole("button", { name: `Apply Assignee: ${MEMBER_USERNAME}` }).click();
+  await expect(panel.getByText(`Assignee: ${MEMBER_USERNAME} · applied`)).toBeVisible();
+  await expect.poll(() => held).toBe(true);
+
+  const dismissed = page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith("/triage"));
+  await panel.getByRole("button", { name: "Dismiss Category: bug" }).click();
+  expect((await dismissed).status()).toBe(200);
+  await expect(panel.getByText("Category: bug")).toHaveCount(0);
+
+  release.resolve();
+  await page.waitForTimeout(1_000);
+  await expect(panel.getByText("Category: bug")).toHaveCount(0, { timeout: 1_000 });
+  await expect(panel.getByText(`Assignee: ${MEMBER_USERNAME} · applied`)).toBeVisible();
+});
+
 test("suggest mode shows what the board offers to apply or dismiss, and drops what it does not", async ({ page, request }) => {
   await useLicenceKey(request, e2eLicence());
   await signIn(page, "owner");
