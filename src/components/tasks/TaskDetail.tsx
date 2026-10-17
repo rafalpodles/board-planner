@@ -652,7 +652,7 @@ function TaskDetailView({
               taskId={task._id}
               triage={task.triage}
               customFields={project.customFields || []}
-              onTriage={(triage) => onTaskChange((prev) => (prev ? { ...prev, triage } : prev))}
+              onTriage={(triage) => onTaskChange((prev) => (prev && prev._id === task._id ? { ...prev, triage } : prev))}
               onChanged={() => {
                 wroteHistory();
                 onReload();

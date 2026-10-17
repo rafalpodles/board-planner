@@ -101,19 +101,21 @@ test("a read of the task that was under way when a suggestion was dismissed does
   // only after the other suggestion has been dismissed, as a busy server can make it
   const release = Promise.withResolvers<void>();
   let held = false;
+  let served = false;
   await page.route(
     (url) => /^\/api\/projects\/[^/]+\/tasks\/[^/]+$/.test(url.pathname),
     async (route) => {
       if (route.request().method() !== "GET" || held) return route.continue();
       held = true;
       const response = await route.fetch();
+      served = true;
       await release.promise;
       await route.fulfill({ response });
     }
   );
   await panel.getByRole("button", { name: `Apply Assignee: ${MEMBER_USERNAME}` }).click();
   await expect(panel.getByText(`Assignee: ${MEMBER_USERNAME} · applied`)).toBeVisible();
-  await expect.poll(() => held).toBe(true);
+  await expect.poll(() => served).toBe(true);
 
   const dismissed = page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith("/triage"));
   await panel.getByRole("button", { name: "Dismiss Category: bug" }).click();
