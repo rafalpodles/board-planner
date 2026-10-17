@@ -1880,7 +1880,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       });
 
       expect(seen.length).toBeGreaterThan(0);
-      expect(seen.every((headers) => headers["X-CP-Capabilities"] === "multi-repository")).toBe(true);
+      expect(seen.every((headers) => headers["X-CP-Capabilities"] === "multi-repository,agent-claude,agent-codex")).toBe(true);
     });
 
     // BP-688. The third site of the same class: a server this worker cannot reach at all (as
@@ -2450,6 +2450,7 @@ describe("preflight's place in the wiring", () => {
 
   const PASSING: PreflightReport = {
     ok: true,
+    agents: ["claude"],
     account: "someone@example.com",
     checks: [{ name: "git", ok: true, detail: RESOLVED.git }],
     paths: RESOLVED,

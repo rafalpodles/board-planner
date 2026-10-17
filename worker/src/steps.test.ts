@@ -140,6 +140,17 @@ describe("runStep — a model step", () => {
     });
   });
 
+  // BP-987
+  it("tells the executor which coding CLI the step runs on, and nothing when the snapshot names none", async () => {
+    const onCodex = ctx();
+    await runStep(entry({ capability: "edit", provider: "codex", model: "gpt-5" }), onCodex);
+    const old = ctx();
+    await runStep(entry({ capability: "edit" }), old);
+
+    expect(onCodex.executor.execute.mock.calls[0][0].brief).toMatchObject({ provider: "codex", model: "gpt-5" });
+    expect(old.executor.execute.mock.calls[0][0].brief.provider).toBeUndefined();
+  });
+
   // Telemetry is how the board shows a run is alive and the only place cost is measured; a step
   // that drops it makes a forty-minute agent look like a hung one
   it("forwards the event stream, so tool use still reaches the board", async () => {

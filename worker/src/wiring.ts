@@ -1,4 +1,5 @@
 import { capabilityHeaders, reportAgents } from "./capabilities.js";
+import { sweepRunHomes } from "./agents/codex.js";
 import {
   accessSync,
   constants,
@@ -425,6 +426,11 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
 
     showLeftovers();
+
+    // What this machine can run, said to the server on every request from here on
+    reportAgents(preflight.agents);
+    // A Codex run home carries the login; one a killed worker left behind goes before the next run
+    if (preflight.paths.codex) sweepRunHomes(undefined, deps.logError);
 
     for (const check of preflight.checks) {
       if (!check.ok) deps.logError(`preflight: ${check.name} — ${check.detail}`);
@@ -1080,6 +1086,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       // the git this run's own inventory scan shells out to.
       // Before preflight's own probe, which is the first confined spawn to carry this worker's mark
       leftovers = (await deps.runner.reapLeftovers?.(bootstrap.stateDir)) ?? "";
+      // Nothing is claimed about what this machine has until preflight has looked
+      reportAgents([]);
       await establishPreflight();
 
       // Before the first heartbeat, which is what carries it: the server matches projects against

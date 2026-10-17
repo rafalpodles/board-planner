@@ -169,3 +169,38 @@ describe("gateFromEntry", () => {
     }
   });
 });
+
+// BP-987. The review gate runs on the coding CLI its parameters name
+describe("gateFromEntry's review gate and the coding CLI", () => {
+  const review = (params: Record<string, string>) => entry({ key: "review", name: "Reviewed", gateKind: "review", params });
+
+  it("runs on Claude Code when no provider is named, as every review did before", () => {
+    const gate = gateFromEntry(review({ model: "sonnet" }), idleRunner, tools, 1000, FALLBACKS);
+
+    expect(gate?.name).toBe("review");
+  });
+
+  it("refuses, as a machine fault, a review on Codex when this machine has no Codex", async () => {
+    const gate = gateFromEntry(review({ provider: "codex", model: "gpt-5" }), idleRunner, tools, 1000, FALLBACKS);
+
+    expect(await gate!.run(ctx(1))).toEqual({ ok: false, reason: expect.stringMatching(/Codex, which this machine cannot run/), machineFault: true });
+  });
+
+  it("refuses a review on Codex that names no model, rather than reviewing on a Claude one", async () => {
+    const gate = gateFromEntry(review({ provider: "codex" }), idleRunner, { ...tools, codex: "/opt/homebrew/bin/codex" }, 1000, FALLBACKS);
+
+    expect(await gate!.run(ctx(1))).toEqual({ ok: false, reason: expect.stringMatching(/Codex and names no model/), machineFault: true });
+  });
+
+  it("refuses a reviewer this worker has never heard of", async () => {
+    const gate = gateFromEntry(review({ provider: "cursor", model: "x" }), idleRunner, tools, 1000, FALLBACKS);
+
+    expect(await gate!.run(ctx(1))).toMatchObject({ ok: false, machineFault: true, reason: expect.stringMatching(/does not know the reviewer cursor/) });
+  });
+
+  it("keeps the gate's own name, which is the block's key", () => {
+    const gate = gateFromEntry(review({ provider: "codex", model: "gpt-5" }), idleRunner, { ...tools, codex: "/opt/homebrew/bin/codex" }, 1000, FALLBACKS);
+
+    expect(gate?.name).toBe("review");
+  });
+});

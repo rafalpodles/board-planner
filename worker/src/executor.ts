@@ -205,6 +205,18 @@ export function createExecutor(
   };
   return {
     async execute({ task, worktreePath, worktreeDir, brief, repositories, signal, onEvent }) {
+      const provider = brief.provider || "claude";
+      const chosen = agents[provider];
+      // Before anything is made: a machine that cannot run this step will be just as unable on the
+      // next task, so it is a fault of the machine and not an error that spends the attempt
+      if (!chosen) {
+        return { kind: "machine_fault", message: `this step runs on ${provider}, which this machine cannot run` };
+      }
+      const agent: CodingAgent = chosen;
+      // Codex has no model to fall back to that is true for every account, so the step names one
+      if (agent.id !== "claude" && !brief.model.trim()) {
+        return { kind: "error", message: `this step runs on ${provider} and names no model` };
+      }
       // Made before anything is spawned and torn down after, whatever the step does: it may hold a
       // copy of the operator's login, which nothing may leave behind
       const run = await agent.prepare(RESULT_SCHEMA);
