@@ -369,6 +369,7 @@ test.describe("creating and editing a sprint from the form", () => {
       headers: SAME_ORIGIN,
     });
     expect(refused.status()).toBe(403);
+    expect(await refused.json()).toEqual({ error: "Forbidden" });
     expect((await storedSprint(LIFECYCLE_CURRENT_ID))?.name).toBe(LIFECYCLE_CURRENT_NAME);
   });
 });
