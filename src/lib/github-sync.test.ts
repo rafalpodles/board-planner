@@ -1075,3 +1075,172 @@ describe("a rename the project's own url has caught up with", () => {
     expect(rowsOf("pr_linked")).toHaveLength(1);
   });
 });
+
+// BP-1068. A project that lists several repositories is synced in a round per repository
+describe("a project that lists several repositories", () => {
+  const several = (...urls: string[]) =>
+    project({ repositoryUrl: urls[0], repositories: urls.map((url, i) => ({ _id: `r${i}`, url, name: "" })) });
+  const fromRepo = (number: number, repo: string, branch = "bp-5/x") => ({
+    ...openPR,
+    number,
+    html_url: `https://github.com/o/${repo}/pull/${number}`,
+    head: { ref: branch, sha: `sha${number}` },
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ state: "pending", statuses: [] }), { status: 200 })));
+    taskFindOne.mockResolvedValue({ _id: "t5", taskNumber: 5, status: "todo", linkedPRs: [] });
+  });
+
+  it("asks each repository for its pull requests, and adds the answers up", async () => {
+    fetchPullRequests.mockImplementation(async (_owner: string, repo: string) => [fromRepo(repo === "api" ? 3 : 9, repo)]);
+
+    const result = await syncGithubPullRequests(db, several("https://github.com/o/web", "https://github.com/o/api"), "u1");
+
+    expect(fetchPullRequests.mock.calls.map(([owner, repo]) => `${owner}/${repo}`)).toEqual(["o/web", "o/api"]);
+    expect(result).toMatchObject({ ok: true, prsFound: 2, prsLinked: 2 });
+    expect(result).not.toHaveProperty("failed");
+  });
+
+  it("names what each round saw by address, so the other repository's links are left alone", async () => {
+    fetchPullRequests.mockImplementation(async (_owner: string, repo: string) => [fromRepo(repo === "api" ? 3 : 9, repo)]);
+
+    await syncGithubPullRequests(db, several("https://github.com/o/web", "https://github.com/o/api"), "u1");
+
+    expect(linkArgs().map((write) => write.seen)).toEqual([["https://github.com/o/web/pull/9"], ["https://github.com/o/api/pull/3"]]);
+  });
+
+  it("skips a repository that is not GitHub's, which a GitLab sync reads", async () => {
+    fetchPullRequests.mockResolvedValue([fromRepo(1, "web")]);
+
+    await syncGithubPullRequests(db, several("https://github.com/o/web", "https://gitlab.com/g/docs"), "u1");
+
+    expect(fetchPullRequests).toHaveBeenCalledTimes(1);
+    expect(fetchPullRequests.mock.calls[0][1]).toBe("web");
+  });
+
+  it("syncs the repositories it can read and names the one it could not", async () => {
+    fetchPullRequests.mockImplementation(async (_owner: string, repo: string) => {
+      if (repo === "api") throw new Error("GitHub answered 404");
+      return [fromRepo(9, repo)];
+    });
+
+    const result = await syncGithubPullRequests(db, several("https://github.com/o/web", "https://github.com/o/api"), "u1");
+
+    expect(result).toMatchObject({ ok: true, prsLinked: 1, failed: [{ repository: "https://github.com/o/api", error: "GitHub answered 404" }] });
+  });
+
+  it("fails as a single repository does when none of them can be read", async () => {
+    fetchPullRequests.mockRejectedValue(new Error("GitHub answered 401"));
+
+    await expect(
+      syncGithubPullRequests(db, several("https://github.com/o/web", "https://github.com/o/api"), "u1")
+    ).rejects.toThrow("GitHub answered 401");
+  });
+
+  it("counts a task once however many of the repositories link it", async () => {
+    fetchPullRequests.mockImplementation(async (_owner: string, repo: string) => [fromRepo(repo === "api" ? 3 : 9, repo)]);
+
+    const result = await syncGithubPullRequests(db, several("https://github.com/o/web", "https://github.com/o/api"), "u1");
+
+    expect(result).toMatchObject({ prsLinked: 2, tasksLinked: 1 });
+    expect(result).not.toHaveProperty("taskNumbers");
+  });
+
+  it("reads one round for a repository however many entries spell it", async () => {
+    fetchPullRequests.mockResolvedValue([fromRepo(1, "web")]);
+
+    await syncGithubPullRequests(db, several("https://github.com/o/web", "git@github.com:o/web.git", "https://github.com/o/api"), "u1");
+
+    expect(fetchPullRequests.mock.calls.map(([, repo]) => repo)).toEqual(["web", "api"]);
+  });
+
+  it("stops asking once GitHub's rate limit is reached, and says which repositories it did not read", async () => {
+    const { GitHubRateLimited } = await import("@/lib/github");
+    fetchPullRequests.mockRejectedValue(new GitHubRateLimited("limited", new Date()));
+
+    const run = syncGithubPullRequests(db, several("https://github.com/o/web", "https://github.com/o/api", "https://github.com/o/docs"), "u1");
+
+    await expect(run).rejects.toThrow("limited");
+    expect(fetchPullRequests).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers with what it read when the limit is reached after some of the repositories", async () => {
+    const { GitHubRateLimited } = await import("@/lib/github");
+    fetchPullRequests.mockImplementation(async (_owner: string, repo: string) => {
+      if (repo === "api") throw new GitHubRateLimited("limited", new Date());
+      return [fromRepo(9, repo)];
+    });
+
+    const result = await syncGithubPullRequests(
+      db,
+      several("https://github.com/o/web", "https://github.com/o/api", "https://github.com/o/docs"),
+      "u1"
+    );
+
+    expect(fetchPullRequests).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      prsLinked: 1,
+      failed: [
+        { repository: "https://github.com/o/api", error: "limited" },
+        { repository: "https://github.com/o/docs", error: expect.stringContaining("rate limit") },
+      ],
+    });
+  });
+
+  it("says in the log which repository the tick could not read, which nothing else would", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    fetchPullRequests.mockImplementation(async (_owner: string, repo: string) => {
+      if (repo === "api") throw new Error("GitHub answered 404");
+      return [fromRepo(9, repo)];
+    });
+    projectFind.mockReturnValue({
+      lean: () => Promise.resolve([several("https://github.com/o/web", "https://github.com/o/api")]),
+    });
+
+    await githubSyncTick();
+
+    expect(error).toHaveBeenCalledWith("GitHub sync could not read https://github.com/o/api of BP: GitHub answered 404");
+    error.mockRestore();
+  });
+
+  it("writes nothing the second time when a task holds a link from each repository and nothing changed", async () => {
+    fetchPullRequests.mockImplementation(async (_owner: string, repo: string) => [fromRepo(repo === "api" ? 3 : 9, repo)]);
+    const both = several("https://github.com/o/web", "https://github.com/o/api");
+    await syncGithubPullRequests(db, both, "u1");
+    const written = taskUpdateOne.mock.calls.flatMap(([, update]) => {
+      const [stage] = update as { $set: { linkedPRs: { $concatArrays: [unknown, { $literal: Record<string, unknown>[] }] } } }[];
+      return stage.$set.linkedPRs.$concatArrays[1].$literal;
+    });
+    expect(written).toHaveLength(2);
+
+    taskUpdateOne.mockClear();
+    logActivity.mockClear();
+    taskFindOne.mockResolvedValue({ _id: "t5", taskNumber: 5, status: "todo", linkedPRs: written });
+    const result = await syncGithubPullRequests(db, both, "u1");
+
+    expect(taskUpdateOne).not.toHaveBeenCalled();
+    expect(logActivity).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ prsLinked: 2, tasksWritten: 0 });
+  });
+
+  it("is the one round it always was for a project that lists one", async () => {
+    fetchPullRequests.mockResolvedValue([fromRepo(1, "r")]);
+
+    await syncGithubPullRequests(db, project({ repositories: [{ _id: "r0", url: "https://github.com/o/r", name: "" }] }), "u1");
+
+    expect(fetchPullRequests).toHaveBeenCalledTimes(1);
+  });
+
+  it("is run for every repository by the background tick, which moves no task", async () => {
+    fetchPullRequests.mockImplementation(async (_owner: string, repo: string) => [{ ...fromRepo(9, repo), state: "closed", merged_at: "2026-08-02T00:00:00Z" }]);
+    projectFind.mockReturnValue({
+      lean: () => Promise.resolve([several("https://github.com/o/web", "https://github.com/o/api")]),
+    });
+
+    await githubSyncTick();
+
+    expect(fetchPullRequests.mock.calls.map(([, repo]) => repo)).toEqual(["web", "api"]);
+    expect(rowsOf("status_changed")).toHaveLength(0);
+  });
+});

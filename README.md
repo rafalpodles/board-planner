@@ -307,7 +307,7 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Where PM agent and AI Assist calls go — a proxy, or another OpenAI-compatible endpoint |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | — | Email notifications |
 | `DIGEST_HOUR`, `DIGEST_TIMEZONE`, `DIGEST_TICK_MS` | `7`, `Europe/Warsaw`, `300000` | When the opt-in daily digest goes out |
-| `GITHUB_SYNC_TICK_MS` | `300000` | How often projects with a GitHub token are re-synced; `0` turns the background sync off |
+| `GITHUB_SYNC_TICK_MS` | `300000` | How often projects with a GitHub token are re-synced; `0` turns the background sync off. A project that lists several repositories costs a round of requests for each |
 | `GITHUB_API_BASE_URL` | `https://api.github.com` | Where GitHub's API is, for GitHub Enterprise Server |
 
 <details>

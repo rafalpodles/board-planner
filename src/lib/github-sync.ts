@@ -3,7 +3,7 @@ import type { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import type { SchedulerStart } from "@/lib/scheduler";
 import { decryptSecret } from "@/lib/encryption";
-import { fetchPullRequests, matchPRsToTasks, parseRepoString, withChecks } from "@/lib/github";
+import { fetchPullRequests, GitHubRateLimited, matchPRsToTasks, parseRepoString, withChecks } from "@/lib/github";
 import { logActivity } from "@/lib/activity";
 import { getProjectColumns } from "@/lib/columns";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
@@ -15,7 +15,8 @@ import {
   unseenLinks,
   writeProviderLinks,
 } from "@/lib/pr-links";
-import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
+import { projectRepositoryUrl, repositoryProvider, storedRepositories } from "@/lib/repository";
+import { repositoriesOfProvider } from "@/lib/repo-match";
 import type { RepositoryFields } from "@/lib/repository";
 import type { CiState, ILinkedPR, IProjectColumn } from "@/types";
 import { type ScopedDb } from "@/lib/db-scope";
@@ -223,8 +224,20 @@ export type SyncResult =
       /** How many tasks those came off, which is not `tasksWritten` — most writes remove nothing. */
       tasksUnlinked: number;
       autoTransitioned: number;
+      /** Repositories of a project that lists several which could not be read; the others were synced. */
+      failed?: { repository: string; error: string }[];
     }
   | { ok: false; status: number; error: string };
+
+// What one repository's round also says, for the wrapper that adds the rounds up and then drops it: a
+// task a run changed in two repositories is one task, not two
+type RoundResult = SyncResult & { taskNumbers?: number[] };
+
+function withoutTasks(result: RoundResult): SyncResult {
+  if (!result.ok) return result;
+  const { taskNumbers: _taskNumbers, ...answer } = result;
+  return answer;
+}
 
 /**
  * One project's GitHub sync: the pull requests, what CI says about them, and the transition a
@@ -242,6 +255,59 @@ export async function syncGithubPullRequests(
   db: ScopedDb,
   project: SyncableProject,
   actor: string | null,
+  transitionOnly?: number
+): Promise<SyncResult> {
+  if (storedRepositories(project).length <= 1) {
+    return withoutTasks(await syncGithubRepository(db, project, projectRepositoryUrl(project), actor, transitionOnly));
+  }
+  const urls = repositoriesOfProvider(project, "github");
+  if (urls.length === 0) {
+    return withoutTasks(await syncGithubRepository(db, project, projectRepositoryUrl(project), actor, transitionOnly));
+  }
+
+  // Each repository is a round of its own: what a round saw is named by url, so one repository's round
+  // never touches the links another's pull requests gave a task. One that cannot be read does not stop
+  // the others, and is named in the answer.
+  const total = { prsFound: 0, prsLinked: 0, tasksWritten: 0, prsUnlinked: 0, tasksUnlinked: 0, autoTransitioned: 0 };
+  const tasks = new Set<number>();
+  const failed: { repository: string; error: string }[] = [];
+  let first: { thrown: unknown } | { result: SyncResult } | undefined;
+  let any = false;
+  for (const [at, url] of urls.entries()) {
+    try {
+      const result = await syncGithubRepository(db, project, url, actor, transitionOnly);
+      if (!result.ok) {
+        failed.push({ repository: url, error: result.error });
+        first ??= { result };
+        continue;
+      }
+      any = true;
+      for (const key of Object.keys(total) as (keyof typeof total)[]) total[key] += result[key];
+      for (const number of result.taskNumbers ?? []) tasks.add(number);
+    } catch (err) {
+      failed.push({ repository: url, error: (err instanceof Error ? err.message : "no answer").split("\n")[0].slice(0, 200) });
+      first ??= { thrown: err };
+      // The limit is the account's, so the repositories still to come would only spend what is left of it
+      if (err instanceof GitHubRateLimited) {
+        for (const skipped of urls.slice(at + 1)) {
+          failed.push({ repository: skipped, error: "not read: GitHub's rate limit was reached" });
+        }
+        break;
+      }
+    }
+  }
+  if (!any && first) {
+    if ("thrown" in first) throw first.thrown;
+    return first.result;
+  }
+  return { ok: true, ...total, tasksLinked: tasks.size, ...(failed.length > 0 ? { failed } : {}) };
+}
+
+async function syncGithubRepository(
+  db: ScopedDb,
+  project: SyncableProject,
+  repositoryUrl: string,
+  actor: string | null,
   /**
    * When set, only this task number may be moved out of review. The task detail's Refresh is
    * about one task, and one GitHub request answers for every branch anyway — so it refreshes
@@ -249,8 +315,7 @@ export async function syncGithubPullRequests(
    * labelled "Refresh PR status" moved other people's tasks, under the clicking user's name.
    */
   transitionOnly?: number
-): Promise<SyncResult> {
-  const repositoryUrl = projectRepositoryUrl(project);
+): Promise<RoundResult> {
   if (!repositoryUrl || !project.githubToken) {
     return {
       ok: false,
@@ -258,7 +323,7 @@ export async function syncGithubPullRequests(
       error: "A repository URL and a GitHub token must be configured in project settings",
     };
   }
-  if (repositoryProvider(project) !== "github") {
+  if (repositoryProvider({ ...project, repositoryUrl }) !== "github") {
     return {
       ok: false,
       status: 400,
@@ -422,6 +487,7 @@ export async function syncGithubPullRequests(
     ok: true,
     prsFound: matchedPRs.length,
     tasksLinked: prsByTask.size,
+    taskNumbers: [...prsByTask.keys()],
     prsLinked: linked,
     tasksWritten: written,
     prsUnlinked: unlinked,
@@ -433,7 +499,8 @@ export async function syncGithubPullRequests(
 /**
  * Refreshes every project that has a GitHub repository and a token.
  *
- * The rate-limit arithmetic. One tick costs two requests for the pull-request listing, plus **two
+ * The rate-limit arithmetic, for ONE repository: a project that lists several is read in a round
+ * each (BP-1068), so multiply by how many of them are GitHub's. One tick costs two requests for the pull-request listing, plus **two
  * to four** per open pull request up to `MAX_CHECKED_PULL_REQUESTS` — one commit-status call and up
  * to `MAX_CHECK_RUN_PAGES` pages of check runs. So at most 2 + 20 × 4 = **82** per project, about
  * 1,000 an hour at the default interval; the ordinary case, one page of check runs, is 42 and about
@@ -466,7 +533,7 @@ async function githubSyncTickFor(db: ScopedDb): Promise<void> {
     { githubToken: { $nin: [null, ""] } },
     // `gitlabHost` because `repositoryProvider` reads it for a self-hosted GitLab; a projection
     // that omits a field the shared helper consults is a bug waiting for that helper to change
-    "key formerKeys githubRepo repositoryUrl gitlabRepo gitlabHost githubToken columns deploymentEnvironment deploymentSync"
+    "key formerKeys githubRepo repositoryUrl repositories gitlabRepo gitlabHost githubToken columns deploymentEnvironment deploymentSync"
   ).lean();
   const readsDeployments = can(await getOrganisation(db.organisation), "reports.insights");
 
@@ -475,6 +542,11 @@ async function githubSyncTickFor(db: ScopedDb): Promise<void> {
     try {
       const result = await syncGithubPullRequests(db, project, null);
       if (!result.ok) continue;
+      // A repository of a project that lists several is read past when it cannot be, so this is the only
+      // place a permanently unreadable one is ever said
+      for (const unread of result.failed ?? []) {
+        console.error(`GitHub sync could not read ${unread.repository} of ${project.key}: ${unread.error}`);
+      }
       // The scheduled path is how most rounds happen, and it used to report nothing at all — so
       // the ordinary way a link disappears was invisible (BP-632). The activity rows on the tasks
       // themselves are the honest half; this is the half an operator can grep. A round that

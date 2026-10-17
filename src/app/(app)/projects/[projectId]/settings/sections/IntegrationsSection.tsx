@@ -39,6 +39,12 @@ function additionalRows(project: { repositories?: { id: string; url: string; nam
   return (project.repositories ?? []).slice(1).map((r) => ({ key: r.id, url: r.url, name: r.name }));
 }
 
+/** Which of a project's repositories a sync could not read, when it read the others */
+export function repositoriesNote(failed: { repository: string; error: string }[] | undefined): string {
+  if (!failed || failed.length === 0) return "";
+  return `; could not read ${failed.map((f) => `${f.repository} (${f.error})`).join(", ")}`;
+}
+
 type ChannelDraft = ApiNotificationChannel & {
   webhookUrl?: string;
   tempId?: string;
@@ -649,7 +655,7 @@ export function IntegrationsSection({
                                 result.autoTransitioned > 0
                                   ? `, ${result.autoTransitioned} auto-transitioned`
                                   : ""
-                              }${deploymentsNote(result.deployments)}`,
+                              }${repositoriesNote(result.failed)}${deploymentsNote(result.deployments)}`,
                               "success",
                             );
                           } catch (err) {
@@ -734,7 +740,7 @@ export function IntegrationsSection({
                                   result.autoTransitioned > 0
                                     ? `, ${result.autoTransitioned} auto-transitioned`
                                     : ""
-                                }`,
+                                }${repositoriesNote(result.failed)}`,
                                 "success",
                               );
                             } catch (err) {
