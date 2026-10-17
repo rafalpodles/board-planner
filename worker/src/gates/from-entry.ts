@@ -6,6 +6,7 @@ import { testPresenceGate } from "./test-presence.js";
 import { buildGate } from "./build.js";
 import { testRunGate } from "./test-run.js";
 import { reviewGate } from "./review.js";
+import { codexAgent } from "../agents/codex.js";
 
 /**
  * What a block that names no parameter of its own falls back to: the project's own worker policy.
@@ -25,6 +26,8 @@ export interface GateTools {
   git: string;
   npm: string;
   claude: string;
+  /** Empty or absent on a machine without a signed-in Codex */
+  codex?: string;
 }
 
 // A value this worker cannot read is the built-in default, never NaN and never zero — a threshold
@@ -38,6 +41,28 @@ function numberOr(value: string | undefined, fallback: number): number {
 // and the comment that refuses has to say which of them did.
 function named(gate: Gate, name: string): Gate {
   return { name, run: gate.run };
+}
+
+function refusingReview(reason: string): Gate {
+  // A machine fault: the machine cannot do this and no change was judged, so it must not read as the reviewer rejecting one
+  return { name: "review", run: async () => ({ ok: false, reason, machineFault: true }) };
+}
+
+function reviewOn(
+  params: Record<string, string>,
+  runner: Runner,
+  tools: GateTools,
+  timeoutMs: number,
+  fallbacks: GateFallbacks
+): Gate {
+  const provider = params.provider || "claude";
+  if (provider === "claude") {
+    return reviewGate(runner, tools.git, tools.claude, timeoutMs, params.model || fallbacks.reviewModel, params.focus);
+  }
+  if (provider !== "codex") return refusingReview(`this worker does not know the reviewer ${provider}`);
+  if (!tools.codex) return refusingReview("this review runs on Codex, which this machine cannot run");
+  if (!params.model?.trim()) return refusingReview("this review runs on Codex and names no model");
+  return reviewGate(runner, tools.git, codexAgent(tools.codex), timeoutMs, params.model.trim(), params.focus);
 }
 
 /**
@@ -73,10 +98,7 @@ export function gateFromEntry(
     case "test-run":
       return named(testRunGate(runner, tools.npm, timeoutMs), entry.key);
     case "review":
-      return named(
-        reviewGate(runner, tools.git, tools.claude, timeoutMs, params.model || fallbacks.reviewModel, params.focus),
-        entry.key
-      );
+      return named(reviewOn(params, runner, tools, timeoutMs, fallbacks), entry.key);
     default:
       return null;
   }

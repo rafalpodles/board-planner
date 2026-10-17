@@ -17,12 +17,27 @@ export const SAYS_IT_RUNS_SEVERAL_REPOSITORIES = true;
 
 export const CAPABILITIES_HEADER = "X-CP-Capabilities";
 
-export function capabilities(says: boolean = SAYS_IT_RUNS_SEVERAL_REPOSITORIES): string[] {
-  return says ? [MULTI_REPOSITORY] : [];
+// The coding CLIs preflight found usable, named `agent-<id>` to the server (BP-987). Empty until the
+// first preflight has answered, so a machine says nothing about what it has not yet looked for.
+let reportedAgents: string[] = [];
+
+/** Called with preflight's answer; the server then offers this machine tasks whose agent runs on these */
+export function reportAgents(agents: readonly string[]): void {
+  reportedAgents = [...agents];
+}
+
+export function capabilities(
+  says: boolean = SAYS_IT_RUNS_SEVERAL_REPOSITORIES,
+  agents: readonly string[] = reportedAgents
+): string[] {
+  return [...(says ? [MULTI_REPOSITORY] : []), ...agents.map((agent) => `agent-${agent}`)];
 }
 
 /** Spread into the headers of every request to the server, next to `X-CP-Protocol` */
-export function capabilityHeaders(says: boolean = SAYS_IT_RUNS_SEVERAL_REPOSITORIES): Record<string, string> {
-  const named = capabilities(says);
+export function capabilityHeaders(
+  says: boolean = SAYS_IT_RUNS_SEVERAL_REPOSITORIES,
+  agents: readonly string[] = reportedAgents
+): Record<string, string> {
+  const named = capabilities(says, agents);
   return named.length > 0 ? { [CAPABILITIES_HEADER]: named.join(",") } : {};
 }

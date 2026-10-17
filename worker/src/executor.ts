@@ -5,6 +5,7 @@ import { Runner } from "./exec.js";
 import { confineTool, RecordedDir } from "./sandbox.js";
 import { AgentRun, CodingAgent } from "./agents/agent.js";
 import { claudeAgent } from "./agents/claude.js";
+import { codexAgent } from "./agents/codex.js";
 import { StreamEvent } from "./stream.js";
 import { ClaimedTask, RunOutcome } from "./types.js";
 
@@ -161,6 +162,8 @@ function incrementalParser(parse: CodingAgent["parseEvents"], onEvent: StreamLis
 
 /** What one step asks of the model. Composed server-side except for the tool list, which is not. */
 export interface StepBrief {
+  /** The coding CLI this step runs on; absent is Claude Code, which every step was before BP-987 */
+  provider?: string;
   prompt: string;
   capability: "read-only" | "edit";
   model: string;
@@ -189,8 +192,17 @@ export interface Executor {
   execute(options: ExecuteOptions): Promise<RunOutcome>;
 }
 
-export function createExecutor(config: WorkerConfig, runner: Runner, claude: string | CodingAgent): Executor {
-  const agent = typeof claude === "string" ? claudeAgent(claude) : claude;
+export function createExecutor(
+  config: WorkerConfig,
+  runner: Runner,
+  claude: string | CodingAgent,
+  // Absent on a machine without Codex: a step that names it is then the machine's fault, not the task's
+  codex?: string | CodingAgent,
+): Executor {
+  const agents: Record<string, CodingAgent | undefined> = {
+    claude: typeof claude === "string" ? claudeAgent(claude) : claude,
+    codex: !codex ? undefined : typeof codex === "string" ? codexAgent(codex) : codex,
+  };
   return {
     async execute({ task, worktreePath, worktreeDir, brief, repositories, signal, onEvent }) {
       // Made before anything is spawned and torn down after, whatever the step does: it may hold a
@@ -214,8 +226,8 @@ export function createExecutor(config: WorkerConfig, runner: Runner, claude: str
         prompt: buildPrompt(task),
         systemPrompt: systemPromptFor(brief, repositories),
         capability: brief.capability,
-        model: modelOr(brief.model || config.model, DEFAULT_MODEL),
-        fallbackModel: modelOr(brief.fallbackModel || config.fallbackModel, DEFAULT_FALLBACK_MODEL),
+        model: agent.id === "claude" ? modelOr(brief.model || config.model, DEFAULT_MODEL) : brief.model.trim(),
+        fallbackModel: agent.id === "claude" ? modelOr(brief.fallbackModel || config.fallbackModel, DEFAULT_FALLBACK_MODEL) : "",
         resultSchema: RESULT_SCHEMA,
         run,
       });

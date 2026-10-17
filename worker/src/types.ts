@@ -12,6 +12,8 @@ export interface SnapshotEntry {
   /** step only */
   prompt?: string;
   capability?: "read-only" | "edit";
+  /** the coding CLI the step runs on; absent is Claude Code, as it was before BP-987 */
+  provider?: string;
   model?: string;
   fallbackModel?: string;
   deterministic?: boolean;

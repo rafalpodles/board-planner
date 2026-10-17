@@ -1,4 +1,4 @@
-import { capabilityHeaders } from "./capabilities.js";
+import { capabilityHeaders, reportAgents } from "./capabilities.js";
 import {
   accessSync,
   constants,
@@ -776,6 +776,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const gitPath = resolvedGitPath();
     const ghPath = resolvedToolPath("gh");
     const claudePath = resolvedToolPath("claude");
+    // Empty where Codex is not installed and signed in, which is what both users below read as absent
+    const codexPath = resolvedToolPath("codex") || undefined;
     const npmPath = resolvedToolPath("npm");
     // The same value rebind() matched this project's checkout against — the server's own record
     // of the project's repository, never re-read from repoPath/.git at execution time.
@@ -814,10 +816,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             createReporter: (client, statusIds) =>
               createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments),
             repositories,
-            executor: createExecutor(taskConfig, deps.runner, claudePath),
+            executor: createExecutor(taskConfig, deps.runner, claudePath, codexPath),
             collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
             gateFor: (entry, runner, timeoutMs, fallbacks) =>
-              gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath }, timeoutMs, fallbacks),
+              gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath, codex: codexPath }, timeoutMs, fallbacks),
             gitPath,
             recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
             logError: deps.logError,
@@ -846,10 +848,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             remoteUrl,
             commitIdentity
           ),
-          executor: createExecutor(taskConfig, deps.runner, claudePath),
+          executor: createExecutor(taskConfig, deps.runner, claudePath, codexPath),
           collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
           gateFor: (entry, runner, timeoutMs, fallbacks) =>
-            gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath }, timeoutMs, fallbacks),
+            gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath, codex: codexPath }, timeoutMs, fallbacks),
           gitPath,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           logError: deps.logError,

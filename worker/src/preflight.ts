@@ -35,6 +35,10 @@ export interface PreflightCheck {
 
 export interface PreflightReport {
   ok: boolean;
+  // The coding CLIs this machine can run steps on, which is what it tells the server it can do. Claude
+  // Code is required and so always here on a machine that may claim at all; Codex is optional and here
+  // only when it is installed and signed in (BP-987).
+  agents: string[];
   // Which account `claude` is signed into. The cost model depends on it being a subscription
   // session rather than an API key, and neither is visible without asking.
   account: string;
@@ -66,6 +70,7 @@ export interface PreflightDeps {
 }
 
 export const COMMIT_IDENTITY_CHECK = "commit identity";
+export const CODEX_CHECK = "codex";
 
 const TIMEOUT_MS = 20_000;
 
@@ -77,7 +82,7 @@ const CONVENTIONAL_DIRS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/
 // A worker started by launchd has PATH=/usr/bin:/bin:/usr/sbin:/sbin — no Homebrew, no nvm, no
 // ~/.local/bin. A login shell is the only thing that knows where the operator actually installed
 // these, so resolution has to go through one.
-async function resolve(deps: PreflightDeps, tool: ToolName): Promise<string> {
+async function resolve(deps: PreflightDeps, tool: string): Promise<string> {
   const shell = deps.env.SHELL?.trim() || "/bin/sh";
   const result = await deps.runner.run(shell, ["-lc", `command -v ${tool}`], {
     cwd: deps.env.HOME?.trim() || "/",
@@ -200,6 +205,40 @@ async function claudeSession(
       detail: `signed in as ${account || "an unnamed account"}${plan ? ` on ${plan}` : ""}`,
     },
   };
+}
+
+// Codex is optional, so none of its answers fails the machine: a machine without it simply is not
+// offered a task whose agent runs on it. The row says which of the three it is, because "why does my
+// Codex task never start" is otherwise unanswerable from the board.
+async function codexSession(
+  deps: PreflightDeps,
+  env: NodeJS.ProcessEnv
+): Promise<{ check: PreflightCheck; path: string }> {
+  const name = CODEX_CHECK;
+  const path = await resolve(deps, "codex");
+  if (!path) {
+    return { path: "", check: { name, ok: true, detail: "not installed: this machine takes no task whose agent runs on Codex" } };
+  }
+  const cwd = deps.env.HOME?.trim() || "/";
+  const version = await deps.runner.run(path, ["--version"], { cwd, timeoutMs: TIMEOUT_MS, env });
+  if (version.code !== 0) {
+    const why = (version.stderr || version.stdout).trim().split("\n")[0];
+    return { path: "", check: { name, ok: true, warn: true, detail: `${path} is present but will not run (${why}): this machine takes no task whose agent runs on Codex` } };
+  }
+  const login = await deps.runner.run(path, ["login", "status"], { cwd, timeoutMs: TIMEOUT_MS, env });
+  if (login.code !== 0) {
+    return {
+      path: "",
+      check: {
+        name,
+        ok: true,
+        warn: true,
+        detail: "installed but not signed in: run `codex login` as the user the worker runs as, or this machine takes no task whose agent runs on Codex",
+      },
+    };
+  }
+  const said = (login.stdout || login.stderr).trim().split("\n").pop()?.trim() ?? "";
+  return { path, check: { name, ok: true, detail: said ? `${said} (${path})` : path } };
 }
 
 // The identity that pushes, named as plainly as the one that writes the code. Reporting only
@@ -572,6 +611,13 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
     }
   }
 
+  const codex = await codexSession(deps, env);
+  checks.push(codex.check);
+  if (codex.path) paths.codex = codex.path;
+  // Claude Code counts only when its own row passed: a machine that could not run it claims nothing
+  const claudeUsable = checks.some((c) => c.name === "claude" && c.ok);
+  const agents = [...(claudeUsable ? ["claude"] : []), ...(codex.path ? ["codex"] : [])];
+
   checks.push(
     await commitIdentityCheck(deps, paths, env, {
       login: githubAccount,
@@ -584,6 +630,7 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
 
   return {
     ok: checks.every((c) => c.ok),
+    agents,
     account,
     checks,
     paths,
