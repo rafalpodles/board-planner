@@ -269,7 +269,7 @@ describe("changing the provider of a step (BP-987)", () => {
     expect(response.status).toBe(400);
     expect((await response.json()).error).toMatch(/Claude model, not a Codex one/);
     expect(doc.save).not.toHaveBeenCalled();
-    expect(doc.provider).toBe("claude");
+    expect(doc).toMatchObject({ provider: "claude" });
   });
 
   it("refuses a new model that does not fit the provider the step already has", async () => {

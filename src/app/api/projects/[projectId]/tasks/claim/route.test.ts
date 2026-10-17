@@ -46,8 +46,11 @@ vi.mock("@/models/agentRun", () => ({
 }));
 // Which agent a project resolves to is agent-snapshot.test.ts's subject. What matters here is the
 // branch where it resolves to none, which no test reached while this always succeeded.
-const snapshotFor = vi.fn(async () => ({ agentId: "a1", name: "Default", sequence: [] }));
+const snapshotFor = vi.fn(async () => ({ agentId: "a1", name: "Default", sequence: [] as unknown[] }));
 vi.mock("@/lib/agent-snapshot", () => ({ snapshotFor }));
+// Which agents a machine cannot run is agent-providers.test.ts's subject; here it is what the claim is told
+const agentsBeyond = vi.fn(async (..._args: unknown[]): Promise<string[]> => []);
+vi.mock("@/lib/agent-providers", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/agent-providers")>()), agentsBeyond }));
 vi.mock("@/lib/middleware", async () => {
   const { scopedToDefaultOrganisation } = await vi.importActual<typeof import("@/lib/db-scope")>("@/lib/db-scope");
   return {
@@ -127,6 +130,7 @@ beforeEach(() => {
   releaseTask.mockResolvedValue(undefined);
   agentRunFindOne.mockResolvedValue(null);
   claimingMachineIds.mockResolvedValue(null);
+  agentsBeyond.mockResolvedValue([]);
 });
 
 // BP-989
@@ -179,7 +183,7 @@ describe("POST /tasks/claim", () => {
       params: Promise.resolve({ projectId: "CP" }),
     });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", null, null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", null, null, []);
   });
 
   /**
@@ -193,7 +197,7 @@ describe("POST /tasks/claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER, null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER, null, []);
     expect(snapshotFor).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, undefined, OWNER);
   });
 
@@ -208,7 +212,7 @@ describe("POST /tasks/claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER, null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", OWNER, null, []);
     expect(snapshotFor).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, undefined, OWNER);
   });
 
@@ -498,7 +502,7 @@ describe("the worker's identity does not decide what is claimed", () => {
 
     // The owner is what is claimed on. The identity is the sixth argument, who the History row is
     // written as, and nothing in the claim's filter reads it (BP-1045)
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", "u-worker");
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", "u-worker", []);
   });
 });
 
@@ -533,7 +537,7 @@ describe("the worker's owner travels with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", null, []);
   });
 
   it("passes the owner set at enrolment", async () => {
@@ -542,7 +546,7 @@ describe("the worker's owner travels with the claim", () => {
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
-    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", null);
+    expect(claimNextTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, OID, "run-1", "u-owner", null, []);
   });
 });
 
@@ -567,5 +571,57 @@ describe("the capabilities the claiming request names", () => {
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
 
     expect(projectSelect.mock.calls[0][0].split(/\s+/)).toContain("repositories");
+  });
+});
+
+// BP-987. A task is only claimed by a machine that can run every coding CLI its agent names
+describe("claiming a task whose agent runs on a coding CLI", () => {
+  const claim = (headers: Record<string, string> = {}) =>
+    POST(request({ ...authed, ...headers }), { params: Promise.resolve({ projectId: "CP" }) });
+  const codexStep = { key: "implement", kind: "step", name: "Implement", provider: "codex" };
+
+  it("asks which agents the claiming request's machine cannot run, from that request's own capabilities", async () => {
+    await claim({ "x-cp-capabilities": "multi-repository,agent-codex" });
+
+    expect(agentsBeyond).toHaveBeenCalledWith(scopedToDefaultOrganisation(), ["multi-repository", "agent-codex"]);
+  });
+
+  it("steps over those agents in the claim", async () => {
+    agentsBeyond.mockResolvedValue(["agent-on-codex"]);
+
+    await claim();
+
+    expect(claimNextTask.mock.calls[0][6]).toEqual(["agent-on-codex"]);
+  });
+
+  it("hands back, refunded, a task whose agent was edited onto a CLI this machine does not report", async () => {
+    snapshotFor.mockResolvedValue({ agentId: "a1", name: "Edited", sequence: [codexStep] });
+
+    const response = await claim();
+
+    expect(response.status).toBe(204);
+    expect(releaseTask).toHaveBeenCalledWith(scopedToDefaultOrganisation(), OID, "t1", expect.objectContaining({ refund: true }));
+  });
+
+  it("runs the same task on a machine that does report it", async () => {
+    snapshotFor.mockResolvedValue({ agentId: "a1", name: "Edited", sequence: [codexStep] });
+
+    const response = await claim({ "x-cp-capabilities": "agent-codex" });
+
+    expect(response.status).toBe(200);
+    expect(releaseTask).not.toHaveBeenCalled();
+  });
+
+  it("needs no report for Claude Code, which every worker runs, one built before BP-987 included", async () => {
+    snapshotFor.mockResolvedValue({ agentId: "a1", name: "Old", sequence: [{ ...codexStep, provider: "claude" }, { key: "review", kind: "gate", name: "Reviewed", gateKind: "review", params: {} }] });
+
+    expect((await claim()).status).toBe(200);
+  });
+
+  it("holds a review gate on Codex to the same rule", async () => {
+    snapshotFor.mockResolvedValue({ agentId: "a1", name: "Reviewed on Codex", sequence: [{ key: "review", kind: "gate", name: "Reviewed", gateKind: "review", params: { provider: "codex", model: "gpt-5" } }] });
+
+    expect((await claim()).status).toBe(204);
+    expect((await claim({ "x-cp-capabilities": "agent-codex" })).status).toBe(200);
   });
 });
