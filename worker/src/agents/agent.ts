@@ -35,7 +35,8 @@ export interface Verdict {
  */
 export interface CodingAgent {
   readonly id: AgentId;
-  readonly tool: ResolvedTool;
+  /** Which resolved tool this is; an agent can name only a coding CLI, never git, gh or npm */
+  readonly tool: Extract<ResolvedTool, "claude">;
   readonly path: string;
   editArgs(call: EditCall): string[];
   reviewArgs(call: ReviewCall): string[];
