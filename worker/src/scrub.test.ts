@@ -395,6 +395,17 @@ describe("scrubPatch", () => {
       expect(scrub(`{${refresh}, "account_id": "a"}`)).toBe('{[redacted], "account_id": "a"}');
     });
 
+    it("does not slow down on a long run of the JWT prefix", () => {
+      const started = Date.now();
+      scrub("eyJ".repeat(100_000));
+
+      expect(Date.now() - started).toBeLessThan(1000);
+    });
+
+    it("does not take the middle of a longer word for the start of a token", () => {
+      expect(scrub(`prefixeyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkw.c2lnbmF0dXJlLXNpZ25hdHVyZQ`)).toContain("prefix");
+    });
+
     it("leaves prose that merely says token alone", () => {
       expect(scrub("refresh_token handling was rewritten")).toBe("refresh_token handling was rewritten");
     });

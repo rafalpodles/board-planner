@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -140,6 +141,18 @@ function makeWritable(path: string): void {
   }
 }
 
+// `file-write*` includes setting file flags, so a run can `chflags uchg` its own home or the login
+// copy in it, which `chmod` does not undo and `rm` refuses (measured under this profile). Not
+// following links: `chflags -R` leaves them alone unless told otherwise.
+function clearFlags(dir: string): void {
+  if (process.platform !== "darwin") return;
+  try {
+    execFileSync("/usr/bin/chflags", ["-R", "nouchg,nouappnd", dir], { stdio: "ignore", timeout: 10_000 });
+  } catch {
+    // reported below if the home is still there
+  }
+}
+
 /** Removes a run's home, the login copy in it included. Never throws; says so when something stays. */
 export function removeRunHome(dir: string, logError: (message: string) => void = console.error): void {
   const attempt = () => {
@@ -151,17 +164,34 @@ export function removeRunHome(dir: string, logError: (message: string) => void =
   };
   attempt();
   if (existsSync(dir)) {
+    clearFlags(dir);
     makeWritable(dir);
     attempt();
   }
   if (existsSync(dir)) logError(`could not remove ${dir}, which holds a copy of the Codex login: delete it by hand`);
 }
 
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 /**
- * Homes a worker that was killed never got to remove. Called once at boot, so a hard stop leaves a
- * login copy behind only until the next start; an hour's grace keeps it off a sibling's live run.
+ * Homes a worker that was killed never got to remove: a run home carries its worker's pid in its
+ * name, and one whose process is gone is nobody's. Judged by the process and not by the age of the
+ * directory, whose mtime says nothing of a run that has long since stopped adding files to it. Meant
+ * for the boot of the worker that offers Codex (the wiring slice calls it); a live sibling's homes
+ * are left alone.
  */
-export function sweepRunHomes(tmp: string = tmpdir(), olderThanMs = 3_600_000, logError?: (message: string) => void): void {
+export function sweepRunHomes(
+  tmp: string = tmpdir(),
+  logError?: (message: string) => void,
+  alive: (pid: number) => boolean = pidAlive,
+): void {
   let names: string[];
   try {
     names = readdirSync(tmp);
@@ -169,11 +199,11 @@ export function sweepRunHomes(tmp: string = tmpdir(), olderThanMs = 3_600_000, l
     return;
   }
   for (const name of names) {
-    if (!name.startsWith(RUN_HOME_PREFIX)) continue;
+    const owner = new RegExp(`^${RUN_HOME_PREFIX}(\\d+)-`).exec(name);
+    if (!owner || alive(Number(owner[1]))) continue;
     const path = join(tmp, name);
     try {
-      const stat = lstatSync(path);
-      if (!stat.isDirectory() || Date.now() - stat.mtimeMs < olderThanMs) continue;
+      if (!lstatSync(path).isDirectory()) continue;
     } catch {
       continue;
     }
@@ -224,7 +254,7 @@ export function codexAgent(path: string, options: CodexOptions = {}): CodingAgen
       if (!existsSync(source)) {
         return { refusal: `codex is not signed in as this user: there is no ${source} (run \`codex login\` as the user the worker runs as)` };
       }
-      const made = mkdtempSync(join(options.tmp ?? tmpdir(), RUN_HOME_PREFIX));
+      const made = mkdtempSync(join(options.tmp ?? tmpdir(), `${RUN_HOME_PREFIX}${process.pid}-`));
       let dir = made;
       try {
         // Resolved, because the profile matches the resolved path and the CLI is told this one

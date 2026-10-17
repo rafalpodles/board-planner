@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -328,26 +329,85 @@ describe("removing a run's home", () => {
 });
 
 describe("sweeping the homes a killed worker left", () => {
-  const aged = (path: string, ageMs: number) => {
-    const when = new Date(Date.now() - ageMs);
-    utimesSync(path, when, when);
+  // A pid that certainly belongs to nobody: a child that has exited
+  const deadPid = () => spawnSync(process.execPath, ["-e", ""]).pid!;
+  const home = (tmp: string, name: string) => {
+    mkdirSync(join(tmp, name));
+    writeFileSync(join(tmp, name, "auth.json"), "{}");
   };
 
-  it("removes an old run home, and leaves a young one, and anything else in the directory", () => {
+  it("removes the homes of a process that is gone, and leaves a live one's and anything else in the directory", () => {
     const tmp = dir();
-    for (const name of ["cp-codex-old", "cp-codex-young", "cp-review-old", "other"]) {
-      mkdirSync(join(tmp, name));
-      writeFileSync(join(tmp, name, "auth.json"), "{}");
-    }
-    aged(join(tmp, "cp-codex-old"), 2 * 3_600_000);
-    aged(join(tmp, "cp-review-old"), 2 * 3_600_000);
+    const dead = deadPid();
+    home(tmp, `cp-codex-${dead}-aaaa`);
+    home(tmp, `cp-codex-${process.pid}-bbbb`);
+    home(tmp, "cp-codex-nopid");
+    home(tmp, `cp-review-${dead}-cccc`);
+    home(tmp, "other");
 
     sweepRunHomes(tmp);
 
-    expect(readdirSync(tmp).sort()).toEqual(["cp-codex-young", "cp-review-old", "other"]);
+    expect(readdirSync(tmp).sort()).toEqual([`cp-codex-${process.pid}-bbbb`, "cp-codex-nopid", `cp-review-${dead}-cccc`, "other"].sort());
+  });
+
+  it("does not look at how old a home is: a long run's home is as live as its worker", () => {
+    const tmp = dir();
+    home(tmp, `cp-codex-${process.pid}-old`);
+    const longAgo = new Date(Date.now() - 48 * 3_600_000);
+    utimesSync(join(tmp, `cp-codex-${process.pid}-old`), longAgo, longAgo);
+
+    sweepRunHomes(tmp);
+
+    expect(readdirSync(tmp)).toEqual([`cp-codex-${process.pid}-old`]);
+  });
+
+  it("does not follow a link named like a home", () => {
+    const tmp = dir();
+    const elsewhere = dir();
+    writeFileSync(join(elsewhere, "keep"), "k");
+    symlinkSync(elsewhere, join(tmp, `cp-codex-${deadPid()}-link`));
+
+    sweepRunHomes(tmp);
+
+    expect(readFileSync(join(elsewhere, "keep"), "utf8")).toBe("k");
+  });
+
+  it("names the pid of the worker that made a home", async () => {
+    const run = (await codexAgent("/x", { sourceHome: (() => { const h = dir(); writeFileSync(join(h, "auth.json"), "{}"); return h; })(), tmp: dir() }).prepare({})) as AgentRun;
+
+    expect(run.dir).toMatch(new RegExp(`/cp-codex-${process.pid}-`));
   });
 
   it("is not stopped by a directory it cannot read", () => {
     expect(() => sweepRunHomes(join(dir(), "missing"))).not.toThrow();
+  });
+});
+
+describe("a home the run made impossible to remove", () => {
+  it.skipIf(process.platform !== "darwin")("is removed although the run set an immutable flag on the login copy and on the home", () => {
+    const home = dir();
+    writeFileSync(join(home, "auth.json"), "{}");
+    execFileSync("/usr/bin/chflags", ["uchg", join(home, "auth.json")]);
+    execFileSync("/usr/bin/chflags", ["uchg", home]);
+
+    removeRunHome(home);
+
+    expect(existsSync(home)).toBe(false);
+  });
+
+  it("says where the login copy is, and that it must go by hand, when it cannot be removed", () => {
+    const parent = dir();
+    const home = join(parent, "cp-codex-1-x");
+    mkdirSync(home);
+    writeFileSync(join(home, "auth.json"), "{}");
+    chmodSync(parent, 0o500);
+    const logged: string[] = [];
+    try {
+      removeRunHome(home, (message) => logged.push(message));
+    } finally {
+      chmodSync(parent, 0o700);
+    }
+
+    expect(logged).toEqual([expect.stringContaining(`${home}, which holds a copy of the Codex login`)]);
   });
 });
