@@ -2,11 +2,11 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
 import { SANDBOX_COMMAND } from "./sandbox.js";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { ApiClient, ClaimRefused, PhaseEvent } from "./api.js";
 import { ControlDeps } from "./control.js";
-import { Runner } from "./exec.js";
+import { Runner, RunOpts } from "./exec.js";
 import { LocalConfigView, LocalServer, LocalServerDeps } from "./local-server.js";
 import { Store } from "./outbox.js";
 import { PreflightReport, runPreflight } from "./preflight.js";
@@ -596,6 +596,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       fetchImpl?: typeof fetch;
       gh?: { token?: string; user?: string };
       unresolvedTools?: string[];
+      // The node the gates would find first on their PATH, and the version it reports (BP-1101)
+      gateNode?: { path: string; version: string };
       deliverable?: boolean;
       // How many times runPreflight throws before the real one answers; true is every time
       preflightThrows?: boolean | number;
@@ -664,20 +666,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       },
     };
 
-    let stop = (): void => {};
-    const worker = createWorker({
-      env: { ...ENV, CP_STATE_DIR: stateDir },
-      runner: {
-        ...(opts.leftovers
-          ? {
-              reapLeftovers: async (dir: string) => {
-                opts.leftovers?.calls.push({ stateDir: dir, runnerCallsBefore: everyCall.length });
-                const answer = opts.leftovers?.answer ?? "";
-                return typeof answer === "string" ? answer : answer.length > 1 ? (answer.shift() ?? "") : (answer[0] ?? "");
-              },
-            }
-          : {}),
-        ...streamingRunner(
+    const inner = streamingRunner(
         claudeCalls,
         opts.onAgentStart,
         everyCall,
@@ -690,11 +679,30 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         opts.unresolvedTools,
         opts.deliverable,
         pushEnvs
-      ),
+    );
+
+    let stop = (): void => {};
+    const worker = createWorker({
+      env: { ...ENV, CP_STATE_DIR: stateDir, ...(opts.gateNode ? { PATH: `${dirname(opts.gateNode.path)}:/usr/bin` } : {}) },
+      runner: {
+        ...(opts.leftovers
+          ? {
+              reapLeftovers: async (dir: string) => {
+                opts.leftovers?.calls.push({ stateDir: dir, runnerCallsBefore: everyCall.length });
+                const answer = opts.leftovers?.answer ?? "";
+                return typeof answer === "string" ? answer : answer.length > 1 ? (answer.shift() ?? "") : (answer[0] ?? "");
+              },
+            }
+          : {}),
+        ...inner,
+        run: (command: string, args: string[], runOpts: RunOpts) =>
+          opts.gateNode && command === opts.gateNode.path && args[0] === "--version"
+            ? Promise.resolve({ code: 0, stdout: `v${opts.gateNode.version}\n`, stderr: "", timedOut: false })
+            : inner.run(command, args, runOpts),
       },
       hostname: () => "host-1",
       // Found only through the probe above, so a tool the probe does not answer is really missing
-      isExecutable: () => false,
+      isExecutable: (path) => opts.gateNode?.path === path,
       ...(opts.preflightThrows
         ? {
             runPreflight: (preflightDeps) => {
@@ -1759,6 +1767,44 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       const [project] = run.localConfig?.().projects ?? [];
       expect(project.blocked).toContain(`${OTHER_REMOTE}:`);
       expect(project.blocked).not.toContain(`${REMOTE}:`);
+    });
+
+    // BP-1101: the gates run npm on whatever node is first on the PATH they are given
+    describe("the Node the gates would run on", () => {
+      const manifest = (engines?: { node: string }) =>
+        JSON.stringify({ scripts: { build: "tsc", test: "vitest" }, ...(engines ? { engines } : {}) });
+      const files = (engines?: { node: string }) => (path: string) =>
+        path.endsWith("package.json") ? manifest(engines) : path.endsWith("package-lock.json") ? "{}" : null;
+
+      it("does not claim from a project whose checkout needs a newer Node than the gates would have", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          readFile: files({ node: ">=26" }),
+          gateNode: { path: "/nvm/22/bin/node", version: "22.22.1" },
+        });
+
+        const [project] = run.localConfig?.().projects ?? [];
+        expect(project.blocked).toMatch(/needs Node >=26.*22\.22\.1 \(\/nvm\/22\/bin\/node\)/);
+        expect(run.claimed).toBe(false);
+      });
+
+      it("claims when the node the gates would run on satisfies it", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          readFile: files({ node: ">=26" }),
+          gateNode: { path: "/opt/homebrew/bin/node", version: "26.8.1" },
+        });
+
+        expect(run.localConfig?.().projects.map((p) => p.blocked)).toEqual([""]);
+        expect(run.claimed).toBe(true);
+      });
+
+      it("asks nothing of a checkout that names no Node", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          readFile: files(),
+          gateNode: { path: "/nvm/22/bin/node", version: "22.22.1" },
+        });
+
+        expect(run.localConfig?.().projects.map((p) => p.blocked)).toEqual([""]);
+      });
     });
 
     it("reaps what an earlier run left in every checkout, not only the primary's", async () => {
