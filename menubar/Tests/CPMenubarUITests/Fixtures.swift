@@ -49,7 +49,7 @@ enum Fixtures {
          "githubAccount":"rafalpodles","githubAccounts":[{"login":"rafalpodles","active":true},{"login":"work","active":false}],
          "projects":[
           {"project":"p1","key":"BP","name":"Board Planner","baseBranch":"main","model":"opus","reviewModel":"sonnet","maxDiffLines":800,"taskTimeoutMs":1800000,"blocked":""},
-          {"project":"p2","key":"FNV","name":"Fonvo","baseBranch":"main","model":"opus","reviewModel":"sonnet","maxDiffLines":800,"taskTimeoutMs":1800000,"blocked":"/Users/rpo/Documents/Projects/ClaudePlannerWorkspace/FNV has no package-lock.json, and the build gate runs npm ci, which fails without one"},
+          {"project":"p2","key":"FNV","name":"Fonvo","baseBranch":"main","model":"opus","reviewModel":"sonnet","maxDiffLines":800,"taskTimeoutMs":1800000,"blocked":"/Users/dev/Workspace/FNV has no package-lock.json, and the build gate runs npm ci, which fails without one"},
           {"project":"p3","key":"SB","name":"Ventures","baseBranch":"main","model":"opus","reviewModel":"sonnet","maxDiffLines":800,"taskTimeoutMs":1800000,"blocked":""}
          ]}
         """
@@ -82,10 +82,10 @@ enum Fixtures {
         state.step = step
         state.apiURL = "https://app.board-planner.com"
         state.workerName = "MAC"
-        state.checkoutsFolder = "/Users/rpo/Documents/Projects/ClaudePlannerWorkspace"
+        state.checkoutsFolder = "/Users/dev/Workspace"
         state.userCode = userCode
         state.verificationURL = "https://app.board-planner.com/device"
-        if step == .running { state.checkoutPath = "/Users/rpo/Documents/Projects/ClaudePlannerWorkspace/BP" }
+        if step == .running { state.checkoutPath = "/Users/dev/Workspace/BP" }
         return state
     }
 }
