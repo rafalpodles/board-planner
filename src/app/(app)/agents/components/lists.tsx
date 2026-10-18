@@ -18,7 +18,7 @@ export function blockSummary(block: ApiAgentBlock): string {
   if (block.kind === "step") {
     if (block.deterministic) return "no model";
     const capability = CAPABILITIES.find((c) => c.value === block.capability)?.label ?? "";
-    return [capability.toLowerCase(), block.model].filter(Boolean).join(" · ");
+    return [capability.toLowerCase(), block.provider === "codex" ? "Codex" : "", block.model].filter(Boolean).join(" · ");
   }
 
   const kind = block.gateKind ? gateKindByKey(block.gateKind) : undefined;
@@ -29,7 +29,7 @@ export function blockSummary(block: ApiAgentBlock): string {
       const value = block.params?.[param.key];
       if (!value) return null;
       const label =
-        param.type === "select" ? param.options?.find((o) => o.value === value)?.label : value;
+        param.type === "select" ? (param.options?.find((o) => o.value === value)?.label ?? value) : value;
       return `${param.label.toLowerCase()} ${label}`;
     })
     .filter(Boolean)

@@ -88,7 +88,7 @@ const IMPLEMENT: ApiAgentBlock = {
   params: {},
   prompt: "Make the change.",
   capability: "edit",
-      provider: "claude",
+  provider: "claude",
   model: "opus",
   fallbackModel: "sonnet",
   deterministic: false,
@@ -309,5 +309,169 @@ describe("who is offered Delete on a block", () => {
     await openTab("Steps");
 
     expect(screen.queryByRole("button", { name: "Delete Mine" })).not.toBeNull();
+  });
+});
+
+// BP-987. A step and the review gate name the coding CLI they run on, and the model goes with it
+describe("choosing the coding CLI of a step", () => {
+  const field = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
+  const CODEX_NOTE = /shell and has network access/;
+
+  it("shows an admin Claude Code for a step stored before the choice existed, with its model list", async () => {
+    await openStep({ ...IMPLEMENT, provider: undefined as never });
+
+    expect(select("Runs on").value).toBe("claude");
+    expect(select("Model").value).toBe("opus");
+    expect(screen.queryByText(CODEX_NOTE)).toBeNull();
+  });
+
+  it("swaps the model list for a typed model, with a plain note, when Codex is chosen, and sends the pair", async () => {
+    catalog.updateBlock.mockResolvedValue(undefined);
+    await openStep(IMPLEMENT);
+
+    fireEvent.change(select("Runs on"), { target: { value: "codex" } });
+
+    expect(field("Model").tagName).toBe("INPUT");
+    expect(field("Model").value).toBe("");
+    expect(screen.getByText(CODEX_NOTE)).not.toBeNull();
+    // A Claude model is not offered to Codex, and none is guessed: the save waits for a name
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(field("Model"), { target: { value: " gpt-6.1-sol " } });
+    await act(async () => screen.getByRole("button", { name: "Save" }).click());
+
+    expect(catalog.updateBlock.mock.calls[0][1]).toMatchObject({ provider: "codex", model: "gpt-6.1-sol" });
+  });
+
+  it("gives the Claude model back as the default when the choice goes back", async () => {
+    await openStep({ ...IMPLEMENT, provider: "codex", model: "gpt-5" });
+    expect(field("Model").value).toBe("gpt-5");
+
+    fireEvent.change(select("Runs on"), { target: { value: "claude" } });
+
+    expect(select("Model").value).toBe("opus");
+  });
+
+  it("sends neither provider nor model when the edit touches neither, so an old step can still be renamed", async () => {
+    catalog.updateBlock.mockResolvedValue(undefined);
+    await openStep(IMPLEMENT);
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Implement it" } });
+    await act(async () => screen.getByRole("button", { name: "Save" }).click());
+
+    const patch = catalog.updateBlock.mock.calls[0][1];
+    expect(patch).not.toHaveProperty("provider");
+    expect(patch).not.toHaveProperty("model");
+  });
+
+  it("shows a reader who may not change it the provider as a read-only field", async () => {
+    isAdmin.value = false;
+    await openStep({ ...IMPLEMENT, provider: "codex", model: "gpt-5" });
+
+    expect(field("Runs on").tagName).toBe("INPUT");
+    expect(field("Runs on").value).toBe("Codex");
+    expect(field("Runs on").readOnly).toBe(true);
+    expect(field("Model").readOnly).toBe(true);
+  });
+
+  it("names the provider in the list beside a step that is not on Claude Code, and nothing extra for one that is", async () => {
+    const { blockSummary } = await import("./components/lists");
+
+    expect(blockSummary({ ...IMPLEMENT, provider: "codex", model: "gpt-5" })).toBe("read and write · Codex · gpt-5");
+    expect(blockSummary(IMPLEMENT)).toBe("read and write · opus");
+  });
+
+  it("names the reviewer in the list beside a review on Codex", async () => {
+    const { blockSummary } = await import("./components/lists");
+
+    expect(
+      blockSummary({ ...IMPLEMENT, kind: "gate", gateKind: "review", params: { focus: "general", provider: "codex", model: "gpt-5" } })
+    ).toBe("looking for Anything wrong · reviewer Codex · model gpt-5");
+  });
+
+  it("creates a step on Codex only once it names a model", async () => {
+    catalog.addBlock.mockResolvedValue(undefined);
+    await openTab("Steps");
+    await act(async () => screen.getByRole("button", { name: "New step" }).click());
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Write it on Codex" } });
+    fireEvent.change(select("Runs on"), { target: { value: "codex" } });
+
+    expect((screen.getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(field("Model"), { target: { value: "gpt-6.1-sol" } });
+    await act(async () => screen.getByRole("button", { name: "Create" }).click());
+
+    expect(catalog.addBlock.mock.calls[0][0]).toMatchObject({ kind: "step", provider: "codex", model: "gpt-6.1-sol" });
+  });
+
+  it("creates a step on Claude Code by default, as before", async () => {
+    catalog.addBlock.mockResolvedValue(undefined);
+    await openTab("Steps");
+    await act(async () => screen.getByRole("button", { name: "New step" }).click());
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Plain" } });
+    await act(async () => screen.getByRole("button", { name: "Create" }).click());
+
+    expect(catalog.addBlock.mock.calls[0][0]).toMatchObject({ provider: "claude", model: "opus" });
+  });
+});
+
+describe("choosing the reviewer of the Reviewed gate", () => {
+  const REVIEW: ApiAgentBlock = {
+    ...IMPLEMENT,
+    _id: "b-review",
+    key: "review",
+    kind: "gate",
+    name: "Reviewed",
+    gateKind: "review",
+    params: { focus: "general", provider: "claude", model: "opus" },
+    prompt: "",
+    model: "",
+  };
+  const field = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
+
+  it("offers Claude Code and Codex, with the model beside the reviewer chosen", async () => {
+    await openTab("Gates");
+    await act(async () => screen.getByRole("button", { name: "New gate" }).click());
+    fireEvent.change(select("What it checks"), { target: { value: "review" } });
+
+    expect(select("Reviewer").value).toBe("claude");
+    expect(select("Model").value).toBe("opus");
+
+    fireEvent.change(select("Reviewer"), { target: { value: "codex" } });
+
+    expect(field("Model").tagName).toBe("INPUT");
+    expect(field("Model").value).toBe("");
+  });
+
+  it("creates a review on Codex with its provider and model among the parameters", async () => {
+    catalog.addBlock.mockResolvedValue(undefined);
+    await openTab("Gates");
+    await act(async () => screen.getByRole("button", { name: "New gate" }).click());
+    fireEvent.change(select("What it checks"), { target: { value: "review" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Reviewed on Codex" } });
+    fireEvent.change(select("Reviewer"), { target: { value: "codex" } });
+    expect((screen.getByRole("button", { name: "Create" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(field("Model"), { target: { value: "gpt-6.1-sol" } });
+    await act(async () => screen.getByRole("button", { name: "Create" }).click());
+
+    expect(catalog.addBlock.mock.calls[0][0]).toMatchObject({
+      kind: "gate",
+      gateKind: "review",
+      params: { focus: "general", provider: "codex", model: "gpt-6.1-sol" },
+    });
+  });
+
+  it("shows an existing review's reviewer, saved with the model it goes with", async () => {
+    catalog.updateBlock.mockResolvedValue(undefined);
+    catalog.gates = [REVIEW];
+    await openTab("Gates");
+    await act(async () => screen.getByRole("button", { name: "Reviewed" }).click());
+
+    expect(select("Reviewer").value).toBe("claude");
+    fireEvent.change(select("Reviewer"), { target: { value: "codex" } });
+    fireEvent.change(field("Model"), { target: { value: "gpt-5" } });
+    await act(async () => screen.getByRole("button", { name: "Save" }).click());
+
+    expect(catalog.updateBlock.mock.calls[0][1]).toMatchObject({ params: { provider: "codex", model: "gpt-5" } });
   });
 });
