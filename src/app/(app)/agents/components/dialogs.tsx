@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Select } from "@/components/ui/Select";
-import { CAPABILITIES, GATE_KINDS, MODELS, gateKindByKey } from "../catalog";
+import { CAPABILITIES, DEFAULT_PROVIDER, GATE_KINDS, MODELS, PROVIDERS, gateKindByKey } from "../catalog";
 import { NewAgent, NewBlock } from "../store";
 import { ApiAgentBlock } from "@/types";
 
@@ -181,7 +181,15 @@ export function NewGateDialog({
         />
 
         {kind?.params.map((param) =>
-          param.type === "select" ? (
+          param.key === "provider" ? (
+            <ProviderModel
+              key="provider-model"
+              providerLabel={param.label}
+              provider={params.provider ?? DEFAULT_PROVIDER}
+              model={params.model ?? MODELS[0].value}
+              onChange={(next) => setParams((v) => ({ ...v, provider: next.provider, model: next.model }))}
+            />
+          ) : param.key === "model" && "provider" in (kind?.defaults ?? {}) ? null : param.type === "select" ? (
             <Select
               key={param.key}
               label={param.label}
@@ -211,20 +219,100 @@ export function NewGateDialog({
           onCancel={close}
           busy={busy}
           onBusy={setBusy}
-          disabled={!name.trim()}
+          disabled={!name.trim() || (params.provider === "codex" && !(params.model ?? "").trim())}
           onCreate={async () => {
             await onCreate({
               kind: "gate",
               name: name.trim(),
               description: kind?.description ?? "",
               gateKind,
-              params,
+              params: trimmedModel(params),
             });
             close();
           }}
         />
       </div>
     </Modal>
+  );
+}
+
+// A pasted model name often carries a space, which the server refuses as not being a model name
+function trimmedModel(params: Record<string, string>): Record<string, string> {
+  return params.model === undefined ? params : { ...params, model: params.model.trim() };
+}
+
+const CODEX_NOTE =
+  "A Codex step works through a shell and has network access, inside the worktree's sandbox. A Claude Code step has neither. The machine that runs it needs Codex installed and signed in.";
+
+/**
+ * The coding CLI and the model go together: the model list is the provider's, and Codex's is the
+ * account's own, so it is typed. Changing the provider resets the model, which would otherwise be
+ * one the new provider has never heard of.
+ */
+function ProviderModel({
+  provider,
+  model,
+  onChange,
+  readOnly = false,
+  modelLabel = "Model",
+  providerLabel = "Runs on",
+  storedModel,
+}: {
+  provider: string;
+  model: string;
+  onChange: (next: { provider: string; model: string }) => void;
+  readOnly?: boolean;
+  modelLabel?: string;
+  providerLabel?: string;
+  storedModel?: string;
+}) {
+  const claude = provider !== "codex";
+  const noteId = useId();
+  // What was in the model field for each provider, so flipping to the other and back changes nothing:
+  // a model stored as "the worker's own", or a custom id, is not overwritten by a default on the way
+  const remembered = useRef<Record<string, string>>({});
+  const options: { value: string; label: string }[] = MODELS.map((m) => ({ value: m.value, label: m.label }));
+  if (claude && storedModel !== undefined && !options.some((m) => m.value === storedModel)) {
+    options.unshift({ value: storedModel, label: storedModel || "The worker's own" });
+  }
+  const providers: { value: string; label: string }[] = PROVIDERS.map((p) => ({ value: p.value, label: p.label }));
+  // A value stored through the API may be one the form does not offer; shown, not swapped for the first
+  if (!providers.some((p) => p.value === provider)) providers.unshift({ value: provider, label: provider });
+  return (
+    <>
+      <Choice
+        label={providerLabel}
+        value={provider}
+        readOnly={readOnly}
+        onChange={(next) => {
+          remembered.current[provider] = model;
+          onChange({ provider: next, model: remembered.current[next] ?? (next === "codex" ? "" : MODELS[0].value) });
+        }}
+        options={providers}
+      />
+      {claude ? (
+        <Choice
+          label={modelLabel}
+          value={model}
+          readOnly={readOnly}
+          onChange={(next) => onChange({ provider, model: next })}
+          options={options}
+        />
+      ) : (
+        <div>
+          <Input
+            label={modelLabel}
+            value={model}
+            readOnly={readOnly}
+            placeholder="A model your Codex account offers"
+            aria-describedby={noteId}
+            onChange={(e) => onChange({ provider, model: e.target.value })}
+            required={!readOnly}
+          />
+          <p id={noteId} className="mt-1 text-[12px] text-text-muted">{CODEX_NOTE}</p>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -241,6 +329,7 @@ export function NewStepDialog({
   const [description, setDescription] = useState("");
   const [prompt, setPrompt] = useState("");
   const [capability, setCapability] = useState<string>(CAPABILITIES[0].value);
+  const [provider, setProvider] = useState<string>(DEFAULT_PROVIDER);
   const [model, setModel] = useState<string>(MODELS[0].value);
   const [busy, setBusy] = useState(false);
 
@@ -249,6 +338,7 @@ export function NewStepDialog({
     setDescription("");
     setPrompt("");
     setCapability(CAPABILITIES[0].value);
+    setProvider(DEFAULT_PROVIDER);
     setModel(MODELS[0].value);
     setBusy(false);
     onClose();
@@ -279,11 +369,13 @@ export function NewStepDialog({
           placeholder="Read the change already committed and write tests that would have caught it failing."
           rows={4}
         />
-        <Select
-          label="Model"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          options={MODELS.map((m) => ({ value: m.value, label: m.label }))}
+        <ProviderModel
+          provider={provider}
+          model={model}
+          onChange={(next) => {
+            setProvider(next.provider);
+            setModel(next.model);
+          }}
         />
         <div>
           <Select
@@ -301,7 +393,7 @@ export function NewStepDialog({
           onCancel={close}
           busy={busy}
           onBusy={setBusy}
-          disabled={!name.trim()}
+          disabled={!name.trim() || (provider === "codex" && !model.trim())}
           onCreate={async () => {
             await onCreate({
               kind: "step",
@@ -309,7 +401,8 @@ export function NewStepDialog({
               description: description.trim(),
               prompt: prompt.trim(),
               capability,
-              model,
+              provider,
+              model: model.trim(),
             });
             close();
           }}
@@ -360,6 +453,7 @@ export function EditBlockDialog({
   const [description, setDescription] = useState("");
   const [prompt, setPrompt] = useState("");
   const [capability, setCapability] = useState("");
+  const [provider, setProvider] = useState<string>(DEFAULT_PROVIDER);
   const [model, setModel] = useState("");
   const [params, setParams] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
@@ -372,6 +466,7 @@ export function EditBlockDialog({
     setDescription(block.description);
     setPrompt(block.prompt);
     setCapability(block.capability);
+    setProvider(block.provider ?? DEFAULT_PROVIDER);
     setModel(block.model);
     setParams(block.params ?? {});
     setError("");
@@ -381,13 +476,6 @@ export function EditBlockDialog({
   if (!block) return null;
   const kind = block.gateKind ? gateKindByKey(block.gateKind) : undefined;
   const callsModel = block.kind === "step" && !block.deterministic;
-  const modelOptions: { value: string; label: string }[] = MODELS.map((m) => ({
-    value: m.value,
-    label: m.label,
-  }));
-  if (!modelOptions.some((m) => m.value === block.model)) {
-    modelOptions.unshift({ value: block.model, label: block.model || "The worker's own" });
-  }
   // A value stored through the API may be one the form does not offer; shown, not swapped for the first
   const withStored = (options: { value: string; label: string }[], stored?: string) =>
     stored && !options.some((o) => o.value === stored)
@@ -432,12 +520,15 @@ export function EditBlockDialog({
               readOnly={readOnly}
               rows={4}
             />
-            <Choice
-              label="Model"
-              value={model}
-              onChange={setModel}
+            <ProviderModel
+              provider={provider}
+              model={model}
               readOnly={readOnly}
-              options={modelOptions}
+              storedModel={block.provider === "codex" ? undefined : block.model}
+              onChange={(next) => {
+                setProvider(next.provider);
+                setModel(next.model);
+              }}
             />
             <div>
               <Choice
@@ -462,7 +553,17 @@ export function EditBlockDialog({
 
         {block.kind === "gate" &&
           kind?.params.map((param) =>
-            param.type === "select" ? (
+            param.key === "provider" ? (
+              <ProviderModel
+                key="provider-model"
+                providerLabel={param.label}
+                provider={params.provider ?? DEFAULT_PROVIDER}
+                model={params.model ?? ""}
+                readOnly={readOnly}
+                storedModel={block.params?.provider === "codex" ? undefined : block.params?.model}
+                onChange={(next) => setParams((v) => ({ ...v, provider: next.provider, model: next.model }))}
+              />
+            ) : param.key === "model" && "provider" in (kind?.defaults ?? {}) ? null : param.type === "select" ? (
               <Choice
                 key={param.key}
                 label={param.label}
@@ -498,7 +599,12 @@ export function EditBlockDialog({
           </Button>
           {!readOnly && (
             <Button
-              disabled={!name.trim() || busy}
+              disabled={
+                !name.trim() ||
+                busy ||
+                (callsModel && provider === "codex" && !model.trim()) ||
+                (block.kind === "gate" && params.provider === "codex" && !(params.model ?? "").trim())
+              }
               onClick={async () => {
                 setError("");
                 setBusy(true);
@@ -506,8 +612,11 @@ export function EditBlockDialog({
                   await onSave(block._id, {
                     name: name.trim(),
                     description: description.trim(),
-                    ...(block.kind === "gate" ? { params } : { prompt: prompt.trim() }),
-                    ...(callsModel && model !== block.model ? { model } : {}),
+                    ...(block.kind === "gate" ? { params: trimmedModel(params) } : { prompt: prompt.trim() }),
+                    // The pair is judged together, so a change to either sends both
+                    ...(callsModel && (model !== block.model || provider !== (block.provider ?? DEFAULT_PROVIDER))
+                      ? { provider, model: model.trim() }
+                      : {}),
                     ...(callsModel && capability !== block.capability ? { capability } : {}),
                   });
                   onClose();

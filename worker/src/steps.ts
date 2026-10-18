@@ -177,6 +177,7 @@ export async function runStep(
     signal: ctx.signal,
     onEvent: ctx.onEvent,
     brief: {
+      provider: entry.provider,
       prompt: entry.prompt ?? "",
       capability: entry.capability ?? "read-only",
       model: entry.model ?? "",

@@ -1,5 +1,6 @@
 import { normaliseComposition, sequenceOf } from "./agent-rules";
-import { StepCapability } from "@/types";
+import { ProviderId, StepCapability } from "@/types";
+import { DEFAULT_PROVIDER } from "./agent-kinds";
 import type { ScopedDb } from "@/lib/db-scope";
 
 /**
@@ -17,12 +18,21 @@ export interface SnapshotEntry {
   /** step only */
   prompt?: string;
   capability?: StepCapability;
+  provider?: ProviderId;
   model?: string;
   fallbackModel?: string;
   deterministic?: boolean;
   /** gate only */
   gateKind?: string;
   params?: Record<string, string>;
+}
+
+function gateParamsOf(block: { params?: Record<string, unknown> }, entry: { params?: Record<string, unknown> }): Record<string, string> {
+  const merged: Record<string, unknown> = { ...(block.params ?? {}), ...(entry.params ?? {}) };
+  const own = block.params?.provider;
+  if (own === undefined) delete merged.provider;
+  else merged.provider = own;
+  return Object.fromEntries(Object.entries(merged).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]));
 }
 
 export interface AgentSnapshot {
@@ -100,6 +110,7 @@ export async function snapshotFor(
             name: block.name,
             prompt: block.prompt,
             capability: block.capability,
+            provider: block.provider ?? DEFAULT_PROVIDER,
             model: block.model,
             fallbackModel: block.fallbackModel,
             deterministic: block.deterministic,
@@ -110,8 +121,10 @@ export async function snapshotFor(
             name: block.name,
             gateKind: block.gateKind,
             // The position's own parameters win over the block's: that is what makes two Size
-            // gates with different limits possible without two catalog rows.
-            params: { ...(block.params ?? {}), ...(entry.params ?? {}) },
+            // gates with different limits possible without two catalog rows. All but the provider,
+            // which is the block's (an admin's choice) whatever a stored position says, and every
+            // value a string, because the worker reads them as strings and the API stored numbers.
+            params: gateParamsOf(block, entry),
           }
     );
   }

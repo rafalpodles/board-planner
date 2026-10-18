@@ -260,6 +260,7 @@ export const GROUPS = {
     "claim-ownership.spec.ts",
     "claim-returns-a-document.spec.ts",
     "multi-repository-claim.spec.ts",
+    "agent-provider.spec.ts",
     "in-app-notifications.spec.ts",
     "board-feed-notifications.spec.ts",
     "notification-grid-delivery.spec.ts",

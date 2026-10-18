@@ -1,4 +1,5 @@
-import { capabilityHeaders } from "./capabilities.js";
+import { capabilityHeaders, reportAgents } from "./capabilities.js";
+import { codexUsable, sweepRunHomes } from "./agents/codex.js";
 import {
   accessSync,
   constants,
@@ -53,7 +54,7 @@ import {
 import type { CommitIdentity } from "./commit.js";
 import { gateFromEntry } from "./gates/from-entry.js";
 import { createRunner, Runner } from "./exec.js";
-import { childEnv } from "./env.js";
+import { childEnv, codexSourceHome } from "./env.js";
 import { createExecutor } from "./executor.js";
 import { LocalServer, LocalServerDeps, startLocalServer } from "./local-server.js";
 import { createLoop } from "./loop.js";
@@ -426,6 +427,15 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
     showLeftovers();
 
+    // What this machine can run, said to the server on every request from here on
+    const found = preflight.paths;
+    reportAgents(preflight.agents ?? [], (agent) =>
+      // Asked on every request: signing out of Codex, or removing it, takes it back at once
+      agent !== "codex" || codexUsable(found.codex, codexSourceHome(deps.env))
+    );
+    // A Codex run home carries the login; one a killed worker left behind goes before the next run
+    sweepRunHomes(undefined, deps.logError);
+
     for (const check of preflight.checks) {
       if (!check.ok) deps.logError(`preflight: ${check.name} — ${check.detail}`);
     }
@@ -776,6 +786,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const gitPath = resolvedGitPath();
     const ghPath = resolvedToolPath("gh");
     const claudePath = resolvedToolPath("claude");
+    // Empty where Codex is not installed and signed in, which is what both users below read as absent
+    const codexPath = resolvedToolPath("codex") || undefined;
     const npmPath = resolvedToolPath("npm");
     // The same value rebind() matched this project's checkout against — the server's own record
     // of the project's repository, never re-read from repoPath/.git at execution time.
@@ -814,10 +826,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             createReporter: (client, statusIds) =>
               createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments),
             repositories,
-            executor: createExecutor(taskConfig, deps.runner, claudePath),
+            executor: createExecutor(taskConfig, deps.runner, claudePath, codexPath),
             collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
             gateFor: (entry, runner, timeoutMs, fallbacks) =>
-              gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath }, timeoutMs, fallbacks),
+              gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath, codex: codexPath }, timeoutMs, fallbacks),
             gitPath,
             recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
             logError: deps.logError,
@@ -846,10 +858,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             remoteUrl,
             commitIdentity
           ),
-          executor: createExecutor(taskConfig, deps.runner, claudePath),
+          executor: createExecutor(taskConfig, deps.runner, claudePath, codexPath),
           collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
           gateFor: (entry, runner, timeoutMs, fallbacks) =>
-            gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath }, timeoutMs, fallbacks),
+            gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath, codex: codexPath }, timeoutMs, fallbacks),
           gitPath,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           logError: deps.logError,
@@ -1078,6 +1090,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       // the git this run's own inventory scan shells out to.
       // Before preflight's own probe, which is the first confined spawn to carry this worker's mark
       leftovers = (await deps.runner.reapLeftovers?.(bootstrap.stateDir)) ?? "";
+      // Nothing is claimed about what this machine has until preflight has looked
+      reportAgents([]);
       await establishPreflight();
 
       // Before the first heartbeat, which is what carries it: the server matches projects against

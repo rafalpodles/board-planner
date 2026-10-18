@@ -1,6 +1,7 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { BLOCK_KINDS, IAgentBlock, STEP_CAPABILITIES } from "@/types";
 import { withOrganisation } from "@/lib/organisation-field";
+import { DEFAULT_PROVIDER, PROVIDER_IDS } from "@/lib/agent-kinds";
 
 // A block is a named configuration of something the worker implements, never new executable code.
 // `key` is the contract with the worker: it resolves the key against its own source, so an ObjectId
@@ -20,6 +21,8 @@ const agentBlockSchema = new Schema<IAgentBlock>(
     // Deliberately not a tool list: a prompt composed with the tools it may use is a capability, and
     // a field for it would let whoever writes a step run anything on the machine.
     capability: { type: String, enum: STEP_CAPABILITIES, default: "read-only" },
+    // Absent on a block stored before BP-987, which is Claude Code: the default says so at hydration
+    provider: { type: String, enum: PROVIDER_IDS, default: DEFAULT_PROVIDER },
     model: { type: String, default: "" },
     fallbackModel: { type: String, default: "" },
     deterministic: { type: Boolean, default: false },

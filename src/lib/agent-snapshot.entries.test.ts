@@ -73,3 +73,48 @@ describe("snapshotFor with composition entries", () => {
     expect(snapshot?.sequence.map((e) => e.key)).toEqual(["implement"]);
   });
 });
+
+describe("snapshotFor and the provider of a step (BP-987)", () => {
+  it("carries a step's provider, Claude for a block stored without one", async () => {
+    blockFind.mockReturnValue(
+      lean([
+        { ...BLOCKS[1], key: "on-codex", provider: "codex", model: "gpt-5", fallbackModel: "" },
+        { ...BLOCKS[1], key: "old" },
+      ])
+    );
+    agentFindOne.mockReturnValue(
+      lean({ _id: "a1", name: "Mixed", scope: "global", composition: { implementation: [{ key: "on-codex" }, { key: "old" }] } })
+    );
+
+    const snapshot = await snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER);
+
+    expect(snapshot?.sequence.map((entry) => entry.provider)).toEqual(["codex", "claude"]);
+  });
+});
+
+describe("snapshotFor and the parameters a gate runs with (BP-987)", () => {
+  const REVIEW = { key: "review", kind: "gate", name: "Reviewed", gateKind: "review", params: { focus: "general", provider: "claude", model: "opus" } };
+  const snapshotOf = async (block: Record<string, unknown>, entry: Record<string, unknown>) => {
+    blockFind.mockReturnValue(lean([block]));
+    agentFindOne.mockReturnValue(lean({ _id: "a1", name: "A", scope: "global", composition: { verification: [entry] } }));
+    return snapshotFor(scopedToDefaultOrganisation(), "p1", "a1", MACHINE_OWNER);
+  };
+
+  it("keeps the block's provider whatever a stored position says", async () => {
+    const snapshot = await snapshotOf(REVIEW, { key: "review", params: { provider: "codex", model: "gpt-5" } });
+
+    expect(snapshot?.sequence[0].params).toMatchObject({ provider: "claude" });
+  });
+
+  it("gives a block that names no provider none, so a stored position cannot add one", async () => {
+    const snapshot = await snapshotOf({ ...REVIEW, params: { focus: "general" } }, { key: "review", params: { provider: "codex" } });
+
+    expect(snapshot?.sequence[0].params).not.toHaveProperty("provider");
+  });
+
+  it("hands the worker strings, whatever type the API stored", async () => {
+    const snapshot = await snapshotOf({ ...REVIEW, params: { provider: "codex", model: 5 } }, { key: "review" });
+
+    expect(snapshot?.sequence[0].params).toEqual({ provider: "codex", model: "5" });
+  });
+});

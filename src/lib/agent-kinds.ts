@@ -25,6 +25,40 @@ export const MODELS = [
   { value: "sonnet", label: "Sonnet" },
 ] as const;
 
+/**
+ * The coding CLI a step or the review gate runs on. A Claude step has no shell and no network; a
+ * Codex step has both, confined to the worktree by the worker's sandbox (BP-987), which is why the
+ * choice is the instance admin's, like the prompt.
+ */
+export const PROVIDERS = [
+  { value: "claude", label: "Claude Code" },
+  { value: "codex", label: "Codex" },
+] as const;
+
+export type ProviderId = (typeof PROVIDERS)[number]["value"];
+
+export const DEFAULT_PROVIDER: ProviderId = "claude";
+
+export const PROVIDER_IDS = PROVIDERS.map((p) => p.value) as ProviderId[];
+
+export function isProvider(value: unknown): value is ProviderId {
+  return PROVIDER_IDS.includes(value as ProviderId);
+}
+
+/**
+ * The models the editor offers for a provider. Empty means a name is typed: Codex's list belongs to
+ * the account signed in on the machine, so a fixed list here would be wrong for somebody.
+ */
+export const MODELS_BY_PROVIDER: Record<ProviderId, readonly { value: string; label: string }[]> = {
+  claude: MODELS,
+  codex: [],
+};
+
+/** The capability a machine names (X-CP-Capabilities) when it can run steps on this provider */
+export function providerCapability(provider: ProviderId): string {
+  return `agent-${provider}`;
+}
+
 export const GATE_KINDS: GateKind[] = [
   {
     key: "diff-size",
@@ -82,9 +116,10 @@ export const GATE_KINDS: GateKind[] = [
           { value: "acceptance", label: "Acceptance criteria" },
         ],
       },
+      { key: "provider", label: "Reviewer", type: "select", options: [...PROVIDERS] },
       { key: "model", label: "Model", type: "select", options: [...MODELS] },
     ],
-    defaults: { focus: "general", model: "opus" },
+    defaults: { focus: "general", provider: "claude", model: "opus" },
   },
 ];
 

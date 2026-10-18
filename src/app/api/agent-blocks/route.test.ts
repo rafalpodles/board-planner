@@ -161,3 +161,46 @@ describe("POST /api/agent-blocks — a gate's parameters", () => {
     expect(create).not.toHaveBeenCalled();
   });
 });
+
+// BP-987. A step names the coding CLI it runs on, and the pair has to be one that can exist
+describe("POST /api/agent-blocks — the provider of a step", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAuthUser.mockResolvedValue(ADMIN);
+    create.mockResolvedValue({ toObject: () => ({ key: "a-key" }) });
+  });
+
+  it("stores a step on Claude when no provider is named, as every step was before", async () => {
+    await post({ ...STEP, model: "opus" });
+
+    expect(create.mock.calls[0][0]).toMatchObject({ provider: "claude", model: "opus" });
+  });
+
+  it("stores a step on Codex with its model, and no fallback", async () => {
+    const response = await post({ ...STEP, provider: "codex", model: "gpt-6.1-sol" });
+
+    expect(response.status).toBe(201);
+    expect(create.mock.calls[0][0]).toMatchObject({ provider: "codex", model: "gpt-6.1-sol", fallbackModel: "" });
+  });
+
+  it.each([
+    ["an unknown provider", { provider: "cursor", model: "x" }, /provider must be one of/],
+    ["Codex with no model", { provider: "codex" }, /required for Codex/],
+    ["Codex with a Claude model", { provider: "codex", model: "sonnet" }, /Claude model, not a Codex one/],
+    ["Claude with an OpenAI model", { provider: "claude", model: "gpt-5" }, /not a Claude model/],
+    ["Claude with an OpenAI model and no provider", { model: "gpt-5" }, /not a Claude model/],
+    ["Codex with a fallback", { provider: "codex", model: "gpt-5", fallbackModel: "gpt-4" }, /not used by Codex/],
+  ])("refuses %s, storing nothing", async (_name, extra, message) => {
+    const response = await post({ ...STEP, ...extra });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(message);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("gives a gate the default provider, whatever the body says", async () => {
+    await post({ kind: "gate", name: "Mine", gateKind: "diff-size", provider: "codex" });
+
+    expect(create.mock.calls[0][0]).toMatchObject({ provider: "claude" });
+  });
+});

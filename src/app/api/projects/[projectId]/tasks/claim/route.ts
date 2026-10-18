@@ -6,6 +6,7 @@ import { BoardCannotClaim } from "@/lib/claim-refusal";
 import { ownerReachableProjectIds, verdictFor } from "@/lib/worker-service";
 import { capabilitiesOf } from "@/lib/worker-capabilities";
 import { snapshotFor } from "@/lib/agent-snapshot";
+import { agentsBeyond, lackedBy } from "@/lib/agent-providers";
 import { releaseTask } from "@/lib/task-service";
 import { claimingMachineIds, HELD_BY_PLAN_ON_THE_MACHINE, isHeldByPlan } from "@/lib/machine-limit";
 
@@ -73,10 +74,20 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
   }
 
   const machineOwnerId = ownerIdOf(worker.owner);
+  const capabilities = capabilitiesOf(request);
 
   let task: Awaited<ReturnType<typeof claimNextTask>>;
   try {
-    task = await claimNextTask(db, projectId, String(worker._id), runId, machineOwnerId, identityOf(worker));
+    task = await claimNextTask(
+      db,
+      projectId,
+      String(worker._id),
+      runId,
+      machineOwnerId,
+      identityOf(worker),
+      // What this machine says it can run, read from this request and never from a stored heartbeat
+      await agentsBeyond(db, capabilities)
+    );
   } catch (error) {
     // 409 with the reason, never 204: 204 is what an empty queue answers, and a board with no
     // column to claim into read as an idle machine for as long as nobody happened to look at the
@@ -129,6 +140,20 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
     // 204, not an error: the worker's loop treats a failed claim as a cycle failure and retries on
     // the next poll. Nothing is claimable here until somebody fixes the agent, which is what 204
     // means.
+    return new NextResponse(null, { status: 204 });
+  }
+
+  // The filter above judged the agent as it stood a moment ago. An agent edited in that window can
+  // need a coding CLI this machine does not have, and the run would be refused on the machine, so it
+  // goes back now. Refunded, because nothing ran: and it cannot loop, since the next claim filters it.
+  const lacking = lackedBy(agent.sequence, capabilities);
+  if (lacking) {
+    await releaseTask(db, projectId, String(task._id), {
+      refund: true,
+      workerId: String(worker._id),
+      actorId: identityOf(worker),
+    }).catch(() => {});
+    console.error(`Claim released: ${projectId}/${String(task._id)} needs ${lacking}, which this machine does not report`);
     return new NextResponse(null, { status: 204 });
   }
 

@@ -344,6 +344,7 @@ export async function runTaskInRepositories(
       signal: deps.signal,
       onEvent,
       brief: {
+        provider: entry.provider,
         prompt: entry.prompt ?? "",
         capability: entry.capability ?? "read-only",
         model: entry.model ?? "",

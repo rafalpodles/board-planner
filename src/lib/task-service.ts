@@ -1872,7 +1872,9 @@ export async function claimNextTask(
   ownerId?: string | null,
   // Who the claim's History row is written as: the machine's own identity, which is who its status
   // changes and comments are already authored by (BP-1045)
-  actorId?: string | null
+  actorId?: string | null,
+  // Agents this machine cannot run (agentsBeyond): a task naming one is not offered to it
+  excludedAgents: string[] = []
   // A document, not a plain ITask: the caller has to know, because spreading one silently yields
   // Mongoose internals with every real field a level down.
 ): Promise<HydratedDocument<ITask> | null> {
@@ -1963,8 +1965,9 @@ export async function claimNextTask(
           ],
         },
       ],
-      // Choosing an agent is the hand-over; a task naming none is one a person is doing
-      agent: { $ne: null },
+      // Choosing an agent is the hand-over; a task naming none is one a person is doing. And one
+      // whose agent runs on a coding CLI this machine does not report is for another machine.
+      agent: excludedAgents.length > 0 ? { $ne: null, $nin: excludedAgents } : { $ne: null },
       // On an array field this means "holds none of them", so a task with no blockers, one whose
       // blockers have all finished, and one written before the field existed all still qualify
       blockedBy: { $nin: openBlockers },

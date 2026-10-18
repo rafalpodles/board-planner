@@ -239,6 +239,81 @@ describe("changing what a block runs as (BP-743, BP-755)", () => {
 });
 
 // Agent rules run when an agent is saved; a block edited under an agent never passed through them.
+// BP-987. The provider and the model are one choice, so an edit is judged on the pair it would leave
+describe("changing the provider of a step (BP-987)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAuthUser.mockResolvedValue(ADMIN);
+    agentFind.mockReturnValue(found([]));
+    allBlocks.mockResolvedValue([]);
+  });
+
+  const step = (overrides: Record<string, unknown> = {}) => block({ capability: "read-only", provider: "claude", model: "opus", ...overrides });
+
+  it("moves a step to Codex together with a model that fits", async () => {
+    const doc = step();
+    blockFindOne.mockResolvedValue(doc);
+
+    const response = await put({ provider: "codex", model: "gpt-6.1-sol" });
+
+    expect(response.status).toBe(200);
+    expect(doc).toMatchObject({ provider: "codex", model: "gpt-6.1-sol" });
+  });
+
+  it("clears the fallback model on the way to Codex, which has none and which a new step is refused", async () => {
+    const doc = step({ fallbackModel: "sonnet" });
+    blockFindOne.mockResolvedValue(doc);
+
+    await put({ provider: "codex", model: "gpt-5" });
+
+    expect(doc).toMatchObject({ provider: "codex", fallbackModel: "" });
+  });
+
+  it("refuses moving to Codex while the model is still a Claude one, changing nothing", async () => {
+    const doc = step();
+    blockFindOne.mockResolvedValue(doc);
+
+    const response = await put({ provider: "codex" });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/Claude model, not a Codex one/);
+    expect(doc.save).not.toHaveBeenCalled();
+    expect(doc).toMatchObject({ provider: "claude" });
+  });
+
+  it("refuses a new model that does not fit the provider the step already has", async () => {
+    blockFindOne.mockResolvedValue(step({ provider: "codex", model: "gpt-5" }));
+
+    const response = await put({ model: "sonnet" });
+
+    expect(response.status).toBe(400);
+  });
+
+  it("refuses moving back to Claude with an OpenAI model", async () => {
+    blockFindOne.mockResolvedValue(step({ provider: "codex", model: "gpt-5" }));
+
+    expect((await put({ provider: "claude" })).status).toBe(400);
+  });
+
+  it("does not judge a pair when the edit names neither, so an old block can still be renamed", async () => {
+    const doc = step({ provider: "codex", model: "" });
+    blockFindOne.mockResolvedValue(doc);
+
+    expect((await put({ name: "Renamed" })).status).toBe(200);
+  });
+
+  it("refuses an unknown provider, and a provider on a gate or on a step the worker performs itself", async () => {
+    blockFindOne.mockResolvedValue(step());
+    expect((await put({ provider: "cursor" })).status).toBe(400);
+
+    blockFindOne.mockResolvedValue(block({ kind: "gate", gateKind: "diff-size", params: {} }));
+    expect((await put({ provider: "codex" })).status).toBe(400);
+
+    blockFindOne.mockResolvedValue(block({ deterministic: true }));
+    expect((await put({ provider: "codex" })).status).toBe(400);
+  });
+});
+
 describe("changing what a step may touch, under agents that already use it (BP-743)", () => {
   const investigate = { key: "a-key", kind: "step", name: "Investigate", capability: "read-only" };
   const build = { key: "build", kind: "gate", name: "Builds", gateKind: "build" };

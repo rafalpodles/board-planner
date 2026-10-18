@@ -7,11 +7,13 @@ import type { ScopedDb } from "@/lib/db-scope";
 import { allBlocks, toApiBlock } from "@/lib/agent-service";
 import {
   capabilityRefusal,
+  modelForProviderRefusal,
+  providerRefusal,
   gateKindRefusal,
   gateParams,
-  modelRefusal,
 } from "@/lib/agent-block-input";
 import { brokenProblems, normaliseComposition } from "@/lib/agent-rules";
+import { DEFAULT_PROVIDER, isProvider } from "@/lib/agent-kinds";
 import { AGENT_BUCKETS, ApiAgentBlock, IAgentBlock, StoredComposition } from "@/types";
 
 // Both shapes are stored. $elemMatch, not a bare string: the path is a subdocument array, and a
@@ -57,17 +59,23 @@ function fieldRefusal(block: IAgentBlock, body: Body): string | null {
         return "A gate's kind is fixed. Create a new gate to check something else.";
       }
     }
-    const stepOnly = ["prompt", "capability", "model"].find(sent);
+    const stepOnly = ["prompt", "capability", "provider", "model"].find(sent);
     if (stepOnly) return `A gate has no ${stepOnly}`;
     return sent("params") ? gateParams(block.gateKind, body.params).refusal : null;
   }
   if (sent("gateKind")) return "A step has no gateKind";
   if (sent("params")) return "A step has no params";
   if (block.deterministic) {
-    const modelOnly = ["capability", "model"].find(sent);
+    const modelOnly = ["capability", "provider", "model"].find(sent);
     return modelOnly ? `This step is an action the worker takes, so it has no ${modelOnly}` : null;
   }
-  return capabilityRefusal(body.capability) ?? modelRefusal(body.model, "model");
+  const provider = isProvider(body.provider) ? body.provider : (block.provider ?? DEFAULT_PROVIDER);
+  const model = body.model !== undefined ? body.model : block.model;
+  return (
+    capabilityRefusal(body.capability) ??
+    providerRefusal(body.provider) ??
+    (sent("provider") || sent("model") ? modelForProviderRefusal(provider, model, "model") : null)
+  );
 }
 
 const MOST_NAMED = 3;
@@ -140,6 +148,9 @@ export const PUT = withAuth(async (request, { params, user, db }) => {
   if (typeof body.description === "string") block.description = body.description.trim();
   if (block.kind === "step" && typeof body.prompt === "string") block.prompt = body.prompt.trim();
   if (body.capability !== undefined) block.capability = body.capability;
+  if (body.provider !== undefined) block.provider = body.provider;
+  // Codex has no fallback model, and POST refuses one: the old one must not outlive the move
+  if (body.provider === "codex") block.fallbackModel = "";
   if (body.model !== undefined) block.model = body.model;
   if (block.kind === "gate" && body.params && typeof body.params === "object") {
     block.params = gateParams(block.gateKind, body.params).params;

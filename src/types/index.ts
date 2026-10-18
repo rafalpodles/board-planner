@@ -1,4 +1,5 @@
 import { Types } from "mongoose";
+import type { ProviderId } from "@/lib/agent-kinds";
 
 // Difficulty levels
 export type Difficulty = "S" | "M" | "L" | "XL";
@@ -2008,6 +2009,7 @@ export type BlockKind = (typeof BLOCK_KINDS)[number];
 
 // What a step may touch. The worker owns these; the server names one and never composes a tool list.
 export const STEP_CAPABILITIES = ["read-only", "edit"] as const;
+export type { ProviderId };
 export type StepCapability = (typeof STEP_CAPABILITIES)[number];
 
 /**
@@ -2039,6 +2041,8 @@ export interface IAgentBlock {
   /** step only */
   prompt: string;
   capability: StepCapability;
+  /** the coding CLI the step runs on */
+  provider: ProviderId;
   model: string;
   fallbackModel: string;
   /** a worker action rather than a model call */
@@ -2072,6 +2076,7 @@ export interface ApiAgentBlock {
   params: Record<string, string>;
   prompt: string;
   capability: StepCapability;
+  provider: ProviderId;
   model: string;
   fallbackModel: string;
   deterministic: boolean;

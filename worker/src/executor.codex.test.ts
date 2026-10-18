@@ -127,3 +127,68 @@ describe("what a codex step is spawned with", () => {
     expect(args).toContain(`W0=${worktree}`);
   });
 });
+
+// BP-987. Which CLI a step runs on is the step's own, and a machine that lacks it says so
+describe("choosing the CLI per step", () => {
+  const run = vi.fn<Runner["run"]>(async () => ok());
+  const executor = () =>
+    createExecutor(workerConfig(), { run }, "/Users/me/.local/bin/claude", codexAgent(CODEX, { sourceHome, tmp }));
+  const step = (brief: Record<string, unknown>) =>
+    executor().execute({
+      task: claimedTask({}),
+      worktreePath: worktree,
+      worktreeDir: recordDir(worktree),
+      brief: { prompt: "do it", capability: "edit", model: "", fallbackModel: "", timeoutMs: 1000, ...brief } as never,
+    });
+  const spawned = () => run.mock.calls[0];
+  const claudeOk = (): CommandResult => ({ ...ok(), stdout: `${JSON.stringify({ type: "result", result: JSON.stringify(OK) })}\n` });
+
+  beforeEach(() => run.mockClear());
+
+  it("runs a step with no provider on Claude Code, as every step did before", async () => {
+    run.mockResolvedValueOnce(claudeOk());
+
+    expect(await step({})).toMatchObject({ kind: "result" });
+    expect(spawned()[1]).toContain("/Users/me/.local/bin/claude");
+    expect(spawned()[1]).toContain("--permission-mode");
+  });
+
+  it("runs a step on Codex with the model it names, and not the Claude default", async () => {
+    await step({ provider: "codex", model: "gpt-6.1-sol" });
+
+    const args = spawned()[1];
+    expect(args).toContain(CODEX);
+    expect(args[args.indexOf("-m") + 1]).toBe("gpt-6.1-sol");
+    expect(args).not.toContain("opus");
+  });
+
+  it("says a step on Codex names no model, spending the attempt and starting nothing", async () => {
+    expect(await step({ provider: "codex", model: "  " })).toEqual({ kind: "error", message: expect.stringMatching(/codex and names no model/) });
+    expect(run).not.toHaveBeenCalled();
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("is a machine fault, not an error, when the machine has no Codex", async () => {
+    const without = createExecutor(workerConfig(), { run }, "/Users/me/.local/bin/claude");
+
+    const outcome = await without.execute({
+      task: claimedTask({}),
+      worktreePath: worktree,
+      worktreeDir: recordDir(worktree),
+      brief: { prompt: "do it", capability: "edit", provider: "codex", model: "gpt-5", fallbackModel: "", timeoutMs: 1000 },
+    });
+
+    expect(outcome).toEqual({ kind: "machine_fault", message: expect.stringMatching(/runs on codex, which this machine cannot run/) });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each(["constructor", "toString", "__proto__", "hasOwnProperty"])("does not take %s, a property every object has, for a CLI", async (provider) => {
+    expect(await step({ provider, model: "x" })).toMatchObject({ kind: "machine_fault" });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("is a machine fault for a CLI this worker has never heard of, never a quiet run on Claude Code", async () => {
+    expect(await step({ provider: "cursor", model: "x" })).toMatchObject({ kind: "machine_fault" });
+    expect(run).not.toHaveBeenCalled();
+  });
+});

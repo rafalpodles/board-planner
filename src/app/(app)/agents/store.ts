@@ -18,6 +18,7 @@ export interface NewBlock {
   params?: Record<string, string>;
   prompt?: string;
   capability?: string;
+  provider?: string;
   model?: string;
 }
 

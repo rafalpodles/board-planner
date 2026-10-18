@@ -23,6 +23,8 @@ const fail = (stderr = ""): CommandResult => ({ code: 1, stdout: "", stderr, tim
 interface Machine {
   has?: string[];
   claudeAuth?: CommandResult;
+  // `codex login status`
+  codexLogin?: CommandResult;
   ghAuth?: CommandResult;
   // `gh auth token --user <login>` — the authoritative answer to "does gh hold this account", and
   // a different call from `gh auth status`
@@ -76,6 +78,7 @@ function machine(spec: Machine = {}): {
       envs[tool] = opts.env;
 
       if (command.endsWith("/claude") && args[0] === "auth") return spec.claudeAuth ?? ok(LOGGED_IN);
+      if (command.endsWith("/codex") && args[0] === "login") return spec.codexLogin ?? ok("Logged in using ChatGPT\n");
       if (command.endsWith("/gh") && args[0] === "auth" && args[1] === "token") {
         return spec.ghToken ?? ok("gho_a_token\n");
       }
@@ -832,4 +835,67 @@ describe("npmCacheCheck", () => {
 
       expect(npmCacheCheck({ CP_NPM_CACHE: join(dir, "cache"), [UNCONFINED_ESCAPE_HATCH]: "1" }).ok).toBe(true);
     }));
+});
+
+// BP-987. Codex is optional: nothing about it fails a machine, and what it says decides which tasks
+// the machine is offered
+describe("preflight and the Codex CLI", () => {
+  const check = (report: Awaited<ReturnType<typeof runPreflight>>) => report.checks.find((c) => c.name === "codex")!;
+  const HAS = ["git", "npm", "claude", "gh", "codex"];
+
+  it("says a machine without it takes no task that runs on it, and stays green", async () => {
+    const report = await runPreflight(depsFor(machine()));
+
+    expect(check(report)).toMatchObject({ ok: true, detail: expect.stringMatching(/not installed.*no task whose agent runs on Codex/) });
+    expect(report.ok).toBe(true);
+    expect(report.agents).toEqual(["claude"]);
+    expect(report.paths.codex).toBeUndefined();
+  });
+
+  it("offers Codex when it is installed and signed in, with the path it will be spawned by", async () => {
+    const report = await runPreflight(depsFor(machine({ has: HAS })));
+
+    expect(check(report)).toMatchObject({ ok: true, detail: expect.stringContaining("Logged in using ChatGPT") });
+    expect(report.agents).toEqual(["claude", "codex"]);
+    expect(report.paths.codex).toBe("/opt/homebrew/bin/codex");
+  });
+
+  it("does not offer it when it is installed but not signed in, and says how to fix that, without failing the machine", async () => {
+    const report = await runPreflight(depsFor(machine({ has: HAS, codexLogin: fail("Not logged in") })));
+
+    expect(check(report)).toMatchObject({ ok: true, warn: true, detail: expect.stringMatching(/not signed in.*codex login/) });
+    expect(report.ok).toBe(true);
+    expect(report.agents).toEqual(["claude"]);
+    expect(report.paths.codex).toBeUndefined();
+  });
+
+  it("does not offer it when it will not run at all", async () => {
+    const report = await runPreflight(depsFor(machine({ has: HAS, versions: { codex: fail("dyld: Library not loaded") } })));
+
+    expect(check(report)).toMatchObject({ ok: true, warn: true, detail: expect.stringContaining("will not run") });
+    expect(report.agents).toEqual(["claude"]);
+  });
+
+  it("names Codex alone when Claude Code cannot be used, which is a machine that claims nothing anyway", async () => {
+    const report = await runPreflight(depsFor(machine({ has: HAS, claudeAuth: ok(JSON.stringify({ loggedIn: false })) })));
+
+    expect(report.ok).toBe(false);
+    expect(report.agents).toEqual(["codex"]);
+  });
+
+  it("looks for the login where a run will copy it from, so a CODEX_HOME the worker is started with counts", async () => {
+    const m = machine({ has: HAS });
+
+    await runPreflight(depsFor(m, { env: { ...env, CODEX_HOME: "/Users/someone/.codex-work" } }));
+
+    expect(m.envs.codex?.CODEX_HOME).toBe("/Users/someone/.codex-work");
+  });
+
+  it("does not name a Codex home when the worker was started with none", async () => {
+    const m = machine({ has: HAS });
+
+    await runPreflight(depsFor(m));
+
+    expect(m.envs.codex).not.toHaveProperty("CODEX_HOME");
+  });
 });
