@@ -288,28 +288,17 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
 // The operator has to read the consequence before the reason: a banner is cut after a couple of
 // lines and the reason can be 200 characters of git's stderr.
 /**
- * The pair drifted apart once already inside this review, so the constant is the invariant.
- *
- * Both sides asserted, because the first version of this test read only the notification — the
- * side that was never at risk — while `PanelView.swift` could be put back to a literal with every
- * test green (found in review). `CPMenubar` has no test target, so the panel is read as text, the
- * way this file already reads the worker's source.
+ * The pair drifted apart once already inside a review, so the constant is the invariant. Both
+ * sides are asserted by behaviour now that the panel's headline comes from `panelSummary`: a
+ * reworded literal on either side fails here, with no source text read.
  */
-@Test func theNotificationTitleIsTheSentenceThePanelShows() throws {
+@Test func theNotificationTitleIsTheSentenceThePanelShows() {
     let request = notification(for: gateFault("CP-1"))
     #expect(request?.title == machineFaultHeadline)
 
-    let panel = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .appendingPathComponent("Sources/CPMenubar/PanelView.swift")
-    let source = try String(contentsOf: panel, encoding: .utf8)
-    let faulted = try #require(
-        source.range(of: #"(?m)^\s*case \.faulted:.*$"#, options: .regularExpression),
-        "PanelView no longer has a .faulted headline")
-
-    #expect(source[faulted].contains("machineFaultHeadline"), "the panel went back to a literal")
+    var state = WorkerState()
+    state.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")), at: Date())
+    #expect(state.panelSummary(now: Date(), pollSeconds: nil).headline == request?.title)
 }
 
 @Test func theFaultBodySaysWhatHappenedBeforeItSaysWhy() throws {

@@ -85,8 +85,13 @@ final class SurfaceSnapshotTests: XCTestCase {
     func testPreferences() {
         let model = AppModel(previewState: Fixtures.idle, config: Fixtures.config)
         let onboarding = OnboardingModel(previewState: Fixtures.onboarding(step: .running))
-        Snapshot.render(
-            PreferencesView(model: model, onboarding: onboarding),
-            name: "preferences-default", width: 460, height: 320)
+        for (name, tab) in [
+            ("preferences-connection", PreferencesView.Tab.connection),
+            ("preferences-projects", .projects), ("preferences-advanced", .advanced),
+        ] {
+            Snapshot.render(
+                PreferencesView(model: model, onboarding: onboarding, initialTab: tab),
+                name: name, width: 540, height: 480)
+        }
     }
 }

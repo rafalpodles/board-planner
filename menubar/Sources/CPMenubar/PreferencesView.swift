@@ -3,21 +3,31 @@ import SwiftUI
 import CPMenubarCore
 
 struct PreferencesView: View {
+    enum Tab: Hashable { case connection, projects, advanced }
+
     let model: AppModel
     var onboarding: OnboardingModel
+    @State private var tab: Tab
+
+    init(model: AppModel, onboarding: OnboardingModel, initialTab: Tab = .connection) {
+        self.model = model
+        self.onboarding = onboarding
+        _tab = State(initialValue: initialTab)
+    }
 
     var body: some View {
-        TabView {
+        TabView(selection: $tab) {
             ConnectionTab(model: model, onboarding: onboarding)
                 .tabItem { Label("Connection", systemImage: "network") }
-            RepositoriesTab(model: model)
-                .tabItem { Label("Repositories", systemImage: "folder") }
-            PolicyTab(model: model)
-                .tabItem { Label("Policy", systemImage: "slider.horizontal.3") }
+                .tag(Tab.connection)
+            ProjectsTab(model: model)
+                .tabItem { Label("Projects", systemImage: "folder") }
+                .tag(Tab.projects)
             AdvancedTab(model: model)
                 .tabItem { Label("Advanced", systemImage: "gearshape") }
+                .tag(Tab.advanced)
         }
-        .frame(width: 460, height: 320)
+        .frame(width: 540, height: 480)
     }
 }
 
@@ -30,24 +40,29 @@ private struct ConnectionTab: View {
 
     var body: some View {
         Form {
-            LabeledContent("Server") {
-                HStack {
-                    // The stored address, not the one the socket reports: after the switch there is
-                    // no worker to report anything, and a dash there would read as a broken machine.
-                    Text(model.config?.apiUrl ?? onboarding.state.apiURL).lineLimit(1).truncationMode(.head)
-                    Button("Change…") { confirming = true }
+            Section("Board") {
+                LabeledContent("Server") {
+                    HStack {
+                        // The stored address, not the one the socket reports: after the switch there is
+                        // no worker to report anything, and a dash there would read as a broken machine.
+                        Text(model.config?.apiUrl ?? onboarding.state.apiURL).lineLimit(1).truncationMode(.head)
+                        StatePill(text: model.state.health == .disconnected ? "Offline" : "Connected",
+                                  color: model.state.health == .disconnected ? .secondary : .green)
+                        Button("Change…") { confirming = true }
+                    }
                 }
+                LabeledContent("This machine", value: model.config?.workerName ?? "—")
+                LabeledContent("Projects", value: model.config.map { "\($0.projectCount)" } ?? "—")
             }
-            LabeledContent("Worker", value: model.config?.workerName ?? "—")
-            LabeledContent("Projects", value: model.config.map { "\($0.projectCount)" } ?? "—")
-            GithubAccountRow(accounts: model.config?.githubAccounts ?? [], onboarding: onboarding)
+            Section("GitHub identity") {
+                GithubAccountRow(accounts: model.config?.githubAccounts ?? [], onboarding: onboarding)
+            }
             Text("This app reads the worker over a local socket and holds no credential of its own. "
                  + "Registration is done on the worker.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
-        .padding()
         .confirmationDialog(
             "Connect this machine to a different board?",
             isPresented: $confirming,
@@ -129,7 +144,7 @@ private struct GithubAccountRow: View {
     }
 }
 
-private struct RepositoriesTab: View {
+private struct CheckoutsSection: View {
     let model: AppModel
 
     @State private var paths: [String] = []
@@ -143,9 +158,15 @@ private struct RepositoriesTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Text("Checkouts").font(.headline)
             List(paths, id: \.self, selection: $selection) { path in
-                Text(path).lineLimit(1).truncationMode(.head)
+                Text(path)
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineLimit(1).truncationMode(.head)
             }
+            .frame(height: 110)
+            .scrollContentBackground(.hidden)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
 
             if let error {
                 Text(error).font(.caption).foregroundStyle(.red)
@@ -234,7 +255,6 @@ private struct RepositoriesTab: View {
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         }
-        .padding()
         .onAppear(perform: load)
     }
 
@@ -348,35 +368,98 @@ private struct RepositoriesTab: View {
     }
 }
 
-private struct PolicyTab: View {
+private struct ProjectsTab: View {
     let model: AppModel
 
+    private var projects: [ProjectConfig] { model.config?.projects ?? [] }
+    private var ready: Int { projects.filter { ($0.blocked ?? "").isEmpty }.count }
+
     var body: some View {
-        Form {
-            // One row per bound project: these settings describe a repository, so a machine serving
-            // two projects genuinely has two answers.
-            ForEach(model.config?.projects ?? [], id: \.project) { project in
-                Section(project.label) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Projects").font(.headline)
+                        Spacer()
+                        if !projects.isEmpty {
+                            Text("\(ready) of \(projects.count) ready").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    if projects.isEmpty {
+                        Text("No project bound yet.").foregroundStyle(.secondary)
+                    } else {
+                        VStack(spacing: 0) {
+                            ForEach(Array(projects.enumerated()), id: \.element.project) { index, project in
+                                if index > 0 { Divider() }
+                                ProjectRow(project: project)
+                            }
+                        }
+                        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    // One row per bound project: these settings describe a repository, so a machine
+                    // serving two projects genuinely has two answers.
+                    Text("Policy comes from each project's own settings — Settings → Workers on that project.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                CheckoutsSection(model: model)
+            }
+            .padding(20)
+        }
+    }
+}
+
+private struct ProjectRow: View {
+    let project: ProjectConfig
+    @State private var expanded = false
+
+    private var blocked: String { project.blocked ?? "" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { expanded.toggle() } label: {
+                HStack(spacing: 10) {
+                    Text(project.key ?? "—")
+                        .font(.caption.weight(.medium))
+                        .frame(minWidth: 34)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Brand.blue.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
+                        .foregroundStyle(Brand.actionBlue)
+                    Text(project.name ?? project.label).lineLimit(1)
+                    Spacer()
                     // The answer to "why is this machine sitting on a project and doing nothing",
                     // which the worker has served since BP-379 and nothing here showed (BP-512)
-                    if let blocked = project.blocked, !blocked.isEmpty {
-                        Text("Not claiming: \(blocked)").font(.caption).foregroundStyle(.orange)
-                    }
+                    Text(blocked.isEmpty ? "Ready" : "Not claiming")
+                        .font(.caption)
+                        .padding(.horizontal, 8).padding(.vertical, 2)
+                        .background((blocked.isEmpty ? Color.green : .orange).opacity(0.16), in: Capsule())
+                        .foregroundStyle(blocked.isEmpty ? Color.green : .orange)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if !blocked.isEmpty {
+                Text(blocked).font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
+            if expanded {
+                VStack(spacing: 4) {
                     LabeledContent("Base branch", value: project.baseBranch)
                     LabeledContent("Model", value: project.model)
                     LabeledContent("Review model", value: project.reviewModel)
                     LabeledContent("Max diff lines", value: "\(project.maxDiffLines)")
                 }
+                .font(.callout)
+                .padding(.top, 8)
             }
-            if model.config?.projects.isEmpty ?? true {
-                Text("No project bound yet.").foregroundStyle(.secondary)
-            }
-            Text("These come from each project's own settings — Settings → Workers on that project.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
-        .formStyle(.grouped)
-        .padding()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 }
 
@@ -399,23 +482,26 @@ private struct AdvancedTab: View {
             // launch does to the environment, which is the same fact from the other side.
             // Swift 6.3.3 quirk: passing `setLoginItem` here as a method reference crashes IRGen
             // emitting the actor-hopping thunk. The closure is not style.
-            Toggle("Start at login", isOn: Binding(get: { startsAtLogin }, set: { setLoginItem($0) }))
-                .help("Opens this app when you log in, which starts the worker with it.")
-            if !loginItemNote.isEmpty {
-                Text(loginItemNote).font(.caption).foregroundStyle(.secondary)
-            }
-
-            LabeledContent("Task timeout",
-                           value: model.config?.projects.first.map { "\($0.taskTimeoutMs / 1000)s" } ?? "—")
-
-            LabeledContent("State directory") {
-                HStack {
-                    Text(stateDirectory).lineLimit(1).truncationMode(.head)
-                    Button("Choose…") { choose() }
+            Section("Startup") {
+                Toggle("Start at login", isOn: Binding(get: { startsAtLogin }, set: { setLoginItem($0) }))
+                    .help("Opens this app when you log in, which starts the worker with it.")
+                if !loginItemNote.isEmpty {
+                    Text(loginItemNote).font(.caption).foregroundStyle(.secondary)
                 }
+                LabeledContent("Task timeout",
+                               value: model.config?.projects.first.map { "\($0.taskTimeoutMs / 1000)s" } ?? "—")
             }
-            LabeledContent("Socket", value: SocketClient.socketPath(in: stateDirectory))
-            LabeledContent("Allowlist", value: ReposFile.path(in: stateDirectory))
+
+            Section("Files") {
+                LabeledContent("State folder") {
+                    HStack {
+                        Text(stateDirectory).lineLimit(1).truncationMode(.head)
+                        Button("Choose…") { choose() }
+                    }
+                }
+                PathRow(label: "Socket", path: SocketClient.socketPath(in: stateDirectory))
+                PathRow(label: "Allowlist", path: ReposFile.path(in: stateDirectory))
+            }
 
             Text("Where the worker keeps its socket. Launched from Finder or a login item this app "
                  + "inherits no environment, so CP_STATE_DIR is not visible to it — set it here.")
@@ -423,7 +509,6 @@ private struct AdvancedTab: View {
                 .foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
-        .padding()
         // Re-read rather than trust the last value: this can also be changed in System Settings
         .onAppear { startsAtLogin = LoginItem.isRegistered }
     }
@@ -454,5 +539,30 @@ private struct AdvancedTab: View {
         StateDirectory.set(path)
         stateDirectory = path
         model.reconnect()
+    }
+}
+
+private struct PathRow: View {
+    let label: String
+    let path: String
+
+    var body: some View {
+        LabeledContent(label) {
+            HStack(spacing: 6) {
+                Text(path)
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineLimit(1).truncationMode(.head)
+                    .textSelection(.enabled)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(path, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Copy \(label.lowercased()) path")
+                .help("Copy")
+            }
+        }
     }
 }
