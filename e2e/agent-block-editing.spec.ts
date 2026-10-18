@@ -153,9 +153,10 @@ test.describe("authoring, one field at a time", () => {
     expect(await storedBlock({ name: "Security pass" })).toMatchObject({
       kind: "gate",
       gateKind: "review",
-      params: { focus: "security", model: "sonnet" },
+      // The reviewer is a parameter since BP-987, and the form stores the one it shows: Claude Code
+      params: { focus: "security", provider: "claude", model: "sonnet" },
     });
-    await expect(blockRow(page, "Security pass")).toContainText("looking for Security · model Sonnet");
+    await expect(blockRow(page, "Security pass")).toContainText("looking for Security · reviewer Claude Code · model Sonnet");
   });
 
   test("an agent's description is written when it is made, and can be rewritten later", async ({
