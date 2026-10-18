@@ -3,8 +3,6 @@ name: Mutation check
 # Breaks the code an e2e assertion watches and reports whether the suite noticed (BP-712, BP-1092).
 # By hand only: a full manifest is an hour or more of one dev server per shard.
 on:
-  push:
-    branches: [bp-1092/mutation-sample]
   workflow_dispatch:
     inputs:
       manifest:
