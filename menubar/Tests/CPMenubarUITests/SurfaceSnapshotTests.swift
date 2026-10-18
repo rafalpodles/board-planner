@@ -10,6 +10,7 @@ final class SurfaceSnapshotTests: XCTestCase {
             ("panel-idle", Fixtures.idle), ("panel-working", Fixtures.working),
             ("panel-needs-human", Fixtures.needsHuman), ("panel-fault", Fixtures.faulted),
             ("panel-offline", Fixtures.disconnected), ("panel-paused", Fixtures.paused),
+            ("panel-paused-running", Fixtures.pausedWhileRunning),
         ] {
             Snapshot.render(
                 PanelView(model: AppModel(previewState: state, config: Fixtures.config)),

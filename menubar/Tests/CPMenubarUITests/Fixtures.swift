@@ -38,6 +38,11 @@ enum Fixtures {
         $0.adopt(StatusResponse(paused: true, current: nil, recent: []), at: t0)
     }
 
+    static let pausedWhileRunning = state {
+        $0.apply(.progress(Progress(phase: "gates:test-presence", taskKey: "BP-1076")), at: t0)
+        $0.forceHealth(.paused)
+    }
+
     static let config: ConfigResponse = {
         let json = """
         {"apiUrl":"https://app.board-planner.com","workerName":"MAC","projectCount":3,"pollIntervalMs":30000,
