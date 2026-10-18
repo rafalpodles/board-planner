@@ -4,6 +4,7 @@ import {
   parseShard,
   pickShard,
   seededSample,
+  selectMutations,
   staleEdit,
   applyEdits,
   carriesMarker,
@@ -296,6 +297,12 @@ describe("shards", () => {
     for (const shard of shards) expect(shard[0].id).toBe("m0");
     const rest = shards.flatMap((s) => s.slice(1).map((m) => m.id)).sort();
     expect(rest).toEqual(all.slice(1).map((m) => m.id).sort());
+  });
+
+  it("keeps the control when --only names other mutations, and refuses a shard left with nothing else", () => {
+    const all = list(5);
+    expect(selectMutations(all, ["m3"], 1, 1).map((m) => m.id)).toEqual(["m0", "m3"]);
+    expect(() => selectMutations(all, ["m3"], 2, 2)).toThrow(/no mutation to run/);
   });
 
   it("reads k/n and refuses anything else", () => {

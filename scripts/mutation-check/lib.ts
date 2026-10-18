@@ -299,3 +299,12 @@ export function staleEdit(source: string, edits: Edit[]): string | null {
     return error instanceof Error ? error.message : String(error);
   }
 }
+
+export function selectMutations(manifest: Mutation[], only: string[] | undefined, index: number, count: number): Mutation[] {
+  const chosen = manifest
+    .filter((m) => m.control || !only || only.includes(m.id))
+    .sort((a, b) => Number(b.control) - Number(a.control));
+  const picked = pickShard(chosen, index, count);
+  if (!picked.some((m) => !m.control)) throw new Error("this selection leaves no mutation to run besides the control");
+  return picked;
+}

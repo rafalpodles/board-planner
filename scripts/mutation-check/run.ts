@@ -24,7 +24,7 @@ import {
   marked,
   parseManifest,
   parseShard,
-  pickShard,
+  selectMutations,
   staleEdit,
   renderTable,
   restoreAll,
@@ -237,12 +237,9 @@ async function main() {
   const manifest = parseManifest(fs.readFileSync(manifestPath, "utf8"));
   const unknown = only?.filter((id) => !manifest.some((m) => m.id === id)) ?? [];
   if (unknown.length) throw new Error(`--only names no mutation in the manifest: ${unknown.join(", ")}`);
-  const chosen = manifest
-    .filter((m) => !only || only.includes(m.id))
-    .sort((a, b) => Number(b.control) - Number(a.control));
   const shard = option("--shard");
   const { index, count } = shard ? parseShard(shard) : { index: 1, count: 1 };
-  const mutations = pickShard(chosen, index, count);
+  const mutations = selectMutations(manifest, only, index, count);
   const stale = new Map<string, string>();
   for (const m of mutations) {
     if (!fs.existsSync(path.join(ROOT, m.spec))) throw new Error(`${m.id}: no spec at ${m.spec}`);

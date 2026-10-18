@@ -55,8 +55,10 @@ jobs:
           MANIFEST: ${{ inputs.manifest }}
           ONLY: ${{ inputs.only }}
         run: |
+          if [ -n "$ONLY" ] && [ "${{ matrix.shard }}" != 1 ]; then echo "--only runs on the first shard"; exit 0; fi
+          SHARD=${{ matrix.shard }}/4; [ -n "$ONLY" ] && SHARD=1/1
           node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/mutation-check/run.ts \
-            --manifest "$MANIFEST" --shard ${{ matrix.shard }}/4 --out e2e/mutations/.work/results.md \
+            --manifest "$MANIFEST" --shard "$SHARD" --out e2e/mutations/.work/results.md \
             ${ONLY:+--only "$ONLY"}
 
       - name: Summary

@@ -1,4 +1,14 @@
 {
+  "sample": {
+    "seed": 1092,
+    "size": 50,
+    "population": 806,
+    "drawnAt": "15bc5c08",
+    "unmutated": {
+      "e2e/field-history.spec.ts:399": "history stores option labels when written, so no line renders the old entry through the current options",
+      "e2e/cross-organisation-projects.spec.ts:81": "one file cannot switch off both organisation walls; the scoped db alone makes the wall throw first (guards.json g03)"
+    }
+  },
   "mutations": [
     {
       "id": "control-move-failure-toast",
@@ -180,7 +190,7 @@
       ],
       "spec": "e2e/failed-read-states.spec.ts",
       "grep": "the agent editor keeps the agent on screen when a reload fails, and Retry reads the rename",
-      "probe": "/agents",
+      "probe": "/agents/aaaaaaaaaaaaaaaaaaaaaaaa",
       "assertion": "failed-read-states:370 agent-editor-error toHaveCount(0) after a failed refresh"
     },
     {
@@ -418,7 +428,7 @@
       ],
       "spec": "e2e/agent-editor-permissions.spec.ts",
       "grep": "an admin is offered all of them",
-      "probe": "/agents",
+      "probe": "/agents/aaaaaaaaaaaaaaaaaaaaaaaa",
       "assertion": "agent-editor-permissions:109 agent-read-only toHaveCount(0) for an admin"
     },
     {

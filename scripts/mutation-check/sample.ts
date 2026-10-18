@@ -1,5 +1,6 @@
 /**
- * Draws the seeded random sample of absence assertions that e2e/mutations/sample.json mutates (BP-1092).
+ * Draws the seeded random sample of absence assertions that e2e/mutations/absence-sample.json mutates (BP-1092).
+ * The draw depends on every assertion in e2e/, so it reproduces only on the commit named in that manifest's `sample`.
  *
  *   node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/mutation-check/sample.ts [--seed 1092] [--size 50]
  */
@@ -10,7 +11,10 @@ import { absenceAssertions, seededSample } from "./lib.ts";
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const option = (name: string, fallback: number) => {
   const at = process.argv.indexOf(name);
-  return at === -1 ? fallback : Number(process.argv[at + 1]);
+  if (at === -1) return fallback;
+  const value = Number(process.argv[at + 1]);
+  if (!Number.isInteger(value) || value < 0) throw new Error(`${name} takes a whole number`);
+  return value;
 };
 
 const specs = fs

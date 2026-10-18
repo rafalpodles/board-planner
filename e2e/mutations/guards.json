@@ -55,7 +55,7 @@
       "spec": "e2e/cross-organisation-projects.spec.ts",
       "grep": "on screen, another organisation's board looks like a board that does not exist",
       "probe": "/api/projects",
-      "assertion": "cross-organisation-projects:81 (sample #32) another organisation's board name toHaveCount(0); db-scope stops adding the organisation"
+      "assertion": "cross-organisation-projects: the not-found page for another organisation's board; db-scope stops adding the organisation, so the wall throws and the page errors"
     },
     {
       "id": "g04-machine-may-force",
