@@ -128,7 +128,7 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     state.apply(.progress(Progress(phase: "agent")), at: t0)
 
     #expect(state.health == .working)
-    #expect(state.iconName(now: t0) == "circle.fill")
+    #expect(state.iconGlyph(now: t0).badge == .none)
 }
 
 @Test func losingTheSocketIsDisconnectedAndSaysSo() {
@@ -137,7 +137,7 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     state.markDisconnected()
 
     #expect(state.health == .disconnected)
-    #expect(state.iconName(now: t0) == "exclamationmark.triangle")
+    #expect(state.iconGlyph(now: t0).badge == .offline)
     #expect(state.title(now: t0) == nil)
 }
 
@@ -145,13 +145,15 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     // allCases, not a literal: a hand-written list is one a new case can be left out of, and the
     // test's own claim is "every".
     let every = Health.allCases
-    let icons = Set(every.map { health -> String in
+    let icons = every.map { health -> IconGlyph in
         var state = WorkerState()
         state.forceHealth(health)
-        return state.iconName(now: t0)
-    })
+        return state.iconGlyph(now: t0)
+    }
 
-    #expect(icons.count == every.count)
+    for (index, glyph) in icons.enumerated() {
+        for other in icons[(index + 1)...] { #expect(glyph != other) }
+    }
 }
 
 @Test func theStageIsThePhasesPlaceInThePipeline() {
@@ -241,8 +243,8 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     #expect(
         state.effectiveHealth(now: t0.addingTimeInterval(WorkerState.faultGrace + 1)) == .idle)
     #expect(
-        state.iconName(now: t0.addingTimeInterval(WorkerState.faultGrace + 1))
-            == WorkerState().iconName(now: t0))
+        state.iconGlyph(now: t0.addingTimeInterval(WorkerState.faultGrace + 1))
+            == WorkerState().iconGlyph(now: t0))
 }
 
 // The case that matters, and the one a grace period could have broken: a machine failing on every

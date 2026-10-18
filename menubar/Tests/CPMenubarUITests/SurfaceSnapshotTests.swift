@@ -17,6 +17,36 @@ final class SurfaceSnapshotTests: XCTestCase {
         }
     }
 
+    func testMenuBarIcon() {
+        struct Strip: View {
+            var body: some View {
+                let states: [(String, WorkerState)] = [
+                    ("Idle", Fixtures.idle), ("Paused", Fixtures.paused), ("Needs a human", Fixtures.needsHuman),
+                    ("Fault", Fixtures.faulted), ("Offline", Fixtures.disconnected),
+                ] + (0..<WorkerState.pipeline.count).map { index in
+                    (WorkerState.stageLabels[index], Fixtures.state {
+                        $0.apply(.progress(Progress(phase: WorkerState.pipeline[index], taskKey: "BP-1")), at: Fixtures.t0)
+                    })
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(states.enumerated()), id: \.offset) { _, entry in
+                        HStack(spacing: 12) {
+                            Image(nsImage: MenuBarGlyph.image(entry.1.iconGlyph(now: Date()), breath: 1))
+                                .renderingMode(.template).foregroundStyle(.primary)
+                            Image(nsImage: MenuBarGlyph.image(entry.1.iconGlyph(now: Date()), breath: 1))
+                                .resizable().interpolation(.high)
+                                .renderingMode(.template).foregroundStyle(.primary)
+                                .frame(width: 60, height: 48)
+                            Text(entry.0).font(.callout)
+                        }
+                    }
+                }
+                .padding(16)
+            }
+        }
+        Snapshot.render(Strip(), name: "menubar-icon-states", width: 260)
+    }
+
     func testConnect() {
         let blocked = OnboardingModel(
             previewState: Fixtures.onboarding(step: .needsPreflight),

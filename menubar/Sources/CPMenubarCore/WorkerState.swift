@@ -134,17 +134,6 @@ public struct WorkerState: Equatable, Sendable {
         return now.timeIntervalSince(since) >= Self.faultGrace ? .idle : .faulted
     }
 
-    public func iconName(now: Date) -> String {
-        switch effectiveHealth(now: now) {
-        case .idle: return "circle"
-        case .working: return "circle.fill"
-        case .paused: return "pause.circle"
-        case .needsHuman: return "exclamationmark.circle.fill"
-        case .faulted: return "wrench.and.screwdriver.fill"
-        case .disconnected: return "exclamationmark.triangle"
-        }
-    }
-
     public func title(now: Date) -> String? {
         guard let phase = currentPhase, let since = phaseSince else { return nil }
         let seconds = max(0, Int(now.timeIntervalSince(since)))

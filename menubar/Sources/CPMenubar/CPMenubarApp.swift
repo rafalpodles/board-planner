@@ -52,7 +52,7 @@ struct CPMenubarApp: App {
  * The symbol in the menu bar, and the one thing that redraws it when nothing is happening.
  *
  * A fault expires after `WorkerState.faultGrace` with no new event to mark the moment, so without
- * a clock of its own this label would keep the wrench until the worker next said anything at all —
+ * a clock of its own this label would keep the fault badge until the worker next said anything at all —
  * which on an idle machine is never (BP-616). A minute, not the panel's second: the only thing
  * that turns on this timer is a fifteen-minute expiry, and the menu bar redraws on every event
  * anyway while a run is under way.
@@ -60,19 +60,29 @@ struct CPMenubarApp: App {
 private struct MenuBarLabel: View {
     let model: AppModel
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var now = Date()
+    @State private var frame = 0
     private let tick = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        // The menu bar renders this as a template image, so state is carried by which symbol it
-        // is rather than by colour.
-        Group {
-            if let title = model.state.title(now: now) {
-                Label(title, systemImage: model.state.iconName(now: now))
-            } else {
-                Image(systemName: model.state.iconName(now: now))
-            }
+        let glyph = model.state.iconGlyph(now: now)
+        let breathing = glyph.breathing != nil && !reduceMotion
+        // The menu bar renders this as a template image, so state is carried by how many cards are lit
+        // and by the badge's shape rather than by colour.
+        HStack(spacing: 4) {
+            Image(nsImage: MenuBarGlyph.image(glyph, breath: breathing ? MenuBarGlyph.breaths[frame % MenuBarGlyph.breaths.count] : 0.6))
+            if let title = model.state.title(now: now) { Text(title) }
         }
         .onReceive(tick) { now = $0 }
+        // Only while a run is on a stage, and never under Reduce Motion: an idle machine redraws
+        // nothing but the once-a-minute clock above.
+        .task(id: breathing) {
+            guard breathing else { frame = 0; return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(350))
+                frame += 1
+            }
+        }
     }
 }

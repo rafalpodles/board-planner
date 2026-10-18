@@ -7,7 +7,9 @@ enum Brand {
 
     /// The logo's six cards in its 32-unit square (public/logo.svg): column, row, opacity.
     static let cards: [(x: CGFloat, y: CGFloat, opacity: Double)] = [
-        (5, 6, 0.9), (5, 12, 0.6), (13, 6, 0.9), (13, 12, 0.6), (13, 18, 0.4), (21, 6, 0.9),
+        (5, 6, IconGlyph.restingOpacities[0]), (5, 12, IconGlyph.restingOpacities[1]),
+        (13, 6, IconGlyph.restingOpacities[2]), (13, 12, IconGlyph.restingOpacities[3]),
+        (13, 18, IconGlyph.restingOpacities[4]), (21, 6, IconGlyph.restingOpacities[5]),
     ]
 }
 
