@@ -241,7 +241,8 @@ async function main() {
     .filter((m) => !only || only.includes(m.id))
     .sort((a, b) => Number(b.control) - Number(a.control));
   const shard = option("--shard");
-  const mutations = shard ? pickShard(chosen, parseShard(shard).index, parseShard(shard).count) : chosen;
+  const { index, count } = shard ? parseShard(shard) : { index: 1, count: 1 };
+  const mutations = pickShard(chosen, index, count);
   const stale = new Map<string, string>();
   for (const m of mutations) {
     if (!fs.existsSync(path.join(ROOT, m.spec))) throw new Error(`${m.id}: no spec at ${m.spec}`);
