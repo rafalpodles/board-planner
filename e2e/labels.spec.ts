@@ -173,7 +173,8 @@ test("labels are edited from the list, several at a time", async ({ page, reques
   expect(await storedLabels(request, 4), "a ticked label unticks").toEqual(["o-back"]);
   await page.keyboard.press("Escape");
   await expect(row(page, FINISHED_TASK_TITLE)).toContainText("Backend");
-  await expect(row(page, FINISHED_TASK_TITLE)).not.toContainText("Design");
+  // The board polls every ten seconds, so this has to be the untick's own paint
+  await expect(row(page, FINISHED_TASK_TITLE)).not.toContainText("Design", { timeout: 1_000 });
 
   await combo.click();
   written = write();
