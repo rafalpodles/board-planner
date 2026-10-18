@@ -493,6 +493,13 @@ describe("checkRepo", () => {
       expect(checkRepo(withEngines(42), "/repo", gates22).map((c) => c.name)).not.toContain("node");
     });
 
+    it("does not refuse a node newer than the range names, and says so", () => {
+      const check = checkRepo(withEngines("^18 || ^20"), "/repo", { version: "26.8.1", path: "/opt/homebrew/bin/node" }).find((c) => c.name === "node");
+
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).toMatch(/newer than/);
+    });
+
     it("does not block on a range it cannot read, and says so", () => {
       const check = checkRepo(withEngines("1.2.3 - 2.3.4"), "/repo", gates22).find((c) => c.name === "node");
 
@@ -504,7 +511,7 @@ describe("checkRepo", () => {
       const check = checkRepo(withEngines(">=26"), "/repo", null).find((c) => c.name === "node");
 
       expect(check?.ok).toBe(true);
-      expect(check?.detail).toMatch(/no node was found/);
+      expect(check?.detail).toMatch(/no node that answers --version/);
     });
   });
 

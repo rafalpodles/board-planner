@@ -5,7 +5,7 @@ import { childEnv, unconfinedAgentAllowed } from "./env.js";
 import { confine, recordDir, SANDBOX_COMMAND, UNCONFINED_ACCEPTED_DETAIL } from "./sandbox.js";
 import { npmCacheDir } from "./gates/confined-npm.js";
 import { Runner } from "./exec.js";
-import { GateNode, satisfiesNodeRange } from "./node-engines.js";
+import { GateNode, nodeVerdict } from "./node-engines.js";
 import { CommitIdentity, resolveCommitIdentity } from "./commit.js";
 import {
   accountCommitIdentity,
@@ -723,18 +723,21 @@ export const NODE_ENGINE_CHECK = "node";
 export function nodeEngineCheck(range: string, node: GateNode | null, repoPath: string): PreflightCheck {
   const name = NODE_ENGINE_CHECK;
   if (node === null) {
-    return { name, ok: true, detail: `${repoPath} names Node ${range}; no node was found on the PATH the gates get, so it was not compared` };
+    return { name, ok: true, detail: `${repoPath} names Node ${range}; the PATH the gates get has no node that answers --version, so it was not compared` };
   }
-  const satisfied = satisfiesNodeRange(node.version, range);
-  if (satisfied === null) {
+  const verdict = nodeVerdict(node.version, range);
+  if (verdict === null) {
     return { name, ok: true, detail: `${repoPath} names Node ${range}, which this cannot read, so it was not compared with ${node.version}` };
   }
-  return satisfied
-    ? { name, ok: true, detail: `Node ${node.version} (${node.path}) satisfies ${range}` }
-    : {
-        name,
-        ok: false,
-        detail: `${repoPath} needs Node ${range}, and the node the gates would run on is ${node.version} (${node.path}); put a Node that satisfies it first on the worker's PATH`,
-      };
+  if (verdict === "satisfied") return { name, ok: true, detail: `Node ${node.version} (${node.path}) satisfies ${range}` };
+  // Newer than the range allows is npm's own warning, not a failure: a range is often a stale
+  // ceiling (`^18 || ^20`) on a repository that runs fine on today's Node.
+  if (verdict === "too-new") {
+    return { name, ok: true, detail: `Node ${node.version} (${node.path}) is newer than ${repoPath} names (${range}); not refused, since npm only warns` };
+  }
+  return {
+    name,
+    ok: false,
+    detail: `${repoPath} needs Node ${range}, and the node the gates would run on is ${node.version} (${node.path}); put a Node that satisfies it first on the worker's PATH`,
+  };
 }
-

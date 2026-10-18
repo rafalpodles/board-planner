@@ -597,7 +597,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       gh?: { token?: string; user?: string };
       unresolvedTools?: string[];
       // The node the gates would find first on their PATH, and the version it reports (BP-1101)
-      gateNode?: { path: string; version: string };
+      gateNode?: { path: string; version: string; code?: number; stdout?: string };
       deliverable?: boolean;
       // How many times runPreflight throws before the real one answers; true is every time
       preflightThrows?: boolean | number;
@@ -667,7 +667,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     };
 
     const inner = streamingRunner(
-        claudeCalls,
+      claudeCalls,
         opts.onAgentStart,
         everyCall,
         remoteCalls,
@@ -697,7 +697,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         ...inner,
         run: (command: string, args: string[], runOpts: RunOpts) =>
           opts.gateNode && command === opts.gateNode.path && args[0] === "--version"
-            ? Promise.resolve({ code: 0, stdout: `v${opts.gateNode.version}\n`, stderr: "", timedOut: false })
+            ? Promise.resolve({
+                code: opts.gateNode.code ?? 0,
+                stdout: opts.gateNode.stdout ?? `v${opts.gateNode.version}\n`,
+                stderr: "",
+                timedOut: false,
+              })
             : inner.run(command, args, runOpts),
       },
       hostname: () => "host-1",
@@ -1795,6 +1800,26 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
         expect(run.localConfig?.().projects.map((p) => p.blocked)).toEqual([""]);
         expect(run.claimed).toBe(true);
+      });
+
+      it("does not block when the node found does not answer --version, or answers nonsense", async () => {
+        for (const answer of [{ code: 1 }, { stdout: "not a version" }, { code: 0, stdout: "" }]) {
+          const run = await runOneTask(undefined, undefined, {
+            readFile: files({ node: ">=26" }),
+            gateNode: { path: "/nvm/22/bin/node", version: "22.22.1", ...answer },
+          });
+
+          expect(run.localConfig?.().projects.map((p) => p.blocked)).toEqual([""]);
+        }
+      });
+
+      it("does not refuse a node newer than the range names, which npm only warns about", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          readFile: files({ node: "^18 || ^20" }),
+          gateNode: { path: "/opt/homebrew/bin/node", version: "26.8.1" },
+        });
+
+        expect(run.localConfig?.().projects.map((p) => p.blocked)).toEqual([""]);
       });
 
       it("asks nothing of a checkout that names no Node", async () => {
