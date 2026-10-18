@@ -3,7 +3,7 @@
  *
  *   E2E_MONGODB_URI=mongodb://localhost:27712/bp712_e2e E2E_PORT=37120 \
  *     node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/mutation-check/run.ts \
- *     [--manifest e2e/mutations/manifest.json] [--only id,id] [--out file.md] [--restore]
+ *     [--manifest e2e/mutations/manifest.json] [--only id,id] [--shard k/n] [--out file.md] [--restore]
  *
  * One `next dev` serves every mutation: a held Playwright run owns the web servers, and each
  * mutation's spec runs with `reuseExistingServer`. A mutation counts only once the dev server has
@@ -23,6 +23,8 @@ import {
   escapeRegExp,
   marked,
   parseManifest,
+  parseShard,
+  pickShard,
   renderTable,
   restoreAll,
   summarise,
@@ -234,9 +236,11 @@ async function main() {
   const manifest = parseManifest(fs.readFileSync(manifestPath, "utf8"));
   const unknown = only?.filter((id) => !manifest.some((m) => m.id === id)) ?? [];
   if (unknown.length) throw new Error(`--only names no mutation in the manifest: ${unknown.join(", ")}`);
-  const mutations = manifest
+  const chosen = manifest
     .filter((m) => !only || only.includes(m.id))
     .sort((a, b) => Number(b.control) - Number(a.control));
+  const shard = option("--shard");
+  const mutations = shard ? pickShard(chosen, parseShard(shard).index, parseShard(shard).count) : chosen;
   for (const m of mutations) {
     if (!fs.existsSync(path.join(ROOT, m.spec))) throw new Error(`${m.id}: no spec at ${m.spec}`);
     applyEdits(realFs.read(m.file), m.edits);

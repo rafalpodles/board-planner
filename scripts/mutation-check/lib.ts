@@ -229,3 +229,63 @@ export function renderTable(results: Result[]): string {
     ...rows,
   ].join("\n");
 }
+
+export interface AbsenceAssertion {
+  spec: string;
+  line: number;
+  test: string;
+  source: string;
+}
+
+const ABSENCE = /\.toHaveCount\(0\)|\.toBeHidden\(/;
+const TEST_TITLE = /^\s*test\(\s*(["'`])((?:\\.|(?!\1).)*)\1/;
+
+export function absenceAssertions(specs: { spec: string; text: string }[]): AbsenceAssertion[] {
+  const found: AbsenceAssertion[] = [];
+  for (const { spec, text } of specs) {
+    let test = "";
+    text.split("\n").forEach((source, index) => {
+      const title = TEST_TITLE.exec(source);
+      if (title) test = title[2];
+      if (ABSENCE.test(source) && !/^\s*\/\//.test(source)) {
+        found.push({ spec, line: index + 1, test, source: source.trim() });
+      }
+    });
+  }
+  return found;
+}
+
+function mulberry32(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function seededSample<T>(items: readonly T[], size: number, seed: number): T[] {
+  const random = mulberry32(seed);
+  const pool = [...items];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, size);
+}
+
+export function parseShard(value: string): { index: number; count: number } {
+  const match = /^(\d+)\/(\d+)$/.exec(value);
+  const index = match ? Number(match[1]) : NaN;
+  const count = match ? Number(match[2]) : NaN;
+  if (!(count >= 1 && index >= 1 && index <= count)) throw new Error(`--shard takes k/n with 1 ≤ k ≤ n, not "${value}"`);
+  return { index, count };
+}
+
+export function pickShard(mutations: Mutation[], index: number, count: number): Mutation[] {
+  const controls = mutations.filter((m) => m.control);
+  const rest = mutations.filter((m) => !m.control);
+  return [...controls, ...rest.filter((_, i) => i % count === index - 1)];
+}
