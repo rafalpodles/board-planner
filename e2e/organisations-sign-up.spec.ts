@@ -134,7 +134,9 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
     await provideAddressAndCode(page, freshAddress("starter"), ORGANISATIONS_PLATFORM_ORIGIN, "/?start");
     await expect(page.getByTestId("create-organisation")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Use another e-mail address" })).toBeVisible();
     await expect(page.getByRole("button", { name: /instead$/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Back" })).toHaveCount(0);
     await page.getByLabel("Organisation name").fill("Starter Co");
     await page.getByLabel("Organisation address").fill(slug);
     await page.getByLabel("Your name").fill("Peter Gibbons");

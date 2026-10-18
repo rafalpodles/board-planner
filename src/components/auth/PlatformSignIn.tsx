@@ -63,7 +63,7 @@ function RememberCheckbox({ checked, onChange }: { checked: boolean; onChange: (
   );
 }
 
-export function PlatformSignIn({ signingUp = false }: { signingUp?: boolean }) {
+export function PlatformSignIn({ signingUp = false, canSignUp = true }: { signingUp?: boolean; canSignUp?: boolean }) {
   const [step, setStep] = useState<Step>({ name: "email" });
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -139,7 +139,7 @@ export function PlatformSignIn({ signingUp = false }: { signingUp?: boolean }) {
       const organisations: Organisation[] = data.organisations ?? [];
       const passwordSignIn = data.passwordSignIn !== false;
       setDomain(data.domain ?? "");
-      if (signingUp && passwordSignIn) {
+      if (signingUp) {
         startCreating(data.email, organisations, passwordSignIn);
       } else if (organisations.length === 1) {
         setStep({ name: "password", email: data.email, organisation: organisations[0], organisations, passwordSignIn });
@@ -197,7 +197,12 @@ export function PlatformSignIn({ signingUp = false }: { signingUp?: boolean }) {
     );
   };
 
-  const creating = step.name === "create" || (signingUp && (step.name === "email" || step.name === "code"));
+  const heading =
+    signingUp && (step.name === "email" || step.name === "code" || step.name === "create")
+      ? "Create your organisation"
+      : step.name === "create"
+        ? "Create an organisation"
+        : `Sign in to ${APP_NAME}`;
 
   const submitCreate = (e: FormEvent) => {
     e.preventDefault();
@@ -217,7 +222,7 @@ export function PlatformSignIn({ signingUp = false }: { signingUp?: boolean }) {
       <div className="w-full max-w-sm" data-testid="platform-sign-in">
         <div className="flex flex-col items-center mb-8">
           <Image src="/logo.svg" alt={APP_NAME} width={48} height={48} className="mb-3" />
-          <h1 className="text-2xl font-bold text-center">{creating ? "Create your organisation" : `Sign in to ${APP_NAME}`}</h1>
+          <h1 className="text-2xl font-bold text-center">{heading}</h1>
         </div>
 
         {error && (
@@ -240,12 +245,14 @@ export function PlatformSignIn({ signingUp = false }: { signingUp?: boolean }) {
             <Button type="submit" className="w-full" disabled={busy}>
               {busy ? "Sending…" : "Continue"}
             </Button>
-            <p className="text-center text-sm text-text-muted">
-              {signingUp ? "Already have an account? " : "New here? "}
-              <a href={signingUp ? "/" : "/?start"} className="focus-ring underline">
-                {signingUp ? "Sign in" : "Create an organisation"}
-              </a>
-            </p>
+            {canSignUp && (
+              <p className="text-center text-sm text-text-muted">
+                {signingUp ? "Already have an account? " : "New here? "}
+                <a href={signingUp ? "/" : "/?start"} className="focus-ring underline">
+                  {signingUp ? "Sign in" : "Create an organisation"}
+                </a>
+              </p>
+            )}
             {switching && (
               <div className="border-t border-border pt-3 text-sm">
                 {forgotten ? (

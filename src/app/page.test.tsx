@@ -59,8 +59,20 @@ describe("the platform host's front page (BP-1009)", () => {
 
     const page = await home({ start: "" });
 
-    expect(page).toMatchObject({ type: PlatformSignIn, props: { signingUp: true } });
+    expect(page).toMatchObject({ type: PlatformSignIn, props: { signingUp: true, canSignUp: true } });
     expect(servedOrganisationById).not.toHaveBeenCalled();
+  });
+
+  it("treats ?start as the sign-in when passwords are off, since no organisation can be made here then", async () => {
+    process.env.PASSWORD_SIGN_IN = "off";
+    try {
+      requestFrom("login.board-planner.com", null);
+
+      expect(await home({ start: "" })).toMatchObject({ type: PlatformSignIn, props: { signingUp: false, canSignUp: false } });
+      expect(servedOrganisationById).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.PASSWORD_SIGN_IN;
+    }
   });
 
   it("is the sign-in, not the sign-up, without ?start", async () => {
