@@ -18,7 +18,7 @@ writes it straight to the worker's identity file (`IdentityFile.swift`, mode 060
 registration writes — and does not use it itself. The other network traffic it starts is git: the
 clone of each repository you add, or a fetch when its checkout is already there, and the push probe
 that checks you may push to it. Past that,
-policy and registration live on the worker and in the web console; the Connection and Policy tabs
+policy and registration live on the worker and in the web console; the Connection tab and the project list on the Projects tab
 are read-only views of what the worker reports over `GET /config`.
 
 ## What the server sends, and where each value lands

@@ -128,7 +128,7 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     state.apply(.progress(Progress(phase: "agent")), at: t0)
 
     #expect(state.health == .working)
-    #expect(state.iconName(now: t0) == "circle.fill")
+    #expect(state.iconGlyph(now: t0).badge == .none)
 }
 
 @Test func losingTheSocketIsDisconnectedAndSaysSo() {
@@ -137,7 +137,7 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     state.markDisconnected()
 
     #expect(state.health == .disconnected)
-    #expect(state.iconName(now: t0) == "exclamationmark.triangle")
+    #expect(state.iconGlyph(now: t0).badge == .offline)
     #expect(state.title(now: t0) == nil)
 }
 
@@ -145,35 +145,54 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     // allCases, not a literal: a hand-written list is one a new case can be left out of, and the
     // test's own claim is "every".
     let every = Health.allCases
-    let icons = Set(every.map { health -> String in
+    let icons = every.map { health -> IconGlyph in
         var state = WorkerState()
         state.forceHealth(health)
-        return state.iconName(now: t0)
-    })
+        return state.iconGlyph(now: t0)
+    }
 
-    #expect(icons.count == every.count)
+    for (index, glyph) in icons.enumerated() {
+        for other in icons[(index + 1)...] { #expect(glyph != other) }
+    }
 }
 
-@Test func theStepperMarksPassedPhasesDoneAndTheRestPending() {
+@Test func theStageIsThePhasesPlaceInThePipeline() {
     var state = WorkerState()
+    #expect(state.stageIndex == nil)
+
     state.apply(.progress(Progress(phase: "push")), at: t0)
-
-    let rows = state.stepperRows()
-
-    #expect(rows.first { $0.phase == "claiming" }?.state == .done)
-    #expect(rows.first { $0.phase == "push" }?.state == .active)
-    #expect(rows.first { $0.phase == "merge" }?.state == .pending)
+    #expect(state.stageIndex == WorkerState.pipeline.firstIndex(of: "push"))
+    #expect(WorkerState.stageLabels.count == WorkerState.pipeline.count)
+    #expect(WorkerState.stageSentences.count == WorkerState.pipeline.count)
 }
 
-// Every gate collapses onto one row: the pipeline's gate count is project policy, not a fixed shape.
-@Test func anyGatePhaseLandsOnTheSingleGatesStep() {
+// Every gate collapses onto one stage: the pipeline's gate count is project policy, not a fixed shape.
+@Test func anyGatePhaseLandsOnTheSingleGatesStage() {
     var state = WorkerState()
     state.apply(.progress(Progress(phase: "gates:test-presence")), at: t0)
 
-    let rows = state.stepperRows()
+    #expect(state.stageIndex == WorkerState.pipeline.firstIndex(of: "gates"))
+}
 
-    #expect(rows.first { $0.phase == "gates" }?.state == .active)
-    #expect(rows.first { $0.phase == "agent" }?.state == .done)
+@Test func aComposedStepLandsOnTheAgentStage() {
+    var state = WorkerState()
+    state.apply(.progress(Progress(phase: "step:implement")), at: t0)
+
+    #expect(state.stageIndex == WorkerState.pipeline.firstIndex(of: "agent"))
+}
+
+@Test func aPhaseThePipelineDoesNotKnowHasNoStage() {
+    var state = WorkerState()
+    state.apply(.progress(Progress(phase: "something-new")), at: t0)
+
+    #expect(state.stageIndex == nil)
+}
+
+@Test func theLastOutcomeIsRemembered() {
+    var state = WorkerState()
+    state.apply(.outcome(Outcome(outcome: "blocked", taskKey: "BP-1", detail: "attempts exhausted")), at: t0)
+
+    #expect(state.lastOutcome?.detail == "attempts exhausted")
 }
 
 @Test func aQuotaReadingIsRememberedWithoutDisturbingThePhase() {
@@ -224,8 +243,8 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     #expect(
         state.effectiveHealth(now: t0.addingTimeInterval(WorkerState.faultGrace + 1)) == .idle)
     #expect(
-        state.iconName(now: t0.addingTimeInterval(WorkerState.faultGrace + 1))
-            == WorkerState().iconName(now: t0))
+        state.iconGlyph(now: t0.addingTimeInterval(WorkerState.faultGrace + 1))
+            == WorkerState().iconGlyph(now: t0))
 }
 
 // The case that matters, and the one a grace period could have broken: a machine failing on every

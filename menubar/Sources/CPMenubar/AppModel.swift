@@ -16,6 +16,15 @@ final class AppModel {
         self.fixedClient = client != nil
     }
 
+    #if DEBUG
+    init(previewState: WorkerState, config: ConfigResponse? = nil) {
+        self.client = AppModel.liveClient()
+        self.fixedClient = true
+        self.state = previewState
+        self.config = config
+    }
+    #endif
+
     private static func liveClient() -> SocketClient {
         SocketClient(socketPath: SocketClient.defaultSocketPath(), transport: POSIXTransport())
     }

@@ -21,4 +21,18 @@ public enum BoardURL {
 
         return (isLocal ? "http://" : "https://") + withoutTrailingSlash
     }
+
+    /// The task's page on the board, from a key like `BP-1075`. Nil for anything that is not
+    /// `PROJECT-NUMBER`, so a malformed key never becomes a link. The project half follows the
+    /// board's own `PROJECT_KEY_PATTERN` (src/lib/urls.ts), which allows `-` and `_` inside a key.
+    public static func task(apiURL: String, key: String) -> URL? {
+        let board = normalise(apiURL)
+        guard !board.isEmpty, let dash = key.lastIndex(of: "-") else { return nil }
+        let project = String(key[..<dash])
+        let number = String(key[key.index(after: dash)...])
+        guard project.range(of: "^[A-Za-z][A-Za-z0-9_-]{0,19}$", options: .regularExpression) != nil,
+            !number.isEmpty, number.allSatisfy({ $0.isASCII && $0.isNumber })
+        else { return nil }
+        return URL(string: "\(board)/projects/\(project)/tasks/\(number)")
+    }
 }

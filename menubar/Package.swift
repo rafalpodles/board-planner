@@ -8,5 +8,6 @@ let package = Package(
         .target(name: "CPMenubarCore"),
         .executableTarget(name: "CPMenubar", dependencies: ["CPMenubarCore"]),
         .testTarget(name: "CPMenubarCoreTests", dependencies: ["CPMenubarCore"]),
+        .testTarget(name: "CPMenubarUITests", dependencies: ["CPMenubar", "CPMenubarCore"]),
     ]
 )
