@@ -30,6 +30,21 @@ final class OnboardingModel {
         workerName = loaded.workerName.isEmpty ? Host.current().localizedName ?? "this Mac" : loaded.workerName
     }
 
+    #if DEBUG
+    init(
+        previewState: OnboardingState, preflight: PreflightReport? = nil,
+        githubAccounts: [PreflightReport.GithubAccount] = [], message: String = ""
+    ) {
+        state = previewState
+        apiURL = previewState.apiURL
+        workerName = previewState.workerName
+        self.preflight = preflight
+        self.githubAccounts = githubAccounts
+        self.githubAccount = githubAccounts.first { $0.active }?.login ?? ""
+        self.message = message
+    }
+    #endif
+
     var stateDirectory: String { StateDirectory.resolve() }
 
     private func persist() { Onboarding.save(state) }
