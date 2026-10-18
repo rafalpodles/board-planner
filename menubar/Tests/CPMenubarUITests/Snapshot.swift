@@ -3,8 +3,8 @@ import SwiftUI
 import XCTest
 
 // Renders a real SwiftUI view through AppKit, so controls draw as they do on screen (ImageRenderer
-// leaves Button, TextField and Picker blank). With CP_SNAPSHOT_DIR set it writes a PNG per
-// appearance for the PR; without it the render still has to produce a non-empty image.
+// leaves Button, TextField and Picker blank), and writes a PNG per appearance into
+// CP_SNAPSHOT_DIR. A TabView's tab strip is not drawn offscreen.
 @MainActor
 enum Snapshot {
     @discardableResult

@@ -136,8 +136,10 @@ struct PanelView: View {
             .accessibilityHidden(health == .disconnected)
 
             if model.state.currentPhase != nil && health != .disconnected {
-                Button { model.send("stop") } label: { Label("Stop", systemImage: "stop.fill") }
-                    .buttonStyle(FooterButtonStyle(tint: .red))
+                Button { model.send("stop") } label: {
+                    Label { Text("Stop") } icon: { Image(systemName: "stop.fill").foregroundStyle(.red) }
+                }
+                .buttonStyle(FooterButtonStyle())
             }
 
             Spacer()

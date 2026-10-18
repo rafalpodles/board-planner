@@ -46,8 +46,8 @@ private struct ConnectionTab: View {
                         // The stored address, not the one the socket reports: after the switch there is
                         // no worker to report anything, and a dash there would read as a broken machine.
                         Text(model.config?.apiUrl ?? onboarding.state.apiURL).lineLimit(1).truncationMode(.head)
-                        StatePill(text: model.state.health == .disconnected ? "Offline" : "Connected",
-                                  color: model.state.health == .disconnected ? .secondary : .green)
+                        let offline = model.config == nil || model.state.health == .disconnected
+                        StatePill(text: offline ? "Offline" : "Connected", color: offline ? .secondary : .green)
                         Button("Change…") { confirming = true }
                     }
                 }
@@ -428,24 +428,29 @@ private struct ProjectRow: View {
                     Text(project.name ?? project.label).lineLimit(1)
                     Spacer()
                     // The answer to "why is this machine sitting on a project and doing nothing",
-                    // which the worker has served since BP-379 and nothing here showed (BP-512)
-                    Text(blocked.isEmpty ? "Ready" : "Not claiming")
-                        .font(.caption)
-                        .padding(.horizontal, 8).padding(.vertical, 2)
-                        .background((blocked.isEmpty ? Color.green : .orange).opacity(0.16), in: Capsule())
-                        .foregroundStyle(blocked.isEmpty ? Color.green : .orange)
+                    // which the worker has served since BP-379 and nothing here showed (BP-512).
+                    // Coloured dot, neutral text: the status colours alone do not reach contrast on
+                    // their own tint in light mode.
+                    StatePill(text: blocked.isEmpty ? "Ready" : "Not claiming", color: blocked.isEmpty ? .green : .orange)
                     Image(systemName: "chevron.right")
                         .font(.caption2).foregroundStyle(.secondary)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .accessibilityHidden(true)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityValue(expanded ? "expanded" : "collapsed")
+            .accessibilityHint("Shows this project's base branch, models and diff limit")
 
             if !blocked.isEmpty {
-                Text(blocked).font(.caption).foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(.orange)
+                        .accessibilityHidden(true)
+                    Text(blocked).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 4)
             }
             if expanded {
                 VStack(spacing: 4) {

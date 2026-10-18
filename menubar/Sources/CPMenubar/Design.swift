@@ -124,6 +124,7 @@ struct NoteCard: View {
     var body: some View {
         Text(text)
             .font(.callout)
+            .lineLimit(6)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 11)

@@ -32,14 +32,6 @@ private func state(_ events: [TelemetryEvent]) -> WorkerState {
     #expect(summary.pill == "Running")
 }
 
-@Test func everyStageHasASentenceOfItsOwn() {
-    let sentences = WorkerState.pipeline.map { phase -> String in
-        state([.progress(Progress(phase: phase, taskKey: "BP-1"))]).panelSummary(now: t0, pollSeconds: nil).detail
-    }
-
-    #expect(Set(sentences).count == WorkerState.pipeline.count)
-}
-
 @Test func aPhaseNobodyTaughtItIsStillSaid() {
     let summary = state([.progress(Progress(phase: "reviewing", taskKey: "BP-1"))]).panelSummary(now: t0, pollSeconds: nil)
 
@@ -117,17 +109,6 @@ private var utc: Calendar {
     #expect(summary?.exhausted == false)
 }
 
-@Test func aResetLaterTodayIsAClockTime() {
-    let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let quota = Quota(status: "allowed_warning", utilization: 0.9, resetsAt: now.timeIntervalSince1970 + 3_600, rateLimitType: "five_hour")
-
-    let summary = QuotaSummary(quota, now: now, calendar: utc, locale: posix)
-
-    #expect(summary?.label == "5-hour limit")
-    #expect(summary?.resets?.hasPrefix("resets ") == true)
-    #expect(summary?.resets?.contains(":") == true)
-}
-
 @Test func aRejectedReadingIsExhaustedWithoutANumber() {
     let summary = QuotaSummary(Quota(status: "rejected"), now: t0, calendar: utc, locale: posix)
 
@@ -154,14 +135,41 @@ private var utc: Calendar {
     #expect(BoardURL.task(apiURL: "", key: "BP-1") == nil)
 }
 
-@Test func aResetAWeekAwayIsADateNotAWeekdayThatReadsAsToday() {
+// 2027-01-15 08:00 UTC is a Friday. Under six days is a weekday, six or more a date: a weekday name a
+// week away would read as today.
+@Test func aResetFiveAndSixDaysAwayIsAWeekdayAndAWeekAwayIsADate() {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
-    let quota = Quota(status: "allowed_warning", utilization: 0.5, resetsAt: now.timeIntervalSince1970 + 6 * 86_400 + 3_600, rateLimitType: "seven_day")
+    func resets(days: Double) -> String? {
+        let quota = Quota(status: "allowed_warning", utilization: 0.5, resetsAt: now.timeIntervalSince1970 + days * 86_400, rateLimitType: "seven_day")
+        return QuotaSummary(quota, now: now, calendar: utc, locale: posix)?.resets
+    }
 
-    let resets = QuotaSummary(quota, now: now, calendar: utc, locale: posix)?.resets
+    #expect(resets(days: 5) == "resets Wed")
+    #expect(resets(days: 6) == "resets 21 Jan")
+    #expect(resets(days: 7) == "resets 22 Jan")
+}
 
-    #expect(resets?.hasPrefix("resets ") == true)
-    #expect(resets?.contains("Fri") == false)
+@Test func aResetLaterTodayIsA24HourClockTime() {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let quota = Quota(status: "allowed_warning", utilization: 0.9, resetsAt: now.timeIntervalSince1970 + 3_600, rateLimitType: "five_hour")
+
+    #expect(QuotaSummary(quota, now: now, calendar: utc, locale: posix)?.resets == "resets 09:00")
+}
+
+@Test func thePercentIsRoundedNotTruncated() {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let quota = Quota(status: "allowed_warning", utilization: 0.766, resetsAt: now.timeIntervalSince1970 + 3_600, rateLimitType: "seven_day")
+
+    #expect(QuotaSummary(quota, now: now, calendar: utc, locale: posix)?.value == "77%")
+}
+
+@Test func eachStageSaysItsOwnSentence() {
+    let sentences = ["Claiming the task", "Preparing a worktree", "The agent is working", "Running the checks",
+                     "Pushing the branch", "Opening the pull request", "Merging the pull request"]
+    for (index, phase) in WorkerState.pipeline.enumerated() {
+        let detail = state([.progress(Progress(phase: phase, taskKey: "BP-1"))]).panelSummary(now: t0, pollSeconds: nil).detail
+        #expect(detail.hasPrefix(sentences[index]), "\(phase)")
+    }
 }
 
 // The CLI reports only during a run; whatever it said last is all an idle machine has

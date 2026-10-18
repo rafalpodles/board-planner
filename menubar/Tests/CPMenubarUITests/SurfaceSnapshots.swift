@@ -3,8 +3,31 @@ import XCTest
 @testable import CPMenubar
 @testable import CPMenubarCore
 
+// A screenshot generator, not a test of behaviour: what the screens say is tested in
+// CPMenubarCoreTests (PanelSummary, QuotaSummary, IconGlyph, ConnectReadiness). It runs only with
+// CP_SNAPSHOT_DIR set, against a scratch state directory so it never reads the developer's own.
 @MainActor
-final class SurfaceSnapshotTests: XCTestCase {
+final class SurfaceSnapshots: XCTestCase {
+    private var scratch: String?
+
+    override func setUpWithError() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["CP_SNAPSHOT_DIR"] != nil,
+            "set CP_SNAPSHOT_DIR to render the screens")
+        let directory = NSTemporaryDirectory() + "cp-snapshot-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        try ReposFile(path: ReposFile.path(in: directory)).write(
+            ["/Users/dev/Workspace/BP", "/Users/dev/Workspace/FNV", "/Users/dev/Workspace/SB"])
+        try GithubAccountFile(path: GithubAccountFile.path(in: directory)).write("rafalpodles")
+        StateDirectory.set(directory)
+        scratch = directory
+    }
+
+    override func tearDown() {
+        StateDirectory.set(nil)
+        if let scratch { try? FileManager.default.removeItem(atPath: scratch) }
+    }
+
     func testPanel() {
         for (name, state) in [
             ("panel-idle", Fixtures.idle), ("panel-working", Fixtures.working),
@@ -14,7 +37,7 @@ final class SurfaceSnapshotTests: XCTestCase {
         ] {
             Snapshot.render(
                 PanelView(model: AppModel(previewState: state, config: Fixtures.config)),
-                name: name, width: 320)
+                name: name, width: 340)
         }
     }
 

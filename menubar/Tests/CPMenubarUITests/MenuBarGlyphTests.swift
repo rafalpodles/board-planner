@@ -76,4 +76,17 @@ final class MenuBarGlyphTests: XCTestCase {
         XCTAssertEqual(alpha(offline, x: 26, y: 21), 0, accuracy: 0.05)
         XCTAssertGreaterThan(alpha(offline, x: 28.8, y: 21), 0.8)
     }
+
+    // Dot and triangle both fill the badge's centre; these two points tell them apart
+    func testTheDotAndTheTriangleAreNotTheSameShape() {
+        let attention = bitmap(MenuBarGlyph.image(glyph(health: .needsHuman)))
+        let fault = bitmap(MenuBarGlyph.image(glyph(health: .faulted)))
+
+        // Level with the centre and 3 left of it: inside the circle, outside the triangle's slanted edge
+        XCTAssertGreaterThan(alpha(attention, x: 22.95, y: 21), 0.8)
+        XCTAssertLessThan(alpha(fault, x: 22.95, y: 21), 0.2)
+        // Near the triangle's lower corner: inside the triangle, outside the circle
+        XCTAssertGreaterThan(alpha(fault, x: 29.0, y: 23.5), 0.8)
+        XCTAssertLessThan(alpha(attention, x: 29.0, y: 23.5), 0.2)
+    }
 }

@@ -9,7 +9,7 @@ public struct QuotaSummary: Equatable, Sendable {
     public let resets: String?
     public let exhausted: Bool
 
-    public init?(_ quota: Quota, now: Date, calendar: Calendar = .current, locale: Locale = .current) {
+    public init?(_ quota: Quota, now: Date, calendar: Calendar = .current, locale: Locale = Locale(identifier: "en_US_POSIX")) {
         let exhausted = quota.status == "rejected"
         guard exhausted || quota.utilization != nil else { return nil }
         // The CLI reports only during a run, so on an idle machine this is the last thing it said. A
@@ -38,8 +38,7 @@ public struct QuotaSummary: Equatable, Sendable {
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
         let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: date)).day ?? 0
-        let template = days == 0 ? "Hm" : (days < 6 ? "EEE" : "d MMM")
-        formatter.setLocalizedDateFormatFromTemplate(template)
+        formatter.dateFormat = days == 0 ? "HH:mm" : (days < 6 ? "EEE" : "d MMM")
         return "resets " + formatter.string(from: date)
     }
 }

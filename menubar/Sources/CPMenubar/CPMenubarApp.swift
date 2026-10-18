@@ -71,10 +71,16 @@ private struct MenuBarLabel: View {
         let breathing = glyph.breathing != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         // The menu bar renders this as a template image, so state is carried by how many cards are lit
         // and by the badge's shape rather than by colour.
-        HStack(spacing: 4) {
-            Image(nsImage: MenuBarGlyph.image(glyph, breath: breathing ? MenuBarGlyph.breaths[frame % MenuBarGlyph.breaths.count] : 0.6))
-            if let title = model.state.title(now: now) { Text(title) }
+        let image = Image(nsImage: MenuBarGlyph.image(glyph, breath: breathing ? MenuBarGlyph.breaths[frame % MenuBarGlyph.breaths.count] : 0.6))
+        Group {
+            if let title = model.state.title(now: now) {
+                Label { Text(title) } icon: { image }
+            } else {
+                image
+            }
         }
+        // The icon is drawn by hand, so nothing but this says what state it is in
+        .accessibilityLabel("Board Planner, \(model.state.panelSummary(now: now, pollSeconds: nil).headline)")
         .onReceive(tick) { now = $0 }
         // Only while a run is on a stage, and never under Reduce Motion: an idle machine redraws
         // nothing but the once-a-minute clock above.

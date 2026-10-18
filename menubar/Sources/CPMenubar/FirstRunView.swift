@@ -52,12 +52,16 @@ struct FirstRunView: View {
             header("Connect this Mac", "A worker runs approved tasks here and reports back to the board.")
 
             StepHeader(number: 1, title: "Board", done: !onboarding.apiURL.trimmingCharacters(in: .whitespaces).isEmpty)
-            HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 TextField("your-board.example.com or localhost:3000", text: $onboarding.apiURL)
                     .textFieldStyle(.roundedBorder)
-                TextField("Machine name", text: $onboarding.workerName)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 100)
+                    .accessibilityLabel("Board address")
+                HStack(spacing: 8) {
+                    Text("Name").font(.caption).foregroundStyle(.secondary).frame(width: 34, alignment: .leading)
+                    TextField("This machine's name", text: $onboarding.workerName)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel("Machine name")
+                }
             }
             .padding(.bottom, 14)
 
@@ -114,6 +118,8 @@ struct FirstRunView: View {
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                .accessibilityElement(children: .combine)
+                .accessibilityValue("failed")
             }
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 6) {
@@ -345,5 +351,17 @@ private struct SetupRow: View {
             }
         }
         .frame(minHeight: 34)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(accessibilityState)
+    }
+
+    private var accessibilityState: String {
+        switch state {
+        case .done: "done"
+        case .active: "in progress"
+        case .pending: "not started"
+        case .failed: "failed"
+        case .unfinished: "not finished"
+        }
     }
 }
