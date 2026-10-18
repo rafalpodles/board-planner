@@ -29,16 +29,18 @@ test.afterEach(async () => {
   if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
 });
 
-const compose = (implementation: unknown[], verification: unknown[] = []) => ({ analysis: [], implementation, verification, delivery: [] });
+const compose = (implementation: unknown[], verification: unknown[] = [], delivery: unknown[] = [{ key: "push" }]) => ({ analysis: [], implementation, verification, delivery });
 
 async function seedProviders() {
   await seed();
   const handle = await db();
   const base = { description: "", builtIn: false, gateKind: "", params: {}, createdAt: new Date(), updatedAt: new Date() };
-  await handle.collection("agentblocks").deleteMany({ key: { $in: ["claude-step", "codex-step", "plain-review"] } });
+  await handle.collection("agentblocks").deleteMany({ key: { $in: ["claude-step", "codex-step", "plain-review", "codex-review", "push"] } });
   await handle.collection("agentblocks").insertMany([
     { ...base, key: "claude-step", kind: "step", name: "Claude step", prompt: "make the change", capability: "edit", provider: "claude", model: "opus", fallbackModel: "sonnet", deterministic: false },
+    { ...base, key: "push", kind: "step", name: "Push", prompt: "", capability: "read-only", provider: "claude", model: "", fallbackModel: "", deterministic: true },
     { ...base, key: "codex-step", kind: "step", name: "Codex step", prompt: "make the change", capability: "edit", provider: "codex", model: "gpt-5", fallbackModel: "", deterministic: false },
+    { ...base, key: "codex-review", kind: "gate", name: "Codex review", gateKind: "review", params: { focus: "general", provider: "codex", model: "gpt-5" }, capability: "read-only", provider: "claude", model: "", fallbackModel: "", deterministic: false },
     { ...base, key: "plain-review", kind: "gate", name: "Plain review", gateKind: "review", params: { focus: "general", provider: "claude", model: "opus" }, capability: "read-only", provider: "claude", model: "", fallbackModel: "", deterministic: false },
   ]);
   await handle.collection("agents").deleteMany({ _id: { $in: [CLAUDE_AGENT, CODEX_AGENT, CODEX_REVIEW_AGENT] } });
@@ -48,8 +50,8 @@ async function seedProviders() {
   await handle.collection("agents").insertMany([
     agent(CLAUDE_AGENT, "On Claude", compose([{ key: "claude-step" }], [{ key: "plain-review" }])),
     agent(CODEX_AGENT, "On Codex", compose([{ key: "codex-step" }])),
-    // The block is on Claude; only the position names Codex, which is where a per-position parameter reaches the worker
-    agent(CODEX_REVIEW_AGENT, "Reviewed on Codex", compose([{ key: "claude-step" }], [{ key: "plain-review", params: { provider: "codex", model: "gpt-5" } }])),
+    // Claude writes the change and Codex reads it: the provider is the gate's own, set by an admin on the block
+    agent(CODEX_REVIEW_AGENT, "Reviewed on Codex", compose([{ key: "claude-step" }], [{ key: "codex-review" }])),
   ]);
   await handle.collection("tasks").deleteMany({ project: PROJECT_ID, status: APPROVED });
   await handle.collection("projects").updateOne(
@@ -128,13 +130,29 @@ test.describe("which machine a task on a coding CLI is given to", () => {
     expect((await answer.json())._id).toBe(String(claude._id));
   });
 
-  test("a review that only a position's own parameter puts on Codex is held to the same rule", async ({ request }) => {
+  test("a review on Codex is held to the same rule as a step on it, though the step is on Claude", async ({ request }) => {
     await addTask(CODEX_REVIEW_AGENT);
 
     expect((await claim(request, "agent-claude")).status()).toBe(204);
     const taken = await claim(request, "agent-codex");
     expect(taken.status(), await taken.text()).toBe(200);
     expect((await taken.json()).agent.sequence[1].params).toMatchObject({ provider: "codex", model: "gpt-5" });
+  });
+
+  // Written into the database as an older version of the app could have, where a position could name
+  // the provider: the snapshot ignores it, and the claim does not read it either
+  test("a position that stored a provider of its own cannot put a Claude review on Codex", async ({ request }) => {
+    const handle = await db();
+    await handle.collection("agents").updateOne(
+      { _id: CODEX_REVIEW_AGENT },
+      { $set: { "composition.verification": [{ key: "plain-review", params: { provider: "codex", model: "gpt-5" } }] } }
+    );
+    await addTask(CODEX_REVIEW_AGENT);
+
+    const answer = await claim(request, "agent-claude");
+
+    expect(answer.status(), await answer.text()).toBe(200);
+    expect((await answer.json()).agent.sequence[1].params.provider).toBe("claude");
   });
 
   // The control: a worker built before this said nothing about agents and ran Claude Code only
@@ -256,13 +274,28 @@ test.describe("choosing the coding CLI in the editor", () => {
     expect(await (await db()).collection("agentblocks").countDocuments({ name: "Refused pair" })).toBe(0);
   });
 
-  test("an agent may not be stored with a position that puts a review on a pair that cannot exist", async ({ request }) => {
+  test("an agent may not be stored with a position that moves a review to another coding CLI, even by an admin", async ({ request }) => {
     const answer = await request.post("/api/agents", {
       headers: ADMIN_AUTH,
-      data: { name: "Bad position", composition: compose([{ key: "claude-step" }], [{ key: "plain-review", params: { provider: "codex", model: "opus" } }]) },
+      data: { name: "Bad position", composition: compose([{ key: "claude-step" }], [{ key: "plain-review", params: { provider: "codex", model: "gpt-5" } }]) },
     });
 
     expect(answer.status()).toBe(400);
-    expect((await answer.json()).error).toMatch(/Claude model, not a Codex one/);
+    expect((await answer.json()).error).toMatch(/a position cannot change what a gate runs on/);
+  });
+
+  test("a position may tune the model, and is refused one that does not fit the gate's own provider", async ({ request }) => {
+    const fits = await request.post("/api/agents", {
+      headers: ADMIN_AUTH,
+      data: { name: "Tuned", composition: compose([{ key: "claude-step" }], [{ key: "codex-review", params: { model: "gpt-6.1-sol" } }]) },
+    });
+    expect(fits.status(), await fits.text()).toBe(201);
+
+    const refused = await request.post("/api/agents", {
+      headers: ADMIN_AUTH,
+      data: { name: "Mismatched", composition: compose([{ key: "claude-step" }], [{ key: "codex-review", params: { model: "sonnet" } }]) },
+    });
+    expect(refused.status()).toBe(400);
+    expect((await refused.json()).error).toMatch(/Claude model, not a Codex one/);
   });
 });
