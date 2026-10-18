@@ -16,6 +16,8 @@ final class OnboardingModel {
     private(set) var githubAccount = ""
     private(set) var githubAccounts: [PreflightReport.GithubAccount] = []
     private(set) var busy = false
+    /// `busy` is shared by the check and the enrolment; this says which one is running
+    private(set) var checking = false
     var message = ""
     /// Why setup stopped after the enrolment was approved, and at which step. The screen reads this
     /// rather than guessing from `message`, which `runPreflight` clears and a relaunch never had.
@@ -65,10 +67,11 @@ final class OnboardingModel {
     // reach the fleet console looking healthy.
     func runPreflight(checkout: String) {
         busy = true
+        checking = true
         message = ""
         let path = checkout
         Task {
-            defer { busy = false }
+            defer { busy = false; checking = false }
             do {
                 let report = try WorkerProcess.preflight(checkout: path)
                 preflight = report

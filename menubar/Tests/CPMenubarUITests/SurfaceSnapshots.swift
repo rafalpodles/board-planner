@@ -107,6 +107,12 @@ final class SurfaceSnapshots: XCTestCase {
                 reason: "Cloned, but this machine cannot push to it: remote: Write access to repository not granted."))
         Snapshot.render(FirstRunView(onboarding: refused), name: "connect-setting-up-failed", width: 380)
 
+        let checkedAfterFailure = OnboardingModel(
+            previewState: Fixtures.onboarding(step: .starting),
+            preflight: Fixtures.preflight(claudeSignedIn: false),
+            message: "Could not reach https://app.board-planner.com — The Internet connection appears to be offline.")
+        Snapshot.render(FirstRunView(onboarding: checkedAfterFailure), name: "connect-setting-up-checked", width: 380)
+
         let interrupted = OnboardingModel(previewState: Fixtures.onboarding(step: .starting))
         Snapshot.render(FirstRunView(onboarding: interrupted), name: "connect-setting-up-unfinished", width: 380)
     }

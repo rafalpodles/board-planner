@@ -37,7 +37,7 @@ struct PanelView: View {
                 ToolLog(tools: tools).padding(.top, 12)
             }
 
-            note.padding(.top, health == .idle || health == .disconnected || health == .paused ? 0 : 12)
+            note.padding(.top, health == .needsHuman || health == .faulted ? 12 : 0)
 
             if quota?.exhausted == true, let quota {
                 NoteCard(text: "Usage limit reached\(quota.resets.map { ", \($0)" } ?? "").", tint: .orange)

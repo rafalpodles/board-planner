@@ -243,7 +243,7 @@ struct FirstRunView: View {
     // an unfinished setup, and it offers the same way out rather than a spinner nobody is turning.
     private var settingUp: some View {
         let failure = onboarding.setupFailure
-        let working = onboarding.busy && failure == nil
+        let working = onboarding.busy && !onboarding.checking && failure == nil
         return VStack(alignment: .leading, spacing: 0) {
             header("Setting up this Mac", "This takes a minute the first time.")
 
@@ -268,17 +268,27 @@ struct FirstRunView: View {
                     .font(.callout).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 10)
-            } else if working, !onboarding.message.isEmpty {
+            } else if working {
+                if !onboarding.message.isEmpty {
+                    Text(onboarding.message)
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 10)
+                }
+            } else if !onboarding.busy, !onboarding.message.isEmpty {
+                // A Connect or a check that could not even start: the reason, not the fixed sentence
                 Text(onboarding.message)
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.callout).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 10)
-            } else if !working {
+            } else if !onboarding.busy {
                 Text("Setup did not finish. Connect again to retry; your checkouts folder and machine checks are kept.")
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 10)
             }
+
+            if let report = onboarding.preflight { machine(report).padding(.top, 14) }
 
             if !onboarding.busy { HStack { Spacer(); retryActions }.padding(.top, 10) }
         }
