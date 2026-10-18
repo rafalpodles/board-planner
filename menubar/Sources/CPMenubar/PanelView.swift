@@ -50,6 +50,7 @@ struct PanelView: View {
         }
         .padding(16)
         .frame(width: 340)
+        .menuBarWindowChrome()
         .onReceive(tick) { now = $0 }
     }
 
