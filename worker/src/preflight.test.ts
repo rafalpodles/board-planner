@@ -467,6 +467,54 @@ describe("checkRepo", () => {
     expect(checks.filter((c) => !c.ok).map((c) => c.name)).toEqual(["build script", "test script"]);
   });
 
+  describe("the Node the gates would run on", () => {
+    const withEngines = (node?: unknown) => (path: string) =>
+      path.endsWith("package-lock.json") ? "{}" : JSON.stringify({ scripts: { build: "x", test: "y" }, ...(node === undefined ? {} : { engines: { node } }) });
+    const gates22 = { version: "22.22.1", path: "/nvm/22/bin/node" };
+
+    it("fails a checkout that needs a newer Node than the gates would have, naming both and the path", () => {
+      const check = checkRepo(withEngines(">=26"), "/repo", gates22).find((c) => c.name === "node");
+
+      expect(check?.ok).toBe(false);
+      expect(check?.detail).toBe(
+        "/repo needs Node >=26, and the node the gates would run on is 22.22.1 (/nvm/22/bin/node); put a Node that satisfies it first on the worker's PATH"
+      );
+    });
+
+    it("passes when the gates' node satisfies the range", () => {
+      const check = checkRepo(withEngines(">=26"), "/repo", { version: "26.8.1", path: "/opt/homebrew/bin/node" }).find((c) => c.name === "node");
+
+      expect(check?.ok).toBe(true);
+    });
+
+    it("adds no check when the checkout names no Node, or when the gates' node was not looked up", () => {
+      expect(checkRepo(withEngines(), "/repo", gates22).map((c) => c.name)).not.toContain("node");
+      expect(checkRepo(withEngines(">=26"), "/repo").map((c) => c.name)).not.toContain("node");
+      expect(checkRepo(withEngines(42), "/repo", gates22).map((c) => c.name)).not.toContain("node");
+    });
+
+    it("does not refuse a node newer than the range names, and says so", () => {
+      const check = checkRepo(withEngines("^18 || ^20"), "/repo", { version: "26.8.1", path: "/opt/homebrew/bin/node" }).find((c) => c.name === "node");
+
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).toMatch(/newer than/);
+    });
+
+    it("does not block on a range it cannot read, and says so", () => {
+      const check = checkRepo(withEngines("1.2.3 - 2.3.4"), "/repo", gates22).find((c) => c.name === "node");
+
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).toMatch(/cannot read/);
+    });
+
+    it("does not block when no node was found on the gates' PATH, and says so", () => {
+      const check = checkRepo(withEngines(">=26"), "/repo", null).find((c) => c.name === "node");
+
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).toMatch(/no node that answers --version/);
+    });
+  });
+
   it("names the repository in the failure, since a worker can serve several", () => {
     const checks = checkRepo(() => null, "/Users/me/checkouts/thing");
 

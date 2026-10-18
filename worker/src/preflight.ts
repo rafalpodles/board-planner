@@ -5,6 +5,7 @@ import { childEnv, unconfinedAgentAllowed } from "./env.js";
 import { confine, recordDir, SANDBOX_COMMAND, UNCONFINED_ACCEPTED_DETAIL } from "./sandbox.js";
 import { npmCacheDir } from "./gates/confined-npm.js";
 import { Runner } from "./exec.js";
+import { GateNode, nodeVerdict } from "./node-engines.js";
 import { CommitIdentity, resolveCommitIdentity } from "./commit.js";
 import {
   accountCommitIdentity,
@@ -662,7 +663,15 @@ export function pathWithTools(paths: Record<string, string>, currentPath: string
 // `npm ci` and `npm run build` are unconditional in the gates, so a repository without a lockfile
 // or without those scripts fails every task forever with nothing saying why. Checked per bound
 // repository, because a worker can serve several.
-export function checkRepo(read: (path: string) => string | null, repoPath: string): PreflightCheck[] {
+/**
+ * What a checkout needs of the machine that runs its gates. `node` is the Node those gates would run
+ * on (null when none could be found on the PATH they get); leave it undefined to skip that check.
+ */
+export function checkRepo(
+  read: (path: string) => string | null,
+  repoPath: string,
+  node?: GateNode | null
+): PreflightCheck[] {
   const checks: PreflightCheck[] = [];
 
   const hasLock = read(join(repoPath, "package-lock.json")) !== null;
@@ -675,11 +684,13 @@ export function checkRepo(read: (path: string) => string | null, repoPath: strin
   });
 
   let scripts: Record<string, unknown> = {};
+  let engine: unknown;
   const manifest = read(join(repoPath, "package.json"));
   if (manifest !== null) {
     try {
-      const parsed = JSON.parse(manifest) as { scripts?: Record<string, unknown> };
+      const parsed = JSON.parse(manifest) as { scripts?: Record<string, unknown>; engines?: { node?: unknown } };
       scripts = parsed.scripts ?? {};
+      engine = parsed.engines?.node;
     } catch {
       scripts = {};
     }
@@ -697,5 +708,36 @@ export function checkRepo(read: (path: string) => string | null, repoPath: strin
     });
   }
 
+  if (node !== undefined && typeof engine === "string" && engine.trim() !== "") {
+    checks.push(nodeEngineCheck(engine.trim(), node, repoPath));
+  }
+
   return checks;
+}
+
+export const NODE_ENGINE_CHECK = "node";
+
+// The gates run npm, and npm runs whatever `node` is first on the PATH they are given — which is
+// the worker's own, set by whatever started it. A checkout that names a Node its gates will not
+// have fails every task at its test gate on a runtime nobody chose (BP-1101).
+export function nodeEngineCheck(range: string, node: GateNode | null, repoPath: string): PreflightCheck {
+  const name = NODE_ENGINE_CHECK;
+  if (node === null) {
+    return { name, ok: true, detail: `${repoPath} names Node ${range}; the PATH the gates get has no node that answers --version, so it was not compared` };
+  }
+  const verdict = nodeVerdict(node.version, range);
+  if (verdict === null) {
+    return { name, ok: true, detail: `${repoPath} names Node ${range}, which this cannot read, so it was not compared with ${node.version}` };
+  }
+  if (verdict === "satisfied") return { name, ok: true, detail: `Node ${node.version} (${node.path}) satisfies ${range}` };
+  // Newer than the range allows is npm's own warning, not a failure: a range is often a stale
+  // ceiling (`^18 || ^20`) on a repository that runs fine on today's Node.
+  if (verdict === "too-new") {
+    return { name, ok: true, detail: `Node ${node.version} (${node.path}) is newer than ${repoPath} names (${range}); not refused, since npm only warns` };
+  }
+  return {
+    name,
+    ok: false,
+    detail: `${repoPath} needs Node ${range}, and the node the gates would run on is ${node.version} (${node.path}); put a Node that satisfies it first on the worker's PATH`,
+  };
 }

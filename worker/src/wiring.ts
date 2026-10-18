@@ -55,6 +55,7 @@ import type { CommitIdentity } from "./commit.js";
 import { gateFromEntry } from "./gates/from-entry.js";
 import { createRunner, Runner } from "./exec.js";
 import { childEnv, codexSourceHome } from "./env.js";
+import { firstOnPath, GateNode } from "./node-engines.js";
 import { createExecutor } from "./executor.js";
 import { LocalServer, LocalServerDeps, startLocalServer } from "./local-server.js";
 import { createLoop } from "./loop.js";
@@ -547,11 +548,12 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     // Kept per project as well as flat: the flat list is what the fleet console renders, and the
     // per-project one is what decides whether that project may be claimed from at all.
     unusable.clear();
+    const gateNode = await resolveGateNode(deps);
     repoChecks = [...bound.entries()].flatMap(([projectId, project]) => {
       const several = project.repositories.length > 1;
       const checked = project.repositories.map((repository) => ({
         repository,
-        checks: checkRepo(deps.readFile, repository.path),
+        checks: checkRepo(deps.readFile, repository.path, gateNode),
       }));
       // One failing checkout makes the project unusable, since a run needs every one of them; the
       // reason names the repository once there is more than one to tell apart.
@@ -1126,4 +1128,15 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       runs.abort(SHUTDOWN_SIGNAL);
     },
   };
+}
+
+// The Node a gate's npm would run on: the first `node` on the PATH children are given, which is not
+// necessarily the one running this worker.
+async function resolveGateNode(deps: WorkerDeps): Promise<GateNode | null> {
+  const env = childEnv([], deps.env);
+  const path = firstOnPath("node", env.PATH ?? "", deps.isExecutable);
+  if (!path) return null;
+  const result = await deps.runner.run(path, ["--version"], { cwd: "/", timeoutMs: 5_000, env });
+  const version = /^v?(\d+\.\d+\.\d+)/.exec(result.stdout.trim())?.[1];
+  return result.code === 0 && version ? { version, path } : null;
 }
