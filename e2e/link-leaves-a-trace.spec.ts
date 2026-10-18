@@ -11,6 +11,7 @@ import {
   PROJECT_KEY,
   SIBLING_TASK_ID,
   SIBLING_TASK_NUMBER,
+  SIBLING_TASK_TITLE,
   seed,
 } from "./seed";
 import { signIn } from "./session";
@@ -352,6 +353,9 @@ test.describe("removing an incoming link", () => {
     // The database, not the panel: the row is gone after a reload, not only from an optimistic
     // render this same click drove.
     await page.goto(taskUrl(SIBLING_TASK_NUMBER));
+    // Links arrive with the task, so its title on screen is a page that has them; before it, the
+    // absence below holds on an empty page
+    await expect(page.getByLabel("Task title")).toHaveValue(SIBLING_TASK_TITLE);
     await expect(page.getByText("Relates to")).toHaveCount(0);
   });
 });

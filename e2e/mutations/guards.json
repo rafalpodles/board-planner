@@ -95,7 +95,7 @@
         }
       ],
       "spec": "e2e/organisations-platform.spec.ts",
-      "grep": "the listing pages by organisation, and a signature covers the query it was made for",
+      "grep": "a signature made outside the window, or a request sent twice, is refused",
       "probe": "/api/platform/organisations",
       "assertion": "platform request: a request signed outside the ±5 min window is accepted"
     },
@@ -109,7 +109,7 @@
         }
       ],
       "spec": "e2e/organisations-platform.spec.ts",
-      "grep": "the listing pages by organisation, and a signature covers the query it was made for",
+      "grep": "a signature made outside the window, or a request sent twice, is refused",
       "probe": "/api/platform/organisations",
       "assertion": "platform request: a replayed nonce is accepted"
     },

@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 import { generateKeyPairSync } from "node:crypto";
 import mongoose from "mongoose";
 import { MAIL_SERVER, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
-import { signPlatformRequest } from "../src/lib/platform-request";
+import { PLATFORM_REQUEST_WINDOW_MS, signPlatformRequest } from "../src/lib/platform-request";
 import { E2E_PLATFORM_REQUEST_KEY, e2eLicence } from "./licence-key";
 import { E2E_MONGODB_URI } from "./seed";
 import {
@@ -83,6 +83,20 @@ test.describe("BP-892: the platform operator is the licence service, not an orga
 
     const tampered = await signedGet(request, "/api/platform/organisations?limit=200", { sign: "/api/platform/organisations?limit=1" });
     expect(tampered.status()).toBe(401);
+  });
+
+  test("a signature made outside the window, or a request sent twice, is refused", async ({ request }) => {
+    const path = "/api/platform/organisations?limit=1";
+    const signedAt = (now: number) => signPlatformRequest({ method: "GET", host: PLATFORM_HOST, path, body: EMPTY, now }, E2E_PLATFORM_REQUEST_KEY);
+    const send = (headers: Record<string, string>) =>
+      request.get(`${ORGANISATIONS_API}${path}`, { headers: { host: PLATFORM_HOST, ...headers } });
+
+    const fresh = signedAt(Date.now());
+    expect((await send(fresh)).status()).toBe(200);
+    expect((await send(fresh)).status()).toBe(401);
+
+    expect((await send(signedAt(Date.now() - PLATFORM_REQUEST_WINDOW_MS - 60_000))).status()).toBe(401);
+    expect((await send(signedAt(Date.now() + PLATFORM_REQUEST_WINDOW_MS + 60_000))).status()).toBe(401);
   });
 
   test("the operator reads the platform log newest first, a page at a time", async ({ request }) => {
