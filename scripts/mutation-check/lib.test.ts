@@ -4,6 +4,7 @@ import {
   parseShard,
   pickShard,
   seededSample,
+  staleEdit,
   applyEdits,
   carriesMarker,
   classify,
@@ -234,6 +235,10 @@ describe("untrusted", () => {
     expect(untrusted([result(plain, "no-tests")]).map((r) => r.outcome)).toEqual(["no-tests"]);
   });
 
+  it("flags a mutation whose edit no longer matches the source", () => {
+    expect(untrusted([result(plain, "stale")])).toHaveLength(1);
+  });
+
   it("flags a mutation the dev server never compiled, and a control that was not caught", () => {
     expect(untrusted([result(plain, "not-picked-up"), result(control, "survived")])).toHaveLength(2);
   });
@@ -296,5 +301,12 @@ describe("shards", () => {
   it("reads k/n and refuses anything else", () => {
     expect(parseShard("2/4")).toEqual({ index: 2, count: 4 });
     for (const bad of ["0/4", "5/4", "2", "a/b", "1/0"]) expect(() => parseShard(bad)).toThrow();
+  });
+});
+
+describe("staleEdit", () => {
+  it("is null while the edits apply and names the edit once they do not", () => {
+    expect(staleEdit("const a = 1;", [{ find: "a = 1", replace: "a = 2" }])).toBeNull();
+    expect(staleEdit("const a = 1;", [{ find: "b = 1", replace: "b = 2" }])).toMatch(/matched 0 times/);
   });
 });

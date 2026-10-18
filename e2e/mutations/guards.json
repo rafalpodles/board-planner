@@ -1,0 +1,243 @@
+{
+  "mutations": [
+    {
+      "id": "control-move-failure-toast",
+      "control": true,
+      "file": "src/hooks/use-project-board.ts",
+      "edits": [
+        {
+          "find": "      toast(reason ? `Failed to move task: ${reason}` : \"Failed to move task\", \"error\");\n      loadData();\n    }\n  }\n\n  async function forceHeldMove",
+          "replace": "      loadData();\n    }\n  }\n\n  async function forceHeldMove"
+        }
+      ],
+      "spec": "e2e/kanban-board-core.spec.ts",
+      "grep": "a move the server refuses rolls the card back",
+      "probe": "/projects/TP",
+      "assertion": "expectToast(page, \"Failed to move task\") — deliberately obvious"
+    },
+    {
+      "id": "g01-wall-lets-a-raw-query-through",
+      "file": "src/lib/organisation-wall.ts",
+      "edits": [
+        {
+          "find": "  if (!named.length) throw new OrganisationWallError(`${what} names no organisation`);",
+          "replace": "  if (!named.length) return want as Types.ObjectId;"
+        }
+      ],
+      "spec": "e2e/organisation-wall.spec.ts",
+      "grep": "a raw model query that names no organisation is refused, for every kind of operation",
+      "probe": "/api/projects",
+      "assertion": "organisation wall: a query naming no organisation runs instead of throwing"
+    },
+    {
+      "id": "g02-wall-lets-a-scoped-query-change-organisation",
+      "file": "src/lib/organisation-wall.ts",
+      "edits": [
+        {
+          "find": "  if (want && ids.some((id) => !id!.equals(want))) throw new OrganisationWallError(`${what} names another organisation than the one it was scoped to`);\n  return ids[0]!;",
+          "replace": "  return ids[0]!;"
+        }
+      ],
+      "spec": "e2e/organisation-wall.spec.ts",
+      "grep": "overriding a scoped query's organisation with where, merge or setQuery is refused",
+      "probe": "/api/projects",
+      "assertion": "organisation wall: a scoped query rewritten to another organisation runs"
+    },
+    {
+      "id": "g03-scoped-db-drops-the-organisation",
+      "file": "src/lib/db-scope.ts",
+      "edits": [
+        {
+          "find": "  return { ...filter, organisation };\n}",
+          "replace": "  return { ...filter };\n}"
+        }
+      ],
+      "spec": "e2e/cross-organisation-projects.spec.ts",
+      "grep": "on screen, another organisation's board looks like a board that does not exist",
+      "probe": "/api/projects",
+      "assertion": "cross-organisation-projects:81 (sample #32) another organisation's board name toHaveCount(0); db-scope stops adding the organisation"
+    },
+    {
+      "id": "g04-machine-may-force",
+      "file": "src/lib/force-guard.ts",
+      "edits": [
+        {
+          "find": "  return force === true && user.viaMachineCredential === true;",
+          "replace": "  return false;"
+        }
+      ],
+      "spec": "e2e/machine-force-refusal.spec.ts",
+      "grep": "an API token sending force is refused, and the run keeps the task",
+      "probe": "/api/projects/TP/tasks",
+      "assertion": "machineMayNotForce: an API token may take a held task off its machine"
+    },
+    {
+      "id": "g05-platform-signature-not-checked",
+      "file": "src/lib/platform-request.ts",
+      "edits": [
+        {
+          "find": "  if (!signatureMatches(platformSigningString(request.method, host, path, timestamp, nonce, body), signature, key)) {\n    return { ok: false, reason: \"bad_signature\", keyId };\n  }\n",
+          "replace": ""
+        }
+      ],
+      "spec": "e2e/organisations-licence.spec.ts",
+      "grep": "an unsigned request, one signed by a stranger, and a tampered one are refused alike",
+      "probe": "/api/platform/organisations",
+      "assertion": "platform request: a signature that does not match is accepted"
+    },
+    {
+      "id": "g06-platform-timestamp-not-checked",
+      "file": "src/lib/platform-request.ts",
+      "edits": [
+        {
+          "find": "  if (Math.abs(now - Number(timestamp)) > PLATFORM_REQUEST_WINDOW_MS) return { ok: false, reason: \"stale_timestamp\", keyId };\n",
+          "replace": ""
+        }
+      ],
+      "spec": "e2e/organisations-platform.spec.ts",
+      "grep": "the listing pages by organisation, and a signature covers the query it was made for",
+      "probe": "/api/platform/organisations",
+      "assertion": "platform request: a request signed outside the ±5 min window is accepted"
+    },
+    {
+      "id": "g07-platform-nonce-replayable",
+      "file": "src/lib/platform-request.ts",
+      "edits": [
+        {
+          "find": "  if (!(await claimNonce(keyId, nonce, now))) return { ok: false, reason: \"replayed_nonce\", keyId };\n",
+          "replace": ""
+        }
+      ],
+      "spec": "e2e/organisations-platform.spec.ts",
+      "grep": "the listing pages by organisation, and a signature covers the query it was made for",
+      "probe": "/api/platform/organisations",
+      "assertion": "platform request: a replayed nonce is accepted"
+    },
+    {
+      "id": "g08-sso-enforcement-lets-passwords-in",
+      "file": "src/lib/password-sign-in.ts",
+      "edits": [
+        {
+          "find": "  if (await ssoEnforced(db)) return NextResponse.json({ error: SSO_REQUIRED, ssoRequired: true }, { status: 403 });\n",
+          "replace": ""
+        }
+      ],
+      "spec": "e2e/organisations-sso.spec.ts",
+      "grep": "every other way in is refused for that organisation and stays open for the others",
+      "probe": "/api/auth/login",
+      "assertion": "SSO enforced: a password sign-in is still accepted"
+    },
+    {
+      "id": "g09-organisation-minute-not-capped",
+      "file": "src/lib/organisation-limits.ts",
+      "edits": [
+        {
+          "find": "  if (all.count > limit) return tooManyRequests(\"organisation\", limit, all.resetAt);\n",
+          "replace": ""
+        }
+      ],
+      "spec": "e2e/organisations-limits.spec.ts",
+      "grep": "an organisation past its requests for the minute is refused, saying when it resets, while the other is served",
+      "probe": "/api/projects",
+      "assertion": "organisation limits: the per-organisation minute is never refused"
+    },
+    {
+      "id": "g10-storage-ignores-the-incoming-file",
+      "file": "src/lib/organisation-limits.ts",
+      "edits": [
+        {
+          "find": "  if (!bytes || storedBytes + incomingBytes <= bytes) return null;",
+          "replace": "  if (!bytes || storedBytes <= bytes) return null;"
+        }
+      ],
+      "spec": "e2e/organisations-limits.spec.ts",
+      "grep": "a Free organisation whose files fill its 1 GB cannot upload another, Pro lifts it, and the other organisation is untouched (BP-967)",
+      "probe": "/api/uploads",
+      "assertion": "storage limit: the size of the file being uploaded is not counted"
+    },
+    {
+      "id": "g11-owner-gate-admits-members",
+      "file": "src/lib/middleware.ts",
+      "edits": [
+        {
+          "find": "    if (!(await check(context.db, user, projectId, \"admin\"))) {\n      return unresolvedProject(user);\n    }\n\n    const resolved = await withResolvedIds(context, params, projectId);\n    if (!resolved.ok) return resolved.response;\n    return handler(request, resolved.context);\n  });",
+          "replace": "    if (!(await check(context.db, user, projectId, \"access\"))) {\n      return unresolvedProject(user);\n    }\n\n    const resolved = await withResolvedIds(context, params, projectId);\n    if (!resolved.ok) return resolved.response;\n    return handler(request, resolved.context);\n  });"
+        }
+      ],
+      "spec": "e2e/project-owner-gate.spec.ts",
+      "grep": "a plain member is refused, the board owner gets through",
+      "probe": "/api/projects/TP/members",
+      "assertion": "withProjectOwner: a plain member passes the owner gate"
+    },
+    {
+      "id": "g12-credential-accepted-on-another-host",
+      "file": "src/lib/middleware.ts",
+      "edits": [
+        {
+          "find": "  if (!organisationOf(principal).equals(host.organisation)) {\n    return NextResponse.json({ error: \"Unauthorized\" }, { status: 401 });\n  }\n",
+          "replace": ""
+        }
+      ],
+      "spec": "e2e/organisations-isolation.spec.ts",
+      "grep": "a token is no credential on another organisation's host",
+      "probe": "/api/projects",
+      "assertion": "host binding: one organisation's credential is accepted on another organisation's host"
+    },
+    {
+      "id": "g13-admin-gate-admits-members",
+      "file": "src/lib/middleware.ts",
+      "edits": [
+        {
+          "find": "    if (context.user.role !== \"admin\") {\n      return NextResponse.json({ error: \"Forbidden\" }, { status: 403 });\n    }\n    return handler(request, context);",
+          "replace": "    return handler(request, context);"
+        }
+      ],
+      "spec": "e2e/admin-only-screens.spec.ts",
+      "grep": "the endpoints behind them refuse a member and answer an admin",
+      "probe": "/api/admin/audit",
+      "assertion": "withAdmin: a member reaches the instance admin endpoints"
+    },
+    {
+      "id": "g14-cross-site-write-accepted",
+      "file": "src/lib/session.ts",
+      "edits": [
+        {
+          "find": "    return site === \"same-origin\" || site === \"none\"\n      ? { ok: true }\n      : { ok: false, reason: \"cross-site\" };",
+          "replace": "    return { ok: true };"
+        }
+      ],
+      "spec": "e2e/organisations-sign-in.spec.ts",
+      "grep": "BP-1009: forgetting the organisation is refused from another origin and off the platform host",
+      "probe": "/api/auth/me",
+      "assertion": "session provenance: a cookie write marked Sec-Fetch-Site: cross-site is accepted"
+    },
+    {
+      "id": "g15-foreign-origin-write-accepted",
+      "file": "src/lib/session.ts",
+      "edits": [
+        {
+          "find": "  return acceptedOrigins(request).includes(normaliseOrigin(origin))\n    ? { ok: true }\n    : { ok: false, reason: \"origin-mismatch\" };",
+          "replace": "  return { ok: true };"
+        }
+      ],
+      "spec": "e2e/organisations-origin.spec.ts",
+      "grep": "a write is accepted with the origin of the organisation's own host, and with nothing else",
+      "probe": "/api/auth/me",
+      "assertion": "session provenance: a cookie write from a foreign Origin is accepted"
+    },
+    {
+      "id": "g16-login-throttle-a-hundred-times-looser",
+      "file": "src/lib/rate-limit.ts",
+      "edits": [
+        {
+          "find": "  const accountThreshold = source ? MAX_ATTEMPTS : ANONYMOUS_ACCOUNT_ATTEMPTS;",
+          "replace": "  const accountThreshold = source ? MAX_ATTEMPTS : ANONYMOUS_ACCOUNT_ATTEMPTS * 100;"
+        }
+      ],
+      "spec": "e2e/sessions-and-auth.spec.ts",
+      "grep": "the sign-in form names the throttle, which refuses the right password and only this account",
+      "probe": "/api/auth/login",
+      "assertion": "login throttle: an account is refused only after 5000 failures instead of 50"
+    }
+  ]
+}

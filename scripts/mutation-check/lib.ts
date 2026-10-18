@@ -21,7 +21,7 @@ export interface JournalEntry {
   original: string;
 }
 
-export type Outcome = "caught" | "survived" | "baseline-red" | "not-picked-up" | "no-tests";
+export type Outcome = "caught" | "survived" | "baseline-red" | "not-picked-up" | "no-tests" | "stale";
 
 export interface RunSummary {
   passed: number;
@@ -211,6 +211,7 @@ export function untrusted(results: Result[]): Result[] {
     (r) =>
       r.outcome === "not-picked-up" ||
       r.outcome === "no-tests" ||
+      r.outcome === "stale" ||
       (r.mutation.control && r.outcome !== "caught")
   );
 }
@@ -288,4 +289,13 @@ export function pickShard(mutations: Mutation[], index: number, count: number): 
   const controls = mutations.filter((m) => m.control);
   const rest = mutations.filter((m) => !m.control);
   return [...controls, ...rest.filter((_, i) => i % count === index - 1)];
+}
+
+export function staleEdit(source: string, edits: Edit[]): string | null {
+  try {
+    applyEdits(source, edits);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }

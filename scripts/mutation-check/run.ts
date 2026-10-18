@@ -25,6 +25,7 @@ import {
   parseManifest,
   parseShard,
   pickShard,
+  staleEdit,
   renderTable,
   restoreAll,
   summarise,
@@ -241,9 +242,12 @@ async function main() {
     .sort((a, b) => Number(b.control) - Number(a.control));
   const shard = option("--shard");
   const mutations = shard ? pickShard(chosen, parseShard(shard).index, parseShard(shard).count) : chosen;
+  const stale = new Map<string, string>();
   for (const m of mutations) {
     if (!fs.existsSync(path.join(ROOT, m.spec))) throw new Error(`${m.id}: no spec at ${m.spec}`);
-    applyEdits(realFs.read(m.file), m.edits);
+    const reason = staleEdit(realFs.read(m.file), m.edits);
+    if (reason && m.control) throw new Error(`the control ${m.id} no longer applies: ${reason}`);
+    if (reason) stale.set(m.id, reason);
   }
 
   await startHold();
@@ -252,6 +256,12 @@ async function main() {
   const baselines = new Map<string, RunSummary>();
   const results: Result[] = [];
   for (const mutation of mutations) {
+    if (stale.has(mutation.id)) {
+      const result: Result = { mutation, outcome: "stale", detail: `no longer matches the source: ${stale.get(mutation.id)}` };
+      results.push(result);
+      console.log(`[mutation-check] ${mutation.id}: stale — ${result.detail}`);
+      continue;
+    }
     const key = `${mutation.spec}\u0000${mutation.grep}`;
     if (!baselines.has(key)) {
       let baseline = await runSpec(mutation, `baseline-${mutation.id}`);
