@@ -150,3 +150,34 @@ struct FooterButtonStyle: ButtonStyle {
             .onHover { hovering = $0 }
     }
 }
+
+// The menu bar's window grows to the largest content it has shown and never shrinks, so a panel that
+// gets shorter (a run ending, a fault clearing) sat on a pane of translucent system background.
+// This sets the window to the content's own size, top edge fixed, and paints the content opaque.
+private struct WindowFit: NSViewRepresentable {
+    let size: CGSize
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard size.width > 0, size.height > 0, let window = view.window else { return }
+            let current = window.contentRect(forFrameRect: window.frame).size
+            guard abs(current.height - size.height) > 0.5 || abs(current.width - size.width) > 0.5 else { return }
+            var frame = window.frame
+            frame.origin.y -= size.height - current.height
+            frame.size.height += size.height - current.height
+            frame.size.width += size.width - current.width
+            window.setFrame(frame, display: true)
+        }
+    }
+}
+
+extension View {
+    func menuBarWindowChrome() -> some View {
+        self
+            .background(Color(nsColor: .windowBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(GeometryReader { proxy in WindowFit(size: proxy.size) })
+    }
+}

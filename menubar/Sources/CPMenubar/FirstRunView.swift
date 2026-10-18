@@ -32,6 +32,7 @@ struct FirstRunView: View {
         }
         .padding(16)
         .frame(width: 380)
+        .menuBarWindowChrome()
     }
 
     private func header(_ title: String, _ subtitle: String) -> some View {
