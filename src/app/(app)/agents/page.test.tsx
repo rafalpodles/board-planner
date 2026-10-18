@@ -404,6 +404,46 @@ describe("choosing the coding CLI of a step", () => {
     expect(catalog.addBlock.mock.calls[0][0]).toMatchObject({ kind: "step", provider: "codex", model: "gpt-6.1-sol" });
   });
 
+  it("changes nothing when the provider is flipped and flipped back, however the model was stored", async () => {
+    catalog.updateBlock.mockResolvedValue(undefined);
+    await openStep({ ...IMPLEMENT, model: "claude-haiku-4-5" });
+
+    fireEvent.change(select("Runs on"), { target: { value: "codex" } });
+    fireEvent.change(select("Runs on"), { target: { value: "claude" } });
+
+    expect(select("Model").value).toBe("claude-haiku-4-5");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Implement it" } });
+    await act(async () => screen.getByRole("button", { name: "Save" }).click());
+    // Back where it began, nothing about the pair differs from what is stored, so none of it is sent
+    const patch = catalog.updateBlock.mock.calls[0][1];
+    expect(patch).not.toHaveProperty("provider");
+    expect(patch).not.toHaveProperty("model");
+  });
+
+  it("keeps what was typed for Codex when the provider is flipped to Claude and back", async () => {
+    await openStep(IMPLEMENT);
+
+    fireEvent.change(select("Runs on"), { target: { value: "codex" } });
+    fireEvent.change(field("Model"), { target: { value: "gpt-5" } });
+    fireEvent.change(select("Runs on"), { target: { value: "claude" } });
+    fireEvent.change(select("Runs on"), { target: { value: "codex" } });
+
+    expect(field("Model").value).toBe("gpt-5");
+  });
+
+  it("shows a provider the form does not offer as it is stored, not as the first one", async () => {
+    await openStep({ ...IMPLEMENT, provider: "gemini" as never });
+
+    expect(select("Runs on").value).toBe("gemini");
+  });
+
+  it("ties the Codex note to the model field it explains", async () => {
+    await openStep({ ...IMPLEMENT, provider: "codex", model: "gpt-5" });
+
+    const id = field("Model").getAttribute("aria-describedby")!;
+    expect(document.getElementById(id)?.textContent).toMatch(/shell and has network access/);
+  });
+
   it("creates a step on Claude Code by default, as before", async () => {
     catalog.addBlock.mockResolvedValue(undefined);
     await openTab("Steps");
@@ -459,6 +499,19 @@ describe("choosing the reviewer of the Reviewed gate", () => {
       gateKind: "review",
       params: { focus: "general", provider: "codex", model: "gpt-6.1-sol" },
     });
+  });
+
+  it("sends a pasted model name without its surrounding spaces", async () => {
+    catalog.addBlock.mockResolvedValue(undefined);
+    await openTab("Gates");
+    await act(async () => screen.getByRole("button", { name: "New gate" }).click());
+    fireEvent.change(select("What it checks"), { target: { value: "review" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Padded" } });
+    fireEvent.change(select("Reviewer"), { target: { value: "codex" } });
+    fireEvent.change(field("Model"), { target: { value: "  gpt-5.5 " } });
+    await act(async () => screen.getByRole("button", { name: "Create" }).click());
+
+    expect(catalog.addBlock.mock.calls[0][0].params.model).toBe("gpt-5.5");
   });
 
   it("shows an existing review's reviewer, saved with the model it goes with", async () => {

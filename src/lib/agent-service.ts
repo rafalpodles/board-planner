@@ -40,10 +40,17 @@ export async function compositionRefusal(
   }
 
   // A position's own parameters override the gate's and reach the worker as written, so the pair the
-  // worker is handed (provider and model together) is what is judged, not each half on its own
+  // worker is handed (provider and model together) is what is judged, not each half on its own. And a
+  // position may not change the provider at all: whoever may edit an agent (a member, for a personal
+  // one) is not whoever may choose what runs on a machine, which is the instance admin's, on the block.
   for (const entry of sequenceOf(composition)) {
     const block = lookup(entry.key);
     if (block?.kind !== "gate" || !entry.params) continue;
+    const own = block.params?.provider || DEFAULT_PROVIDER;
+    if ("provider" in entry.params && (entry.params.provider || DEFAULT_PROVIDER) !== own) {
+      const message = `${block.name}: a position cannot change what a gate runs on — that is set on the gate itself, by an admin`;
+      return { error: message, problems: [message] };
+    }
     const refusal = gateParams(block.gateKind, { ...block.params, ...entry.params }).refusal;
     if (refusal) return { error: `${block.name}: ${refusal}`, problems: [`${block.name}: ${refusal}`] };
   }

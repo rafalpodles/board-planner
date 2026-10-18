@@ -1,5 +1,5 @@
 import { capabilityHeaders, reportAgents } from "./capabilities.js";
-import { sweepRunHomes } from "./agents/codex.js";
+import { codexUsable, sweepRunHomes } from "./agents/codex.js";
 import {
   accessSync,
   constants,
@@ -54,7 +54,7 @@ import {
 import type { CommitIdentity } from "./commit.js";
 import { gateFromEntry } from "./gates/from-entry.js";
 import { createRunner, Runner } from "./exec.js";
-import { childEnv } from "./env.js";
+import { childEnv, codexSourceHome } from "./env.js";
 import { createExecutor } from "./executor.js";
 import { LocalServer, LocalServerDeps, startLocalServer } from "./local-server.js";
 import { createLoop } from "./loop.js";
@@ -428,9 +428,13 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     showLeftovers();
 
     // What this machine can run, said to the server on every request from here on
-    reportAgents(preflight.agents);
+    const found = preflight.paths;
+    reportAgents(preflight.agents ?? [], (agent) =>
+      // Asked on every request: signing out of Codex, or removing it, takes it back at once
+      agent !== "codex" || codexUsable(found.codex, codexSourceHome(deps.env))
+    );
     // A Codex run home carries the login; one a killed worker left behind goes before the next run
-    if (preflight.paths.codex) sweepRunHomes(undefined, deps.logError);
+    sweepRunHomes(undefined, deps.logError);
 
     for (const check of preflight.checks) {
       if (!check.ok) deps.logError(`preflight: ${check.name} — ${check.detail}`);

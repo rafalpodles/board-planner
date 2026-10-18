@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { agentsBeyond, canRun, gateProvider, lackedBy, providersOf } from "./agent-providers";
+import { agentsBeyond, agentsNamingAny, canRun, gateProvider, lackedBy, providersOf } from "./agent-providers";
 import type { ScopedDb } from "@/lib/db-scope";
 import type { SnapshotEntry } from "./agent-snapshot";
 
@@ -58,17 +58,29 @@ describe("agentsBeyond", () => {
 
     expect(await agentsBeyond(db, [])).toEqual(["a1", "a2"]);
     expect(blockFind.mock.calls[0][0]).toEqual({ $or: [{ provider: "codex" }, { "params.provider": "codex" }] });
-    const filter = JSON.stringify(agentFind.mock.calls[0][0]);
-    expect(filter).toContain('"composition.implementation.key":{"$in":["on-codex"]}');
-    expect(filter).toContain('"composition.verification.params.provider":"codex"');
+    expect(JSON.stringify(agentFind.mock.calls[0][0])).toContain('"composition.implementation":{"$elemMatch":{"$eq":"on-codex"}}');
   });
 
-  it("still looks at a position's own provider when no block is on the provider", async () => {
+  it("does not look at agents at all while no block is on a provider the machine lacks", async () => {
     const { db, agentFind } = dbWith([], [{ _id: "a1" }]);
 
-    expect(await agentsBeyond(db, [])).toEqual(["a1"]);
-    const filter = JSON.stringify(agentFind.mock.calls[0][0]);
-    expect(filter).not.toContain('"$in"');
-    expect(filter).toContain('.params.provider":"codex"');
+    expect(await agentsBeyond(db, [])).toEqual([]);
+    expect(agentFind).not.toHaveBeenCalled();
+  });
+});
+
+// A mocked database never casts a filter, which is how a bare string against a subdocument array
+// (BP-460) reached review: the real model is asked here
+describe("the filter agentsBeyond sends is one the Agent model can cast", () => {
+  it("casts, in either stored shape of a composition", async () => {
+    const { Agent } = await import("@/models/agent");
+
+    expect(() => Agent.find(agentsNamingAny(["implement", "other"])).cast(Agent)).not.toThrow();
+  });
+
+  it("and the shape it replaced did not, which is what makes the test above able to fail", async () => {
+    const { Agent } = await import("@/models/agent");
+
+    expect(() => Agent.find({ "composition.delivery": { $in: ["implement"] } } as never).cast(Agent)).toThrow(/Cast to embedded failed/);
   });
 });

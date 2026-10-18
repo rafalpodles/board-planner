@@ -149,6 +149,8 @@ export const PUT = withAuth(async (request, { params, user, db }) => {
   if (block.kind === "step" && typeof body.prompt === "string") block.prompt = body.prompt.trim();
   if (body.capability !== undefined) block.capability = body.capability;
   if (body.provider !== undefined) block.provider = body.provider;
+  // Codex has no fallback model, and POST refuses one: the old one must not outlive the move
+  if (body.provider === "codex") block.fallbackModel = "";
   if (body.model !== undefined) block.model = body.model;
   if (block.kind === "gate" && body.params && typeof body.params === "object") {
     block.params = gateParams(block.gateKind, body.params).params;

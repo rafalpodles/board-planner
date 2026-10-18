@@ -186,10 +186,20 @@ describe("gateFromEntry's review gate and the coding CLI", () => {
     expect(await gate!.run(ctx(1))).toEqual({ ok: false, reason: expect.stringMatching(/Codex, which this machine cannot run/), machineFault: true });
   });
 
-  it("refuses a review on Codex that names no model, rather than reviewing on a Claude one", async () => {
+  // A gate configured without what it needs is not the machine's fault: handed back as one it would be
+  // claimed again by the next poll, and the one after, and never escalate
+  it("refuses a review on Codex that names no model, rather than reviewing on a Claude one, and not as the machine's fault", async () => {
     const gate = gateFromEntry(review({ provider: "codex" }), idleRunner, { ...tools, codex: "/opt/homebrew/bin/codex" }, 1000, FALLBACKS);
 
-    expect(await gate!.run(ctx(1))).toEqual({ ok: false, reason: expect.stringMatching(/Codex and names no model/), machineFault: true });
+    const verdict = await gate!.run(ctx(1));
+    expect(verdict).toEqual({ ok: false, reason: expect.stringMatching(/Codex and names no model/) });
+    expect(verdict).not.toHaveProperty("machineFault");
+  });
+
+  it("does not throw on a model that arrives as a number", async () => {
+    const gate = gateFromEntry(review({ provider: "codex", model: 5 as unknown as string }), idleRunner, { ...tools, codex: "/opt/homebrew/bin/codex" }, 1000, FALLBACKS);
+
+    expect(await gate!.run(ctx(1))).toMatchObject({ ok: false, reason: expect.stringMatching(/names no model/) });
   });
 
   it("refuses a reviewer this worker has never heard of", async () => {

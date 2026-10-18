@@ -33,10 +33,29 @@ export function lackedBy(sequence: readonly SnapshotEntry[], capabilities: reado
 }
 
 /**
+ * The agents that name any of these block keys, in either stored shape. `$elemMatch`, not a bare
+ * string: the path is a subdocument array, and a bare string there is a CastError that took the
+ * whole request down (BP-460) — here, every claim of a machine without Codex.
+ */
+export function agentsNamingAny(keys: readonly string[]) {
+  return {
+    $or: AGENT_BUCKETS.flatMap((bucket) =>
+      keys.flatMap((key) => [
+        { [`composition.${bucket}.key`]: key },
+        { [`composition.${bucket}`]: { $elemMatch: { $eq: key } } },
+      ])
+    ),
+  };
+}
+
+/**
  * The ids of the agents a machine with these capabilities cannot run, for the claim to step over: a
  * task whose agent is in the list is not offered to it. A list of what is excluded rather than of
  * what is allowed, because it is empty for a machine that can run everything and short for one that
- * cannot, and the common case then costs a query that finds nothing.
+ * cannot, and the common case then costs one query that finds nothing.
+ *
+ * Only a block's own provider counts. A position in a composition cannot change it: whoever may edit
+ * an agent is not whoever may choose what runs on a machine (compositionRefusal, snapshotFor).
  */
 export async function agentsBeyond(db: ScopedDb, capabilities: readonly string[]): Promise<string[]> {
   const beyond = PROVIDER_IDS.filter((provider) => !canRun(capabilities, provider));
@@ -46,14 +65,8 @@ export async function agentsBeyond(db: ScopedDb, capabilities: readonly string[]
     { $or: beyond.flatMap((provider) => [{ provider }, { "params.provider": provider }]) },
     "key"
   ).lean();
-  const keys = blocks.map((block) => block.key);
+  if (blocks.length === 0) return [];
 
-  // A position's own parameters may name the provider for a gate whose block does not, and an agent
-  // stored before entries existed holds bare keys
-  const named = AGENT_BUCKETS.flatMap((bucket) => [
-    ...(keys.length > 0 ? [{ [`composition.${bucket}.key`]: { $in: keys } }, { [`composition.${bucket}`]: { $in: keys } }] : []),
-    ...beyond.map((provider) => ({ [`composition.${bucket}.params.provider`]: provider })),
-  ]);
-  const agents = await db.Agent.find({ $or: named }, "_id").lean();
+  const agents = await db.Agent.find(agentsNamingAny(blocks.map((block) => block.key)), "_id").lean();
   return agents.map((agent) => String(agent._id));
 }

@@ -142,10 +142,10 @@ describe("a run across several repositories", () => {
       };
     });
 
-    const seen: { repositories?: { name: string; path: string }[]; cwd?: string }[] = [];
+    const seen: { repositories?: { name: string; path: string }[]; cwd?: string; brief?: Parameters<Executor["execute"]>[0]["brief"] }[] = [];
     const executor: Executor = {
-      execute: vi.fn(async ({ repositories: refs, worktreePath }: Parameters<Executor["execute"]>[0]) => {
-        seen.push({ repositories: refs?.map((r) => ({ name: r.name, path: r.path })), cwd: worktreePath });
+      execute: vi.fn(async ({ repositories: refs, worktreePath, brief }: Parameters<Executor["execute"]>[0]) => {
+        seen.push({ repositories: refs?.map((r) => ({ name: r.name, path: r.path })), cwd: worktreePath, brief });
         const byName = Object.fromEntries((refs ?? []).map((r) => [r.name, r.path])) as Record<Name, string>;
         over.write?.(byName, seen.length - 1);
         return { kind: "result" as const, result: COMPLETED };
@@ -220,6 +220,16 @@ describe("a run across several repositories", () => {
     expect(run.seen[0].repositories?.map((r) => r.name)).toEqual(["api", "web"]);
     expect(run.seen[0].cwd).toBe(run.seen[0].repositories?.[0].path);
     expect(new Set(run.seen[0].repositories?.map((r) => r.path)).size).toBe(2);
+  });
+
+  // BP-987. The single-repository path named the coding CLI and this one did not, so a Codex step of
+  // a project with two repositories ran on Claude Code with a Codex model's name
+  it("tells the executor which coding CLI a step runs on, as the one-repository path does", async () => {
+    const run = build({ write: (w) => write(w.api, "api.txt", "a\n") });
+
+    await runTaskInRepositories(run.deps, taskWith({ ...IMPLEMENT, provider: "codex", model: "gpt-5" }));
+
+    expect(run.seen[0].brief).toMatchObject({ provider: "codex", model: "gpt-5" });
   });
 
   it("leaves a repository the agent did not change with no gate, no push and no pull request", async () => {

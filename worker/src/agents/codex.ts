@@ -122,6 +122,11 @@ export function strictSchema(schema: unknown): unknown {
 
 const RUN_HOME_PREFIX = "cp-codex-";
 
+/** Whether Codex is still there to run: the program, and the login a run copies. Cheap, so it is asked per request. */
+export function codexUsable(path: string | undefined, sourceHome: string, exists: (path: string) => boolean = existsSync): boolean {
+  return !!path && exists(path) && exists(join(sourceHome, "auth.json"));
+}
+
 // The run is allowed to write its own home, and `chmod 000` on it is a write: an agent that can be
 // told to may leave a directory its own uid cannot delete. The worker is that uid, so it makes the
 // tree writable again first (never following a link out of it) and then removes it.

@@ -43,9 +43,11 @@ function named(gate: Gate, name: string): Gate {
   return { name, run: gate.run };
 }
 
-function refusingReview(reason: string): Gate {
-  // A machine fault: the machine cannot do this and no change was judged, so it must not read as the reviewer rejecting one
-  return { name: "review", run: async () => ({ ok: false, reason, machineFault: true }) };
+function refusingReview(reason: string, machineFault = true): Gate {
+  // A machine fault: the machine cannot do this and no change was judged, so it must not read as the
+  // reviewer rejecting one. A gate configured without what it needs is not the machine's fault, and
+  // must not be handed back for another machine to try again for ever
+  return { name: "review", run: async () => ({ ok: false, reason, ...(machineFault ? { machineFault: true } : {}) }) };
 }
 
 function reviewOn(
@@ -55,14 +57,15 @@ function reviewOn(
   timeoutMs: number,
   fallbacks: GateFallbacks
 ): Gate {
-  const provider = params.provider || "claude";
+  const provider = typeof params.provider === "string" && params.provider ? params.provider : "claude";
+  const model = typeof params.model === "string" ? params.model.trim() : "";
   if (provider === "claude") {
     return reviewGate(runner, tools.git, tools.claude, timeoutMs, params.model || fallbacks.reviewModel, params.focus);
   }
   if (provider !== "codex") return refusingReview(`this worker does not know the reviewer ${provider}`);
   if (!tools.codex) return refusingReview("this review runs on Codex, which this machine cannot run");
-  if (!params.model?.trim()) return refusingReview("this review runs on Codex and names no model");
-  return reviewGate(runner, tools.git, codexAgent(tools.codex), timeoutMs, params.model.trim(), params.focus);
+  if (!model) return refusingReview("this review runs on Codex and names no model", false);
+  return reviewGate(runner, tools.git, codexAgent(tools.codex), timeoutMs, model, params.focus);
 }
 
 /**

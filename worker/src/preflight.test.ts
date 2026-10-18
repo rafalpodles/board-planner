@@ -882,4 +882,20 @@ describe("preflight and the Codex CLI", () => {
     expect(report.ok).toBe(false);
     expect(report.agents).toEqual(["codex"]);
   });
+
+  it("looks for the login where a run will copy it from, so a CODEX_HOME the worker is started with counts", async () => {
+    const m = machine({ has: HAS });
+
+    await runPreflight(depsFor(m, { env: { ...env, CODEX_HOME: "/Users/someone/.codex-work" } }));
+
+    expect(m.envs.codex?.CODEX_HOME).toBe("/Users/someone/.codex-work");
+  });
+
+  it("does not name a Codex home when the worker was started with none", async () => {
+    const m = machine({ has: HAS });
+
+    await runPreflight(depsFor(m));
+
+    expect(m.envs.codex).not.toHaveProperty("CODEX_HOME");
+  });
 });

@@ -182,6 +182,11 @@ describe("choosing the CLI per step", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it.each(["constructor", "toString", "__proto__", "hasOwnProperty"])("does not take %s, a property every object has, for a CLI", async (provider) => {
+    expect(await step({ provider, model: "x" })).toMatchObject({ kind: "machine_fault" });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("is a machine fault for a CLI this worker has never heard of, never a quiet run on Claude Code", async () => {
     expect(await step({ provider: "cursor", model: "x" })).toMatchObject({ kind: "machine_fault" });
     expect(run).not.toHaveBeenCalled();

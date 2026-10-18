@@ -21,16 +21,25 @@ export const CAPABILITIES_HEADER = "X-CP-Capabilities";
 // first preflight has answered, so a machine says nothing about what it has not yet looked for.
 let reportedAgents: string[] = [];
 
-/** Called with preflight's answer; the server then offers this machine tasks whose agent runs on these */
-export function reportAgents(agents: readonly string[]): void {
+// Whether a CLI preflight found is still there to run. Preflight runs once, and a machine whose
+// operator signs out of Codex afterwards would otherwise go on being offered its tasks and handing
+// each one back, for ever, behind the same task (BP-987).
+let stillUsable: (agent: string) => boolean = () => true;
+
+/**
+ * Called with preflight's answer; the server then offers this machine tasks whose agent runs on these.
+ * `usable` is asked on every request, so a CLI that has gone since stops being claimed.
+ */
+export function reportAgents(agents: readonly string[], usable: (agent: string) => boolean = () => true): void {
   reportedAgents = [...agents];
+  stillUsable = usable;
 }
 
 export function capabilities(
   says: boolean = SAYS_IT_RUNS_SEVERAL_REPOSITORIES,
   agents: readonly string[] = reportedAgents
 ): string[] {
-  return [...(says ? [MULTI_REPOSITORY] : []), ...agents.map((agent) => `agent-${agent}`)];
+  return [...(says ? [MULTI_REPOSITORY] : []), ...agents.filter((agent) => stillUsable(agent)).map((agent) => `agent-${agent}`)];
 }
 
 /** Spread into the headers of every request to the server, next to `X-CP-Protocol` */

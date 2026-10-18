@@ -62,4 +62,25 @@ describe("what this worker says it can run", () => {
 
     expect(capabilities()).toEqual([MULTI_REPOSITORY]);
   });
+
+  it("stops claiming a CLI the moment it is no longer usable, without waiting for a new preflight", () => {
+    let codexIsThere = true;
+    reportAgents(["claude", "codex"], (agent) => agent !== "codex" || codexIsThere);
+    expect(capabilities()).toContain("agent-codex");
+
+    codexIsThere = false;
+
+    expect(capabilities()).toEqual(["multi-repository", "agent-claude"]);
+    expect(capabilityHeaders()).toEqual({ "X-CP-Capabilities": "multi-repository,agent-claude" });
+  });
+
+  it("claims it again when it comes back", () => {
+    let codexIsThere = false;
+    reportAgents(["codex"], () => codexIsThere);
+    expect(capabilities()).not.toContain("agent-codex");
+
+    codexIsThere = true;
+
+    expect(capabilities()).toContain("agent-codex");
+  });
 });

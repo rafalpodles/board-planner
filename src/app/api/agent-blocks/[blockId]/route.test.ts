@@ -260,6 +260,15 @@ describe("changing the provider of a step (BP-987)", () => {
     expect(doc).toMatchObject({ provider: "codex", model: "gpt-6.1-sol" });
   });
 
+  it("clears the fallback model on the way to Codex, which has none and which a new step is refused", async () => {
+    const doc = step({ fallbackModel: "sonnet" });
+    blockFindOne.mockResolvedValue(doc);
+
+    await put({ provider: "codex", model: "gpt-5" });
+
+    expect(doc).toMatchObject({ provider: "codex", fallbackModel: "" });
+  });
+
   it("refuses moving to Codex while the model is still a Claude one, changing nothing", async () => {
     const doc = step();
     blockFindOne.mockResolvedValue(doc);

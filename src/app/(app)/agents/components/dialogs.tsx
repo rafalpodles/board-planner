@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
@@ -226,7 +226,7 @@ export function NewGateDialog({
               name: name.trim(),
               description: kind?.description ?? "",
               gateKind,
-              params,
+              params: trimmedModel(params),
             });
             close();
           }}
@@ -234,6 +234,11 @@ export function NewGateDialog({
       </div>
     </Modal>
   );
+}
+
+// A pasted model name often carries a space, which the server refuses as not being a model name
+function trimmedModel(params: Record<string, string>): Record<string, string> {
+  return params.model === undefined ? params : { ...params, model: params.model.trim() };
 }
 
 const CODEX_NOTE =
@@ -262,18 +267,28 @@ function ProviderModel({
   storedModel?: string;
 }) {
   const claude = provider !== "codex";
+  const noteId = useId();
+  // What was in the model field for each provider, so flipping to the other and back changes nothing:
+  // a model stored as "the worker's own", or a custom id, is not overwritten by a default on the way
+  const remembered = useRef<Record<string, string>>({});
   const options: { value: string; label: string }[] = MODELS.map((m) => ({ value: m.value, label: m.label }));
   if (claude && storedModel !== undefined && !options.some((m) => m.value === storedModel)) {
     options.unshift({ value: storedModel, label: storedModel || "The worker's own" });
   }
+  const providers: { value: string; label: string }[] = PROVIDERS.map((p) => ({ value: p.value, label: p.label }));
+  // A value stored through the API may be one the form does not offer; shown, not swapped for the first
+  if (!providers.some((p) => p.value === provider)) providers.unshift({ value: provider, label: provider });
   return (
     <>
       <Choice
         label={providerLabel}
         value={provider}
         readOnly={readOnly}
-        onChange={(next) => onChange({ provider: next, model: next === "codex" ? "" : MODELS[0].value })}
-        options={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))}
+        onChange={(next) => {
+          remembered.current[provider] = model;
+          onChange({ provider: next, model: remembered.current[next] ?? (next === "codex" ? "" : MODELS[0].value) });
+        }}
+        options={providers}
       />
       {claude ? (
         <Choice
@@ -290,10 +305,11 @@ function ProviderModel({
             value={model}
             readOnly={readOnly}
             placeholder="A model your Codex account offers"
+            aria-describedby={noteId}
             onChange={(e) => onChange({ provider, model: e.target.value })}
             required={!readOnly}
           />
-          <p className="mt-1 text-[12px] text-text-muted">{CODEX_NOTE}</p>
+          <p id={noteId} className="mt-1 text-[12px] text-text-muted">{CODEX_NOTE}</p>
         </div>
       )}
     </>
@@ -596,7 +612,7 @@ export function EditBlockDialog({
                   await onSave(block._id, {
                     name: name.trim(),
                     description: description.trim(),
-                    ...(block.kind === "gate" ? { params } : { prompt: prompt.trim() }),
+                    ...(block.kind === "gate" ? { params: trimmedModel(params) } : { prompt: prompt.trim() }),
                     // The pair is judged together, so a change to either sends both
                     ...(callsModel && (model !== block.model || provider !== (block.provider ?? DEFAULT_PROVIDER))
                       ? { provider, model: model.trim() }

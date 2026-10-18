@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { summarise } from "../telemetry.js";
 import { AgentRun, NO_RUN } from "./agent.js";
 import { RESULT_SCHEMA } from "../executor.js";
-import { codexAgent, removeRunHome, strictSchema, sweepRunHomes } from "./codex.js";
+import { codexAgent, codexUsable, removeRunHome, strictSchema, sweepRunHomes } from "./codex.js";
 
 const scratch: string[] = [];
 function dir(): string {
@@ -434,5 +434,23 @@ describe("a home the run made impossible to remove", () => {
     }
 
     expect(logged).toEqual([expect.stringContaining(`${home}, which holds a copy of the Codex login`)]);
+  });
+});
+
+describe("codexUsable", () => {
+  const there = (...present: string[]) => (path: string) => present.includes(path);
+
+  it("is usable with the program and the login it copies", () => {
+    expect(codexUsable("/bin/codex", "/home/.codex", there("/bin/codex", "/home/.codex/auth.json"))).toBe(true);
+  });
+
+  it("is not once the operator has signed out, which takes the login away", () => {
+    expect(codexUsable("/bin/codex", "/home/.codex", there("/bin/codex"))).toBe(false);
+  });
+
+  it("is not once the program is gone, or was never found", () => {
+    expect(codexUsable("/bin/codex", "/home/.codex", there("/home/.codex/auth.json"))).toBe(false);
+    expect(codexUsable(undefined, "/home/.codex", there("/home/.codex/auth.json"))).toBe(false);
+    expect(codexUsable("", "/home/.codex", () => true)).toBe(false);
   });
 });

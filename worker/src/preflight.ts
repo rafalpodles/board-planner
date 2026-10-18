@@ -220,12 +220,15 @@ async function codexSession(
     return { path: "", check: { name, ok: true, detail: "not installed: this machine takes no task whose agent runs on Codex" } };
   }
   const cwd = deps.env.HOME?.trim() || "/";
-  const version = await deps.runner.run(path, ["--version"], { cwd, timeoutMs: TIMEOUT_MS, env });
+  // The login is looked for where a run will copy it from (codexSourceHome), and childEnv does not
+  // forward CODEX_HOME, so a machine that sets one would otherwise be judged on a different home
+  const codexEnv = { ...env, ...(deps.env.CODEX_HOME?.trim() ? { CODEX_HOME: deps.env.CODEX_HOME.trim() } : {}) };
+  const version = await deps.runner.run(path, ["--version"], { cwd, timeoutMs: TIMEOUT_MS, env: codexEnv });
   if (version.code !== 0) {
     const why = (version.stderr || version.stdout).trim().split("\n")[0];
     return { path: "", check: { name, ok: true, warn: true, detail: `${path} is present but will not run (${why}): this machine takes no task whose agent runs on Codex` } };
   }
-  const login = await deps.runner.run(path, ["login", "status"], { cwd, timeoutMs: TIMEOUT_MS, env });
+  const login = await deps.runner.run(path, ["login", "status"], { cwd, timeoutMs: TIMEOUT_MS, env: codexEnv });
   if (login.code !== 0) {
     return {
       path: "",

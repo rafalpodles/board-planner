@@ -27,6 +27,14 @@ export interface SnapshotEntry {
   params?: Record<string, string>;
 }
 
+function gateParamsOf(block: { params?: Record<string, unknown> }, entry: { params?: Record<string, unknown> }): Record<string, string> {
+  const merged: Record<string, unknown> = { ...(block.params ?? {}), ...(entry.params ?? {}) };
+  const own = block.params?.provider;
+  if (own === undefined) delete merged.provider;
+  else merged.provider = own;
+  return Object.fromEntries(Object.entries(merged).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]));
+}
+
 export interface AgentSnapshot {
   agentId: string;
   name: string;
@@ -113,8 +121,10 @@ export async function snapshotFor(
             name: block.name,
             gateKind: block.gateKind,
             // The position's own parameters win over the block's: that is what makes two Size
-            // gates with different limits possible without two catalog rows.
-            params: { ...(block.params ?? {}), ...(entry.params ?? {}) },
+            // gates with different limits possible without two catalog rows. All but the provider,
+            // which is the block's (an admin's choice) whatever a stored position says, and every
+            // value a string, because the worker reads them as strings and the API stored numbers.
+            params: gateParamsOf(block, entry),
           }
     );
   }
