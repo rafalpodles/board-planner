@@ -237,7 +237,7 @@ export async function removeTaskLink(
   const update =
     type === "blocked_by"
       ? { $pull: { blockedBy: targetTaskId } }
-      : { $pull: { relations: { task: null, type } } };
+      : { $pull: { relations: { task: targetTaskId, type } } };
 
   // "before", so what is announced is what THIS write removed. Deciding from a separate read
   // taken first would let a link added in between be pulled here and recorded nowhere — the

@@ -440,18 +440,18 @@
       "file": "src/hooks/use-focus-trap.ts",
       "edits": [
         {
-          "find": "      close: () => onEscapeRef.current(),",
-          "replace": "      close: onEscape,"
+          "find": "      if (e.key === \"Escape\") {\n        onEscapeRef.current();\n        return;\n      }",
+          "replace": "      if (e.key === \"Escape\") {\n        onEscape();\n        return;\n      }"
         },
         {
-          "find": "  }, [active, containerRef, lockScroll, sheet]);",
-          "replace": "  }, [active, containerRef, lockScroll, sheet, onEscape]);"
+          "find": "    document.addEventListener(\"keydown\", handleKey);\n    return () => document.removeEventListener(\"keydown\", handleKey);\n  }, [active, containerRef]);",
+          "replace": "    document.addEventListener(\"keydown\", handleKey);\n    return () => document.removeEventListener(\"keydown\", handleKey);\n  }, [active, containerRef, onEscape]);"
         }
       ],
       "spec": "e2e/shortcut-help-escape.spec.ts",
       "grep": "Escape closes the help even when a context menu closes on the same press",
       "probe": "/projects/TP",
-      "assertion": "shortcut-help-escape:318 help.toBeHidden() when a context menu closes on the same Escape (BP-530 reintroduced)"
+      "assertion": "shortcut-help-escape:318 help.toBeHidden() when a context menu closes on the same Escape (BP-530 reintroduced in the keydown effect)"
     },
     {
       "id": "s33-unlink-tool-removes-nothing",

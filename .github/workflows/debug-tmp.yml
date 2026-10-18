@@ -3,9 +3,20 @@ on:
   push:
     branches: [bp-1092/mutation-sample]
 jobs:
-  debug:
+  direct:
+    name: direct ${{ matrix.id }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { id: s26-bulk-move-paints-held-card, manifest: e2e/mutations/absence-sample.json }
+          - { id: s31-layer-escape-through-stale-closure, manifest: e2e/mutations/absence-sample.json }
+          - { id: s37-relation-removal-writes-nothing, manifest: e2e/mutations/absence-sample.json }
+          - { id: g06-platform-timestamp-not-checked, manifest: e2e/mutations/guards.json }
+          - { id: g07-platform-nonce-replayable, manifest: e2e/mutations/guards.json }
+          - { id: none, manifest: e2e/mutations/absence-sample.json }
     services:
       mongo:
         image: mongo:7
@@ -19,4 +30,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test e2e/link-leaves-a-trace.spec.ts -g "removes it from the end" --reporter=list 2>&1 | grep -E "DEBUG|passed|failed|Error" | cut -c1-3000
+      - name: Apply the mutation to the source, then run its spec on a fresh server
+        env:
+          E2E_ORGANISATIONS_SERVER: "1"
+        run: |
+          ID=${{ matrix.id }}; [ "$ID" = none ] && ID=s26-bulk-move-paints-held-card && APPLY=0 || APPLY=1
+          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON -e '
+            import("./scripts/mutation-check/lib.ts").then(({parseManifest,applyEdits,escapeRegExp})=>{
+              const fs=require("fs");const m=parseManifest(fs.readFileSync(process.argv[1],"utf8")).find(x=>x.id===process.argv[2]);
+              if(process.argv[3]==="1")fs.writeFileSync(m.file,applyEdits(fs.readFileSync(m.file,"utf8"),m.edits));
+              fs.writeFileSync("/tmp/spec",m.spec);fs.writeFileSync("/tmp/grep",escapeRegExp(m.grep));
+            })' ${{ matrix.manifest }} "$ID" "$APPLY"
+          git diff --stat
+          npx playwright test "$(cat /tmp/spec)" --grep "$(cat /tmp/grep)" --retries=0 --reporter=list 2>&1 | grep -E "✓|✘|passed|failed|Error:|\.spec\.ts:[0-9]+" | head -20 || true

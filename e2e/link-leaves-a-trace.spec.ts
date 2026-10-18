@@ -352,10 +352,6 @@ test.describe("removing an incoming link", () => {
     // The database, not the panel: the row is gone after a reload, not only from an optimistic
     // render this same click drove.
     await page.goto(taskUrl(SIBLING_TASK_NUMBER));
-    await page.waitForTimeout(3000);
-    console.log("DEBUG-DECOY", JSON.stringify((await (await request.get(`/api/projects/${PROJECT_KEY}/tasks/${DECOY_TASK_ID}`, { headers: ADMIN_AUTH })).json()).relations));
-    console.log("DEBUG-SIBLING", JSON.stringify((await (await request.get(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`, { headers: ADMIN_AUTH })).json()).relatedFrom));
-    console.log("DEBUG-MAIN", (await page.locator("main").innerText()).slice(0, 3000));
     await expect(page.getByText("Relates to")).toHaveCount(0);
   });
 });
