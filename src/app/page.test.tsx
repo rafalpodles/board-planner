@@ -22,7 +22,7 @@ function requestFrom(host: string, cookie: string | null) {
   headers.mockResolvedValue(new Headers({ host, ...(cookie ? { cookie } : {}) }));
 }
 
-const home = (query: { switch?: string } = {}) => Home({ searchParams: Promise.resolve(query) });
+const home = (query: { switch?: string; start?: string } = {}) => Home({ searchParams: Promise.resolve(query) });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -51,6 +51,36 @@ describe("the platform host's front page (BP-1009)", () => {
 
     expect(page).toMatchObject({ type: PlatformSignIn });
     expect(servedOrganisationById).not.toHaveBeenCalled();
+  });
+
+  it("keeps its own page on ?start, which is the sign-up, and tells the form so (BP-1079)", async () => {
+    requestFrom("login.board-planner.com", "bp_last_organisation=" + GLOBEX.id);
+    servedOrganisationById.mockResolvedValue(GLOBEX);
+
+    const page = await home({ start: "" });
+
+    expect(page).toMatchObject({ type: PlatformSignIn, props: { signingUp: true, canSignUp: true } });
+    expect(servedOrganisationById).not.toHaveBeenCalled();
+  });
+
+  it("treats ?start as the sign-in when passwords are off, since no organisation can be made here then", async () => {
+    process.env.PASSWORD_SIGN_IN = "off";
+    try {
+      requestFrom("login.board-planner.com", null);
+
+      expect(await home({ start: "" })).toMatchObject({ type: PlatformSignIn, props: { signingUp: false, canSignUp: false } });
+      expect(servedOrganisationById).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.PASSWORD_SIGN_IN;
+    }
+  });
+
+  it("is the sign-in, not the sign-up, without ?start", async () => {
+    requestFrom("login.board-planner.com", null);
+    servedOrganisationById.mockResolvedValue(null);
+
+    expect(await home()).toMatchObject({ type: PlatformSignIn, props: { signingUp: false } });
+    expect(await home({ switch: "" })).toMatchObject({ props: { signingUp: false } });
   });
 
   it.each([

@@ -63,7 +63,7 @@ function RememberCheckbox({ checked, onChange }: { checked: boolean; onChange: (
   );
 }
 
-export function PlatformSignIn() {
+export function PlatformSignIn({ signingUp = false, canSignUp = true }: { signingUp?: boolean; canSignUp?: boolean }) {
   const [step, setStep] = useState<Step>({ name: "email" });
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -139,7 +139,9 @@ export function PlatformSignIn() {
       const organisations: Organisation[] = data.organisations ?? [];
       const passwordSignIn = data.passwordSignIn !== false;
       setDomain(data.domain ?? "");
-      if (organisations.length === 1) {
+      if (signingUp) {
+        startCreating(data.email, organisations, passwordSignIn);
+      } else if (organisations.length === 1) {
         setStep({ name: "password", email: data.email, organisation: organisations[0], organisations, passwordSignIn });
       } else {
         setStep({ name: "organisations", email: data.email, organisations, passwordSignIn });
@@ -165,21 +167,42 @@ export function PlatformSignIn() {
     });
   };
 
-  const startCreating = () => {
-    if (step.name !== "organisations" && step.name !== "password") return;
+  function startCreating(email: string, organisations: Organisation[], passwordSignIn: boolean) {
     setError("");
     setPassword("");
     if (!username) {
       setUsername(
-        latinFold(step.email.split("@")[0].split("+")[0])
+        latinFold(email.split("@")[0].split("+")[0])
           .toLowerCase()
           .replace(/[^a-z0-9._-]/g, "")
           .replace(/^[._-]+/, "")
           .slice(0, 32)
       );
     }
-    setStep({ name: "create", email: step.email, organisations: step.organisations, passwordSignIn: step.passwordSignIn });
+    setStep({ name: "create", email, organisations, passwordSignIn });
+  }
+
+  const createFromHere = () => {
+    if (step.name !== "organisations" && step.name !== "password") return;
+    startCreating(step.email, step.organisations, step.passwordSignIn);
   };
+
+  const signInInstead = () => {
+    if (step.name !== "create") return;
+    setError("");
+    setStep(
+      step.organisations.length === 1
+        ? { name: "password", email: step.email, organisation: step.organisations[0], organisations: step.organisations, passwordSignIn: step.passwordSignIn }
+        : { name: "organisations", email: step.email, organisations: step.organisations, passwordSignIn: step.passwordSignIn }
+    );
+  };
+
+  const heading =
+    signingUp && (step.name === "email" || step.name === "code" || step.name === "create")
+      ? "Create your organisation"
+      : step.name === "create"
+        ? "Create an organisation"
+        : `Sign in to ${APP_NAME}`;
 
   const submitCreate = (e: FormEvent) => {
     e.preventDefault();
@@ -199,7 +222,7 @@ export function PlatformSignIn() {
       <div className="w-full max-w-sm" data-testid="platform-sign-in">
         <div className="flex flex-col items-center mb-8">
           <Image src="/logo.svg" alt={APP_NAME} width={48} height={48} className="mb-3" />
-          <h1 className="text-2xl font-bold text-center">{step.name === "create" ? "Create an organisation" : `Sign in to ${APP_NAME}`}</h1>
+          <h1 className="text-2xl font-bold text-center">{heading}</h1>
         </div>
 
         {error && (
@@ -222,6 +245,14 @@ export function PlatformSignIn() {
             <Button type="submit" className="w-full" disabled={busy}>
               {busy ? "Sending…" : "Continue"}
             </Button>
+            {canSignUp && (
+              <p className="text-center text-sm text-text-muted">
+                {signingUp ? "Already have an account? " : "New here? "}
+                <a href={signingUp ? "/" : "/?start"} className="focus-ring underline">
+                  {signingUp ? "Sign in" : "Create an organisation"}
+                </a>
+              </p>
+            )}
             {switching && (
               <div className="border-t border-border pt-3 text-sm">
                 {forgotten ? (
@@ -291,7 +322,7 @@ export function PlatformSignIn() {
               </>
             )}
             {step.passwordSignIn && (
-              <Button type="button" variant={step.organisations.length === 0 ? "primary" : "secondary"} className="w-full" onClick={startCreating}>
+              <Button type="button" variant={step.organisations.length === 0 ? "primary" : "secondary"} className="w-full" onClick={createFromHere}>
                 Create an organisation
               </Button>
             )}
@@ -343,20 +374,22 @@ export function PlatformSignIn() {
             <Button type="submit" className="w-full" disabled={busy || terms === undefined}>
               {busy ? "Creating…" : "Create the organisation"}
             </Button>
-            <button
-              type="button"
-              onClick={() => {
-                setError("");
-                setStep(
-                  step.organisations.length === 1
-                    ? { name: "password", email: step.email, organisation: step.organisations[0], organisations: step.organisations, passwordSignIn: step.passwordSignIn }
-                    : { name: "organisations", email: step.email, organisations: step.organisations, passwordSignIn: step.passwordSignIn }
-                );
-              }}
-              className="focus-ring w-full text-sm text-text-muted underline"
-            >
-              Back
-            </button>
+            {signingUp ? (
+              <>
+                {step.organisations.length > 0 && (
+                  <button type="button" onClick={signInInstead} className="focus-ring w-full text-sm text-text-muted underline">
+                    {step.organisations.length === 1 ? `Sign in to ${step.organisations[0].name} instead` : "Sign in to one of your organisations instead"}
+                  </button>
+                )}
+                <button type="button" onClick={backToEmail} className="focus-ring w-full text-sm text-text-muted underline">
+                  Use another e-mail address
+                </button>
+              </>
+            ) : (
+              <button type="button" onClick={signInInstead} className="focus-ring w-full text-sm text-text-muted underline">
+                Back
+              </button>
+            )}
           </form>
         )}
 
@@ -420,7 +453,7 @@ export function PlatformSignIn() {
             <button type="button" onClick={backToEmail} className="focus-ring w-full text-sm text-text-muted underline">
               Use another e-mail address
             </button>
-            <button type="button" onClick={startCreating} className="focus-ring w-full text-sm text-text-muted underline">
+            <button type="button" onClick={createFromHere} className="focus-ring w-full text-sm text-text-muted underline">
               Create another organisation
             </button>
           </form>

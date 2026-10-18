@@ -122,6 +122,47 @@ test.describe("BP-673: creating an organisation from the platform host", () => {
     expect(String(second!._id)).not.toBe(String(ACME.adminId));
   });
 
+  test("BP-1079: ?start is the sign-up: it says so before the code, opens the form after it, and ignores a remembered organisation", async ({ page }) => {
+    const slug = `start-${Date.now()}`;
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+    await expect(page.getByRole("heading", { name: "Sign in to Board Planner" })).toBeVisible();
+    await page.getByRole("link", { name: "Create an organisation" }).click();
+    await page.waitForURL(`${ORGANISATIONS_PLATFORM_ORIGIN}/?start`);
+    await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sign in", exact: true })).toHaveAttribute("href", "/");
+
+    await provideAddressAndCode(page, freshAddress("starter"), ORGANISATIONS_PLATFORM_ORIGIN, "/?start");
+    await expect(page.getByTestId("create-organisation")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Use another e-mail address" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /instead$/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Back" })).toHaveCount(0);
+    await page.getByLabel("Organisation name").fill("Starter Co");
+    await page.getByLabel("Organisation address").fill(slug);
+    await page.getByLabel("Your name").fill("Peter Gibbons");
+    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByRole("checkbox", { name: /Next time you go straight to this organisation/ }).check();
+    await page.getByRole("button", { name: "Create the organisation" }).click();
+    await page.waitForURL(`${originOf(slug)}/projects`);
+
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?start`);
+    await expect(page.getByRole("heading", { name: "Create your organisation" })).toBeVisible();
+    await expect(page.getByLabel("E-mail address")).toBeVisible();
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/`);
+    await page.waitForURL(`${originOf(slug)}/projects`);
+  });
+
+  test("BP-1079: an address that already has an organisation still lands on the form from ?start, with the way to its organisation", async ({ page }) => {
+    const email = freshAddress("member");
+    await withDb((db) => db.collection("users").updateOne({ _id: ACME.adminId }, { $set: { email, emailVerifiedAt: new Date() } }));
+
+    await provideAddressAndCode(page, email, ORGANISATIONS_PLATFORM_ORIGIN, "/?start");
+    await expect(page.getByTestId("create-organisation")).toBeVisible();
+    await page.getByRole("button", { name: "Sign in to Acme instead" }).click();
+    await expect(page.getByText("Signing in to Acme")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sign in to Board Planner" })).toBeVisible();
+  });
+
   test("a Polish name becomes a plain address", async ({ page }) => {
     await provideAddressAndCode(page, freshAddress("krakow"));
     await page.getByRole("button", { name: "Create an organisation" }).click();
