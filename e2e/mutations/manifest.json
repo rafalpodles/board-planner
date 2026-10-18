@@ -6,8 +6,8 @@
       "file": "src/hooks/use-project-board.ts",
       "edits": [
         {
-          "find": "      if (parkIfHeld(err, taskId, retry)) return;\n      toast(\"Failed to move task\", \"error\");\n",
-          "replace": "      if (parkIfHeld(err, taskId, retry)) return;\n"
+          "find": "      toast(reason ? `Failed to move task: ${reason}` : \"Failed to move task\", \"error\");\n      loadData();\n    }\n  }\n\n  async function forceHeldMove",
+          "replace": "      loadData();\n    }\n  }\n\n  async function forceHeldMove"
         }
       ],
       "spec": "e2e/kanban-board-core.spec.ts",
@@ -20,8 +20,8 @@
       "file": "src/hooks/use-project-board.ts",
       "edits": [
         {
-          "find": "      toast(\"Failed to move task\", \"error\");\n      loadData();\n    }\n  }\n\n  async function forceHeldMove",
-          "replace": "      toast(\"Failed to move task\", \"error\");\n    }\n  }\n\n  async function forceHeldMove"
+          "find": "      toast(reason ? `Failed to move task: ${reason}` : \"Failed to move task\", \"error\");\n      loadData();\n    }\n  }",
+          "replace": "      toast(reason ? `Failed to move task: ${reason}` : \"Failed to move task\", \"error\");\n    }\n  }"
         }
       ],
       "spec": "e2e/kanban-board-core.spec.ts",
@@ -62,12 +62,12 @@
       "file": "src/hooks/use-project-board.ts",
       "edits": [
         {
-          "find": "    dropReadsInFlight();\n    setTasks((prev) =>\n      prev.map((t) =>\n        t._id === taskId\n          ? { ...t, status: status as ApiTask[\"status\"], order: newOrder }\n          : t\n      )\n    );\n",
-          "replace": "    dropReadsInFlight();\n"
+          "find": "    setTasks((prev) =>\n      prev.map((t) =>\n        t._id === taskId\n          ? { ...t, status: status as ApiTask[\"status\"], order: newOrder, ...optimisticLane }\n          : t\n      )\n    );\n\n    const body = {",
+          "replace": "    const body = {"
         },
         {
-          "find": ")) as Partial<ApiTask>;\n      setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...updated } : t)));\n    } catch (err) {\n      // A worker is running",
-          "replace": ")) as Partial<ApiTask>;\n      void updated;\n    } catch (err) {\n      // A worker is running"
+          "find": ")) as Partial<ApiTask>;\n      setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...updated } : t)));\n      // The parent's progress",
+          "replace": ")) as Partial<ApiTask>;\n      void updated;\n      // The parent's progress"
         }
       ],
       "spec": "e2e/kanban-board-core.spec.ts",
@@ -80,12 +80,12 @@
       "file": "src/hooks/use-project-board.ts",
       "edits": [
         {
-          "find": "    dropReadsInFlight();\n    setTasks((prev) =>\n      prev.map((t) =>\n        t._id === taskId\n          ? { ...t, status: status as ApiTask[\"status\"], order: newOrder }\n          : t\n      )\n    );\n",
-          "replace": "    dropReadsInFlight();\n"
+          "find": "    setTasks((prev) =>\n      prev.map((t) =>\n        t._id === taskId\n          ? { ...t, status: status as ApiTask[\"status\"], order: newOrder, ...optimisticLane }\n          : t\n      )\n    );\n\n    const body = {",
+          "replace": "    const body = {"
         },
         {
-          "find": ")) as Partial<ApiTask>;\n      setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...updated } : t)));\n    } catch (err) {\n      // A worker is running",
-          "replace": ")) as Partial<ApiTask>;\n      void updated;\n    } catch (err) {\n      // A worker is running"
+          "find": ")) as Partial<ApiTask>;\n      setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...updated } : t)));\n      // The parent's progress",
+          "replace": ")) as Partial<ApiTask>;\n      void updated;\n      // The parent's progress"
         }
       ],
       "spec": "e2e/kanban-board-core.spec.ts",

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  absenceAssertions,
+  parseShard,
+  pickShard,
+  seededSample,
+  selectMutations,
+  staleEdit,
   applyEdits,
   carriesMarker,
   classify,
@@ -230,6 +236,10 @@ describe("untrusted", () => {
     expect(untrusted([result(plain, "no-tests")]).map((r) => r.outcome)).toEqual(["no-tests"]);
   });
 
+  it("flags a mutation whose edit no longer matches the source", () => {
+    expect(untrusted([result(plain, "stale")])).toHaveLength(1);
+  });
+
   it("flags a mutation the dev server never compiled, and a control that was not caught", () => {
     expect(untrusted([result(plain, "not-picked-up"), result(control, "survived")])).toHaveLength(2);
   });
@@ -238,5 +248,72 @@ describe("untrusted", () => {
     expect(
       untrusted([result(plain, "caught"), result(plain, "survived"), result(plain, "baseline-red"), result(control, "caught")])
     ).toEqual([]);
+  });
+});
+
+describe("absenceAssertions", () => {
+  it("finds both shapes under the test that holds them, and skips commented-out lines", () => {
+    const text = [
+      'test("first one", async ({ page }) => {',
+      "  await expect(a).toHaveCount(0);",
+      "  // await expect(b).toHaveCount(0);",
+      "});",
+      "test('second', async () => {",
+      "  await expect(c).toBeHidden();",
+      "  await expect(d).toHaveCount(1);",
+      "});",
+    ].join("\n");
+    expect(absenceAssertions([{ spec: "e2e/x.spec.ts", text }])).toEqual([
+      { spec: "e2e/x.spec.ts", line: 2, test: "first one", source: "await expect(a).toHaveCount(0);" },
+      { spec: "e2e/x.spec.ts", line: 6, test: "second", source: "await expect(c).toBeHidden();" },
+    ]);
+  });
+});
+
+describe("seededSample", () => {
+  const items = Array.from({ length: 100 }, (_, i) => i);
+
+  it("draws the same sample for the same seed, a different one for another, with no repeats", () => {
+    const a = seededSample(items, 10, 1092);
+    expect(seededSample(items, 10, 1092)).toEqual(a);
+    expect(seededSample(items, 10, 1093)).not.toEqual(a);
+    expect(new Set(a).size).toBe(10);
+  });
+
+  it("returns everything when asked for more than there is, and leaves the input alone", () => {
+    const copy = [...items];
+    expect(seededSample(items, 500, 1).sort((x, y) => x - y)).toEqual(items);
+    expect(items).toEqual(copy);
+  });
+});
+
+describe("shards", () => {
+  const list = (n: number, controls = 1) =>
+    Array.from({ length: n }, (_, i) => ({ ...parseManifest(manifest(entry({ id: `m${i}` })))[0], control: i < controls }));
+
+  it("gives every shard the controls and splits the rest without overlap or loss", () => {
+    const all = list(11);
+    const shards = [1, 2, 3].map((k) => pickShard(all, k, 3));
+    for (const shard of shards) expect(shard[0].id).toBe("m0");
+    const rest = shards.flatMap((s) => s.slice(1).map((m) => m.id)).sort();
+    expect(rest).toEqual(all.slice(1).map((m) => m.id).sort());
+  });
+
+  it("keeps the control when --only names other mutations, and refuses a shard left with nothing else", () => {
+    const all = list(5);
+    expect(selectMutations(all, ["m3"], 1, 1).map((m) => m.id)).toEqual(["m0", "m3"]);
+    expect(() => selectMutations(all, ["m3"], 2, 2)).toThrow(/no mutation to run/);
+  });
+
+  it("reads k/n and refuses anything else", () => {
+    expect(parseShard("2/4")).toEqual({ index: 2, count: 4 });
+    for (const bad of ["0/4", "5/4", "2", "a/b", "1/0"]) expect(() => parseShard(bad)).toThrow();
+  });
+});
+
+describe("staleEdit", () => {
+  it("is null while the edits apply and names the edit once they do not", () => {
+    expect(staleEdit("const a = 1;", [{ find: "a = 1", replace: "a = 2" }])).toBeNull();
+    expect(staleEdit("const a = 1;", [{ find: "b = 1", replace: "b = 2" }])).toMatch(/matched 0 times/);
   });
 });

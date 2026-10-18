@@ -3,7 +3,7 @@
  *
  *   E2E_MONGODB_URI=mongodb://localhost:27712/bp712_e2e E2E_PORT=37120 \
  *     node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/mutation-check/run.ts \
- *     [--manifest e2e/mutations/manifest.json] [--only id,id] [--out file.md] [--restore]
+ *     [--manifest e2e/mutations/manifest.json] [--only id,id] [--shard k/n] [--out file.md] [--restore]
  *
  * One `next dev` serves every mutation: a held Playwright run owns the web servers, and each
  * mutation's spec runs with `reuseExistingServer`. A mutation counts only once the dev server has
@@ -23,6 +23,9 @@ import {
   escapeRegExp,
   marked,
   parseManifest,
+  parseShard,
+  selectMutations,
+  staleEdit,
   renderTable,
   restoreAll,
   summarise,
@@ -234,12 +237,15 @@ async function main() {
   const manifest = parseManifest(fs.readFileSync(manifestPath, "utf8"));
   const unknown = only?.filter((id) => !manifest.some((m) => m.id === id)) ?? [];
   if (unknown.length) throw new Error(`--only names no mutation in the manifest: ${unknown.join(", ")}`);
-  const mutations = manifest
-    .filter((m) => !only || only.includes(m.id))
-    .sort((a, b) => Number(b.control) - Number(a.control));
+  const shard = option("--shard");
+  const { index, count } = shard ? parseShard(shard) : { index: 1, count: 1 };
+  const mutations = selectMutations(manifest, only, index, count);
+  const stale = new Map<string, string>();
   for (const m of mutations) {
     if (!fs.existsSync(path.join(ROOT, m.spec))) throw new Error(`${m.id}: no spec at ${m.spec}`);
-    applyEdits(realFs.read(m.file), m.edits);
+    const reason = staleEdit(realFs.read(m.file), m.edits);
+    if (reason && m.control) throw new Error(`the control ${m.id} no longer applies: ${reason}`);
+    if (reason) stale.set(m.id, reason);
   }
 
   await startHold();
@@ -248,6 +254,12 @@ async function main() {
   const baselines = new Map<string, RunSummary>();
   const results: Result[] = [];
   for (const mutation of mutations) {
+    if (stale.has(mutation.id)) {
+      const result: Result = { mutation, outcome: "stale", detail: `no longer matches the source: ${stale.get(mutation.id)}` };
+      results.push(result);
+      console.log(`[mutation-check] ${mutation.id}: stale — ${result.detail}`);
+      continue;
+    }
     const key = `${mutation.spec}\u0000${mutation.grep}`;
     if (!baselines.has(key)) {
       let baseline = await runSpec(mutation, `baseline-${mutation.id}`);

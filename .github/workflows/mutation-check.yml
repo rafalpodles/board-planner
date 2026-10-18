@@ -1,0 +1,75 @@
+name: Mutation check
+
+# Breaks the code an e2e assertion watches and reports whether the suite noticed (BP-712, BP-1092).
+# By hand only: a full manifest is an hour or more of one dev server per shard.
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Which manifest to run
+        required: true
+        default: e2e/mutations/absence-sample.json
+        type: choice
+        options:
+          - e2e/mutations/absence-sample.json
+          - e2e/mutations/guards.json
+          - e2e/mutations/manifest.json
+      only:
+        description: Comma-separated mutation ids (empty runs the whole manifest)
+        required: false
+        type: string
+
+jobs:
+  mutations:
+    name: Mutations — shard ${{ matrix.shard }} of 4
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run the shard
+        env:
+          E2E_PROXIED_SERVER: "1"
+          E2E_PASSWORDLESS_SERVER: "1"
+          E2E_ORGANISATIONS_SERVER: "1"
+          MANIFEST: ${{ inputs.manifest }}
+          ONLY: ${{ inputs.only }}
+        run: |
+          if [ -n "$ONLY" ] && [ "${{ matrix.shard }}" != 1 ]; then echo "--only runs on the first shard"; exit 0; fi
+          SHARD=${{ matrix.shard }}/4; [ -n "$ONLY" ] && SHARD=1/1
+          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/mutation-check/run.ts \
+            --manifest "$MANIFEST" --shard "$SHARD" --out e2e/mutations/.work/results.md \
+            ${ONLY:+--only "$ONLY"}
+
+      - name: Summary
+        if: always()
+        run: |
+          [ -f e2e/mutations/.work/results.md ] && cat e2e/mutations/.work/results.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mutation-check-${{ matrix.shard }}
+          path: e2e/mutations/.work
+          include-hidden-files: true
+          retention-days: 14

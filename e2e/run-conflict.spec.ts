@@ -39,6 +39,7 @@ import {
 } from "./seed";
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 import { dragTo } from "./drag";
+import { silenceBoardPoll } from "./board-poll";
 
 // Per test, not once per run: the flow ends with the run released, so a retry or a second
 // iteration would otherwise start from a task no worker is holding
@@ -335,6 +336,8 @@ test("a bulk move takes what it can and leaves the task a worker is running", as
   page,
   request,
 }) => {
+  // The poll would put the held card back within ten seconds even with the bulk move painting it moved
+  await silenceBoardPoll(page);
   await signIn(page);
 
   const source = boardColumn(page, SOURCE_COLUMN.id);

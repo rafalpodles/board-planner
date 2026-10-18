@@ -1,0 +1,705 @@
+{
+  "sample": {
+    "seed": 1092,
+    "size": 50,
+    "population": 806,
+    "drawnAt": "15bc5c08",
+    "unmutated": {
+      "e2e/field-history.spec.ts:399": "history stores option labels when written, so no line renders the old entry through the current options",
+      "e2e/cross-organisation-projects.spec.ts:81": "one file cannot switch off both organisation walls; the scoped db alone makes the wall throw first (guards.json g03)"
+    }
+  },
+  "mutations": [
+    {
+      "id": "control-move-failure-toast",
+      "control": true,
+      "file": "src/hooks/use-project-board.ts",
+      "edits": [
+        {
+          "find": "      toast(reason ? `Failed to move task: ${reason}` : \"Failed to move task\", \"error\");\n      loadData();\n    }\n  }\n\n  async function forceHeldMove",
+          "replace": "      loadData();\n    }\n  }\n\n  async function forceHeldMove"
+        }
+      ],
+      "spec": "e2e/kanban-board-core.spec.ts",
+      "grep": "a move the server refuses rolls the card back",
+      "probe": "/projects/TP",
+      "assertion": "expectToast(page, \"Failed to move task\") — deliberately obvious"
+    },
+    {
+      "id": "s01-search-empty-on-failure",
+      "file": "src/app/(app)/search/page.tsx",
+      "edits": [
+        {
+          "find": "{!loading && !failed && active && hits.length === 0 && (",
+          "replace": "{!loading && active && hits.length === 0 && ("
+        }
+      ],
+      "spec": "e2e/failed-read-states.spec.ts",
+      "grep": "a search that fails says so rather than reporting no tasks",
+      "probe": "/search",
+      "assertion": "failed-read-states:168 getByText(\"No tasks found\").toHaveCount(0)"
+    },
+    {
+      "id": "s02-webhook-save-leaves-draft",
+      "file": "src/app/(app)/projects/[projectId]/settings/sections/IntegrationsSection.tsx",
+      "edits": [
+        {
+          "find": "          webhooks.commit({ webhooks: saved });\n          toast(\"Webhooks saved\", \"success\");",
+          "replace": "          webhooks.rebase({ webhooks: saved });\n          toast(\"Webhooks saved\", \"success\");"
+        }
+      ],
+      "spec": "e2e/project-settings.spec.ts",
+      "grep": "a webhook save that succeeds leaves no unsaved work behind",
+      "probe": "/projects/TP/settings",
+      "assertion": "project-settings:810 saveButton.toBeHidden() after a successful webhook save"
+    },
+    {
+      "id": "s03-audit-section-for-members",
+      "file": "src/app/(app)/projects/[projectId]/settings/page.tsx",
+      "edits": [
+        {
+          "find": "    keywords: \"audit log history changes who when activity\",\n    access: \"projectAdmin\",",
+          "replace": "    keywords: \"audit log history changes who when activity\",\n    access: \"member\","
+        }
+      ],
+      "spec": "e2e/project-audit-log.spec.ts",
+      "grep": "a member is not shown the log at all",
+      "probe": "/projects/TP/settings",
+      "assertion": "project-audit-log:287 rows(page).toHaveCount(0) for a member (with :284-286 beside it)"
+    },
+    {
+      "id": "s04-preview-keeps-editor",
+      "file": "src/components/ui/MarkdownEditor.tsx",
+      "edits": [
+        {
+          "find": "onClick={() => setPreview((p) => !p)}",
+          "replace": "onClick={() => {}}"
+        }
+      ],
+      "spec": "e2e/task-composing-controls.spec.ts",
+      "grep": "every button, with a selection and at the caret, writes the Markdown the task then renders",
+      "probe": "/projects/TP",
+      "assertion": "task-composing-controls:170 editor.toHaveCount(0) after Preview"
+    },
+    {
+      "id": "s05-create-account-on-claimed-instance",
+      "file": "src/app/login/page.tsx",
+      "edits": [
+        {
+          "find": "setUnclaimed(ok && data.unclaimed === true);",
+          "replace": "setUnclaimed(ok);"
+        }
+      ],
+      "spec": "e2e/day-zero.spec.ts",
+      "grep": "offers no account creation, and signing in still works",
+      "probe": "/login",
+      "assertion": "day-zero:187 \"First time? Create Account\" toHaveCount(0) once users exist"
+    },
+    {
+      "id": "s06-category-filter-ignored",
+      "file": "src/components/kanban/BoardFilters.tsx",
+      "edits": [
+        {
+          "find": "      result = result.filter((t) => t.category === filters.category);",
+          "replace": "      result = [...result];"
+        }
+      ],
+      "spec": "e2e/kanban-board-core.spec.ts",
+      "grep": "filters narrow the board, combine, and survive a reload",
+      "probe": "/projects/TP",
+      "assertion": "kanban-board-core:400 DECOY title toHaveCount(0) under a category filter (with :398 count beside it)"
+    },
+    {
+      "id": "s07-catalog-gates-panel-always-shown",
+      "file": "src/app/(app)/agents/page.tsx",
+      "edits": [
+        {
+          "find": "        id=\"catalog-gates\"\n        aria-labelledby=\"catalog-tab-gates\"\n        hidden={tab !== \"gates\"}",
+          "replace": "        id=\"catalog-gates\"\n        aria-labelledby=\"catalog-tab-gates\"\n        hidden={false}"
+        }
+      ],
+      "spec": "e2e/agents-catalog.spec.ts",
+      "grep": "the three tabs are one panel at a time, and the arrow keys move between them",
+      "probe": "/agents",
+      "assertion": "agents-catalog:262 gatesPanel.toBeHidden() on the Agents tab"
+    },
+    {
+      "id": "s08-foreign-key-linked",
+      "file": "src/lib/task-references.ts",
+      "edits": [
+        {
+          "find": "            if (!keyBelongsTo(key, scope)) return false;\n",
+          "replace": ""
+        }
+      ],
+      "spec": "e2e/task-references.spec.ts",
+      "grep": "a key inside code stays text, and another project's key is left alone",
+      "probe": "/projects/TP/tasks/1",
+      "assertion": "task-references:163 link \"ACME-4\" toHaveCount(0)"
+    },
+    {
+      "id": "s09-help-ignores-escape",
+      "file": "src/components/ui/ShortcutHelp.tsx",
+      "edits": [
+        {
+          "find": "<Modal open={open} onClose={onClose} title=\"Keyboard Shortcuts\"",
+          "replace": "<Modal open={open} onClose={() => {}} title=\"Keyboard Shortcuts\""
+        }
+      ],
+      "spec": "e2e/shortcut-help-escape.spec.ts",
+      "grep": "Escape closes the help without also clearing the selection underneath it",
+      "probe": "/projects/TP",
+      "assertion": "shortcut-help-escape:286 help.toBeHidden() after Escape"
+    },
+    {
+      "id": "s10-hide-done-ignored",
+      "file": "src/app/(app)/my-tasks/page.tsx",
+      "edits": [
+        {
+          "find": "const filtered = hideDone ? tasks.filter((t) => t.statusRole !== \"done\") : tasks;",
+          "replace": "const filtered = tasks;"
+        }
+      ],
+      "spec": "e2e/my-tasks.spec.ts",
+      "grep": "Hide done takes the finished work off the list, and gives it back",
+      "probe": "/my-tasks",
+      "assertion": "my-tasks:162 MINE_DONE title toHaveCount(0) with Hide done ticked"
+    },
+    {
+      "id": "s11-groups-ignore-filter",
+      "file": "src/components/kanban/ProjectBoardView.tsx",
+      "edits": [
+        {
+          "find": "? groupTasks(filteredTasks, viewMode",
+          "replace": "? groupTasks(tasks, viewMode"
+        }
+      ],
+      "spec": "e2e/list-grouping-states.spec.ts",
+      "grep": "a filter narrows the groups and their counts, and clearing it brings them back",
+      "probe": "/projects/TP",
+      "assertion": "list-grouping-states:102 header Medium toHaveCount(0) under a priority filter"
+    },
+    {
+      "id": "s12-agent-refresh-failure-replaces-editor",
+      "file": "src/app/(app)/agents/[agentId]/page.tsx",
+      "edits": [
+        {
+          "find": "  if (store.failed && !agent) {",
+          "replace": "  if (store.failed) {"
+        }
+      ],
+      "spec": "e2e/failed-read-states.spec.ts",
+      "grep": "the agent editor keeps the agent on screen when a reload fails, and Retry reads the rename",
+      "probe": "/agents/aaaaaaaaaaaaaaaaaaaaaaaa",
+      "assertion": "failed-read-states:370 agent-editor-error toHaveCount(0) after a failed refresh"
+    },
+    {
+      "id": "s13-no-done-column-hint-always",
+      "file": "src/app/(app)/projects/[projectId]/insights/page.tsx",
+      "edits": [
+        {
+          "find": "{noDoneColumn && !onSample && (",
+          "replace": "{!onSample && ("
+        }
+      ],
+      "spec": "e2e/insights-page.spec.ts",
+      "grep": "a new board says nothing has finished, and a board with no Done column says why",
+      "probe": "/projects/TP/insights",
+      "assertion": "insights-page:192 insights-no-done-column toHaveCount(0) on a board with a Done column"
+    },
+    {
+      "id": "s14-mail-screen-says-unconfigured",
+      "file": "src/app/(app)/settings/email/page.tsx",
+      "edits": [
+        {
+          "find": ") : settings.configured ? (",
+          "replace": ") : !settings.configured ? ("
+        }
+      ],
+      "spec": "e2e/instance-settings.spec.ts",
+      "grep": "the mail screen reports the server it was given",
+      "probe": "/settings/email",
+      "assertion": "instance-settings:641 \"No mail server is configured.\" toHaveCount(0) with SMTP set"
+    },
+    {
+      "id": "s15-attachment-not-removed",
+      "file": "src/components/pm/PmChat.tsx",
+      "edits": [
+        {
+          "find": "onClick={() => removePending(p.fileId)}",
+          "replace": "onClick={() => {}}"
+        }
+      ],
+      "spec": "e2e/pm-chat.spec.ts",
+      "grep": "a Retry with nothing left to send is not offered",
+      "probe": "/projects/TP/pm",
+      "assertion": "pm-chat:814 Attachment preview toHaveCount(0) after Remove attachment"
+    },
+    {
+      "id": "s16-scrim-does-not-close-drawer",
+      "file": "src/app/(app)/layout.tsx",
+      "edits": [
+        {
+          "find": "              onClick={() => setNavOpen(false)}\n              className=\"fixed inset-0 z-40 bg-black/50 md:hidden\"",
+          "replace": "              onClick={() => {}}\n              className=\"fixed inset-0 z-40 bg-black/50 md:hidden\""
+        }
+      ],
+      "spec": "e2e/narrow-navigation.spec.ts",
+      "grep": "opens, takes the page behind it away, and closes on the scrim",
+      "probe": "/projects",
+      "assertion": "narrow-navigation:95 drawer toHaveCount(0) after a click on the scrim"
+    },
+    {
+      "id": "s17-older-sprints-never-folded",
+      "file": "src/components/sprints/SprintSelector.tsx",
+      "edits": [
+        {
+          "find": "const completed = showOlder ? [...recentCompleted, ...olderCompleted] : recentCompleted;",
+          "replace": "const completed = [...recentCompleted, ...olderCompleted];"
+        }
+      ],
+      "spec": "e2e/sprints-ui.spec.ts",
+      "grep": "folds the oldest away and gives it back on Show older",
+      "probe": "/projects/TP/sprints",
+      "assertion": "sprints-ui:852 oldest closed sprint toHaveCount(0) before Show older"
+    },
+    {
+      "id": "s18-ai-assist-offered-without-key",
+      "file": "src/components/tasks/TaskForm.tsx",
+      "edits": [
+        {
+          "find": "      {aiEnabled && (\n        <div className=\"bg-bg-input border border-border rounded-lg p-3 space-y-2\">",
+          "replace": "      {(aiEnabled || aiNeedsPlan) && (\n        <div className=\"bg-bg-input border border-border rounded-lg p-3 space-y-2\">"
+        }
+      ],
+      "spec": "e2e/organisations-ai-keys.spec.ts",
+      "grep": "is offered its own key or Pro where AI Assist and the PM agent would be",
+      "probe": "/projects/TP",
+      "assertion": "organisations-ai-keys:99 AI Assist prompt toHaveCount(0) for a Free organisation with no key"
+    },
+    {
+      "id": "s19-archived-badge-on-every-card",
+      "file": "src/components/kanban/TaskCard.tsx",
+      "edits": [
+        {
+          "find": "        {task.archivedAt && (\n          <span\n            data-testid=\"card-archived\"",
+          "replace": "        {true && (\n          <span\n            data-testid=\"card-archived\""
+        }
+      ],
+      "spec": "e2e/archive-and-delete.spec.ts",
+      "grep": "it leaves the board, the list, search and my tasks, still opens by its link, and comes back from Show archived",
+      "probe": "/projects/TP",
+      "assertion": "archive-and-delete:129 card-archived toHaveCount(0) on a live card"
+    },
+    {
+      "id": "s20-closed-save-bar-keeps-summary",
+      "file": "src/components/settings/SaveBar.tsx",
+      "edits": [
+        {
+          "find": "      {!slidAway && (\n        <div className=\"px-0.5 pb-3 pt-2\">",
+          "replace": "      {true && (\n        <div className=\"px-0.5 pb-3 pt-2\">"
+        }
+      ],
+      "spec": "e2e/project-settings.spec.ts",
+      "grep": "holds nothing once a save has landed and the section is switched",
+      "probe": "/projects/TP/settings",
+      "assertion": "project-settings:909 /unsaved change/ toHaveCount(0) before anything is edited"
+    },
+    {
+      "id": "s21-new-task-dialog-ignores-close",
+      "file": "src/components/tasks/NewTaskModal.tsx",
+      "edits": [
+        {
+          "find": "<Modal open={open} onClose={onClose} closeDisabled={saving} title=\"New Task\"",
+          "replace": "<Modal open={open} onClose={() => {}} closeDisabled={saving} title=\"New Task\""
+        }
+      ],
+      "spec": "e2e/board-irreversible.spec.ts",
+      "grep": "the shortcuts the help dialog advertises do what it says",
+      "probe": "/projects/TP",
+      "assertion": "board-irreversible:831 New Task dialog toBeHidden() after Close dialog"
+    },
+    {
+      "id": "s22-held-badge-on-every-machine",
+      "file": "src/app/(app)/settings/workers/page.tsx",
+      "edits": [
+        {
+          "find": "                      {worker.condition?.state === \"held\" && (\n                        <span data-testid=\"worker-held\"",
+          "replace": "                      {true && (\n                        <span data-testid=\"worker-held\""
+        }
+      ],
+      "spec": "e2e/organisations-machine-limit.spec.ts",
+      "grep": "after Pro ends with two machines, the first connected claims, the other is kept, told why, and takes over when the first is switched off",
+      "probe": "/settings/workers",
+      "assertion": "organisations-machine-limit:285 worker-held toHaveCount(0) on the machine that claims"
+    },
+    {
+      "id": "s23-mention-offers-everyone",
+      "file": "src/app/api/projects/[projectId]/assignable-users/route.ts",
+      "edits": [
+        {
+          "find": "{ ...(await projectAudienceFilter(db, projectId)), kind: { $ne: \"machine\" }",
+          "replace": "{ kind: { $ne: \"machine\" }"
+        }
+      ],
+      "spec": "e2e/assignee-access.spec.ts",
+      "grep": "offers only the same people to @mention",
+      "probe": "/api/projects/TP/assignable-users",
+      "assertion": "assignee-access:107 outsider toHaveCount(0) in the @mention list"
+    },
+    {
+      "id": "s24-block-dialog-cancel-stays",
+      "file": "src/app/(app)/agents/components/dialogs.tsx",
+      "edits": [
+        {
+          "find": "          <Button variant=\"secondary\" onClick={onClose} disabled={busy}>\n            {readOnly ? \"Done\" : \"Cancel\"}",
+          "replace": "          <Button variant=\"secondary\" onClick={() => {}} disabled={busy}>\n            {readOnly ? \"Done\" : \"Cancel\"}"
+        }
+      ],
+      "spec": "e2e/agent-block-editing.spec.ts",
+      "grep": "editing one in use goes through where deleting it is refused, and Cancel writes nothing",
+      "probe": "/agents",
+      "assertion": "agent-block-editing:462 block dialog toBeHidden() after Cancel"
+    },
+    {
+      "id": "s25-delete-confirm-cancel-stays",
+      "file": "src/components/kanban/ProjectBoardView.tsx",
+      "edits": [
+        {
+          "find": "        onClose={() => setConfirmContextDelete(null)}",
+          "replace": "        onClose={() => {}}"
+        }
+      ],
+      "spec": "e2e/board-irreversible.spec.ts",
+      "grep": "from the card's menu: Cancel keeps the task, Delete removes it",
+      "probe": "/projects/TP",
+      "assertion": "board-irreversible:288 Delete Task dialog toBeHidden() after Cancel"
+    },
+    {
+      "id": "s26-bulk-move-paints-held-card",
+      "file": "src/hooks/use-project-board.ts",
+      "edits": [
+        {
+          "find": "prev.map((t) => (movedIds.has(t._id) ? { ...t, status: status as ApiTask[\"status\"] } : t))",
+          "replace": "prev.map((t) => (ids.includes(t._id) ? { ...t, status: status as ApiTask[\"status\"] } : t))"
+        }
+      ],
+      "spec": "e2e/run-conflict.spec.ts",
+      "grep": "a bulk move takes what it can and leaves the task a worker is running",
+      "probe": "/projects/TP",
+      "assertion": "run-conflict:367 held card toHaveCount(0) in the target column after a bulk move"
+    },
+    {
+      "id": "s27-planning-pane-never-loads",
+      "file": "src/components/sprints/PlanningPane.tsx",
+      "edits": [
+        {
+          "find": "      {loading ? (\n        <p className=\"py-8 text-center text-sm text-text-muted\">Loading…</p>",
+          "replace": "      {true ? (\n        <p className=\"py-8 text-center text-sm text-text-muted\">Loading…</p>"
+        }
+      ],
+      "spec": "e2e/sprint-planning.spec.ts",
+      "grep": "a sprint pane still loading its tasks refuses the drop, and takes it once they land",
+      "probe": "/projects/TP/sprints",
+      "assertion": "sprint-planning:353 \"Loading…\" toHaveCount(0) once the pane's tasks land"
+    },
+    {
+      "id": "s28-failed-my-tasks-reads-empty",
+      "file": "src/app/(app)/my-tasks/page.tsx",
+      "edits": [
+        {
+          "find": "  if (failed) {\n    return (\n      <LoadFailed\n        testId=\"my-tasks-error\"",
+          "replace": "  if (false) {\n    return (\n      <LoadFailed\n        testId=\"my-tasks-error\""
+        }
+      ],
+      "spec": "e2e/my-tasks.spec.ts",
+      "grep": "a failed load says so, and the retry loads the list",
+      "probe": "/my-tasks",
+      "assertion": "my-tasks:336 \"No tasks assigned to you\" toHaveCount(0) when the read failed"
+    },
+    {
+      "id": "s29-read-only-banner-for-admins",
+      "file": "src/app/(app)/agents/[agentId]/page.tsx",
+      "edits": [
+        {
+          "find": "      {!mayEdit && (\n        <p\n          data-testid=\"agent-read-only\"",
+          "replace": "      {true && (\n        <p\n          data-testid=\"agent-read-only\""
+        }
+      ],
+      "spec": "e2e/agent-editor-permissions.spec.ts",
+      "grep": "an admin is offered all of them",
+      "probe": "/agents/aaaaaaaaaaaaaaaaaaaaaaaa",
+      "assertion": "agent-editor-permissions:109 agent-read-only toHaveCount(0) for an admin"
+    },
+    {
+      "id": "s30-agents-unread-once-loaded",
+      "file": "src/components/tasks/detail/PropertyRail.tsx",
+      "edits": [
+        {
+          "find": "        {agentsStatus === \"failed\" && (\n          <LoadFailed",
+          "replace": "        {agentsStatus !== \"loading\" && (\n          <LoadFailed"
+        }
+      ],
+      "spec": "e2e/failed-read-states.spec.ts",
+      "grep": "a task's Agent row still says a personal agent is not the reader's once the list answers",
+      "probe": "/projects/TP/tasks/1",
+      "assertion": "failed-read-states:566 agents-unread toHaveCount(0) once the agent list answered"
+    },
+    {
+      "id": "s31-layer-escape-through-stale-closure",
+      "file": "src/hooks/use-focus-trap.ts",
+      "edits": [
+        {
+          "find": "      if (e.key === \"Escape\") {\n        onEscapeRef.current();\n        return;\n      }",
+          "replace": "      if (e.key === \"Escape\") {\n        onEscape();\n        return;\n      }"
+        },
+        {
+          "find": "    document.addEventListener(\"keydown\", handleKey);\n    return () => document.removeEventListener(\"keydown\", handleKey);\n  }, [active, containerRef]);",
+          "replace": "    document.addEventListener(\"keydown\", handleKey);\n    return () => document.removeEventListener(\"keydown\", handleKey);\n  }, [active, containerRef, onEscape]);"
+        }
+      ],
+      "spec": "e2e/shortcut-help-escape.spec.ts",
+      "grep": "Escape closes the help even when a context menu closes on the same press",
+      "probe": "/projects/TP",
+      "assertion": "shortcut-help-escape:318 help.toBeHidden() when a context menu closes on the same Escape (BP-530 reintroduced in the keydown effect)"
+    },
+    {
+      "id": "s33-unlink-tool-removes-nothing",
+      "file": "src/lib/mcp/tools.ts",
+      "edits": [
+        {
+          "find": "      await client.removeTaskLink(projectId, taskId, targetTaskId, type);\n      return json(describeLink(type, taskKey, targetTaskKey, true));",
+          "replace": "      return json(describeLink(type, taskKey, targetTaskKey, true));"
+        }
+      ],
+      "spec": "e2e/mcp-tools.spec.ts",
+      "grep": "link_tasks builds a parent and its child, and unlink_tasks takes it apart",
+      "probe": "/api/mcp",
+      "assertion": "mcp-tools:791 Children heading toHaveCount(0) after unlink_tasks"
+    },
+    {
+      "id": "s34-reconnecting-machine-counts-against-limit",
+      "file": "src/lib/machine-limit.ts",
+      "edits": [
+        {
+          "find": "  if (machine && (await db.Worker.exists({ name: machine.name, host: machine.host, owner: machine.owner }))) return null;\n",
+          "replace": ""
+        }
+      ],
+      "spec": "e2e/organisations-machine-limit.spec.ts",
+      "grep": "on Free, the menubar's confirmation page says so before the click, and connecting the same machine again is not refused",
+      "probe": "/api/workers/enrolment/device/ABCD-EFGH",
+      "assertion": "organisations-machine-limit:232 machine-limit toHaveCount(0) when the same machine connects again"
+    },
+    {
+      "id": "s35-members-may-rename-organisation",
+      "file": "src/app/(app)/settings/organisation/page.tsx",
+      "edits": [
+        {
+          "find": "        {isAdmin ? (\n          <form onSubmit={save}",
+          "replace": "        {true ? (\n          <form onSubmit={save}"
+        }
+      ],
+      "spec": "e2e/organisations-name.spec.ts",
+      "grep": "a member reads the name and cannot change it, on screen or through the API",
+      "probe": "/settings/organisation",
+      "assertion": "organisations-name:144 Name field toHaveCount(0) for a member"
+    },
+    {
+      "id": "s36-no-grouping-ignored",
+      "file": "src/components/kanban/BoardFilters.tsx",
+      "edits": [
+        {
+          "find": "onChange={(e) => onGroupByChange(e.target.value as GroupBy)}",
+          "replace": "onChange={(e) => e.target.value && onGroupByChange(e.target.value as GroupBy)}"
+        }
+      ],
+      "spec": "e2e/list-grouping.spec.ts",
+      "grep": "rows cannot be reordered while grouped, and the grips come back ungrouped",
+      "probe": "/projects/TP",
+      "assertion": "list-grouping:269 headers toHaveCount(0) after No grouping"
+    },
+    {
+      "id": "s37-relation-removal-writes-nothing",
+      "file": "src/lib/task-links.ts",
+      "edits": [
+        {
+          "find": "      : { $pull: { relations: { task: targetTaskId, type } } };\n\n  // \"before\"",
+          "replace": "      : { $pull: { relations: { task: null, type } } };\n\n  // \"before\""
+        }
+      ],
+      "spec": "e2e/link-leaves-a-trace.spec.ts",
+      "grep": "removes it from the end that actually holds it, and records it at both ends",
+      "probe": "/api/projects/TP/tasks/1/links",
+      "assertion": "link-leaves-a-trace:355 \"Relates to\" toHaveCount(0) after a reload"
+    },
+    {
+      "id": "s38-licence-warns-a-year-early",
+      "file": "src/components/settings/LicenceDetails.tsx",
+      "edits": [
+        {
+          "find": "  if (daysLeft <= EXPIRY_WARNING_DAYS) {",
+          "replace": "  if (daysLeft <= EXPIRY_WARNING_DAYS + 365) {"
+        }
+      ],
+      "spec": "e2e/licence.spec.ts",
+      "grep": "a signed key turns the instance Pro and the page shows who it is for",
+      "probe": "/settings/licence",
+      "assertion": "licence:57 licence-warning toHaveCount(0) with 200 days left"
+    },
+    {
+      "id": "s39-escape-keeps-selection",
+      "file": "src/components/kanban/ProjectBoardView.tsx",
+      "edits": [
+        {
+          "find": "      if (e.key === \"Escape\") {\n        setSelectedTasks(new Set());\n",
+          "replace": "      if (e.key === \"Escape\") {\n"
+        }
+      ],
+      "spec": "e2e/shortcut-help-escape.spec.ts",
+      "grep": "Escape still clears a card selection when no dialog is open",
+      "probe": "/projects/TP",
+      "assertion": "shortcut-help-escape:109 selectBox.toBeHidden() after Escape"
+    },
+    {
+      "id": "s40-pm-edit-attributed-to-the-person",
+      "file": "src/lib/pm/tools.ts",
+      "edits": [
+        {
+          "find": "updateTask(db, ctx.projectId, String(resolved.task._id), body, ctx.pmUserId);",
+          "replace": "updateTask(db, ctx.projectId, String(resolved.task._id), body, ctx.triggeredByUserId);"
+        }
+      ],
+      "spec": "e2e/field-history.spec.ts",
+      "grep": "a PM turn records its field change under the agent's own name",
+      "probe": "/api/projects/TP/pm/messages",
+      "assertion": "field-history:557 \"E2E Admin changed Difficulty\" toHaveCount(0) after a PM turn"
+    },
+    {
+      "id": "s42-new-task-dialog-stays-after-create",
+      "file": "src/components/kanban/ProjectBoardView.tsx",
+      "edits": [
+        {
+          "find": "          onSaved={() => {\n            setShowNewTask(false);\n            reload();",
+          "replace": "          onSaved={() => {\n            reload();"
+        }
+      ],
+      "spec": "e2e/task-recurrence.spec.ts",
+      "grep": "an end set on the create form is what the task is created with",
+      "probe": "/projects/TP",
+      "assertion": "task-recurrence:187 New Task dialog toHaveCount(0) after Create Task"
+    },
+    {
+      "id": "s43-confirm-button-on-confirmed-address",
+      "file": "src/app/(app)/settings/profile/page.tsx",
+      "edits": [
+        {
+          "find": "{!emailChanged && savedEmail && !pendingEmail && confirmed === false && !confirmationSentTo && (",
+          "replace": "{!emailChanged && savedEmail && !pendingEmail && !confirmationSentTo && ("
+        }
+      ],
+      "spec": "e2e/confirm-current-address.spec.ts",
+      "grep": "an address with no proof is confirmed by the link sent to it, and the address does not move",
+      "probe": "/settings/profile",
+      "assertion": "confirm-current-address:72 \"Confirm this address\" toHaveCount(0) once confirmed"
+    },
+    {
+      "id": "s44-label-search-matches-everything",
+      "file": "src/lib/custom-fields.ts",
+      "edits": [
+        {
+          "find": "    [`customFieldValues.${fieldId}`]: { $in: ids },",
+          "replace": "    _id: { $exists: true },"
+        }
+      ],
+      "spec": "e2e/labels.spec.ts",
+      "grep": "the search palette finds a task by its label, and the tasks API does too",
+      "probe": "/api/search",
+      "assertion": "labels:131 a task without the label toHaveCount(0) in the palette"
+    },
+    {
+      "id": "s45-dashboard-try-again-does-nothing",
+      "file": "src/app/(app)/projects/[projectId]/dashboard/page.tsx",
+      "edits": [
+        {
+          "find": "            <Button variant=\"secondary\" className=\"mt-4\" onClick={load}>\n              Try again",
+          "replace": "            <Button variant=\"secondary\" className=\"mt-4\" onClick={() => {}}>\n              Try again"
+        }
+      ],
+      "spec": "e2e/dashboard-says-why.spec.ts",
+      "grep": "a server that fails says what it said, and Try again picks it up",
+      "probe": "/projects/TP/dashboard",
+      "assertion": "dashboard-says-why:114 dashboard-error toHaveCount(0) after Try again"
+    },
+    {
+      "id": "s46-sso-offered-without-plan",
+      "file": "src/lib/oidc/providers.ts",
+      "edits": [
+        {
+          "find": "  if (!can(await getOrganisation(db.organisation), \"identity.sso\")) return null;\n",
+          "replace": ""
+        }
+      ],
+      "spec": "e2e/organisations-sso.spec.ts",
+      "grep": "what was stored stays while the plan does not include it, and is offered again with the plan",
+      "probe": "/api/auth/oidc/providers",
+      "assertion": "organisations-sso:159 the organisation's SSO button toHaveCount(0) without the plan"
+    },
+    {
+      "id": "s47-forced-move-keeps-the-run",
+      "file": "src/lib/task-service.ts",
+      "edits": [
+        {
+          "find": "    { $set: setFields, ...(leavesColumn ? { $unset: UNSET_RUN } : {}) },",
+          "replace": "    { $set: setFields },"
+        }
+      ],
+      "spec": "e2e/run-conflict.spec.ts",
+      "grep": "a project member, holding a grant and nothing else, meets the same refusal",
+      "probe": "/api/projects/TP/tasks",
+      "assertion": "run-conflict:472 run badge toHaveCount(0) after Move anyway"
+    },
+    {
+      "id": "s48-search-retry-keeps-the-error",
+      "file": "src/components/search/use-search.ts",
+      "edits": [
+        {
+          "find": "    setLoading(true);\n    setFailed(false);\n    const timer",
+          "replace": "    setLoading(true);\n    const timer"
+        }
+      ],
+      "spec": "e2e/failed-read-states.spec.ts",
+      "grep": "a search that fails says so rather than reporting no tasks",
+      "probe": "/search",
+      "assertion": "failed-read-states:175 search-error toHaveCount(0) after a successful Retry"
+    },
+    {
+      "id": "s49-group-by-on-the-sprint-page",
+      "file": "src/components/kanban/ProjectBoardView.tsx",
+      "edits": [
+        {
+          "find": "showGroupBy={!pinViewMode || viewMode === \"list\"}",
+          "replace": "showGroupBy={true}"
+        }
+      ],
+      "spec": "e2e/board-swimlanes.spec.ts",
+      "grep": "a board that holds a grouping the sprint page cannot draw still opens there without rows",
+      "probe": "/projects/TP/sprints",
+      "assertion": "board-swimlanes:432 Group tasks by toHaveCount(0) on the sprint page"
+    },
+    {
+      "id": "s50-other-boards-agent-offered",
+      "file": "src/components/tasks/detail/PropertyRail.tsx",
+      "edits": [
+        {
+          "find": "const offeredAgents = agents.filter((a) => mayRunForThisPerson(a) && mayRunOnThisBoard(a));",
+          "replace": "const offeredAgents = agents.filter((a) => mayRunForThisPerson(a));"
+        }
+      ],
+      "spec": "e2e/agent-picker-scoping.spec.ts",
+      "grep": "the picker offers this board's agent and withholds another board's",
+      "probe": "/projects/TP/tasks/1",
+      "assertion": "agent-picker-scoping:106 another board's agent toHaveCount(0) in the picker"
+    }
+  ]
+}
