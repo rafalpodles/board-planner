@@ -154,26 +154,43 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     #expect(icons.count == every.count)
 }
 
-@Test func theStepperMarksPassedPhasesDoneAndTheRestPending() {
+@Test func theStageIsThePhasesPlaceInThePipeline() {
     var state = WorkerState()
+    #expect(state.stageIndex == nil)
+
     state.apply(.progress(Progress(phase: "push")), at: t0)
-
-    let rows = state.stepperRows()
-
-    #expect(rows.first { $0.phase == "claiming" }?.state == .done)
-    #expect(rows.first { $0.phase == "push" }?.state == .active)
-    #expect(rows.first { $0.phase == "merge" }?.state == .pending)
+    #expect(state.stageIndex == WorkerState.pipeline.firstIndex(of: "push"))
+    #expect(WorkerState.stageLabels.count == WorkerState.pipeline.count)
+    #expect(WorkerState.stageSentences.count == WorkerState.pipeline.count)
 }
 
-// Every gate collapses onto one row: the pipeline's gate count is project policy, not a fixed shape.
-@Test func anyGatePhaseLandsOnTheSingleGatesStep() {
+// Every gate collapses onto one stage: the pipeline's gate count is project policy, not a fixed shape.
+@Test func anyGatePhaseLandsOnTheSingleGatesStage() {
     var state = WorkerState()
     state.apply(.progress(Progress(phase: "gates:test-presence")), at: t0)
 
-    let rows = state.stepperRows()
+    #expect(state.stageIndex == WorkerState.pipeline.firstIndex(of: "gates"))
+}
 
-    #expect(rows.first { $0.phase == "gates" }?.state == .active)
-    #expect(rows.first { $0.phase == "agent" }?.state == .done)
+@Test func aComposedStepLandsOnTheAgentStage() {
+    var state = WorkerState()
+    state.apply(.progress(Progress(phase: "step:implement")), at: t0)
+
+    #expect(state.stageIndex == WorkerState.pipeline.firstIndex(of: "agent"))
+}
+
+@Test func aPhaseThePipelineDoesNotKnowHasNoStage() {
+    var state = WorkerState()
+    state.apply(.progress(Progress(phase: "something-new")), at: t0)
+
+    #expect(state.stageIndex == nil)
+}
+
+@Test func theLastOutcomeIsRemembered() {
+    var state = WorkerState()
+    state.apply(.outcome(Outcome(outcome: "blocked", taskKey: "BP-1", detail: "attempts exhausted")), at: t0)
+
+    #expect(state.lastOutcome?.detail == "attempts exhausted")
 }
 
 @Test func aQuotaReadingIsRememberedWithoutDisturbingThePhase() {

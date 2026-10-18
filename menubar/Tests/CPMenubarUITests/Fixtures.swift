@@ -3,7 +3,7 @@ import Foundation
 @testable import CPMenubarCore
 
 enum Fixtures {
-    static let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    static let t0 = Date().addingTimeInterval(-252)
 
     static func state(_ build: (inout WorkerState) -> Void = { _ in }) -> WorkerState {
         var state = WorkerState()
@@ -21,7 +21,7 @@ enum Fixtures {
         ] {
             $0.apply(.progress(Progress(phase: phase, taskKey: "BP-1076", tool: tool)), at: t0)
         }
-        $0.apply(.quota(Quota(status: "allowed_warning", utilization: 0.76, resetsAt: nil, rateLimitType: "seven_day")), at: t0)
+        $0.apply(.quota(Quota(status: "allowed_warning", utilization: 0.76, resetsAt: Date().addingTimeInterval(3 * 86_400).timeIntervalSince1970, rateLimitType: "seven_day")), at: t0)
     }
 
     static let needsHuman = state {

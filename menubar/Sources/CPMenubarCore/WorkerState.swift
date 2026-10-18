@@ -19,15 +19,6 @@ public enum Health: Equatable, Sendable, CaseIterable {
     case idle, working, needsHuman, faulted, disconnected, paused
 }
 
-public enum StepState: Equatable, Sendable {
-    case done, active, pending
-}
-
-public struct StepRow: Equatable, Sendable {
-    public let phase: String
-    public let state: StepState
-}
-
 public struct WorkerState: Equatable, Sendable {
     public private(set) var health: Health = .idle
     public private(set) var currentPhase: String?
@@ -35,6 +26,7 @@ public struct WorkerState: Equatable, Sendable {
     public private(set) var recentTools: [ToolActivity] = []
     public private(set) var mergedToday: Int = 0
     public private(set) var lastQuota: Quota?
+    public private(set) var lastOutcome: Outcome?
     public private(set) var lastEventAt: Date?
     private var phaseSince: Date?
     /// When this machine last said it could not run a task. See `effectiveHealth(now:)`.
@@ -61,6 +53,7 @@ public struct WorkerState: Equatable, Sendable {
         case .quota(let quota):
             lastQuota = quota
         case .outcome(let outcome):
+            lastOutcome = outcome
             currentTaskKey = outcome.taskKey
             currentPhase = nil
             phaseSince = nil
@@ -160,20 +153,30 @@ public struct WorkerState: Equatable, Sendable {
         return "\(key) · \(phase) \(elapsed)"
     }
 
-    public func stepperRows() -> [StepRow] {
-        // A composed agent names the block it is on — "step:implement", "gates:diff-size". The
-        // stepper shows the fixed stages, so every block folds back onto the stage it belongs to.
-        let normalised = currentPhase.map { phase -> String in
-            if phase.hasPrefix("gates:") { return "gates" }
-            if phase.hasPrefix("step:") { return "agent" }
-            return phase
+    /// Where the current run is in `pipeline`, with every composed block folded onto the stage it
+    /// belongs to: the pipeline's gate count is project policy, not a fixed shape.
+    public var stageIndex: Int? {
+        guard let phase = currentPhase else { return nil }
+        let stage: String
+        if phase.hasPrefix("gates:") {
+            stage = "gates"
+        } else if phase.hasPrefix("step:") {
+            stage = "agent"
+        } else {
+            stage = phase
         }
-        guard let current = normalised, let index = Self.pipeline.firstIndex(of: current) else {
-            return Self.pipeline.map { StepRow(phase: $0, state: .pending) }
-        }
-        return Self.pipeline.enumerated().map { offset, phase in
-            StepRow(phase: phase, state: offset < index ? .done : (offset == index ? .active : .pending))
-        }
+        return Self.pipeline.firstIndex(of: stage)
+    }
+
+    public static let stageLabels = ["Claim", "Worktree", "Agent", "Gates", "Push", "PR", "Merge"]
+
+    static let stageSentences = [
+        "Claiming the task", "Preparing a worktree", "The agent is working", "Running the checks",
+        "Pushing the branch", "Opening the pull request", "Merging the pull request",
+    ]
+
+    public func elapsed(now: Date) -> TimeInterval? {
+        phaseSince.map { max(0, now.timeIntervalSince($0)) }
     }
 }
 
