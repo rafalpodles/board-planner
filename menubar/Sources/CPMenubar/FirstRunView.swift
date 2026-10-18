@@ -51,7 +51,7 @@ struct FirstRunView: View {
         VStack(alignment: .leading, spacing: 0) {
             header("Connect this Mac", "A worker runs approved tasks here and reports back to the board.")
 
-            StepHeader(number: 1, title: "Board", done: !onboarding.apiURL.isEmpty)
+            StepHeader(number: 1, title: "Board", done: !onboarding.apiURL.trimmingCharacters(in: .whitespaces).isEmpty)
             HStack(spacing: 8) {
                 TextField("your-board.example.com or localhost:3000", text: $onboarding.apiURL)
                     .textFieldStyle(.roundedBorder)
@@ -232,47 +232,61 @@ struct FirstRunView: View {
     // MARK: Setting up
 
     // The enrolment is approved and the worker is not running yet: the clone, the push check, then
-    // the start. A failure keeps the credential and says why in the message below.
+    // the start. A failure keeps the credential and says why. A relaunch in this step, or a
+    // preflight rerun after a failure, has neither a clone in flight nor a reason to show: that is
+    // an unfinished setup, and it offers the same way out rather than a spinner nobody is turning.
     private var settingUp: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let failure = onboarding.setupFailure
+        let working = onboarding.busy && failure == nil
+        return VStack(alignment: .leading, spacing: 0) {
             header("Setting up this Mac", "This takes a minute the first time.")
 
             VStack(spacing: 0) {
                 SetupRow(title: "Registered with the board", state: .done)
                 Divider()
-                SetupRow(title: "Cloning the repository and checking it can push", state: failed ? .failed : .active)
+                SetupRow(
+                    title: "Cloning the repository and checking it can push",
+                    state: failure?.stage == .cloning ? .failed
+                        : failure?.stage == .starting ? .done
+                        : working ? .active : .unfinished)
                 Divider()
-                SetupRow(title: "Starting the worker", state: .pending)
+                SetupRow(
+                    title: "Starting the worker",
+                    state: failure?.stage == .starting ? .failed : .pending)
             }
             .padding(.horizontal, 12)
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
 
-            if !onboarding.message.isEmpty {
+            if let failure {
+                Text(failure.reason)
+                    .font(.callout).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 10)
+            } else if working, !onboarding.message.isEmpty {
                 Text(onboarding.message)
-                    .font(.callout)
-                    .foregroundStyle(failed ? Color.red : .secondary)
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 10)
+            } else if !working {
+                Text("Setup did not finish. Connect again to retry; your checkouts folder and machine checks are kept.")
+                    .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 10)
             }
 
-            if failed { HStack { Spacer(); actionsAfterFailure }.padding(.top, 10) }
+            if !onboarding.busy { HStack { Spacer(); retryActions }.padding(.top, 10) }
         }
     }
 
-    private var failed: Bool {
-        !onboarding.message.isEmpty && !onboarding.message.hasPrefix("Cloning") && !onboarding.busy
-    }
-
-    private var actionsAfterFailure: some View {
+    private var retryActions: some View {
         HStack(spacing: 8) {
             Button("Check this machine") {
                 onboarding.runPreflight(checkout: onboarding.state.checkoutsFolder)
             }
-            .disabled(onboarding.state.checkoutsFolder.isEmpty || onboarding.busy)
+            .disabled(onboarding.state.checkoutsFolder.isEmpty)
             Button("Connect") { onboarding.connect() }
                 .buttonStyle(.borderedProminent)
                 .tint(Brand.actionBlue)
-                .disabled(onboarding.busy)
         }
     }
 
@@ -314,7 +328,7 @@ private struct StepHeader: View {
 }
 
 private struct SetupRow: View {
-    enum RowState { case done, active, pending, failed }
+    enum RowState { case done, active, pending, failed, unfinished }
     let title: String
     let state: RowState
 
@@ -327,6 +341,7 @@ private struct SetupRow: View {
             case .active: ProgressView().controlSize(.small)
             case .pending: Text("Next").font(.caption).foregroundStyle(.secondary)
             case .failed: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+            case .unfinished: Text("Not finished").font(.caption).foregroundStyle(.secondary)
             }
         }
         .frame(minHeight: 34)

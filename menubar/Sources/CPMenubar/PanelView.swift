@@ -14,8 +14,13 @@ struct PanelView: View {
         model.state.panelSummary(now: now, pollSeconds: model.config.map { $0.pollIntervalMs / 1000 })
     }
 
+    // A pause stops new claims and leaves a run already going to finish, so the run's own detail
+    // follows `currentPhase`, not the health word.
+    private var runInProgress: Bool { model.state.currentPhase != nil && health != .disconnected }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let quota = model.state.lastQuota.flatMap { QuotaSummary($0, now: now) }
+        return VStack(alignment: .leading, spacing: 0) {
             header
 
             VStack(alignment: .leading, spacing: 2) {
@@ -24,17 +29,22 @@ struct PanelView: View {
             }
             .padding(.top, 14)
 
-            if health == .working, let stage = model.state.stageIndex {
+            if runInProgress, let stage = model.state.stageIndex {
                 StageRail(stage: stage, labels: WorkerState.stageLabels).padding(.top, 14)
             }
 
-            if health == .working, !model.state.recentTools.isEmpty {
+            if runInProgress, !model.state.recentTools.isEmpty {
                 ToolLog(tools: tools).padding(.top, 12)
             }
 
-            if let note { note.padding(.top, 12) }
+            note.padding(.top, health == .idle || health == .disconnected || health == .paused ? 0 : 12)
 
-            if health != .disconnected { tiles.padding(.top, 12) }
+            if quota?.exhausted == true, let quota {
+                NoteCard(text: "Usage limit reached\(quota.resets.map { ", \($0)" } ?? "").", tint: .orange)
+                    .padding(.top, 12)
+            }
+
+            if health != .disconnected { tiles(quota).padding(.top, 12) }
 
             footer.padding(.top, 14)
         }
@@ -75,7 +85,7 @@ struct PanelView: View {
     private var tools: [ToolActivity] { Array(model.state.recentTools.prefix(3)) }
 
     @ViewBuilder
-    private var note: (some View)? {
+    private var note: some View {
         switch health {
         case .needsHuman:
             VStack(alignment: .leading, spacing: 8) {
@@ -89,10 +99,8 @@ struct PanelView: View {
             }
         case .faulted:
             NoteCard(text: outcomeNote ?? "The worker could not run the task on this machine.", tint: .red)
-        default:
-            if let quota, quota.exhausted {
-                NoteCard(text: "Usage limit reached\(quota.resets.map { ", \($0)" } ?? "").", tint: .orange)
-            }
+        case .idle, .working, .paused, .disconnected:
+            EmptyView()
         }
     }
 
@@ -106,11 +114,7 @@ struct PanelView: View {
         return BoardURL.task(apiURL: api, key: key)
     }
 
-    private var quota: QuotaSummary? {
-        model.state.lastQuota.flatMap { QuotaSummary($0, now: now) }
-    }
-
-    private var tiles: some View {
+    private func tiles(_ quota: QuotaSummary?) -> some View {
         HStack(spacing: 8) {
             MetricTile(label: "Merged today", value: "\(model.state.mergedToday)")
             if let quota, !quota.exhausted {
@@ -128,10 +132,10 @@ struct PanelView: View {
             }
             .buttonStyle(FooterButtonStyle())
             .opacity(health == .disconnected ? 0 : 1)
-            .allowsHitTesting(health != .disconnected)
+            .disabled(health == .disconnected)
             .accessibilityHidden(health == .disconnected)
 
-            if health == .working {
+            if model.state.currentPhase != nil && health != .disconnected {
                 Button { model.send("stop") } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(FooterButtonStyle(tint: .red))
             }

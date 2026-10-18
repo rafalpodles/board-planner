@@ -73,13 +73,18 @@ final class SurfaceSnapshotTests: XCTestCase {
 
         let cloning = OnboardingModel(
             previewState: Fixtures.onboarding(step: .starting),
-            message: "Cloning https://github.com/rafalpodles/board-planner…")
+            message: "Cloning https://github.com/rafalpodles/board-planner…", busy: true)
         Snapshot.render(FirstRunView(onboarding: cloning), name: "connect-setting-up", width: 380)
 
         let refused = OnboardingModel(
             previewState: Fixtures.onboarding(step: .starting),
-            message: "Cloned, but this machine cannot push to it: remote: Write access to repository not granted.")
+            setupFailure: .init(
+                stage: .cloning,
+                reason: "Cloned, but this machine cannot push to it: remote: Write access to repository not granted."))
         Snapshot.render(FirstRunView(onboarding: refused), name: "connect-setting-up-failed", width: 380)
+
+        let interrupted = OnboardingModel(previewState: Fixtures.onboarding(step: .starting))
+        Snapshot.render(FirstRunView(onboarding: interrupted), name: "connect-setting-up-unfinished", width: 380)
     }
 
     func testPreferences() {

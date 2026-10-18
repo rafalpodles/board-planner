@@ -44,6 +44,9 @@ public struct WorkerState: Equatable, Sendable {
         case .progress(let progress):
             if health != .paused { health = .working }
             if currentPhase != progress.phase { phaseSince = now }
+            // The first event of a run starts from nothing: claiming carries no key, and the last
+            // task's would otherwise head a panel about a task that is not this one
+            if currentPhase == nil { currentTaskKey = nil }
             currentPhase = progress.phase
             if let key = progress.taskKey { currentTaskKey = key }
             if let tool = progress.tool {

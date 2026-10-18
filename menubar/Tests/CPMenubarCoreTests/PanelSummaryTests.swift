@@ -96,6 +96,8 @@ private func state(_ events: [TelemetryEvent]) -> WorkerState {
     #expect(pills.count == Health.allCases.count)
 }
 
+private let posix = Locale(identifier: "en_US_POSIX")
+
 private var utc: Calendar {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(identifier: "UTC")!
@@ -103,11 +105,11 @@ private var utc: Calendar {
 }
 
 @Test func aWeeklyReadingNamesTheWindowAndWhenItResets() {
-    // 2027-01-15 08:00 UTC is a Friday; the reset is the following Thursday
+    // 2027-01-15 08:00 UTC is a Friday; five days on is the Wednesday
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     let quota = Quota(status: "allowed_warning", utilization: 0.764, resetsAt: now.timeIntervalSince1970 + 5 * 86_400, rateLimitType: "seven_day")
 
-    let summary = QuotaSummary(quota, now: now, calendar: utc)
+    let summary = QuotaSummary(quota, now: now, calendar: utc, locale: posix)
 
     #expect(summary?.label == "Weekly limit")
     #expect(summary?.value == "76%")
@@ -119,7 +121,7 @@ private var utc: Calendar {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     let quota = Quota(status: "allowed_warning", utilization: 0.9, resetsAt: now.timeIntervalSince1970 + 3_600, rateLimitType: "five_hour")
 
-    let summary = QuotaSummary(quota, now: now, calendar: utc)
+    let summary = QuotaSummary(quota, now: now, calendar: utc, locale: posix)
 
     #expect(summary?.label == "5-hour limit")
     #expect(summary?.resets?.hasPrefix("resets ") == true)
@@ -127,7 +129,7 @@ private var utc: Calendar {
 }
 
 @Test func aRejectedReadingIsExhaustedWithoutANumber() {
-    let summary = QuotaSummary(Quota(status: "rejected"), now: t0, calendar: utc)
+    let summary = QuotaSummary(Quota(status: "rejected"), now: t0, calendar: utc, locale: posix)
 
     #expect(summary?.value == "Reached")
     #expect(summary?.exhausted == true)
@@ -135,7 +137,7 @@ private var utc: Calendar {
 
 // The CLI sends this event only near thresholds: a status with no number is nothing to put a tile on.
 @Test func aReadingWithNoNumberAndNoRefusalHasNothingToShow() {
-    #expect(QuotaSummary(Quota(status: "allowed"), now: t0, calendar: utc) == nil)
+    #expect(QuotaSummary(Quota(status: "allowed"), now: t0, calendar: utc, locale: posix) == nil)
 }
 
 @Test func aTaskKeyBecomesItsPageOnTheBoard() {
@@ -150,4 +152,82 @@ private var utc: Calendar {
         #expect(BoardURL.task(apiURL: "app.board-planner.com", key: key) == nil, "\(key)")
     }
     #expect(BoardURL.task(apiURL: "", key: "BP-1") == nil)
+}
+
+@Test func aResetAWeekAwayIsADateNotAWeekdayThatReadsAsToday() {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let quota = Quota(status: "allowed_warning", utilization: 0.5, resetsAt: now.timeIntervalSince1970 + 6 * 86_400 + 3_600, rateLimitType: "seven_day")
+
+    let resets = QuotaSummary(quota, now: now, calendar: utc, locale: posix)?.resets
+
+    #expect(resets?.hasPrefix("resets ") == true)
+    #expect(resets?.contains("Fri") == false)
+}
+
+// The CLI reports only during a run; whatever it said last is all an idle machine has
+@Test func aWindowThatHasAlreadyResetIsNotALimitAnyMore() {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let exhausted = Quota(status: "rejected", resetsAt: now.timeIntervalSince1970 - 3_600, rateLimitType: "five_hour")
+    let warned = Quota(status: "allowed_warning", utilization: 0.9, resetsAt: now.timeIntervalSince1970 - 1, rateLimitType: "seven_day")
+
+    #expect(QuotaSummary(exhausted, now: now, calendar: utc, locale: posix) == nil)
+    #expect(QuotaSummary(warned, now: now, calendar: utc, locale: posix) == nil)
+}
+
+@Test func theModelSpecificWeeklyWindowsAreNamed() {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let later = now.timeIntervalSince1970 + 86_400
+    #expect(QuotaSummary(Quota(status: "allowed_warning", utilization: 0.8, resetsAt: later, rateLimitType: "seven_day_opus"), now: now, calendar: utc, locale: posix)?.label == "Weekly Opus limit")
+    #expect(QuotaSummary(Quota(status: "allowed_warning", utilization: 0.8, resetsAt: later, rateLimitType: "seven_day_sonnet"), now: now, calendar: utc, locale: posix)?.label == "Weekly Sonnet limit")
+}
+
+@Test func aPausedMachineSaysWhenARunIsStillGoing() {
+    var paused = WorkerState()
+    paused.apply(.progress(Progress(phase: "agent", taskKey: "BP-1")), at: t0)
+    paused.forceHealth(.paused)
+
+    let summary = paused.panelSummary(now: t0, pollSeconds: nil)
+
+    #expect(summary.headline == "Paused")
+    #expect(summary.detail == "BP-1 is still running. Nothing new will start.")
+}
+
+@Test func aSubSecondPollIsNeverSaidAsZeroSeconds() {
+    #expect(WorkerState().panelSummary(now: t0, pollSeconds: 0).detail == "Checking the board every 1 s.")
+}
+
+// Claiming carries no key, and the last task's would otherwise head the next run
+@Test func aNewRunDoesNotInheritTheLastTasksKey() {
+    var state = WorkerState()
+    state.apply(.progress(Progress(phase: "agent", taskKey: "BP-1")), at: t0)
+    state.apply(.outcome(Outcome(outcome: "merged", taskKey: "BP-1")), at: t0)
+    state.apply(.progress(Progress(phase: "claiming")), at: t0)
+
+    #expect(state.currentTaskKey == nil)
+    #expect(state.panelSummary(now: t0, pollSeconds: nil).headline == "Working")
+
+    state.apply(.progress(Progress(phase: "worktree", taskKey: "BP-2")), at: t0)
+    #expect(state.currentTaskKey == "BP-2")
+}
+
+@Test func aBlockedTaskKeepsItsKeyUntilTheNextRunStarts() {
+    var state = WorkerState()
+    state.apply(.outcome(Outcome(outcome: "blocked", taskKey: "BP-9")), at: t0)
+
+    #expect(state.currentTaskKey == "BP-9")
+    #expect(state.panelSummary(now: t0, pollSeconds: nil).detail == "BP-9 is waiting for you.")
+}
+
+@Test func aProjectKeyWithDashesAndUnderscoresIsStillALink() {
+    #expect(BoardURL.task(apiURL: "app.board-planner.com", key: "MY-APP-12")?.absoluteString
+        == "https://app.board-planner.com/projects/MY-APP/tasks/12")
+    #expect(BoardURL.task(apiURL: "app.board-planner.com", key: "MY_APP-3")?.absoluteString
+        == "https://app.board-planner.com/projects/MY_APP/tasks/3")
+}
+
+@Test func nonAsciiDigitsAndLettersAreNotALink() {
+    for key in ["BP-½", "BP-١٢", "ÉP-1", "1BP-1"] {
+        #expect(BoardURL.task(apiURL: "app.board-planner.com", key: key) == nil, "\(key)")
+    }
+    #expect(BoardURL.task(apiURL: "app.board-planner.com", key: String(repeating: "A", count: 21) + "-1") == nil)
 }

@@ -60,14 +60,15 @@ struct CPMenubarApp: App {
 private struct MenuBarLabel: View {
     let model: AppModel
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var now = Date()
     @State private var frame = 0
     private let tick = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
         let glyph = model.state.iconGlyph(now: now)
-        let breathing = glyph.breathing != nil && !reduceMotion
+        // Read from the system rather than the SwiftUI environment, which a menu bar label is not
+        // guaranteed to be given
+        let breathing = glyph.breathing != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         // The menu bar renders this as a template image, so state is carried by how many cards are lit
         // and by the badge's shape rather than by colour.
         HStack(spacing: 4) {
@@ -80,7 +81,7 @@ private struct MenuBarLabel: View {
         .task(id: breathing) {
             guard breathing else { frame = 0; return }
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(350))
+                try? await Task.sleep(for: .milliseconds(500))
                 frame += 1
             }
         }

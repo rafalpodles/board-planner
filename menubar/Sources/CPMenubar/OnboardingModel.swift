@@ -17,6 +17,15 @@ final class OnboardingModel {
     private(set) var githubAccounts: [PreflightReport.GithubAccount] = []
     private(set) var busy = false
     var message = ""
+    /// Why setup stopped after the enrolment was approved, and at which step. The screen reads this
+    /// rather than guessing from `message`, which `runPreflight` clears and a relaunch never had.
+    private(set) var setupFailure: SetupFailure?
+
+    struct SetupFailure: Equatable {
+        enum Stage { case cloning, starting }
+        let stage: Stage
+        let reason: String
+    }
 
     var apiURL: String
     var workerName: String
@@ -33,7 +42,8 @@ final class OnboardingModel {
     #if DEBUG
     init(
         previewState: OnboardingState, preflight: PreflightReport? = nil,
-        githubAccounts: [PreflightReport.GithubAccount] = [], message: String = ""
+        githubAccounts: [PreflightReport.GithubAccount] = [], message: String = "",
+        setupFailure: SetupFailure? = nil, busy: Bool = false
     ) {
         state = previewState
         apiURL = previewState.apiURL
@@ -42,6 +52,8 @@ final class OnboardingModel {
         self.githubAccounts = githubAccounts
         self.githubAccount = githubAccounts.first { $0.active }?.login ?? ""
         self.message = message
+        self.setupFailure = setupFailure
+        self.busy = busy
     }
     #endif
 
@@ -108,6 +120,7 @@ final class OnboardingModel {
         guard !busy else { return }
         busy = true
         message = ""
+        setupFailure = nil
         let client = DeviceEnrolmentClient(apiURL: apiURL)
         let machine = workerName
         let host = Host.current().name ?? ""
@@ -196,6 +209,7 @@ final class OnboardingModel {
             // The credential is kept: the enrolment succeeded, only the clone did not, and redoing
             // the approval would spend a second one for nothing.
             message = reason
+            setupFailure = SetupFailure(stage: .cloning, reason: reason)
         }
     }
 
@@ -217,8 +231,10 @@ final class OnboardingModel {
             state = Onboarding.started(state)
             persist()
             message = ""
+            setupFailure = nil
         } catch {
             message = error.localizedDescription
+            setupFailure = SetupFailure(stage: .starting, reason: error.localizedDescription)
         }
     }
 
