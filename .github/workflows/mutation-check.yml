@@ -3,6 +3,8 @@ name: Mutation check
 # Breaks the code an e2e assertion watches and reports whether the suite noticed (BP-712, BP-1092).
 # By hand only: a full manifest is an hour or more of one dev server per shard.
 on:
+  push:
+    branches: [bp-1092/mutation-sample]
   workflow_dispatch:
     inputs:
       manifest:
@@ -21,13 +23,14 @@ on:
 
 jobs:
   mutations:
-    name: Mutations — shard ${{ matrix.shard }} of 4
+    name: Mutations — ${{ matrix.manifest }} shard ${{ matrix.shard }} of 4
     runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
+        manifest: ${{ fromJson(github.event_name == 'push' && '["e2e/mutations/absence-sample.json","e2e/mutations/guards.json"]' || format('["{0}"]', inputs.manifest)) }}
     services:
       mongo:
         image: mongo:7
@@ -52,7 +55,7 @@ jobs:
           E2E_PROXIED_SERVER: "1"
           E2E_PASSWORDLESS_SERVER: "1"
           E2E_ORGANISATIONS_SERVER: "1"
-          MANIFEST: ${{ inputs.manifest }}
+          MANIFEST: ${{ matrix.manifest }}
           ONLY: ${{ inputs.only }}
         run: |
           node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/mutation-check/run.ts \
@@ -67,7 +70,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: mutation-check-${{ matrix.shard }}
+          name: mutation-check-${{ strategy.job-index }}
           path: e2e/mutations/.work
           include-hidden-files: true
           retention-days: 14
