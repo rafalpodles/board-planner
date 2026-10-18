@@ -268,6 +268,13 @@ struct FirstRunView: View {
                     .font(.callout).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 10)
+                // A check that could not run after the failure: the click must answer something
+                if !onboarding.busy, !onboarding.message.isEmpty, onboarding.message != failure.reason {
+                    Text(onboarding.message)
+                        .font(.callout).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                }
             } else if working {
                 if !onboarding.message.isEmpty {
                     Text(onboarding.message)
