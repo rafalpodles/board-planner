@@ -50,7 +50,7 @@ describe("a mention", () => {
   it("is not found in an e-mail address, a code span, a fenced block or a link", () => {
     const { container } = render(
       <MarkdownContent mentions={PEOPLE}>
-        {"write to ops@member.example, run `@member`, see [@member](https://example.com)\n\n```\n@member\n```"}
+        {"write to me@member or ops@member.example, run `@member`, see [@member](https://example.com)\n\n```\n@member\n```"}
       </MarkdownContent>
     );
 

@@ -824,6 +824,35 @@ describe("mentions in the composer (BP-1106)", () => {
     expect(box.value).toBe("ask @mem");
   });
 
+  it("does not open a list that arrives after the message was sent", async () => {
+    let answer!: (tasks: unknown[]) => void;
+    api.get.mockImplementation((path: string) =>
+      path.includes("/pm/messages")
+        ? Promise.resolve({ messages: [], nextCursor: null })
+        : path.includes("/tasks/suggest")
+          ? new Promise((resolve) => (answer = resolve))
+          : path.includes("/tasks")
+            ? Promise.resolve([])
+            : path.includes("/assignable-users")
+              ? Promise.resolve([])
+              : Promise.resolve(PROJECT)
+    );
+    api.stream.mockResolvedValue(heldStream().response);
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const box = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+
+    await typeInto(box, "see BP-1");
+    await waitFor(() => expect(answer).toBeTypeOf("function"));
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(api.stream).toHaveBeenCalled());
+
+    await act(async () => answer([{ _id: "t1", taskNumber: 12, title: "Late" }]));
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
   it("still sends on Enter when nothing is offered", async () => {
     api.stream.mockResolvedValue(heldStream().response);
     render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);

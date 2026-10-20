@@ -86,6 +86,23 @@ describe("a list somebody is done with", () => {
     expect(result.current.trigger).toBeNull();
   });
 
+  // Shift+Enter is a new line wherever Enter sends, as in the PM chat
+  it("leaves Shift+Enter to the field", async () => {
+    const { result } = await openedList();
+    let prevented = false;
+
+    act(() =>
+      result.current.onKeyDown({
+        key: "Enter",
+        shiftKey: true,
+        preventDefault: () => (prevented = true),
+      } as KeyboardEvent<HTMLTextAreaElement>)
+    );
+
+    expect(prevented).toBe(false);
+    expect(result.current.items).toHaveLength(3);
+  });
+
   it("stays shut after a pick when the triggers are rebuilt", async () => {
     const { result, rerender } = await openedList();
     act(() => result.current.onKeyDown(press("Enter")));

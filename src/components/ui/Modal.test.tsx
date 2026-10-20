@@ -321,6 +321,28 @@ describe("Modal dismissal, still intact", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  // BP-1106: a comment box in the task modal closes its suggestion list on Escape, and the modal,
+  // its draft with it, went too
+  it("leaves Escape to a field inside that has already answered it", () => {
+    const onClose = vi.fn();
+    render(
+      <Modal open onClose={onClose} title="A task">
+        <textarea aria-label="Comment" onKeyDown={(e) => e.key === "Escape" && e.preventDefault()} />
+        <input aria-label="Title" />
+      </Modal>
+    );
+
+    const escape = (field: HTMLElement) =>
+      act(() => {
+        field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      });
+    escape(screen.getByLabelText("Comment"));
+    expect(onClose).not.toHaveBeenCalled();
+
+    escape(screen.getByLabelText("Title"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("closes on a scrim click but not on a click inside", () => {
     const onClose = vi.fn();
     const { container } = renderModal({ onClose });

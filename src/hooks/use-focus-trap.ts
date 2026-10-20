@@ -83,6 +83,8 @@ export function useFocusTrap({
       const container = containerRef.current;
       if (!container || topmostLayer() !== container) return;
       if (e.key === "Escape") {
+        // A field inside that already answered it — an editor closing its suggestion list
+        if (e.defaultPrevented) return;
         onEscapeRef.current();
         return;
       }

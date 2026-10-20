@@ -13,6 +13,7 @@ import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { SuggestionList } from "@/components/ui/SuggestionList";
 import { useTriggerAutocomplete } from "@/hooks/use-trigger-autocomplete";
 import { useEditorTriggers, useMentionablePeople } from "@/hooks/use-editor-triggers";
+import type { MentionablePerson } from "@/lib/remark-mentions";
 import { timeAgo } from "@/lib/time";
 import { downscaleImage, estimateImageTokens } from "@/lib/image-resize";
 import { isPmLockedByInstance, isPmRunnable, pmDisabledReason } from "@/lib/pm/gate";
@@ -60,7 +61,15 @@ interface LiveAnswerHandle {
 }
 
 // Holds the streaming text itself, so a chunk re-renders this bubble and not the whole thread
-function LiveAnswer({ handle, onGrow }: { handle: RefObject<LiveAnswerHandle | null>; onGrow: () => void }) {
+function LiveAnswer({
+  handle,
+  onGrow,
+  mentions,
+}: {
+  handle: RefObject<LiveAnswerHandle | null>;
+  onGrow: () => void;
+  mentions: readonly MentionablePerson[];
+}) {
   const [text, setText] = useState("");
   useImperativeHandle(handle, () => ({ append: (chunk) => setText((prev) => prev + chunk), clear: () => setText("") }), []);
   useEffect(() => {
@@ -69,7 +78,7 @@ function LiveAnswer({ handle, onGrow }: { handle: RefObject<LiveAnswerHandle | n
   if (!text) return null;
   return (
     <div className="text-sm prose-sm break-words" data-testid="pm-live-text">
-      <MarkdownContent>{text}</MarkdownContent>
+      <MarkdownContent mentions={mentions}>{text}</MarkdownContent>
     </div>
   );
 }
@@ -354,6 +363,8 @@ export function PmChat({
     answerBefore.current =
       [...messages].reverse().find((m) => m.role === "assistant")?._id ?? "";
     setInput("");
+    // A suggestion still on its way would otherwise open over the emptied box
+    mention.close();
     setStopping(false);
     stopRequested.current = false;
     turnAccepted.current = false;
@@ -729,7 +740,7 @@ export function PmChat({
             <div className="max-w-[85%] bg-bg-card border border-border rounded-lg px-3 py-2">
               <p className="mb-1 mr-1.5 inline-block text-[11px] font-medium text-text-muted">PM Agent</p>
               <AiBadge />
-              <LiveAnswer handle={liveAnswer} onGrow={followLiveAnswer} />
+              <LiveAnswer handle={liveAnswer} onGrow={followLiveAnswer} mentions={people} />
               <div
                 className="flex items-center gap-2 text-sm text-text-muted"
                 role="status"

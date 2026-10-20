@@ -1,14 +1,38 @@
+import { findAndReplace, type ReplaceFunction } from "mdast-util-find-and-replace";
+import type { Root } from "mdast";
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
+
 // A username may hold dots (USERNAME_PATTERN), but a sentence may end right after one, so a dot
-// counts only when another name character follows it. The lookbehind keeps the domain of an e-mail
-// address from reading as a mention of whoever is called that.
+// counts only when another name character follows it. A username ending in a dot, or holding two
+// in a row, is therefore read short. The lookbehind keeps an e-mail address from reading as a
+// mention of whoever has the name after its @.
 const NAME = "[a-zA-Z0-9](?:[a-zA-Z0-9_-]|\\.(?=[a-zA-Z0-9_-]))*";
 const NOT_INSIDE_A_WORD = "(?<![\\w.@-])";
 
-export const MENTION = new RegExp(`${NOT_INSIDE_A_WORD}@(${NAME})`, "g");
+const MENTION = `${NOT_INSIDE_A_WORD}@(${NAME})`;
 
 /** What the composer matches before the caret: the mention being typed, possibly still empty. */
 export const MENTION_BEING_TYPED = new RegExp(`${NOT_INSIDE_A_WORD}@([a-zA-Z0-9._-]*)$`);
 
-export function mentionedUsernames(text: string): string[] {
-  return [...new Set([...text.matchAll(MENTION)].map((m) => m[1].toLowerCase()))];
+/**
+ * Every mention in a markdown tree's prose. Code, links and definitions are out of reach, so what
+ * the reader sees highlighted and who is told are the same people.
+ */
+export function replaceMentions(tree: Root, replace: (whole: string, username: string) => ReturnType<ReplaceFunction>) {
+  findAndReplace(tree, [[new RegExp(MENTION, "g"), replace]], {
+    ignore: ["code", "inlineCode", "math", "inlineMath", "link", "linkReference", "definition"],
+  });
+}
+
+const parser = unified().use(remarkParse).use(remarkGfm);
+
+export function mentionedUsernames(markdown: string): string[] {
+  const found = new Set<string>();
+  replaceMentions(parser.parse(markdown), (_whole, username) => {
+    found.add(username.toLowerCase());
+    return false;
+  });
+  return [...found];
 }

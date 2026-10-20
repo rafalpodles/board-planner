@@ -14,6 +14,14 @@ describe("mentionedUsernames", () => {
     expect(mentionedUsernames("write to ops@member.example or me@rafal")).toEqual([]);
   });
 
+  // What the reader sees highlighted is who is told: the prose, after the markdown is read
+  it("reads a mention inside emphasis, and none in code or a link", () => {
+    expect(mentionedUsernames("_@member_ and __@rafal__, not `@code` nor [@link](https://example.com)\n\n```\n@block\n```")).toEqual([
+      "member",
+      "rafal",
+    ]);
+  });
+
   it("reads a mention after punctuation and at the start of a line", () => {
     expect(mentionedUsernames("(@member)\n@rafal: yes")).toEqual(["member", "rafal"]);
   });

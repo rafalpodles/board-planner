@@ -285,19 +285,48 @@ test("a dotted username is offered, mentioned and told whole, and an e-mail addr
   await expect(option).toContainText(DOTTED_FULL_NAME);
   await page.keyboard.press("Enter");
   await expect(box).toHaveValue(`@${DOTTED_USERNAME} `);
-  await box.pressSequentially("please write to ops@member.example.");
+  // In emphasis, which the server read as the raw text `_@jan…_` and so mentioned nobody; and an
+  // address with no dot in its domain, which GFM does not make a link of
+  await box.press("Backspace");
+  await box.press("Home");
+  await box.pressSequentially("_");
+  await box.press("End");
+  await box.pressSequentially("_ please write to me@member or ops@member.example.");
 
   const posted = taskWrite(page, "POST", `/tasks/${FINISHED_TASK_ID}/comments`);
   await page.getByRole("button", { name: "Comment" }).click();
   await expectWritten(posted, 201);
 
   const comment = page.locator(".prose", { hasText: "ops@member.example" });
-  await expect(comment.locator("span.mention")).toHaveText([`@${DOTTED_USERNAME}`]);
+  await expect(comment.locator("em span.mention")).toHaveText([`@${DOTTED_USERNAME}`]);
   await expect(comment.locator("span.mention")).toHaveAttribute("title", DOTTED_FULL_NAME);
 
   await expect.poll(() => mentionsStoredFor(DOTTED_ID)).toBe(1);
   // Dispatched with the first, so it has landed by now if it was ever going to
   expect(await mentionsStoredFor(MEMBER_ID)).toBe(0);
+});
+
+// BP-1106: the modal closed on the same Escape that closed the comment's suggestion list
+test("Escape in a comment over the board closes the suggestions, not the task", async ({ page }) => {
+  await arriveSignedIn(page);
+  await page.goto(boardUrl);
+  await page.getByRole("link", { name: new RegExp(SIBLING_TASK_TITLE) }).first().click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Task title")).toHaveValue(SIBLING_TASK_TITLE);
+
+  const box = dialog.getByPlaceholder("Write a comment, @mention someone…");
+  await box.click();
+  await box.pressSequentially("ask @mem");
+  await expect(dialog.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await expect(dialog.getByRole("listbox")).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(box).toHaveValue("ask @mem");
+
+  // The control: with nothing left to close, Escape is the modal's again
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test("watching puts a person on the list and their feed keeps following the task", async ({
