@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MENTION_BEING_TYPED, mentionedUsernames } from "./mentions";
+import { MENTION_BEING_TYPED } from "./mentions";
+import { mentionedUsernames } from "./mentioned-usernames";
 
 describe("mentionedUsernames", () => {
   it("reads every username once, lower-cased", () => {
@@ -24,6 +25,17 @@ describe("mentionedUsernames", () => {
 
   it("reads a mention after punctuation and at the start of a line", () => {
     expect(mentionedUsernames("(@member)\n@rafal: yes")).toEqual(["member", "rafal"]);
+  });
+});
+
+describe("a body nested deeper than the markdown parser can follow", () => {
+  // Inside the comment limit, and enough to exhaust the parser's stack (BP-1107). The comment is
+  // already stored when its mentions are read, so a throw here answered 500 for a saved comment
+  it.each([
+    [">".repeat(6000), "blockquotes"],
+    ["- ".repeat(3000), "list items"],
+  ])("still reads its mentions from the text, through %s deep %s", (prefix) => {
+    expect(mentionedUsernames(`${prefix}@member look`)).toEqual(["member"]);
   });
 });
 

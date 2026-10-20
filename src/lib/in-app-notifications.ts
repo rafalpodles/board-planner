@@ -8,7 +8,7 @@ import { Pill, renderEmail } from "@/lib/email-template";
 import { organisationOrigin } from "@/lib/organisation-host";
 import { notificationPath } from "@/lib/urls";
 import { recipientsWithAccess } from "@/lib/grants";
-import { mentionedUsernames } from "@/lib/mentions";
+import { mentionedUsernames } from "@/lib/mentioned-usernames";
 import type { ScopedDb } from "@/lib/db-scope";
 
 /**

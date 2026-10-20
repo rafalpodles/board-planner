@@ -1,8 +1,5 @@
 import { findAndReplace, type ReplaceFunction } from "mdast-util-find-and-replace";
 import type { Root } from "mdast";
-import { unified } from "unified";
-import remarkParse from "remark-parse";
-import remarkGfm from "remark-gfm";
 
 // A username may hold dots (USERNAME_PATTERN), but a sentence may end right after one, so a dot
 // counts only when another name character follows it. A username ending in a dot, or holding two
@@ -11,7 +8,7 @@ import remarkGfm from "remark-gfm";
 const NAME = "[a-zA-Z0-9](?:[a-zA-Z0-9_-]|\\.(?=[a-zA-Z0-9_-]))*";
 const NOT_INSIDE_A_WORD = "(?<![\\w.@-])";
 
-const MENTION = `${NOT_INSIDE_A_WORD}@(${NAME})`;
+export const MENTION = `${NOT_INSIDE_A_WORD}@(${NAME})`;
 
 /** What the composer matches before the caret: the mention being typed, possibly still empty. */
 export const MENTION_BEING_TYPED = new RegExp(`${NOT_INSIDE_A_WORD}@([a-zA-Z0-9._-]*)$`);
@@ -24,15 +21,4 @@ export function replaceMentions(tree: Root, replace: (whole: string, username: s
   findAndReplace(tree, [[new RegExp(MENTION, "g"), replace]], {
     ignore: ["code", "inlineCode", "math", "inlineMath", "link", "linkReference", "definition"],
   });
-}
-
-const parser = unified().use(remarkParse).use(remarkGfm);
-
-export function mentionedUsernames(markdown: string): string[] {
-  const found = new Set<string>();
-  replaceMentions(parser.parse(markdown), (_whole, username) => {
-    found.add(username.toLowerCase());
-    return false;
-  });
-  return [...found];
 }
