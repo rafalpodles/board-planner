@@ -95,7 +95,9 @@ describe("a list somebody is done with", () => {
       result.current.onKeyDown({
         key: "Enter",
         shiftKey: true,
-        preventDefault: () => (prevented = true),
+        preventDefault: () => {
+          prevented = true;
+        },
       } as KeyboardEvent<HTMLTextAreaElement>)
     );
 
