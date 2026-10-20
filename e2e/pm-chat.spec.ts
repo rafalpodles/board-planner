@@ -1042,7 +1042,7 @@ test.describe("mentions in the chat box", () => {
     await expect(page.getByRole("listbox")).toHaveCount(0);
     await expect(box).toHaveValue(`give @member ${SIBLING_TASK_KEY} to @mem`);
 
-    // Three picks and an Escape, and the model was asked nothing
+    // Two picks and an Escape, and the model was asked nothing
     expect(await (await request.get(`${PM_STUB_URL}/requests`)).json()).toHaveLength(0);
     await expect(agentSpoke(page)).toHaveCount(0);
 
@@ -1051,5 +1051,27 @@ test.describe("mentions in the chat box", () => {
     await expect(reply(page)).toContainText("Done.");
     const mention = bubbles(page).locator("span.mention", { hasText: "@member" }).first();
     await expect(mention).toHaveAttribute("title", "E2E Member");
+  });
+
+  // The floating panel closes on Escape; the one that closes the list must leave it and the draft
+  test("Escape in the floating chat closes the list, not the chat", async ({ page }) => {
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}`);
+    await page.getByRole("button", { name: "Open PM chat" }).click();
+    const box = chatBox(page);
+    await expect(box).toBeVisible();
+
+    await box.click();
+    await box.pressSequentially("ask @mem");
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await expect(page.getByTestId("pm-chat-panel")).toBeVisible();
+    await expect(box).toHaveValue("ask @mem");
+
+    // The control: with nothing left to close, Escape is the panel's again
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("pm-chat-panel")).toHaveCount(0);
   });
 });

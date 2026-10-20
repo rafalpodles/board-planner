@@ -40,6 +40,8 @@ export function PmChatWidget() {
     // panel under it would unmount the draft and the staged uploads with it, which is the loss
     // PmChatWidget.test.tsx already guards against for a dialog opened elsewhere.
     if (e.key !== "Escape" || openLayerCount() > 0) return;
+    // A field inside that already answered it — the composer closing its suggestion list
+    if (e.defaultPrevented) return;
     // Mid-composition — Japanese, Chinese, Korean — Escape cancels the IME's candidate window and
     // belongs to the field, not to the panel
     if (e.nativeEvent.isComposing) return;

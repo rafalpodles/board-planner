@@ -322,7 +322,7 @@ body {
   border-radius: 9999px;
   padding: 0.05em 0.45em;
   font-weight: 500;
-  white-space: nowrap;
+  box-decoration-break: clone;
   cursor: default;
 }
 
