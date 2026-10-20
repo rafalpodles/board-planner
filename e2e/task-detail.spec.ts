@@ -286,12 +286,9 @@ test("a dotted username is offered, mentioned and told whole, and an e-mail addr
   await page.keyboard.press("Enter");
   await expect(box).toHaveValue(`@${DOTTED_USERNAME} `);
   // In emphasis, which the server read as the raw text `_@jan…_` and so mentioned nobody; and an
-  // address with no dot in its domain, which GFM does not make a link of
-  await box.press("Backspace");
-  await box.press("Home");
-  await box.pressSequentially("_");
-  await box.press("End");
-  await box.pressSequentially("_ please write to me@member or ops@member.example.");
+  // address with no dot in its domain, which GFM does not make a link of. Filled rather than typed
+  // around: Home and End scroll a textarea on macOS instead of moving its caret
+  await box.fill(`_@${DOTTED_USERNAME}_ please write to me@member or ops@member.example.`);
 
   const posted = taskWrite(page, "POST", `/tasks/${FINISHED_TASK_ID}/comments`);
   await page.getByRole("button", { name: "Comment" }).click();
