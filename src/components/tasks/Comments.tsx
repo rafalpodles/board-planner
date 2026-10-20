@@ -15,7 +15,7 @@ import { Avatar } from "@/components/tasks/detail/atoms";
 import type { ReferenceScope } from "@/lib/task-references";
 import { useTriggerAutocomplete, type Trigger } from "@/hooks/use-trigger-autocomplete";
 import { SuggestionList } from "@/components/ui/SuggestionList";
-import { useEditorTriggers } from "@/hooks/use-editor-triggers";
+import { useEditorTriggers, useMentionablePeople } from "@/hooks/use-editor-triggers";
 import { COMMENT_BODY_MAX_LENGTH } from "@/lib/identifiers";
 import { AiBadge } from "@/components/ui/AiBadge";
 import { SourceBadge } from "@/components/ui/SourceBadge";
@@ -214,7 +214,8 @@ export function Comments({
 
   // Two instances, one per composer: each owns a textarea, and the edit box used to share the new
   // comment's state through a "target" flag threaded into every handler.
-  const triggers = useEditorTriggers(projectId, scope?.key);
+  const people = useMentionablePeople(projectId);
+  const triggers = useEditorTriggers(projectId, scope?.key, people);
   const newMention = useTriggerAutocomplete(triggers, textareaRef, setBody);
   const editMention = useTriggerAutocomplete(triggers, editTextareaRef, setEditBody);
 
@@ -324,7 +325,7 @@ export function Comments({
               </div>
             ) : (
               <div className="text-sm prose prose-sm max-w-none overflow-x-auto">
-                <MarkdownContent mentions scope={scope}>{comment.body}</MarkdownContent>
+                <MarkdownContent mentions={people} scope={scope}>{comment.body}</MarkdownContent>
               </div>
             )}
 

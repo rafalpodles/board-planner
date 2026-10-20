@@ -10,6 +10,9 @@ import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { ApiPmMessage, ApiProject, ApiTask } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
+import { SuggestionList } from "@/components/ui/SuggestionList";
+import { useTriggerAutocomplete } from "@/hooks/use-trigger-autocomplete";
+import { useEditorTriggers, useMentionablePeople } from "@/hooks/use-editor-triggers";
 import { timeAgo } from "@/lib/time";
 import { downscaleImage, estimateImageTokens } from "@/lib/image-resize";
 import { isPmLockedByInstance, isPmRunnable, pmDisabledReason } from "@/lib/pm/gate";
@@ -101,6 +104,9 @@ export function PmChat({
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const people = useMentionablePeople(projectId);
+  const triggers = useEditorTriggers(projectId, project?.key, people);
+  const mention = useTriggerAutocomplete(triggers, inputRef, setInput);
   const [liveActions, setLiveActions] = useState<{ tool: string; taskKey?: string; summary: string }[]>([]);
   const liveAnswer = useRef<LiveAnswerHandle | null>(null);
   const stickToBottom = useRef(true);
@@ -524,6 +530,9 @@ export function PmChat({
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    // While the list is open Enter picks from it, and a pick must never also send
+    mention.onKeyDown(e);
+    if (e.defaultPrevented) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send(input);
@@ -708,7 +717,7 @@ export function PmChat({
                 </div>
               )}
               <div className="text-sm prose-sm break-words">
-                <MarkdownContent>{m.content || (m.attachments?.length ? "" : "…")}</MarkdownContent>
+                <MarkdownContent mentions={people}>{m.content || (m.attachments?.length ? "" : "…")}</MarkdownContent>
               </div>
               {actionChips(m.actions)}
               <p className="text-[10px] text-text-muted mt-1">{timeAgo(m.createdAt)}</p>
@@ -822,11 +831,21 @@ export function PmChat({
               />
             </svg>
           </button>
+          <SuggestionList
+            items={mention.items}
+            index={mention.index}
+            onPick={mention.choose}
+            onHover={mention.setIndex}
+          />
           <textarea
             ref={inputRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              mention.detect(e.target.value, e.target.selectionStart);
+            }}
             onKeyDown={handleKeyDown}
+            onBlur={() => setTimeout(mention.close, 150)}
             onPaste={(e) => {
               // How people actually attach a screenshot
               const files = [...e.clipboardData.files];

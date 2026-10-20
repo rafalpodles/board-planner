@@ -5,20 +5,75 @@ import { MarkdownContent } from "./MarkdownContent";
 
 afterEach(cleanup);
 
-// globals.css badges `:not(pre, strong) > code.md-code` and leaves a mention, bold code, a plain name,
-// which holds only while this is the shape a mention renders in
-describe("a mention", () => {
-  it("renders as bold code, the shape the stylesheet takes the backticks off", () => {
-    const { container } = render(<MarkdownContent mentions>{"@member could you look?"}</MarkdownContent>);
+const PEOPLE = [
+  { username: "member", fullName: "Mia Member" },
+  { username: "jan.kowalski", fullName: "Jan Kowalski" },
+];
 
-    expect(container.querySelector("strong > code")?.textContent).toBe("@member");
+const pills = (container: HTMLElement) =>
+  [...container.querySelectorAll("span.mention")].map((el) => ({
+    text: el.textContent,
+    title: el.getAttribute("title"),
+  }));
+
+describe("a mention", () => {
+  it("renders a person of this board as a pill naming them on hover", () => {
+    const { container } = render(<MarkdownContent mentions={PEOPLE}>{"@member could you look?"}</MarkdownContent>);
+
+    expect(pills(container)).toEqual([{ text: "@member", title: "Mia Member" }]);
+    expect(container.textContent).toBe("@member could you look?");
+  });
+
+  it("keeps a dotted username whole and leaves the full stop that ends the sentence", () => {
+    const { container } = render(
+      <MarkdownContent mentions={PEOPLE}>{"thanks @jan.kowalski. And @member."}</MarkdownContent>
+    );
+
+    expect(pills(container).map((p) => p.text)).toEqual(["@jan.kowalski", "@member"]);
+    expect(container.textContent).toBe("thanks @jan.kowalski. And @member.");
+  });
+
+  it("matches the username whatever case it was written in", () => {
+    const { container } = render(<MarkdownContent mentions={PEOPLE}>{"@Member"}</MarkdownContent>);
+
+    expect(pills(container)).toEqual([{ text: "@Member", title: "Mia Member" }]);
+  });
+
+  it("leaves someone the board cannot mention as the text that was written", () => {
+    const { container } = render(<MarkdownContent mentions={PEOPLE}>{"@stranger hello"}</MarkdownContent>);
+
+    expect(pills(container)).toEqual([]);
+    expect(container.querySelector("strong, code")).toBeNull();
+    expect(container.textContent).toBe("@stranger hello");
+  });
+
+  it("is not found in an e-mail address, a code span, a fenced block or a link", () => {
+    const { container } = render(
+      <MarkdownContent mentions={PEOPLE}>
+        {"write to ops@member.example, run `@member`, see [@member](https://example.com)\n\n```\n@member\n```"}
+      </MarkdownContent>
+    );
+
+    expect(pills(container)).toEqual([]);
+    expect(container.querySelector("code")?.textContent).toBe("@member");
+    expect(container.querySelector("a[href=\"https://example.com\"]")?.textContent).toBe("@member");
   });
 
   it("stays plain text where mentions are off", () => {
     const { container } = render(<MarkdownContent>{"@member could you look?"}</MarkdownContent>);
 
-    expect(container.querySelector("code")).toBeNull();
+    expect(pills(container)).toEqual([]);
     expect(container.textContent).toBe("@member could you look?");
+  });
+
+  it("keeps the markdown around it", () => {
+    const { container } = render(
+      <MarkdownContent mentions={PEOPLE}>{"**done**, @member\n\n- one\n- two"}</MarkdownContent>
+    );
+
+    expect(container.querySelector("strong")?.textContent).toBe("done");
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+    expect(pills(container).map((p) => p.text)).toEqual(["@member"]);
   });
 });
 
