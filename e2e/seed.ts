@@ -1689,6 +1689,38 @@ export async function seedAssignmentOutsider() {
   );
 }
 
+export const DOTTED_USERNAME = "jan.kowalski";
+export const DOTTED_FULL_NAME = "Jan Kowalski";
+export const DOTTED_ID = id("e2e00000000000000000a00a");
+
+/**
+ * BP-1105. A username may hold a dot, and a mention used to stop at it. An instance admin, so the
+ * board can mention them without a grant being written for them.
+ */
+export async function seedDottedUser() {
+  const db = (await connect()).db!;
+  await db.collection("users").insertOne({
+    _id: DOTTED_ID,
+    username: DOTTED_USERNAME,
+    password: OUTSIDER_PASSWORD_HASH,
+    fullName: DOTTED_FULL_NAME,
+    email: "",
+    emailNotifications: false,
+    collapseEmptyColumns: false,
+    kind: "human",
+    role: "admin",
+    createdAt: new Date(),
+  });
+  await stampOrganisationAndDisconnect();
+}
+
+export async function mentionsStoredFor(recipient: mongoose.Types.ObjectId): Promise<number> {
+  const db = (await connect()).db!;
+  const count = await db.collection("notifications").countDocuments({ recipient, type: "mentioned" });
+  await mongoose.disconnect();
+  return count;
+}
+
 /**
  * BP-407. The OUTCOME of an attempt, the shape `dispatchWebhooks` writes back onto a webhook row
  * after one — so the page's reading of both states is tested without waiting on a delivery.
