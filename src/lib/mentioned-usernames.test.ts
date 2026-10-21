@@ -45,6 +45,18 @@ describe("a body nested deeper than the markdown parser can follow", () => {
   it("still parses an ordinary comment, so a mention in code is not told", () => {
     expect(mentionedUsernames(`${"- ".repeat(20)}item\n\n\`@member\``)).toEqual([]);
   });
+
+  it("still parses a long paste of code, table borders and bullets", () => {
+    const line = "    def get_user_by_id(self, user_id, *args, **kwargs):  # @rafal\n        return self.__cache[user_id]\n";
+    const border = `+${"-".repeat(300)}+\n`;
+    const bullets = "* one\n* two\n".repeat(40);
+    let code = "";
+    while (code.length < 17000) code += line;
+    const body = `_@member_ see:\n\n${bullets}\n\`\`\`python\n${border}${code}\`\`\``;
+    expect(body.length).toBeLessThan(20000);
+
+    expect(mentionedUsernames(body)).toEqual(["member"]);
+  });
 });
 
 describe("MENTION_BEING_TYPED", () => {
