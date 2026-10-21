@@ -21,6 +21,29 @@ describe("a body too costly to parse (BP-1107)", () => {
     expect(tooCostlyToParse(`${body}x`)).toBe(true);
   });
 
+  // The parser ends a line at a lone \r, and sees only a space or a tab as blank
+  it.each([
+    ["a bare carriage return", `> x\r${"a\r".repeat(1200)}`],
+    ["lines of no-break spaces", `> x\n${"a\n\u00a0\n".repeat(1200)}`],
+    ["lines of em spaces", `- x\n${"a\n\u2003\n".repeat(1200)}`],
+  ])("is not fooled by %s ending a lazy line", (_label, body) => {
+    expect(tooCostlyToParse(body)).toBe(true);
+  });
+
+  it("allows exactly as much as each limit says", () => {
+    expect(tooCostlyToParse(`${"- ".repeat(39)}x`)).toBe(false);
+    expect(tooCostlyToParse(`${"- ".repeat(40)}x`)).toBe(true);
+
+    expect(tooCostlyToParse(`> q\n${"a\n".repeat(500)}`)).toBe(false);
+    expect(tooCostlyToParse(`> q\n${"a\n".repeat(501)}`)).toBe(true);
+
+    expect(tooCostlyToParse("x *y ".repeat(2000))).toBe(false);
+    expect(tooCostlyToParse("x *y ".repeat(2001))).toBe(true);
+
+    expect(tooCostlyToParse("a".repeat(20000))).toBe(false);
+    expect(tooCostlyToParse("a".repeat(20001))).toBe(true);
+  });
+
   it("finds the nesting on any line, not only the first", () => {
     expect(tooCostlyToParse(`a comment\n\n${">".repeat(600)} deep`)).toBe(true);
   });
@@ -38,6 +61,7 @@ describe("a body too costly to parse (BP-1107)", () => {
     ["a quoted e-mail reply", repeat("> a quoted line of the reply\n", 19000)],
     ["many short quotes, each continued lazily", repeat("> quote\nlazy one\nlazy two\nlazy three\n\n", 19000)],
     ["a long bullet list", repeat("- an item in a long list\n", 19000)],
+    ["thousands of star bullets", repeat("* a\n", 19000)],
     ["a paste of Python", repeat("    def get(self, user_id, *args, **kwargs):\n        return self.__cache[user_id]\n", 19000)],
     ["snake_case names, thousands of underscores", "get_user_by_id ".repeat(1300)],
     [

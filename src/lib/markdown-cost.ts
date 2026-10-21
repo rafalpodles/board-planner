@@ -11,15 +11,25 @@ const DEEPLY_NESTED = new RegExp(
   `^(?:[ \\t]*(?:>|[-*+](?=[ \\t])|\\d{1,9}[.)](?=[ \\t]))){${NESTING_TOKENS},}`,
   "m"
 );
+// Only a space or a tab makes a line blank to the parser; a no-break space is text
+const BLANK_LINE = /^[ \t]*$/;
 const CONTAINER_LINE = /^[ \t]*(?:>|[-*+][ \t]|\d{1,9}[.)][ \t])/;
 
 export function tooCostlyToParse(markdown: string): boolean {
   if (markdown.length > MOST_PARSED_CHARS || DEEPLY_NESTED.test(markdown)) return true;
 
   let markers = 0;
+  let atLineStart = true;
   for (let i = 0; i < markdown.length; i++) {
     const char = markdown[i];
-    if (char !== "*" && char !== "_") continue;
+    if (char === "\n" || char === "\r") {
+      atLineStart = true;
+      continue;
+    }
+    if (char === " " || char === "\t") continue;
+    const bullet = atLineStart && char === "*" && /[ \t]/.test(markdown[i + 1] ?? "");
+    atLineStart = false;
+    if ((char !== "*" && char !== "_") || bullet) continue;
     // snake_case and __dunder__ names: an underscore between two word characters emphasises nothing
     if (char === "_" && /\w/.test(markdown[i - 1] ?? "") && /\w/.test(markdown[i + 1] ?? "")) continue;
     if (++markers > MOST_EMPHASIS_MARKERS) return true;
@@ -28,8 +38,8 @@ export function tooCostlyToParse(markdown: string): boolean {
   // Lines that continue a quote or list item without repeating its marker
   let inContainer = false;
   let lazy = 0;
-  for (const line of markdown.split("\n")) {
-    if (!line.trim()) {
+  for (const line of markdown.split(/\r\n|\r|\n/)) {
+    if (BLANK_LINE.test(line)) {
       inContainer = false;
       lazy = 0;
     } else if (CONTAINER_LINE.test(line)) {

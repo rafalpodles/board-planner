@@ -65,7 +65,7 @@ function RawText({ children, inline }: { children: string; inline: boolean }) {
   return (
     <div>
       <p data-markdown="note" className="mb-1 text-xs text-text-muted">
-        Shown as plain text: too long or too deeply nested to format.
+        Shown as plain text: too long or too complex to format.
       </p>
       <div data-markdown="raw" className={RAW_TEXT}>
         {children}
