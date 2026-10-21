@@ -29,13 +29,21 @@ describe("mentionedUsernames", () => {
 });
 
 describe("a body nested deeper than the markdown parser can follow", () => {
-  // Inside the comment limit, and enough to exhaust the parser's stack (BP-1107). The comment is
-  // already stored when its mentions are read, so a throw here answered 500 for a saved comment
+  // Inside the comment limit. Each costs the parser seconds and then its stack (BP-1107), on a comment
+  // already stored: a throw answered 500 for it, and the wait held up every other request
   it.each([
-    [">".repeat(6000), "blockquotes"],
-    ["- ".repeat(3000), "list items"],
-  ])("still reads its mentions from the text, through %s deep %s", (prefix) => {
+    [">".repeat(15000), "blockquotes"],
+    ["- ".repeat(7500), "list items"],
+    ["_*".repeat(10000), "emphasis markers"],
+  ])("reads its mentions from the text, at once, through %s deep %s", (prefix) => {
+    const started = performance.now();
     expect(mentionedUsernames(`${prefix}@member look`)).toEqual(["member"]);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  // The guard reads the raw text, which a fence does not hide; the parse it skips would have
+  it("still parses an ordinary comment, so a mention in code is not told", () => {
+    expect(mentionedUsernames(`${"- ".repeat(20)}item\n\n\`@member\``)).toEqual([]);
   });
 });
 
