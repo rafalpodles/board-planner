@@ -32,11 +32,11 @@ describe("a body nested deeper than the markdown parser can follow", () => {
   // Inside the comment limit. Each costs the parser seconds and then its stack (BP-1107), on a comment
   // already stored: a throw answered 500 for it, and the wait held up every other request
   it.each([
-    [">".repeat(15000), "blockquotes"],
-    ["- ".repeat(7500), "list items"],
-    ["_*".repeat(10000), "emphasis markers"],
-    ["1. ".repeat(6600), "numbered list items"],
-  ])("reads its mentions from the text, at once, through %s deep %s", (prefix) => {
+    ["blockquotes", ">".repeat(15000)],
+    ["list items", "- ".repeat(7500)],
+    ["emphasis markers", "_*".repeat(10000)],
+    ["numbered list items", "1. ".repeat(6600)],
+  ])("reads its mentions from the text, at once, through deep %s", (_label, prefix) => {
     const started = performance.now();
     expect(mentionedUsernames(`${prefix}@member look`)).toEqual(["member"]);
     expect(performance.now() - started).toBeLessThan(200);
