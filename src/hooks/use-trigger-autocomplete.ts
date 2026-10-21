@@ -148,7 +148,7 @@ export function useTriggerAutocomplete(
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
         setIndex((i) => Math.max(i - 1, 0));
-      } else if (event.key === "Enter" || event.key === "Tab") {
+      } else if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
         event.preventDefault();
         choose(items[index]);
       } else if (event.key === "Escape") {

@@ -10,6 +10,10 @@ import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { ApiPmMessage, ApiProject, ApiTask } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { MarkdownContent } from "@/components/ui/MarkdownContent";
+import { SuggestionList } from "@/components/ui/SuggestionList";
+import { useTriggerAutocomplete } from "@/hooks/use-trigger-autocomplete";
+import { useEditorTriggers, useMentionablePeople } from "@/hooks/use-editor-triggers";
+import type { MentionablePerson } from "@/lib/remark-mentions";
 import { timeAgo } from "@/lib/time";
 import { downscaleImage, estimateImageTokens } from "@/lib/image-resize";
 import { isPmLockedByInstance, isPmRunnable, pmDisabledReason } from "@/lib/pm/gate";
@@ -57,7 +61,15 @@ interface LiveAnswerHandle {
 }
 
 // Holds the streaming text itself, so a chunk re-renders this bubble and not the whole thread
-function LiveAnswer({ handle, onGrow }: { handle: RefObject<LiveAnswerHandle | null>; onGrow: () => void }) {
+function LiveAnswer({
+  handle,
+  onGrow,
+  mentions,
+}: {
+  handle: RefObject<LiveAnswerHandle | null>;
+  onGrow: () => void;
+  mentions: readonly MentionablePerson[];
+}) {
   const [text, setText] = useState("");
   useImperativeHandle(handle, () => ({ append: (chunk) => setText((prev) => prev + chunk), clear: () => setText("") }), []);
   useEffect(() => {
@@ -66,7 +78,7 @@ function LiveAnswer({ handle, onGrow }: { handle: RefObject<LiveAnswerHandle | n
   if (!text) return null;
   return (
     <div className="text-sm prose-sm break-words" data-testid="pm-live-text">
-      <MarkdownContent>{text}</MarkdownContent>
+      <MarkdownContent mentions={mentions}>{text}</MarkdownContent>
     </div>
   );
 }
@@ -101,6 +113,9 @@ export function PmChat({
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const people = useMentionablePeople(projectId);
+  const triggers = useEditorTriggers(projectId, project?.key, people);
+  const mention = useTriggerAutocomplete(triggers, inputRef, setInput);
   const [liveActions, setLiveActions] = useState<{ tool: string; taskKey?: string; summary: string }[]>([]);
   const liveAnswer = useRef<LiveAnswerHandle | null>(null);
   const stickToBottom = useRef(true);
@@ -348,6 +363,8 @@ export function PmChat({
     answerBefore.current =
       [...messages].reverse().find((m) => m.role === "assistant")?._id ?? "";
     setInput("");
+    // A suggestion still on its way would otherwise open over the emptied box
+    mention.close();
     setStopping(false);
     stopRequested.current = false;
     turnAccepted.current = false;
@@ -524,6 +541,9 @@ export function PmChat({
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    // While the list is open Enter picks from it, and a pick must never also send
+    mention.onKeyDown(e);
+    if (e.defaultPrevented) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send(input);
@@ -708,7 +728,7 @@ export function PmChat({
                 </div>
               )}
               <div className="text-sm prose-sm break-words">
-                <MarkdownContent>{m.content || (m.attachments?.length ? "" : "…")}</MarkdownContent>
+                <MarkdownContent mentions={people}>{m.content || (m.attachments?.length ? "" : "…")}</MarkdownContent>
               </div>
               {actionChips(m.actions)}
               <p className="text-[10px] text-text-muted mt-1">{timeAgo(m.createdAt)}</p>
@@ -720,7 +740,7 @@ export function PmChat({
             <div className="max-w-[85%] bg-bg-card border border-border rounded-lg px-3 py-2">
               <p className="mb-1 mr-1.5 inline-block text-[11px] font-medium text-text-muted">PM Agent</p>
               <AiBadge />
-              <LiveAnswer handle={liveAnswer} onGrow={followLiveAnswer} />
+              <LiveAnswer handle={liveAnswer} onGrow={followLiveAnswer} mentions={people} />
               <div
                 className="flex items-center gap-2 text-sm text-text-muted"
                 role="status"
@@ -822,11 +842,21 @@ export function PmChat({
               />
             </svg>
           </button>
+          <SuggestionList
+            items={mention.items}
+            index={mention.index}
+            onPick={mention.choose}
+            onHover={mention.setIndex}
+          />
           <textarea
             ref={inputRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              mention.detect(e.target.value, e.target.selectionStart);
+            }}
             onKeyDown={handleKeyDown}
+            onBlur={() => setTimeout(mention.close, 150)}
             onPaste={(e) => {
               // How people actually attach a screenshot
               const files = [...e.clipboardData.files];

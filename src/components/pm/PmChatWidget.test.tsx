@@ -19,7 +19,13 @@ const { api } = vi.hoisted(() => ({
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/projects/TP/sprints" }));
 vi.mock("next/link", () => ({ default: ({ children }: { children: React.ReactNode }) => children }));
-vi.mock("./PmChat", () => ({ PmChat: () => null }));
+const chat = vi.hoisted(() => ({ consumesEscape: false }));
+vi.mock("./PmChat", () => ({
+  PmChat: () =>
+    chat.consumesEscape ? (
+      <textarea aria-label="composer" onKeyDown={(e) => e.key === "Escape" && e.preventDefault()} />
+    ) : null,
+}));
 
 const PROJECT = {
   _id: "p1",
@@ -38,6 +44,7 @@ function zOf(el: Element | null | undefined): number {
 }
 
 beforeEach(() => {
+  chat.consumesEscape = false;
   api.get.mockReset();
   api.get.mockResolvedValue(PROJECT);
 });
@@ -223,6 +230,16 @@ describe("the chat's own keyboard", () => {
    * panel must not close underneath it — that would unmount the draft and the staged uploads, the
    * loss this suite already guards against for a dialog opened elsewhere.
    */
+  // BP-1106: Escape closes the composer's suggestion list, and must not take the draft with it
+  it("leaves Escape alone when a field inside has already answered it", async () => {
+    chat.consumesEscape = true;
+    await open();
+
+    fireEvent.keyDown(screen.getByLabelText("composer"), { key: "Escape" });
+
+    expect(screen.queryByTestId("pm-chat-panel")).not.toBeNull();
+  });
+
   it("leaves Escape alone while a layer of its own is open", async () => {
     const panel = await open();
     render(

@@ -1012,3 +1012,66 @@ test.describe("whose conversation it is", () => {
     await other.close();
   });
 });
+
+// BP-1106. The comment composer and the description offered `@` people and the board's tasks; the
+// PM chat, where people name both most, offered neither.
+test.describe("mentions in the chat box", () => {
+  test("@ offers the board's people and the key its tasks, and picking one never sends", async ({
+    page,
+    request,
+  }) => {
+    await signIn(page);
+    await openChat(page);
+
+    const box = chatBox(page);
+    await box.click();
+    await box.pressSequentially("give @mem");
+    const person = page.getByRole("option", { name: /member/ });
+    await expect(person).toContainText("E2E Member");
+    await page.keyboard.press("Enter");
+    await expect(box).toHaveValue("give @member ");
+
+    await box.pressSequentially(`${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`);
+    await expect(page.getByRole("option", { name: new RegExp(`${PROJECT_KEY}-${SIBLING_TASK_NUMBER}\\b`) })).toBeVisible();
+    await page.keyboard.press("Tab");
+    await expect(box).toHaveValue(`give @member ${SIBLING_TASK_KEY} `);
+
+    await box.pressSequentially("to @mem");
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await expect(box).toHaveValue(`give @member ${SIBLING_TASK_KEY} to @mem`);
+
+    // Two picks and an Escape, and the model was asked nothing
+    expect(await (await request.get(`${PM_STUB_URL}/requests`)).json()).toHaveLength(0);
+    await expect(agentSpoke(page)).toHaveCount(0);
+
+    await box.fill("");
+    await say(page, "assign it to @member", { say: "Done." });
+    await expect(reply(page)).toContainText("Done.");
+    const mention = bubbles(page).locator("span.mention", { hasText: "@member" }).first();
+    await expect(mention).toHaveAttribute("title", "E2E Member");
+  });
+
+  // The floating panel closes on Escape; the one that closes the list must leave it and the draft
+  test("Escape in the floating chat closes the list, not the chat", async ({ page }) => {
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}`);
+    await page.getByRole("button", { name: "Open PM chat" }).click();
+    const box = chatBox(page);
+    await expect(box).toBeVisible();
+
+    await box.click();
+    await box.pressSequentially("ask @mem");
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await expect(page.getByTestId("pm-chat-panel")).toBeVisible();
+    await expect(box).toHaveValue("ask @mem");
+
+    // The control: with nothing left to close, Escape is the panel's again
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("pm-chat-panel")).toHaveCount(0);
+  });
+});

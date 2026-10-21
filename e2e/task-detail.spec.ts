@@ -4,9 +4,14 @@ import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
   DECOY_TASK_ID,
+  DOTTED_FULL_NAME,
+  DOTTED_ID,
+  DOTTED_USERNAME,
   DECOY_TASK_NUMBER,
   FINISHED_TASK_ID,
   FINISHED_TASK_NUMBER,
+  MEMBER_ID,
+  mentionsStoredFor,
   PROJECT_KEY,
   PROJECT_NAME,
   SIBLING_TASK_ID,
@@ -14,6 +19,7 @@ import {
   SIBLING_TASK_TITLE,
   storedActivity,
   seed,
+  seedDottedUser,
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 import { TASK_TITLE_MAX_LENGTH } from "@/lib/identifiers";
@@ -221,9 +227,9 @@ test("a mention lands in the mentioned user's feed", async ({ page, request }) =
     .toBe(true);
 });
 
-// The typography plugin fences inline code with a backtick on each side and bolds it. A mention
-// renders as bold code, so it read `@member`; ordinary inline code read the same way, unstyled (BP-1064)
-test("inline code is a badge and a mention a plain name, neither fenced in backticks", async ({ page }) => {
+// The typography plugin fences inline code with a backtick on each side and bolds it, so inline code
+// read `npm test`, unstyled (BP-1064). A mention used to be bold code; it is a pill now (BP-1105)
+test("inline code is a badge and a mention a pill naming the person, neither fenced in backticks", async ({ page }) => {
   await openTask(page, FINISHED_TASK_NUMBER);
 
   const posted = taskWrite(page, "POST", `/tasks/${FINISHED_TASK_ID}/comments`);
@@ -237,15 +243,20 @@ test("inline code is a badge and a mention a plain name, neither fenced in backt
       return {
         fences: [getComputedStyle(node, "::before").content, getComputedStyle(node, "::after").content],
         background: style.backgroundColor,
+        radius: parseFloat(style.borderTopLeftRadius),
         weight: style.fontWeight,
         mono: /mono|courier/i.test(style.fontFamily),
       };
     });
   const clear = "rgba(0, 0, 0, 0)";
 
-  const mention = page.locator("strong > code", { hasText: "@member" });
+  const mention = page.locator("span.mention", { hasText: "@member" });
   await expect(mention).toBeVisible();
-  expect(await look(mention)).toMatchObject({ fences: ["none", "none"], background: clear });
+  await expect(mention).toHaveAttribute("title", "E2E Member");
+  const pill = await look(mention);
+  expect(pill.background).not.toBe(clear);
+  expect(pill.radius).toBeGreaterThan(8);
+  expect(pill.mono).toBe(false);
 
   const code = page.locator("p > code", { hasText: "npm test" });
   await expect(code).toBeVisible();
@@ -256,6 +267,63 @@ test("inline code is a badge and a mention a plain name, neither fenced in backt
   const block = page.locator("pre > code", { hasText: "npm run build" });
   await expect(block).toBeVisible();
   expect(await look(block)).toMatchObject({ fences: ["none", "none"], background: clear });
+});
+
+// BP-1105. A username may hold a dot, and the mention stopped at it: `@jan.kowalski` asked for
+// `jan` and told nobody. The domain of an e-mail address read as a mention of whoever had its name.
+test("a dotted username is offered, mentioned and told whole, and an e-mail address mentions nobody", async ({
+  page,
+}) => {
+  await seedDottedUser();
+  await openTask(page, FINISHED_TASK_NUMBER);
+
+  const box = composer(page);
+  await box.click();
+  await box.pressSequentially("@jan.k");
+  const option = page.getByRole("option", { name: new RegExp(DOTTED_USERNAME.replace(".", "\\.")) });
+  await expect(option).toBeVisible();
+  await expect(option).toContainText(DOTTED_FULL_NAME);
+  await page.keyboard.press("Enter");
+  await expect(box).toHaveValue(`@${DOTTED_USERNAME} `);
+  // In emphasis, which the server read as the raw text `_@jan…_` and so mentioned nobody; and an
+  // address with no dot in its domain, which GFM does not make a link of. Filled rather than typed
+  // around: Home and End scroll a textarea on macOS instead of moving its caret
+  await box.fill(`_@${DOTTED_USERNAME}_ please write to me@member or ops@member.example.`);
+
+  const posted = taskWrite(page, "POST", `/tasks/${FINISHED_TASK_ID}/comments`);
+  await page.getByRole("button", { name: "Comment" }).click();
+  await expectWritten(posted, 201);
+
+  const comment = page.locator(".prose", { hasText: "ops@member.example" });
+  await expect(comment.locator("em span.mention")).toHaveText([`@${DOTTED_USERNAME}`]);
+  await expect(comment.locator("span.mention")).toHaveAttribute("title", DOTTED_FULL_NAME);
+
+  await expect.poll(() => mentionsStoredFor(DOTTED_ID)).toBe(1);
+  // Dispatched with the first, so it has landed by now if it was ever going to
+  expect(await mentionsStoredFor(MEMBER_ID)).toBe(0);
+});
+
+// BP-1106: the modal closed on the same Escape that closed the comment's suggestion list
+test("Escape in a comment over the board closes the suggestions, not the task", async ({ page }) => {
+  await arriveSignedIn(page);
+  await page.goto(boardUrl);
+  await page.getByRole("link", { name: new RegExp(SIBLING_TASK_TITLE) }).first().click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Task title")).toHaveValue(SIBLING_TASK_TITLE);
+
+  const box = dialog.getByPlaceholder("Write a comment, @mention someone…");
+  await box.click();
+  await box.pressSequentially("ask @mem");
+  await expect(dialog.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await expect(dialog.getByRole("listbox")).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(box).toHaveValue("ask @mem");
+
+  // The control: with nothing left to close, Escape is the modal's again
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test("watching puts a person on the list and their feed keeps following the task", async ({

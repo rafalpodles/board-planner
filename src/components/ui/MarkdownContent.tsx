@@ -4,6 +4,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useMemo } from "react";
 import { remarkTaskReferences, type ReferenceScope } from "@/lib/task-references";
+import { remarkMentions, type MentionablePerson } from "@/lib/remark-mentions";
 
 // "//evil.example" is a protocol-relative URL and "/\\evil.example" is folded into one by some
 // parsers — both start with a slash and both leave the origin. Same check safeNextPath makes,
@@ -52,7 +53,8 @@ const components = {
 
 export function MarkdownContent({
   children,
-  mentions = false,
+  // The people a `@username` may name here; each one renders as a pill and anyone else as text
+  mentions,
   // One line inside a row of other things — an acceptance criterion next to its checkbox — where a
   // block-level paragraph would break the row onto its own line
   inline = false,
@@ -61,7 +63,7 @@ export function MarkdownContent({
   scope,
 }: {
   children: string;
-  mentions?: boolean;
+  mentions?: readonly MentionablePerson[];
   inline?: boolean;
   scope?: ReferenceScope | null;
 }) {
@@ -70,23 +72,20 @@ export function MarkdownContent({
   const key = scope?.key ?? "";
   const former = (scope?.formerKeys ?? []).join(",");
   const plugins = useMemo(
-    () =>
-      key
-        ? [remarkGfm, remarkTaskReferences({ key, formerKeys: former ? former.split(",") : [] })]
-        : [remarkGfm],
-    [key, former]
+    () => [
+      remarkGfm,
+      ...(key ? [remarkTaskReferences({ key, formerKeys: former ? former.split(",") : [] })] : []),
+      ...(mentions?.length ? [remarkMentions(mentions)] : []),
+    ],
+    [key, former, mentions]
   );
-
-  const processed = mentions
-    ? children.replace(/@([a-zA-Z0-9_-]+)/g, "**`@$1`**")
-    : children;
 
   return (
     <Markdown
       remarkPlugins={plugins}
       components={inline ? { ...components, p: ({ children: c }) => <>{c}</> } : components}
     >
-      {processed}
+      {children}
     </Markdown>
   );
 }

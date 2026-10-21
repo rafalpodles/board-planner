@@ -8,6 +8,7 @@ import { Pill, renderEmail } from "@/lib/email-template";
 import { organisationOrigin } from "@/lib/organisation-host";
 import { notificationPath } from "@/lib/urls";
 import { recipientsWithAccess } from "@/lib/grants";
+import { mentionedUsernames } from "@/lib/mentioned-usernames";
 import type { ScopedDb } from "@/lib/db-scope";
 
 /**
@@ -287,12 +288,7 @@ export function collectRecipients(task: {
  * Parse @mentions from comment body and resolve to user IDs.
  */
 export async function resolveMentions(db: ScopedDb, body: string): Promise<string[]> {
-  const mentionRegex = /@([a-zA-Z0-9_-]+)/g;
-  const usernames: string[] = [];
-  let match;
-  while ((match = mentionRegex.exec(body)) !== null) {
-    usernames.push(match[1].toLowerCase());
-  }
+  const usernames = mentionedUsernames(body);
   if (usernames.length === 0) return [];
 
   const users = await db.User.find(

@@ -4,11 +4,29 @@ import { useEffect, useMemo, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { escapeRegex } from "@/lib/escape-regex";
 import type { Trigger } from "@/hooks/use-trigger-autocomplete";
+import { MENTION_BEING_TYPED } from "@/lib/mentions";
 
-interface Person {
+export interface Person {
   _id: string;
   username: string;
   fullName: string;
+}
+
+/** The people who can reach the board, which is who a `@` may name in it. */
+export function useMentionablePeople(projectId: string | null): Person[] {
+  const api = useApi();
+  const [people, setPeople] = useState<Person[]>([]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    api
+      .get(`/api/projects/${projectId}/assignable-users`)
+      .then(setPeople)
+      .catch(() => setPeople([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  return people;
 }
 
 /**
@@ -18,25 +36,22 @@ interface Person {
  * Shared so the comment composer and the description editor cannot drift apart — the mention half
  * lived inside Comments and reached nowhere else, which is why a description never offered one.
  */
-export function useEditorTriggers(projectId: string, projectKey?: string): Trigger[] {
+export function useEditorTriggers(
+  projectId: string,
+  projectKey?: string,
+  // A caller that already holds the list, so it is not fetched twice
+  knownPeople?: Person[]
+): Trigger[] {
   const api = useApi();
-  const [people, setPeople] = useState<Person[]>([]);
-
-  useEffect(() => {
-    api
-      .get(`/api/projects/${projectId}/assignable-users`)
-      .then(setPeople)
-      .catch(() => setPeople([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  const fetched = useMentionablePeople(knownPeople ? null : projectId);
+  const people = knownPeople ?? fetched;
 
   return useMemo(
     () => [
       {
         name: "mention",
-        // Unchanged from when it lived inline: an `@` anywhere before the caret, matched against
-        // username and full name alike
-        pattern: /@([a-zA-Z0-9_-]*)$/,
+        // Matched against username and full name alike
+        pattern: MENTION_BEING_TYPED,
         suggest: (query: string) =>
           people
             .filter(

@@ -754,3 +754,135 @@ describe("a Stop pressed before the server has taken the turn", () => {
     expect(screen.getByRole("button", { name: /send/i })).toBeTruthy();
   });
 });
+
+describe("mentions in the composer (BP-1106)", () => {
+  beforeEach(() => {
+    api.get.mockImplementation((path: string) =>
+      path.includes("/pm/messages")
+        ? Promise.resolve({ messages: [], nextCursor: null })
+        : path.includes("/assignable-users")
+          ? Promise.resolve([{ _id: "u1", username: "member", fullName: "Mia Member" }])
+          : path.includes("/tasks/suggest")
+            ? Promise.resolve([{ _id: "t7", taskNumber: 7, title: "Fix the login" }])
+            : path.includes("/tasks")
+              ? Promise.resolve([])
+              : Promise.resolve(PROJECT)
+    );
+  });
+
+  async function typeInto(box: HTMLTextAreaElement, value: string) {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, value);
+      box.selectionStart = box.selectionEnd = value.length;
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  it("offers the board's people after @, and Enter picks one without sending", async () => {
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const box = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith("/api/projects/p1/assignable-users"));
+
+    await typeInto(box, "ask @mem");
+    const option = await screen.findByRole("option", { name: /member/ });
+    expect(option.textContent).toContain("Mia Member");
+
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+
+    await waitFor(() => expect(box.value).toBe("ask @member "));
+    expect(api.stream).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("offers the board's tasks after its key, and Tab inserts the key", async () => {
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const box = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+
+    await typeInto(box, "look at BP-");
+    await screen.findByRole("option", { name: /BP-7/ });
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    });
+
+    await waitFor(() => expect(box.value).toBe("look at BP-7 "));
+  });
+
+  it("closes on Escape and leaves what was typed", async () => {
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const box = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith("/api/projects/p1/assignable-users"));
+
+    await typeInto(box, "ask @mem");
+    await screen.findByRole("listbox");
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(box.value).toBe("ask @mem");
+  });
+
+  it("does not open a list that arrives after the message was sent", async () => {
+    let answer!: (tasks: unknown[]) => void;
+    api.get.mockImplementation((path: string) =>
+      path.includes("/pm/messages")
+        ? Promise.resolve({ messages: [], nextCursor: null })
+        : path.includes("/tasks/suggest")
+          ? new Promise((resolve) => (answer = resolve))
+          : path.includes("/tasks")
+            ? Promise.resolve([])
+            : path.includes("/assignable-users")
+              ? Promise.resolve([])
+              : Promise.resolve(PROJECT)
+    );
+    api.stream.mockResolvedValue(heldStream().response);
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const box = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+
+    await typeInto(box, "see BP-1");
+    await waitFor(() => expect(answer).toBeTypeOf("function"));
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(api.stream).toHaveBeenCalled());
+
+    await act(async () => answer([{ _id: "t1", taskNumber: 12, title: "Late" }]));
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("still sends on Enter when nothing is offered", async () => {
+    api.stream.mockResolvedValue(heldStream().response);
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const box = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+
+    await typeInto(box, "hello");
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+
+    await waitFor(() => expect(api.stream).toHaveBeenCalled());
+  });
+
+  it("shows a mention of the board's people in the thread as a pill", async () => {
+    api.get.mockImplementation((path: string) =>
+      path.includes("/pm/messages")
+        ? Promise.resolve({
+            messages: [
+              { _id: "m1", project: "p1", role: "user", content: "assign it to @member", actions: [], trigger: { type: "chat" }, triggeredBy: null, createdAt: "2026-10-10T10:00:00Z" },
+            ],
+            nextCursor: null,
+          })
+        : path.includes("/assignable-users")
+          ? Promise.resolve([{ _id: "u1", username: "member", fullName: "Mia Member" }])
+          : path.includes("/tasks")
+            ? Promise.resolve([])
+            : Promise.resolve(PROJECT)
+    );
+    const { container } = render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+
+    await waitFor(() => expect(container.querySelector("span.mention")?.getAttribute("title")).toBe("Mia Member"));
+  });
+});
