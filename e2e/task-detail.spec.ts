@@ -10,8 +10,10 @@ import {
   DECOY_TASK_NUMBER,
   FINISHED_TASK_ID,
   FINISHED_TASK_NUMBER,
+  FINISHED_TASK_TITLE,
   MEMBER_ID,
   mentionsStoredFor,
+  PROJECT_ID,
   PROJECT_KEY,
   PROJECT_NAME,
   SIBLING_TASK_ID,
@@ -324,6 +326,49 @@ test("Escape in a comment over the board closes the suggestions, not the task", 
   // The control: with nothing left to close, Escape is the modal's again
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+// BP-1107. react-markdown parses while it renders: 6,000 `>` stalled the tab, then threw out of the
+// tree and took the task page down for everyone who opened it, until the comment was deleted
+test("a comment and a description nested past what the parser can follow are shown as text, and the task still opens", async ({
+  page,
+  request,
+}) => {
+  const base = `/api/projects/${PROJECT_ID}/tasks/${FINISHED_TASK_ID}`;
+  const nested = (end: string) => `${">".repeat(6000)}${end}`;
+  expect((await request.post(`${base}/comments`, { headers: ADMIN_AUTH, data: { body: nested("c") } })).status()).toBe(201);
+  expect((await request.put(base, { headers: ADMIN_AUTH, data: { description: nested("d") } })).status()).toBe(200);
+  // The control, posted after: an ordinary comment is still read as markdown
+  expect(
+    (await request.post(`${base}/comments`, { headers: ADMIN_AUTH, data: { body: "an *ordinary* comment" } })).status()
+  ).toBe(201);
+
+  await openTask(page, FINISHED_TASK_NUMBER);
+
+  await expect(page.getByLabel("Task title")).toHaveValue(FINISHED_TASK_TITLE);
+  const raw = page.locator("[data-markdown=raw]");
+  await expect(raw).toHaveCount(2);
+  expect(await raw.evaluateAll((nodes) => nodes.map((n) => n.textContent))).toEqual([nested("d"), nested("c")]);
+  await expect(page.locator("[data-markdown=note]")).toHaveCount(2);
+  await expect(page.locator(".prose em", { hasText: "ordinary" })).toBeVisible();
+});
+
+// The parser is quadratic in the shape of a body, and 100,000 characters of the wrong shape froze a
+// tab for 40 seconds. Past the longest comment a description is shown as text, and says so
+test("a description longer than a comment may be is shown as text, with a note, and the task opens", async ({
+  page,
+  request,
+}) => {
+  const description = `# Spec\n\n${"word ".repeat(5000)}`;
+  const base = `/api/projects/${PROJECT_ID}/tasks/${FINISHED_TASK_ID}`;
+  expect((await request.put(base, { headers: ADMIN_AUTH, data: { description } })).status()).toBe(200);
+
+  await openTask(page, FINISHED_TASK_NUMBER);
+
+  await expect(page.getByLabel("Task title")).toHaveValue(FINISHED_TASK_TITLE);
+  await expect(page.locator("[data-markdown=note]")).toHaveText(/plain text/);
+  expect(await page.locator("[data-markdown=raw]").evaluate((n) => n.textContent)).toBe(description);
+  await expect(page.locator(".prose h1", { hasText: "Spec" })).toHaveCount(0);
 });
 
 test("watching puts a person on the list and their feed keeps following the task", async ({

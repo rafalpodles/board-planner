@@ -101,3 +101,63 @@ describe("code", () => {
     expect(container.querySelector("code.md-code")?.textContent).toBe("null");
   });
 });
+
+// BP-1107. react-markdown parses while it renders: a body nested deeper than the parser can follow
+// stalled the tab for seconds and then threw out of the tree it sat in, so a comment of 6,000 `>`
+// took the page down for everyone who opened it
+describe("a body too costly to parse", () => {
+  it.each([
+    ["blockquotes", ">".repeat(15000)],
+    ["list items", "- ".repeat(7500)],
+    ["emphasis markers", "_*".repeat(10000)],
+  ])("is shown as the text it was written as, at once, for %s", (_label, body) => {
+    const started = performance.now();
+    const { container } = render(<MarkdownContent>{`${body}x`}</MarkdownContent>);
+
+    expect(performance.now() - started).toBeLessThan(500);
+    const raw = container.querySelector("[data-markdown=raw]");
+    expect(raw?.textContent).toBe(`${body}x`);
+    expect(container.querySelector("blockquote, ul, ol, em, strong")).toBeNull();
+  });
+
+  it("keeps the text of a mention, a link and a code span as written", () => {
+    const body = `${">".repeat(600)} @member see [the log](https://example.com) and \`code\``;
+    const { container } = render(<MarkdownContent mentions={PEOPLE}>{body}</MarkdownContent>);
+
+    expect(container.querySelector("[data-markdown=raw]")?.textContent).toBe(body);
+    expect(container.querySelector("a, code, span.mention")).toBeNull();
+  });
+
+  it("is a span inside a row of other things, and a block with a note everywhere else", () => {
+    const body = ">".repeat(600);
+    const inline = render(<MarkdownContent inline>{body}</MarkdownContent>);
+    expect(inline.container.querySelector("span[data-markdown=raw]")).not.toBeNull();
+    expect(inline.container.querySelector("[data-markdown=note]")).toBeNull();
+    cleanup();
+    const block = render(<MarkdownContent>{body}</MarkdownContent>);
+    expect(block.container.querySelector("div[data-markdown=raw]")).not.toBeNull();
+    expect(block.container.querySelector("[data-markdown=note]")?.textContent).toMatch(/plain text/);
+  });
+
+  it("is what a description longer than a comment may be gets, with its headings left as written", () => {
+    const body = `# Heading\n\n${"word ".repeat(4100)}`;
+    const { container } = render(<MarkdownContent>{body}</MarkdownContent>);
+
+    expect(container.querySelector("h1")).toBeNull();
+    expect(container.querySelector("[data-markdown=raw]")?.textContent).toBe(body);
+  });
+
+  it("renders nothing, rather than throwing, for a body that is not text", () => {
+    const { container } = render(<MarkdownContent>{undefined as unknown as string}</MarkdownContent>);
+
+    expect(container.textContent).toBe("");
+  });
+
+  it("is not what an ordinary comment gets", () => {
+    const { container } = render(<MarkdownContent>{"**done**\n\n> quoted\n\n- one\n- two"}</MarkdownContent>);
+
+    expect(container.querySelector("[data-markdown=raw]")).toBeNull();
+    expect(container.querySelector("blockquote")?.textContent).toContain("quoted");
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+  });
+});

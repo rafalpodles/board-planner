@@ -2,9 +2,10 @@
 
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useMemo } from "react";
+import { Component, useMemo, type ReactNode } from "react";
 import { remarkTaskReferences, type ReferenceScope } from "@/lib/task-references";
 import { remarkMentions, type MentionablePerson } from "@/lib/remark-mentions";
+import { tooCostlyToParse } from "@/lib/markdown-cost";
 
 // "//evil.example" is a protocol-relative URL and "/\\evil.example" is folded into one by some
 // parsers — both start with a slash and both leave the origin. Same check safeNextPath makes,
@@ -51,6 +52,52 @@ const components = {
   ),
 };
 
+const RAW_TEXT = "whitespace-pre-wrap [overflow-wrap:anywhere]";
+
+function RawText({ children, inline }: { children: string; inline: boolean }) {
+  if (inline) {
+    return (
+      <span data-markdown="raw" className={RAW_TEXT}>
+        {children}
+      </span>
+    );
+  }
+  return (
+    <div>
+      <p data-markdown="note" className="mb-1 text-xs text-text-muted">
+        Shown as plain text: too long or too complex to format.
+      </p>
+      <div data-markdown="raw" className={RAW_TEXT}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// react-markdown parses while it renders, so a body the parser throws on takes down the tree it sits
+// in (BP-1107)
+class RawTextOnError extends Component<
+  { source: string; fallback: ReactNode; children: ReactNode },
+  { failed: boolean; source: string }
+> {
+  state = { failed: false, source: this.props.source };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  static getDerivedStateFromProps(
+    props: { source: string },
+    state: { failed: boolean; source: string }
+  ) {
+    return props.source === state.source ? null : { failed: false, source: props.source };
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
 export function MarkdownContent({
   children,
   // The people a `@username` may name here; each one renders as a pill and anyone else as text
@@ -80,12 +127,18 @@ export function MarkdownContent({
     [key, former, mentions]
   );
 
+  const body = typeof children === "string" ? children : "";
+  const raw = useMemo(() => tooCostlyToParse(body), [body]);
+  if (raw) return <RawText inline={inline}>{body}</RawText>;
+
   return (
-    <Markdown
-      remarkPlugins={plugins}
-      components={inline ? { ...components, p: ({ children: c }) => <>{c}</> } : components}
-    >
-      {children}
-    </Markdown>
+    <RawTextOnError source={body} fallback={<RawText inline={inline}>{body}</RawText>}>
+      <Markdown
+        remarkPlugins={plugins}
+        components={inline ? { ...components, p: ({ children: c }) => <>{c}</> } : components}
+      >
+        {body}
+      </Markdown>
+    </RawTextOnError>
   );
 }
