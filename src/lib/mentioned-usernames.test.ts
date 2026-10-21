@@ -35,6 +35,7 @@ describe("a body nested deeper than the markdown parser can follow", () => {
     [">".repeat(15000), "blockquotes"],
     ["- ".repeat(7500), "list items"],
     ["_*".repeat(10000), "emphasis markers"],
+    ["1. ".repeat(6600), "numbered list items"],
   ])("reads its mentions from the text, at once, through %s deep %s", (prefix) => {
     const started = performance.now();
     expect(mentionedUsernames(`${prefix}@member look`)).toEqual(["member"]);

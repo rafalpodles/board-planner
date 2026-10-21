@@ -8,7 +8,7 @@ const parser = unified().use(remarkParse).use(remarkGfm);
 // Hundreds of nesting levels, or thousands of emphasis markers, cost the parser seconds and then its
 // stack (BP-1107). A body past either is read as raw text, as it was before the parse: a mention in
 // its code or links is told, and one in emphasis is not
-const DEEPLY_NESTED = /^[ \t>*+\-]{500,}/m;
+const DEEPLY_NESTED = /^[ \t>*+\-\d.)]{500,}/m;
 const MOST_EMPHASIS_MARKERS = 5000;
 
 function tooCostlyToParse(markdown: string): boolean {
