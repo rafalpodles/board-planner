@@ -349,7 +349,26 @@ test("a comment and a description nested past what the parser can follow are sho
   const raw = page.locator("[data-markdown=raw]");
   await expect(raw).toHaveCount(2);
   expect(await raw.evaluateAll((nodes) => nodes.map((n) => n.textContent))).toEqual([nested("d"), nested("c")]);
+  await expect(page.locator("[data-markdown=note]")).toHaveCount(2);
   await expect(page.locator(".prose em", { hasText: "ordinary" })).toBeVisible();
+});
+
+// The parser is quadratic in the shape of a body, and 100,000 characters of the wrong shape froze a
+// tab for 40 seconds. Past the longest comment a description is shown as text, and says so
+test("a description longer than a comment may be is shown as text, with a note, and the task opens", async ({
+  page,
+  request,
+}) => {
+  const description = `# Spec\n\n${"word ".repeat(5000)}`;
+  const base = `/api/projects/${PROJECT_ID}/tasks/${FINISHED_TASK_ID}`;
+  expect((await request.put(base, { headers: ADMIN_AUTH, data: { description } })).status()).toBe(200);
+
+  await openTask(page, FINISHED_TASK_NUMBER);
+
+  await expect(page.getByLabel("Task title")).toHaveValue(FINISHED_TASK_TITLE);
+  await expect(page.locator("[data-markdown=note]")).toHaveText(/plain text/);
+  expect(await page.locator("[data-markdown=raw]").evaluate((n) => n.textContent)).toBe(description);
+  await expect(page.locator(".prose h1", { hasText: "Spec" })).toHaveCount(0);
 });
 
 test("watching puts a person on the list and their feed keeps following the task", async ({

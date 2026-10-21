@@ -38,6 +38,17 @@ describe("a body the parser throws on", () => {
     expect(container.querySelector("footer")?.textContent).toBe("after it");
   });
 
+  it("is a span in a row of other things, and a block with a note elsewhere", () => {
+    const inline = render(<MarkdownContent inline>{"a body"}</MarkdownContent>);
+    expect(inline.container.querySelector("span[data-markdown=raw]")).not.toBeNull();
+    expect(inline.container.querySelector("[data-markdown=note]")).toBeNull();
+    cleanup();
+
+    const block = render(<MarkdownContent>{"a body"}</MarkdownContent>);
+    expect(block.container.querySelector("div[data-markdown=raw]")).not.toBeNull();
+    expect(block.container.querySelector("[data-markdown=note]")).not.toBeNull();
+  });
+
   it("is parsed again when the body changes", () => {
     const { container, rerender } = render(<MarkdownContent>{"first"}</MarkdownContent>);
     expect(container.querySelector("[data-markdown=raw]")).not.toBeNull();

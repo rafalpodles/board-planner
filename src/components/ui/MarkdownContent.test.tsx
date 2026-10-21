@@ -128,13 +128,29 @@ describe("a body too costly to parse", () => {
     expect(container.querySelector("a, code, span.mention")).toBeNull();
   });
 
-  it("is a span inside a row of other things, and a block everywhere else", () => {
+  it("is a span inside a row of other things, and a block with a note everywhere else", () => {
     const body = ">".repeat(600);
     const inline = render(<MarkdownContent inline>{body}</MarkdownContent>);
     expect(inline.container.querySelector("span[data-markdown=raw]")).not.toBeNull();
+    expect(inline.container.querySelector("[data-markdown=note]")).toBeNull();
     cleanup();
     const block = render(<MarkdownContent>{body}</MarkdownContent>);
     expect(block.container.querySelector("div[data-markdown=raw]")).not.toBeNull();
+    expect(block.container.querySelector("[data-markdown=note]")?.textContent).toMatch(/plain text/);
+  });
+
+  it("is what a description longer than a comment may be gets, with its headings left as written", () => {
+    const body = `# Heading\n\n${"word ".repeat(4100)}`;
+    const { container } = render(<MarkdownContent>{body}</MarkdownContent>);
+
+    expect(container.querySelector("h1")).toBeNull();
+    expect(container.querySelector("[data-markdown=raw]")?.textContent).toBe(body);
+  });
+
+  it("renders nothing, rather than throwing, for a body that is not text", () => {
+    const { container } = render(<MarkdownContent>{undefined as unknown as string}</MarkdownContent>);
+
+    expect(container.textContent).toBe("");
   });
 
   it("is not what an ordinary comment gets", () => {

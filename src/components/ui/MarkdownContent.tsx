@@ -52,23 +52,30 @@ const components = {
   ),
 };
 
-// Wrapped, and broken anywhere: a body of nothing but `>` has no space to wrap at
+const RAW_TEXT = "whitespace-pre-wrap [overflow-wrap:anywhere]";
+
 function RawText({ children, inline }: { children: string; inline: boolean }) {
-  const className = "whitespace-pre-wrap [overflow-wrap:anywhere]";
-  return inline ? (
-    <span data-markdown="raw" className={className}>
-      {children}
-    </span>
-  ) : (
-    <div data-markdown="raw" className={className}>
-      {children}
+  if (inline) {
+    return (
+      <span data-markdown="raw" className={RAW_TEXT}>
+        {children}
+      </span>
+    );
+  }
+  return (
+    <div>
+      <p data-markdown="note" className="mb-1 text-xs text-text-muted">
+        Shown as plain text: too long or too deeply nested to format.
+      </p>
+      <div data-markdown="raw" className={RAW_TEXT}>
+        {children}
+      </div>
     </div>
   );
 }
 
-// react-markdown parses while it renders, so a body the parser cannot follow throws from inside the
-// tree it sits in. Without this, one comment takes down the panel — and the page — for everyone
-// who opens it (BP-1107); with it, that body is shown as the text it was written as.
+// react-markdown parses while it renders, so a body the parser throws on takes down the tree it sits
+// in (BP-1107)
 class RawTextOnError extends Component<
   { source: string; fallback: ReactNode; children: ReactNode },
   { failed: boolean; source: string }
@@ -79,7 +86,6 @@ class RawTextOnError extends Component<
     return { failed: true };
   }
 
-  // A new body gets its own chance at being parsed
   static getDerivedStateFromProps(
     props: { source: string },
     state: { failed: boolean; source: string }
@@ -121,19 +127,17 @@ export function MarkdownContent({
     [key, former, mentions]
   );
 
-  const raw = useMemo(() => tooCostlyToParse(children), [children]);
-  if (raw) return <RawText inline={inline}>{children}</RawText>;
+  const body = typeof children === "string" ? children : "";
+  const raw = useMemo(() => tooCostlyToParse(body), [body]);
+  if (raw) return <RawText inline={inline}>{body}</RawText>;
 
   return (
-    <RawTextOnError
-      source={children}
-      fallback={<RawText inline={inline}>{children}</RawText>}
-    >
+    <RawTextOnError source={body} fallback={<RawText inline={inline}>{body}</RawText>}>
       <Markdown
         remarkPlugins={plugins}
         components={inline ? { ...components, p: ({ children: c }) => <>{c}</> } : components}
       >
-        {children}
+        {body}
       </Markdown>
     </RawTextOnError>
   );
