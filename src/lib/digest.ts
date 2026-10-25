@@ -74,6 +74,9 @@ export function lineFor(notification: any, origin: string | null): DigestLine {
   if (notification.type === "board_access" && project?.key) {
     return { key: project.key, title, url: origin ? `${origin}${projectPath(project.key)}` : undefined };
   }
+  if (notification.type === "token_expiring" && project?.key) {
+    return { key: project.key, title, url: origin ? `${origin}${projectPath(project.key)}/settings?section=integrations` : undefined };
+  }
   return {
     key: key || "—",
     title,

@@ -73,6 +73,7 @@ const connectionSchema = new Schema(
     lastSyncAt: { type: Date, default: null },
     lastSyncLinked: { type: Number, default: 0 },
     lastSyncTasks: { type: Number, default: 0 },
+    expiryNotifiedFor: { type: Date, default: null },
   },
   { _id: false }
 );

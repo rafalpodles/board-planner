@@ -49,7 +49,7 @@ export async function recordSyncSucceeded(
 
 /** A new token starts a new connection: nothing the old one earned or lost carries over. */
 export function freshConnection(identity: { login: string; expiresAt: Date | null } = { login: "", expiresAt: null }) {
-  return { rejectedAt: null, lastSyncAt: null, lastSyncLinked: 0, lastSyncTasks: 0, ...identity };
+  return { rejectedAt: null, lastSyncAt: null, lastSyncLinked: 0, lastSyncTasks: 0, expiryNotifiedFor: null, ...identity };
 }
 
 /** Whose GitHub account the token is and when it lapses is for whoever can change it. */

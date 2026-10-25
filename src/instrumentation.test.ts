@@ -54,6 +54,8 @@ vi.mock("@/lib/pm/pm-user", () => ({ markPmAsMachine }));
 vi.mock("@/lib/worker-user", () => ({ repairMachineNames }));
 vi.mock("@/lib/pm/scheduler", () => ({ startPmScheduler }));
 vi.mock("@/lib/github-sync", () => ({ startGithubSyncScheduler }));
+const startTokenExpiryScheduler = vi.fn(() => ({ started: true as const, tickMs: 3_600_000 }));
+vi.mock("@/lib/token-expiry", () => ({ startTokenExpiryScheduler }));
 vi.mock("@/lib/digest", () => ({
   startDigestScheduler,
   digestHour: () => 7,

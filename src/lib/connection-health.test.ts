@@ -9,6 +9,7 @@ const connection = (over: Record<string, unknown> = {}) => ({
   lastSyncAt: null,
   lastSyncLinked: 0,
   lastSyncTasks: 0,
+  expiryNotifiedFor: null,
   ...over,
 });
 
