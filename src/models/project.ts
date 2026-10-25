@@ -65,6 +65,18 @@ const customFieldSchema = new Schema(
   }
 );
 
+const connectionSchema = new Schema(
+  {
+    rejectedAt: { type: Date, default: null },
+    login: { type: String, default: "" },
+    expiresAt: { type: Date, default: null },
+    lastSyncAt: { type: Date, default: null },
+    lastSyncLinked: { type: Number, default: 0 },
+    lastSyncTasks: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 const projectSchema = new Schema<IProject>(
   {
     name: {
@@ -279,6 +291,8 @@ const projectSchema = new Schema<IProject>(
       default: () => ({ syncedThrough: null, blockedUntil: null, lastError: "" }),
       _id: false,
     },
+    githubConnection: { type: connectionSchema, default: () => ({}) },
+    gitlabConnection: { type: connectionSchema, default: () => ({}) },
     gitlabRepo: {
       type: String,
       default: "",

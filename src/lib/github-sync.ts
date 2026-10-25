@@ -3,7 +3,8 @@ import type { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import type { SchedulerStart } from "@/lib/scheduler";
 import { decryptSecret } from "@/lib/encryption";
-import { fetchPullRequests, GitHubRateLimited, matchPRsToTasks, parseRepoString, withChecks } from "@/lib/github";
+import { fetchPullRequests, GitHubRateLimited, GitHubRefused, matchPRsToTasks, parseRepoString, withChecks } from "@/lib/github";
+import { recordSyncSucceeded, recordTokenRejected } from "@/lib/repository-connection";
 import { logActivity } from "@/lib/activity";
 import { getProjectColumns } from "@/lib/columns";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
@@ -252,6 +253,33 @@ function withoutTasks(result: RoundResult): SyncResult {
  * leaves the pipeline alone; a person clicking Sync gets both, as before.
  */
 export async function syncGithubPullRequests(
+  db: ScopedDb,
+  project: SyncableProject,
+  actor: string | null,
+  transitionOnly?: number
+): Promise<SyncResult> {
+  let result: SyncResult;
+  try {
+    result = await syncEveryGithubRepository(db, project, actor, transitionOnly);
+  } catch (err) {
+    if (err instanceof GitHubRefused && err.status === 401) {
+      throw new GitHubTokenRejected(await recordTokenRejected(db, project._id, "github"));
+    }
+    throw err;
+  }
+  if (result.ok) await recordSyncSucceeded(db, project._id, "github", result);
+  return result;
+}
+
+/** GitHub answered 401: the token is dead, and `firstSeen` says whether this sync is the one that found out. */
+export class GitHubTokenRejected extends GitHubRefused {
+  constructor(readonly firstSeen: boolean) {
+    super(401);
+    this.message = "GitHub rejected this project's token: it has expired or was revoked";
+  }
+}
+
+async function syncEveryGithubRepository(
   db: ScopedDb,
   project: SyncableProject,
   actor: string | null,
@@ -530,7 +558,8 @@ export async function githubSyncTick(): Promise<void> {
 
 async function githubSyncTickFor(db: ScopedDb): Promise<void> {
   const projects = await db.Project.find(
-    { githubToken: { $nin: [null, ""] } },
+    // A rejected token is not asked again until somebody saves a new one or syncs by hand (BP-1108)
+    { githubToken: { $nin: [null, ""] }, "githubConnection.rejectedAt": null },
     // `gitlabHost` because `repositoryProvider` reads it for a self-hosted GitLab; a projection
     // that omits a field the shared helper consults is a bug waiting for that helper to change
     "key formerKeys githubRepo repositoryUrl repositories gitlabRepo gitlabHost githubToken columns deploymentEnvironment deploymentSync"
@@ -557,6 +586,10 @@ async function githubSyncTickFor(db: ScopedDb): Promise<void> {
         );
       }
     } catch (err) {
+      if (err instanceof GitHubTokenRejected) {
+        if (err.firstSeen) console.warn(`GitHub rejected the token of ${project.key}; its sync is paused until a new one is saved`);
+        continue;
+      }
       // One unreachable repository must not stop the others
       console.error(`GitHub sync failed for ${project.key}:`, err);
     }

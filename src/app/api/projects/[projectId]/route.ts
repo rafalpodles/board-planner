@@ -34,7 +34,10 @@ import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import { githubWebBase } from "@/lib/github-host";
 import { releaseProjectUploads } from "@/lib/upload-cleanup";
 import { DEFAULT_DEPLOYMENT_ENVIRONMENT } from "@/lib/github-deployments";
-import { parseRepoString } from "@/lib/github";
+import { checkGithubToken, parseRepoString } from "@/lib/github";
+import { freshConnection } from "@/lib/repository-connection";
+import { repositoriesOfProvider } from "@/lib/repo-match";
+import type { RepositoryFields } from "@/lib/repository";
 
 const MAX_DEPLOYMENT_ENVIRONMENT = 255;
 
@@ -94,6 +97,17 @@ const PM_SAVED_AUTONOMY_FIELDS = [
 const MCP_SERVERS_WRITE_ATTEMPTS = 3;
 
 // The MCP list is written only over the one its tokens were merged from: a refresh rotates them on its own
+const MOST_REPOSITORIES_CHECKED = 10;
+
+function githubRepositoriesOf(project: RepositoryFields): { owner: string; repo: string }[] {
+  const listed = repositoriesOfProvider(project, "github");
+  const urls = listed.length > 0 ? listed : repositoryProvider(project) === "github" ? [projectRepositoryUrl(project)] : [];
+  return urls
+    .slice(0, MOST_REPOSITORIES_CHECKED)
+    .map((url) => parseRepoString(url))
+    .filter((parsed): parsed is { owner: string; repo: string } => parsed !== null);
+}
+
 async function writeProjectSettings(
   db: ScopedDb,
   projectId: string,
@@ -383,6 +397,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     }
   }
 
+  const incomingGithubToken = typeof updates.githubToken === "string" ? updates.githubToken : undefined;
   const incomingTokens = ["githubToken", "gitlabToken", "codaToken"] as const;
   const storingAToken = incomingTokens.some(
     (field) => typeof updates[field] === "string" && updates[field]
@@ -420,9 +435,26 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     updates.repositories = plan.repositories;
   }
 
+  let githubConnection: ReturnType<typeof freshConnection> | undefined;
+  if (incomingGithubToken) {
+    const stored = await db.Project.findById(projectId).select("repositoryUrl repositories githubRepo gitlabRepo gitlabHost").lean();
+    if (!stored) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    const checked = await checkGithubToken(incomingGithubToken, githubRepositoriesOf({ ...stored, ...updates } as never));
+    if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 });
+    githubConnection = freshConnection({ login: checked.login, expiresAt: checked.expiresAt });
+  } else if (incomingGithubToken === "") {
+    githubConnection = freshConnection();
+  }
+
   const written = await writeProjectSettings(db, projectId, updates, pmServers, repositoriesBefore);
   if ("error" in written) {
     return NextResponse.json({ error: written.error }, { status: written.status });
+  }
+  if (githubConnection) {
+    await db.Project.updateOne({ _id: projectId }, { $set: { githubConnection } });
+  }
+  if (typeof updates.gitlabToken === "string") {
+    await db.Project.updateOne({ _id: projectId }, { $set: { gitlabConnection: freshConnection() } });
   }
   const beforeImage = written.before;
   const repositoryMoved =

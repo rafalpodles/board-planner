@@ -209,7 +209,10 @@ async function refusal(res: Response, perCommit = false): Promise<Error> {
   // systematically produces a line per pull request per tick — up to 240 an hour on one project —
   // and drowning the log is its own outage. The pull-request listing keeps `error`, because it
   // fails once per sync and takes the whole sync down with it.
-  (perCommit ? console.warn : console.error)(`GitHub API ${res.status}: ${body.slice(0, 500)}`);
+  // A rejected token is recorded on the project and reported once by whoever records it (BP-1108)
+  if (res.status !== 401) {
+    (perCommit ? console.warn : console.error)(`GitHub API ${res.status}: ${body.slice(0, 500)}`);
+  }
 
   const limited = rateLimit(res);
   // "account", not "token": the limit is counted per GitHub account, so the branch that burnt it
@@ -219,6 +222,53 @@ async function refusal(res: Response, perCommit = false): Promise<Error> {
     return new GitHubRateLimited(`GitHub rate limit reached for this GitHub account; ${limited}`, rateLimitedUntil(res));
   }
   return new GitHubRefused(res.status);
+}
+
+export type TokenCheck =
+  | { ok: true; login: string; expiresAt: Date | null }
+  | { ok: false; error: string };
+
+/**
+ * Before a token is stored: does GitHub take it, and can it read each repository's pull requests.
+ * The expiry is GitHub's own header, absent for a token that never expires.
+ */
+export async function checkGithubToken(token: string, repositories: { owner: string; repo: string }[]): Promise<TokenCheck> {
+  const headers = { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}` };
+  const ask = (path: string) =>
+    safeFetch(`${API_BASE()}${path}`, { headers, signal: AbortSignal.timeout(15000) }, GITHUB_DESTINATION);
+  try {
+    const user = await ask("/user");
+    if (user.status === 401) return { ok: false, error: "GitHub rejected this token: it is wrong, expired or revoked. Nothing was saved." };
+    if (!user.ok) return { ok: false, error: `GitHub answered ${user.status} when asked who this token belongs to. Nothing was saved.` };
+    const { login } = (await readBoundedJson(user, MAX_RESPONSE_BYTES)) as { login?: string };
+    const expiresAt = parseTokenExpiry(user.headers.get("github-authentication-token-expiration"));
+
+    for (const { owner, repo } of repositories) {
+      const repository = await ask(`/repos/${owner}/${repo}`);
+      if (repository.status === 404 || repository.status === 403) {
+        return { ok: false, error: `GitHub accepted this token, but it cannot read ${owner}/${repo}. Give it access to that repository. Nothing was saved.` };
+      }
+      if (!repository.ok) return { ok: false, error: `GitHub answered ${repository.status} for ${owner}/${repo}. Nothing was saved.` };
+      await repository.body?.cancel().catch(() => undefined);
+      const pulls = await ask(`/repos/${owner}/${repo}/pulls?state=open&per_page=1`);
+      await pulls.body?.cancel().catch(() => undefined);
+      if (!pulls.ok) {
+        return { ok: false, error: `This token can see ${owner}/${repo} but not its pull requests. Give it read access to Pull requests. Nothing was saved.` };
+      }
+    }
+    return { ok: true, login: login ?? "", expiresAt };
+  } catch {
+    return { ok: false, error: "GitHub could not be reached to check this token. Nothing was saved." };
+  }
+}
+
+/** GitHub sends `2027-01-24 10:00:00 +0100`, or `UTC` in place of the offset. */
+export function parseTokenExpiry(header: string | null): Date | null {
+  const match = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) (UTC|[+-]\d{2}:?\d{2})$/.exec(header?.trim() ?? "");
+  if (!match) return null;
+  const offset = match[3] === "UTC" ? "Z" : match[3].replace(/^([+-]\d{2}):?(\d{2})$/, "$1:$2");
+  const at = new Date(`${match[1]}T${match[2]}${offset}`);
+  return Number.isNaN(at.getTime()) ? null : at;
 }
 
 /** GitHub itself answered no, as opposed to the request failing on the way. */
