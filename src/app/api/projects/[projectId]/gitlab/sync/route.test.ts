@@ -26,7 +26,8 @@ const { fetchMergeRequests, projectFindOne, taskFindOne, taskUpdateOne, taskFind
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
-vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
+const projectUpdateOne = vi.hoisted(() => vi.fn(async () => ({ modifiedCount: 1 })));
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne, updateOne: projectUpdateOne } }));
 // `find` is the second pass BP-610 added: the tasks this round contradicts without visiting.
 // Every test here drives a round whose matches are its whole story, so it answers with nothing.
 vi.mock("@/models/task", () => ({
@@ -573,6 +574,10 @@ describe("POST .../gitlab/sync — a project that lists several repositories", (
     const res = await POST(request(), ctx());
 
     expect(res.status).toBe(502);
-    expect((await res.json()).error).toBe("GitLab answered 401");
+    expect((await res.json()).error).toContain("GitLab rejected this project's token");
+    expect(projectUpdateOne).toHaveBeenCalledWith(
+      expect.objectContaining({ "gitlabConnection.rejectedAt": null }),
+      { $set: { "gitlabConnection.rejectedAt": expect.any(Date) } }
+    );
   });
 });

@@ -6,6 +6,7 @@ import type { RepositoryProvider } from "@/lib/repository";
 import { BrandIcon, type BrandId } from "@/components/ui/BrandIcon";
 import { Button } from "@/components/ui/Button";
 import { ProBadge } from "@/components/ui/ProUpsell";
+import { connectionHealth, formatDay, healthBadge, type ConnectionHealth } from "@/lib/connection-health";
 
 export type IntegrationId =
   "github" | "gitlab" | "coda" | "channels" | "webhooks";
@@ -22,6 +23,14 @@ interface Definition {
    * offered in the picker — pasting the URL is what adds it.
    */
   impliedByRepository?: (provider: RepositoryProvider) => boolean;
+  /** What the board last learnt about the token, which can contradict "configured" (BP-1108) */
+  health?: (project: ApiProject) => ConnectionHealth;
+}
+
+function stoppedSince(health: ConnectionHealth): string | null {
+  if (health.state === "rejected") return formatDay(health.since);
+  if (health.state === "expired") return formatDay(health.on);
+  return null;
 }
 
 export const INTEGRATIONS: Definition[] = [
@@ -31,9 +40,13 @@ export const INTEGRATIONS: Definition[] = [
     name: "GitHub",
     blurb: "Link pull requests to tasks by key",
     isConfigured: (p) => !!p.githubTokenSet,
-    summary: (p) =>
-      p.githubTokenSet ? "Linking pull requests" : "Needs an access token",
+    summary: (p) => {
+      if (!p.githubTokenSet) return "Needs an access token";
+      const since = stoppedSince(connectionHealth(p.githubConnection));
+      return since ? `Pull requests stopped linking on ${since}` : "Linking pull requests";
+    },
     impliedByRepository: (provider) => provider === "github",
+    health: (p) => connectionHealth(p.githubConnection),
   },
   {
     id: "gitlab",
@@ -41,9 +54,13 @@ export const INTEGRATIONS: Definition[] = [
     name: "GitLab",
     blurb: "Link merge requests to tasks by key",
     isConfigured: (p) => !!p.gitlabTokenSet,
-    summary: (p) =>
-      p.gitlabTokenSet ? "Linking merge requests" : "Needs an access token",
+    summary: (p) => {
+      if (!p.gitlabTokenSet) return "Needs an access token";
+      const since = stoppedSince(connectionHealth(p.gitlabConnection));
+      return since ? `Merge requests stopped linking on ${since}` : "Linking merge requests";
+    },
     impliedByRepository: (provider) => provider === "gitlab",
+    health: (p) => connectionHealth(p.gitlabConnection),
   },
   {
     id: "coda",
@@ -143,6 +160,7 @@ export function Connections({
         {visible.map((integration) => {
           const open = expanded === integration.id;
           const connected = integration.isConfigured(project);
+          const unhealthy = connected && integration.health ? healthBadge(integration.health(project)) : null;
           const implied =
             integration.impliedByRepository?.(repositoryProvider) ?? false;
 
@@ -169,6 +187,14 @@ export function Connections({
 
                 {needsPro.includes(integration.id) ? (
                   <ProBadge />
+                ) : unhealthy ? (
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                      unhealthy.tone === "danger" ? "bg-danger/15 text-danger" : "bg-warning/15 text-warning"
+                    }`}
+                  >
+                    {unhealthy.label}
+                  </span>
                 ) : (
                   <span
                     className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${

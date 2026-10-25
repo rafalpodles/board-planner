@@ -1,3 +1,4 @@
+import { hideConnectionIdentity } from "@/lib/repository-connection";
 import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { withPrimaryUrl } from "@/lib/repositories";
 import { NextResponse } from "next/server";
@@ -56,6 +57,7 @@ export const GET = withAuth(async (_request, { user, db }) => {
     obj.taskCount = stats?.taskCount ?? 0;
     obj.hasActiveSprint = withActiveSprint.has(String(p._id));
     obj.canAdmin = administered.has(String(p._id));
+    hideConnectionIdentity(obj);
     return obj;
   });
   return NextResponse.json(sanitized);

@@ -20,6 +20,10 @@ import { readBody, serve } from "./stub-guard.mjs";
  *                  deployments listing and each deployment's statuses answer (BP-878)
  *   deploymentsLimited — answer the deployments listing with GitHub's primary rate limit
  *   deploymentsRefused — answer it 403 as a token without access to deployments gets
+ *   refusedTokens — bearers GitHub answers 401 to, on `/user` and every repository path, as it does a
+ *                   revoked or expired token (BP-1108)
+ *   tokenLogin, tokenExpiration — who `/user` says a project's token belongs to, and the
+ *                   `github-authentication-token-expiration` header it sends (BP-1108)
  *
  * `GET /asked` returns every path the app has requested since the last reset, which is how a spec
  * asserts what was *not* asked about — the rate-limit rule, and the one about finished work.
@@ -49,6 +53,9 @@ let checks = {};
 let deployments = [];
 let deploymentsLimited = false;
 let deploymentsRefused = false;
+let refusedTokens = [];
+let tokenLogin = "stub-owner";
+let tokenExpiration = null;
 /** When a spec names several repositories: `{ "owner/repo": pulls[] }`, each answering its own listing (BP-1068). */
 let repositories = null;
 let asked = [];
@@ -100,6 +107,9 @@ serve({
       deployments = body.deployments ?? [];
       deploymentsLimited = body.deploymentsLimited === true;
       deploymentsRefused = body.deploymentsRefused === true;
+      refusedTokens = body.refusedTokens ?? [];
+      tokenLogin = body.tokenLogin ?? "stub-owner";
+      tokenExpiration = body.tokenExpiration ?? null;
       repository = body.repository ?? "example/board";
       repositories = body.repositories ?? null;
       asked = [];
@@ -170,6 +180,9 @@ serve({
       deployments = [];
       deploymentsLimited = false;
       deploymentsRefused = false;
+      refusedTokens = [];
+      tokenLogin = "stub-owner";
+      tokenExpiration = null;
       repositories = null;
       asked = [];
       bearers = [];
@@ -177,8 +190,30 @@ serve({
       return;
     }
 
+    const bearer = (req.headers.authorization ?? "").replace(/^Bearer /, "");
+    if (refusedTokens.includes(bearer)) {
+      asked.push(pathname);
+      bearers.push(req.headers.authorization ?? null);
+      json(res, { message: "Bad credentials" }, 401);
+      return;
+    }
+
+    // A project's access token rather than a sign-in: whoever the spec said it belongs to
+    if (pathname === "/user" && bearer && !bearer.startsWith("gho_")) {
+      asked.push(pathname);
+      bearers.push(req.headers.authorization ?? null);
+      const payload = JSON.stringify({ login: tokenLogin });
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+        ...(tokenExpiration ? { "github-authentication-token-expiration": tokenExpiration } : {}),
+      });
+      res.end(payload);
+      return;
+    }
+
     if (pathname === "/user" || pathname === "/user/emails") {
-      const person = tokens.get((req.headers.authorization ?? "").replace(/^Bearer /, ""));
+      const person = tokens.get(bearer);
       if (!person) {
         json(res, { message: "Bad credentials" }, 401);
         return;
@@ -196,6 +231,11 @@ serve({
     const addressed = /^\/repos\/([^/]+\/[^/]+)\//.exec(`${pathname}/`);
     if (addressed && (repositories ? !(addressed[1] in repositories) : addressed[1] !== repository)) {
       json(res, { message: `github stub is not ${addressed[1]}` }, 404);
+      return;
+    }
+
+    if (/^\/repos\/[^/]+\/[^/]+$/.test(pathname)) {
+      json(res, { full_name: addressed[1] });
       return;
     }
 

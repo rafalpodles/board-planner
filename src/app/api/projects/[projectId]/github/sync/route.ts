@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { syncGithubPullRequests } from "@/lib/github-sync";
+import { GitHubTokenRejected, syncGithubPullRequests } from "@/lib/github-sync";
 import { withProjectAccess } from "@/lib/middleware";
 import { syncGithubDeployments } from "@/lib/github-deployments";
 import { getOrganisation } from "@/lib/organisation";
@@ -40,6 +40,12 @@ export const POST = withProjectAccess(async (request, { params, user, db }) => {
   try {
     result = await syncGithubPullRequests(db, project, String(user._id), transitionOnly);
   } catch (err) {
+    if (err instanceof GitHubTokenRejected) {
+      return NextResponse.json(
+        { error: "GitHub rejected this project's token: it has expired or was revoked. Paste a new one." },
+        { status: 502 }
+      );
+    }
     console.error("GitHub sync failed:", err);
     return NextResponse.json(
       { error: `GitHub could not be reached: ${firstLine(err)}` },

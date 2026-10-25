@@ -28,6 +28,11 @@ const refuseModel = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/model-keys", () => ({ modelKeyAvailability }));
 vi.mock("@/lib/model-check", () => ({ refuseModel }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+const checkGithubToken = vi.hoisted(() => vi.fn(async () => ({ ok: true, login: "octo", expiresAt: null })));
+vi.mock("@/lib/github", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/github")>()),
+  checkGithubToken,
+}));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
@@ -147,6 +152,7 @@ beforeEach(() => {
   projectFindOne.mockReturnValue({
     toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
     select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
+    lean: () => Promise.resolve({ _id: PROJECT_ID, name: "Test Project" }),
     populate: saved,
   });
   projectFindOneAndUpdate.mockReturnValue({
@@ -1008,6 +1014,72 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     const response = await PUT(putRequest({ worker: { lockedByInstance: true } }), ctx());
 
     expect(response.status).toBe(403);
+  });
+});
+
+describe("PUT /api/projects/[projectId] checks a GitHub token before storing it (BP-1108)", () => {
+  beforeEach(() => {
+    check.mockResolvedValue(true);
+  });
+
+  it("refuses a token GitHub will not take, and writes nothing", async () => {
+    checkGithubToken.mockResolvedValueOnce({ ok: false, error: "GitHub rejected this token: it is wrong, expired or revoked. Nothing was saved." } as never);
+
+    const response = await PUT(putRequest({ githubToken: "ghp_dead" }), ctx());
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain("GitHub rejected this token");
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+    expect(projectUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("checks against the repository the same save names, and stores who the token belongs to", async () => {
+    const expiresAt = new Date("2027-01-24T09:00:00Z");
+    checkGithubToken.mockResolvedValueOnce({ ok: true, login: "rafalpodles", expiresAt } as never);
+
+    const response = await PUT(
+      putRequest({ repositoryUrl: "https://github.com/orbit-dev/orbit", githubToken: "ghp_live" }),
+      ctx()
+    );
+
+    expect(response.status).toBe(200);
+    expect(checkGithubToken).toHaveBeenCalledWith("ghp_live", [{ owner: "orbit-dev", repo: "orbit" }]);
+    // In the settings write itself, so the answer carries it and no second write can fail apart from it
+    expect(projectFindOneAndUpdate.mock.calls[0][1].githubConnection).toMatchObject({ login: "rafalpodles", expiresAt, rejectedAt: null, lastSyncAt: null });
+    expect(JSON.stringify(projectUpdateOne.mock.calls)).not.toContain("githubConnection");
+  });
+
+  it("refuses a token that is not a string rather than storing it unchecked and unsealed", async () => {
+    const response = await PUT(putRequest({ githubToken: 12345 }), ctx());
+
+    expect(response.status).toBe(400);
+    expect(checkGithubToken).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("names the token in the audit trail and not the state it resets", async () => {
+    projectFindOneAndUpdate.mockReturnValue({ lean: () => Promise.resolve({ githubToken: "" }) });
+
+    await PUT(putRequest({ githubToken: "ghp_live" }), ctx());
+
+    const details = logProjectAudit.mock.calls.map(([, , , , detail]) => String(detail)).join("\n");
+    expect(details).toContain("GitHub token set");
+    expect(details).not.toContain("onnection");
+  });
+
+  it("asks GitHub nothing for a save that does not carry a token", async () => {
+    const response = await PUT(putRequest({ name: "Renamed" }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(checkGithubToken).not.toHaveBeenCalled();
+  });
+
+  it("forgets the old token's state when the token is cleared", async () => {
+    const response = await PUT(putRequest({ githubToken: "" }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(checkGithubToken).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate.mock.calls[0][1].githubConnection).toMatchObject({ login: "", rejectedAt: null });
   });
 });
 

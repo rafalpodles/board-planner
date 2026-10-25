@@ -1,12 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   allowLoopbackIn,
+  checkGithubToken,
   fetchDeployments,
   fetchDeploymentStatuses,
   fetchMergedPullRequests, fetchPullRequests,
   GitHubRateLimited,
   GitHubRefused,
   matchPRsToTasks,
+  parseTokenExpiry,
   reduceChecks,
 } from "./github";
 
@@ -331,5 +333,59 @@ describe("fetchMergedPullRequests", () => {
     const result = await fetchMergedPullRequests("o", "r", "tok", new Date("2026-01-01"), new Date("2026-12-31"));
     expect(safeFetch).toHaveBeenCalledTimes(5);
     expect(result.complete).toBe(false);
+  });
+});
+
+describe("checking a token before it is stored (BP-1108)", () => {
+  const answer = (status: number, body: unknown = {}, headers: Record<string, string> = {}) =>
+    Promise.resolve(new Response(JSON.stringify(body), { status, headers }));
+  const paths = () => safeFetch.mock.calls.map(([url]) => new URL(url).pathname + new URL(url).search);
+
+  it("names whose token it is and when it expires, after reading each repository's pull requests", async () => {
+    safeFetch.mockReset();
+    safeFetch
+      .mockImplementationOnce(() => answer(200, { login: "rafalpodles" }, { "github-authentication-token-expiration": "2027-01-24 10:00:00 +0100" }))
+      .mockImplementation(() => answer(200, []));
+
+    const checked = await checkGithubToken("tok", [{ owner: "o", repo: "r" }]);
+
+    expect(checked).toEqual({ ok: true, login: "rafalpodles", expiresAt: new Date("2027-01-24T09:00:00Z") });
+    expect(paths()).toEqual(["/user", "/repos/o/r", "/repos/o/r/pulls?state=open&per_page=1"]);
+  });
+
+  it.each([
+    [[401], "GitHub rejected this token"],
+    [[200, 404], "cannot read o/r"],
+    [[200, 200, 403], "not its pull requests"],
+  ])("refuses %j with a reason a person can act on", async (statuses, reason) => {
+    safeFetch.mockReset();
+    for (const status of statuses) safeFetch.mockImplementationOnce(() => answer(status, { login: "x" }));
+
+    const checked = await checkGithubToken("tok", [{ owner: "o", repo: "r" }]);
+
+    expect(checked.ok).toBe(false);
+    expect(!checked.ok && checked.error).toContain(reason);
+    expect(!checked.ok && checked.error).toContain("Nothing was saved");
+  });
+
+  it("says GitHub could not be reached rather than blaming the token", async () => {
+    safeFetch.mockReset();
+    safeFetch.mockImplementationOnce(() => Promise.reject(new Error("ECONNREFUSED")));
+
+    expect(await checkGithubToken("tok", [])).toEqual({ ok: false, error: "GitHub could not be reached to check this token. Nothing was saved." });
+  });
+});
+
+describe("GitHub's token expiry header", () => {
+  it.each([
+    ["2027-01-24 10:00:00 +0100", "2027-01-24T09:00:00.000Z"],
+    ["2027-01-24 10:00:00 UTC", "2027-01-24T10:00:00.000Z"],
+    ["2027-01-24 10:00:00 -05:30", "2027-01-24T15:30:00.000Z"],
+  ])("reads %s", (header, iso) => {
+    expect(parseTokenExpiry(header)?.toISOString()).toBe(iso);
+  });
+
+  it.each([null, "", "never", "2027-13-45 99:00:00 +0100"])("reads %j as no expiry", (header) => {
+    expect(parseTokenExpiry(header as string | null)).toBeNull();
   });
 });

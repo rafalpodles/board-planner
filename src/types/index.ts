@@ -1055,6 +1055,20 @@ export interface GroupRole {
   role: GrantRelation;
 }
 
+/** What the board knows about a provider token's health; never the token itself (BP-1108). */
+export interface RepositoryConnection {
+  rejectedAt: Date | null;
+  login: string;
+  expiresAt: Date | null;
+  lastSyncAt: Date | null;
+  lastSyncLinked: number;
+  lastSyncTasks: number;
+}
+
+export type ApiRepositoryConnection = {
+  [K in keyof RepositoryConnection]: RepositoryConnection[K] extends Date | null ? string | null : RepositoryConnection[K];
+};
+
 export interface IProject {
   _id: Types.ObjectId;
   /** Which identity provider groups give which role on the board; empty means the board is not mapped. */
@@ -1086,6 +1100,8 @@ export interface IProject {
   deploymentEnvironment: string;
   triageMode: TriageMode;
   deploymentSync: { syncedThrough: Date | null; blockedUntil: Date | null; lastError?: string };
+  githubConnection?: RepositoryConnection;
+  gitlabConnection?: RepositoryConnection;
   /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   gitlabRepo: string;
   gitlabHost: string;
@@ -1396,6 +1412,8 @@ export interface ApiProject {
   // This instance's GitHub web origin, so a draft URL is classified the way the server will
   githubWebBase?: string;
   githubTokenSet: boolean;
+  githubConnection?: ApiRepositoryConnection;
+  gitlabConnection?: ApiRepositoryConnection;
   deploymentEnvironment?: string;
   triageMode?: TriageMode;
   gitlabHost?: string;
