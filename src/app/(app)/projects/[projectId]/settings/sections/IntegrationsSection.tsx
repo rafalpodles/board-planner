@@ -698,8 +698,8 @@ export function IntegrationsSection({
                         }
                       />
                       <p className="mt-1 text-xs text-text-muted">
-                        A fine-grained token for this repository, read-only: Pull requests, Commit statuses,
-                        Contents, and Deployments for Insights.{" "}
+                        A fine-grained token for this repository, read-only: Pull requests, Checks, Commit
+                        statuses, Contents, and Deployments for Insights.{" "}
                         <a
                           className="text-primary underline"
                           href={`${project.githubWebBase || "https://github.com"}/settings/personal-access-tokens/new`}
