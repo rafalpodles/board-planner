@@ -306,7 +306,7 @@ describe("IntegrationsSection and the GitHub token's state (BP-1108)", () => {
   });
 
   it("badges a rejected token instead of calling it Connected, and says when it stopped", () => {
-    github({ githubConnection: connection({ rejectedAt: `${year}-10-18T07:12:00Z` }) as never });
+    github({ githubConnection: connection({ rejectedAt: `${year}-10-18T12:00:00Z` }) as never });
 
     expect(screen.getByText("Token rejected")).toBeTruthy();
     expect(screen.queryByText("Connected")).toBeNull();
@@ -326,7 +326,7 @@ describe("IntegrationsSection and the GitHub token's state (BP-1108)", () => {
   });
 
   it("saves a typed token, and only the token, before it syncs on it", async () => {
-    github({ githubConnection: connection({ rejectedAt: `${year}-10-18T07:12:00Z` }) as never });
+    github({ githubConnection: connection({ rejectedAt: `${year}-10-18T12:00:00Z` }) as never });
     openGithub();
     api.put.mockResolvedValue({ _id: "p1", githubTokenSet: true });
     api.post.mockResolvedValue({ prsLinked: 3, tasksLinked: 2, prsUnlinked: 0, autoTransitioned: 0 });

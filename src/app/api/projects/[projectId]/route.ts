@@ -35,7 +35,7 @@ import { githubWebBase } from "@/lib/github-host";
 import { releaseProjectUploads } from "@/lib/upload-cleanup";
 import { DEFAULT_DEPLOYMENT_ENVIRONMENT } from "@/lib/github-deployments";
 import { checkGithubToken, parseRepoString } from "@/lib/github";
-import { freshConnection } from "@/lib/repository-connection";
+import { freshConnection, hideConnectionIdentity } from "@/lib/repository-connection";
 import { repositoriesOfProvider } from "@/lib/repo-match";
 import type { RepositoryFields } from "@/lib/repository";
 
@@ -76,6 +76,7 @@ export const GET = withProjectAccessOrWorker(async (_request, { params, user, db
     obj.pmLocked = pmAccess.locked;
   }
   obj.canAdmin = await check(db, user, String(project._id), "admin");
+  hideConnectionIdentity(obj);
   return NextResponse.json(obj);
 }, { reach: "board" });
 
@@ -97,6 +98,10 @@ const PM_SAVED_AUTONOMY_FIELDS = [
 const MCP_SERVERS_WRITE_ATTEMPTS = 3;
 
 // The MCP list is written only over the one its tokens were merged from: a refresh rotates them on its own
+// The list mirrors repositoryUrl, which is described already; a connection is what a new token
+// resets, and the token itself is the change the trail names
+const UNAUDITED = new Set(["repositories", "githubConnection", "gitlabConnection"]);
+
 const MOST_REPOSITORIES_CHECKED = 10;
 
 function githubRepositoriesOf(project: RepositoryFields): { owner: string; repo: string }[] {
@@ -397,6 +402,11 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     }
   }
 
+  for (const field of ["githubToken", "gitlabToken", "codaToken"] as const) {
+    if (updates[field] !== undefined && typeof updates[field] !== "string") {
+      return NextResponse.json({ error: `${field} must be a string` }, { status: 400 });
+    }
+  }
   const incomingGithubToken = typeof updates.githubToken === "string" ? updates.githubToken : undefined;
   const incomingTokens = ["githubToken", "gitlabToken", "codaToken"] as const;
   const storingAToken = incomingTokens.some(
@@ -435,26 +445,20 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     updates.repositories = plan.repositories;
   }
 
-  let githubConnection: ReturnType<typeof freshConnection> | undefined;
   if (incomingGithubToken) {
     const stored = await db.Project.findById(projectId, "repositoryUrl repositories githubRepo gitlabRepo gitlabHost").lean();
     if (!stored) return NextResponse.json({ error: "Project not found" }, { status: 404 });
     const checked = await checkGithubToken(incomingGithubToken, githubRepositoriesOf({ ...stored, ...updates } as never));
     if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 });
-    githubConnection = freshConnection({ login: checked.login, expiresAt: checked.expiresAt });
+    updates.githubConnection = freshConnection({ login: checked.login, expiresAt: checked.expiresAt });
   } else if (incomingGithubToken === "") {
-    githubConnection = freshConnection();
+    updates.githubConnection = freshConnection();
   }
+  if (typeof updates.gitlabToken === "string") updates.gitlabConnection = freshConnection();
 
   const written = await writeProjectSettings(db, projectId, updates, pmServers, repositoriesBefore);
   if ("error" in written) {
     return NextResponse.json({ error: written.error }, { status: written.status });
-  }
-  if (githubConnection) {
-    await db.Project.updateOne({ _id: projectId }, { $set: { githubConnection } });
-  }
-  if (typeof updates.gitlabToken === "string") {
-    await db.Project.updateOne({ _id: projectId }, { $set: { gitlabConnection: freshConnection() } });
   }
   const beforeImage = written.before;
   const repositoryMoved =
@@ -489,9 +493,9 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   try {
     images = projectWriteImages(beforeImage, updates);
     // The list mirrors repositoryUrl here, which is described already
-    changes = describeSettingsChanges(images.before, images.after.toObject(), Object.keys(updates).filter((k) => k !== "repositories"));
+    changes = describeSettingsChanges(images.before, images.after.toObject(), Object.keys(updates).filter((k) => !UNAUDITED.has(k)));
   } catch {
-    changes = [`Changed: ${Object.keys(updates).join(", ")}`];
+    changes = [`Changed: ${Object.keys(updates).filter((k) => !UNAUDITED.has(k)).join(", ")}`];
   }
   if (body.additionalRepositories !== undefined || typeof updates.repositoryUrl === "string") {
     changes.push(
@@ -540,6 +544,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     obj.pmLocked = pmAccess.locked;
   }
   obj.canAdmin = await check(db, user, String(project._id), "admin");
+  hideConnectionIdentity(obj);
   return NextResponse.json(obj);
 });
 

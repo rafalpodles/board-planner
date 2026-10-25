@@ -263,7 +263,7 @@ export async function syncGithubPullRequests(
     result = await syncEveryGithubRepository(db, project, actor, transitionOnly);
   } catch (err) {
     if (err instanceof GitHubRefused && err.status === 401) {
-      throw new GitHubTokenRejected(await recordTokenRejected(db, project._id, "github"));
+      throw new GitHubTokenRejected(await recordTokenRejected(db, project._id, "github", project.githubToken ?? ""));
     }
     throw err;
   }

@@ -15,7 +15,7 @@ export const POST = withProjectAccess(async (_request, { params, user, db }) => 
 
   const result = await syncGitlabMergeRequests(db, project, String(user._id));
   if (!result.ok && result.error === "GitLab answered 401") {
-    await recordTokenRejected(db, project._id, "gitlab");
+    await recordTokenRejected(db, project._id, "gitlab", project.gitlabToken ?? "");
     return NextResponse.json(
       { error: "GitLab rejected this project's token: it has expired or was revoked. Paste a new one." },
       { status: 502 }

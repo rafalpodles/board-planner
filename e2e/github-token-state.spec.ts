@@ -66,8 +66,8 @@ test("a rejected token is badged, told on the board, and replaced by a typed one
   );
 
   await openGithub(page);
-  await expect(page.getByText("Token rejected")).toBeVisible();
-  await expect(page.getByText("Connected")).toHaveCount(0);
+  await expect(page.getByText("Token rejected", { exact: true })).toBeVisible();
+  await expect(page.getByText("Connected", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/^GitHub rejected this token on 18 Oct/)).toBeVisible();
 
   await tokenField(page).fill(FRESH);
@@ -82,8 +82,8 @@ test("a rejected token is badged, told on the board, and replaced by a typed one
   expect(bearers.length).toBeGreaterThan(0);
   expect(bearers.every((bearer) => bearer === `Bearer ${FRESH}`)).toBe(true);
 
-  await expect(page.getByText("Connected")).toBeVisible();
-  await expect(page.getByText("Token rejected")).toHaveCount(0);
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+  await expect(page.getByText("Token rejected", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("status").filter({ hasText: "Token of" })).toContainText("Token of token-owner, with no expiry.");
   await expect(page.getByRole("status").filter({ hasText: "Last synced" })).toContainText("0 pull requests linked to 0 tasks.");
   expect(await connection()).toMatchObject({ rejectedAt: null, login: "token-owner" });
@@ -130,14 +130,14 @@ test("a person's sync on a dead token records it, and the badge turns", async ({
   await stub(page, { refusedTokens: [DEAD] });
   await signIn(page);
   await openGithub(page);
-  await expect(page.getByText("Connected")).toBeVisible();
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
 
   const synced = isSync(page);
   await page.getByRole("button", { name: "Sync pull requests now" }).click();
   expect((await synced).status()).toBe(502);
 
   await expect(lastToast(page)).toContainText("GitHub rejected this project's token");
-  await expect(page.getByText("Token rejected")).toBeVisible();
+  await expect(page.getByText("Token rejected", { exact: true })).toBeVisible();
   expect((await connection()).rejectedAt).toBeInstanceOf(Date);
 });
 
@@ -156,4 +156,24 @@ test("a token close to its expiry is badged with the days left", async ({ page }
 
   await expect(page.getByText("Expires in 3 days")).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "This token expires on" })).toBeVisible();
+});
+
+test("a new token saved with Save changes clears the rejection at once, without a sync", async ({ page }) => {
+  await seedRepository({ repositoryUrl: REPO_URL, githubToken: DEAD });
+  await markRejected(new Date(`${new Date().getFullYear()}-10-18T12:00:00Z`));
+  await stub(page, { refusedTokens: [DEAD], tokenLogin: "token-owner" });
+  await signIn(page);
+  await openGithub(page);
+  await expect(page.getByText("Token rejected", { exact: true })).toBeVisible();
+
+  await tokenField(page).fill(FRESH);
+  const saved = isPut(page);
+  await page.getByRole("button", { name: "Save changes" }).click();
+  expect((await saved).status()).toBe(200);
+
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible({ timeout: 1_000 });
+  await expect(page.getByText("Token rejected", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "Token of" })).toContainText("Token of token-owner");
+  const asked: string[] = await (await page.request.get(`${GITHUB_STUB_URL}/asked`)).json();
+  expect(asked.some((path) => path.endsWith("/pulls") && !path.includes("per_page"))).toBe(false);
 });

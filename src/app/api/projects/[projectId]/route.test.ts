@@ -1018,6 +1018,10 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
 });
 
 describe("PUT /api/projects/[projectId] checks a GitHub token before storing it (BP-1108)", () => {
+  beforeEach(() => {
+    check.mockResolvedValue(true);
+  });
+
   it("refuses a token GitHub will not take, and writes nothing", async () => {
     checkGithubToken.mockResolvedValueOnce({ ok: false, error: "GitHub rejected this token: it is wrong, expired or revoked. Nothing was saved." } as never);
 
@@ -1040,8 +1044,27 @@ describe("PUT /api/projects/[projectId] checks a GitHub token before storing it 
 
     expect(response.status).toBe(200);
     expect(checkGithubToken).toHaveBeenCalledWith("ghp_live", [{ owner: "orbit-dev", repo: "orbit" }]);
-    const set = projectUpdateOne.mock.calls.map((call) => call[1]).find((update) => update?.$set?.githubConnection);
-    expect(set.$set.githubConnection).toMatchObject({ login: "rafalpodles", expiresAt, rejectedAt: null, lastSyncAt: null });
+    // In the settings write itself, so the answer carries it and no second write can fail apart from it
+    expect(projectFindOneAndUpdate.mock.calls[0][1].githubConnection).toMatchObject({ login: "rafalpodles", expiresAt, rejectedAt: null, lastSyncAt: null });
+    expect(JSON.stringify(projectUpdateOne.mock.calls)).not.toContain("githubConnection");
+  });
+
+  it("refuses a token that is not a string rather than storing it unchecked and unsealed", async () => {
+    const response = await PUT(putRequest({ githubToken: 12345 }), ctx());
+
+    expect(response.status).toBe(400);
+    expect(checkGithubToken).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("names the token in the audit trail and not the state it resets", async () => {
+    projectFindOneAndUpdate.mockReturnValue({ lean: () => Promise.resolve({ githubToken: "" }) });
+
+    await PUT(putRequest({ githubToken: "ghp_live" }), ctx());
+
+    const details = logProjectAudit.mock.calls.map(([, , , , detail]) => String(detail)).join("\n");
+    expect(details).toContain("GitHub token set");
+    expect(details).not.toContain("onnection");
   });
 
   it("asks GitHub nothing for a save that does not carry a token", async () => {
@@ -1056,8 +1079,7 @@ describe("PUT /api/projects/[projectId] checks a GitHub token before storing it 
 
     expect(response.status).toBe(200);
     expect(checkGithubToken).not.toHaveBeenCalled();
-    const set = projectUpdateOne.mock.calls.map((call) => call[1]).find((update) => update?.$set?.githubConnection);
-    expect(set.$set.githubConnection).toMatchObject({ login: "", rejectedAt: null });
+    expect(projectFindOneAndUpdate.mock.calls[0][1].githubConnection).toMatchObject({ login: "", rejectedAt: null });
   });
 });
 

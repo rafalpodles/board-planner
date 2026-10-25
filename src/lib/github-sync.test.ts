@@ -273,7 +273,7 @@ describe("a token GitHub rejects (BP-1108)", () => {
     await githubSyncTick();
 
     expect(projectUpdateOne).toHaveBeenCalledWith(
-      { _id: "p1", "githubConnection.rejectedAt": null, organisation: DEFAULT_ORGANISATION_ID },
+      { _id: "p1", githubToken: "enc", "githubConnection.rejectedAt": null, organisation: DEFAULT_ORGANISATION_ID },
       { $set: { "githubConnection.rejectedAt": expect.any(Date) } }
     );
     expect(warn.mock.calls).toEqual([["GitHub rejected the token of BP; its sync is paused until a new one is saved"]]);

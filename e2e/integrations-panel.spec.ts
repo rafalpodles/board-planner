@@ -323,9 +323,8 @@ test.describe("a refused sync", () => {
     page,
     request,
   }) => {
-    // Registered for the save, which checks the token against the repository (BP-1108), then reset:
-    // the stub's default `repository` is "example/board", so the sync's own requests are answered
-    // 404 — a realistic upstream refusal.
+    // Registered for the save, which checks the token against the repository (BP-1108), then moved
+    // away, so the sync's own requests are answered 404 — a realistic upstream refusal.
     await request.post(`${GITHUB_STUB_URL}/control`, { data: { repository: "e2e/unregistered-repo" } });
     await signIn(page);
     await page.goto(SETTINGS);
@@ -343,7 +342,7 @@ test.describe("a refused sync", () => {
     );
     await saveButton(page).click();
     await tokenSaved;
-    await request.post(`${GITHUB_STUB_URL}/reset`);
+    await request.post(`${GITHUB_STUB_URL}/control`, { data: { repository: "example/board" } });
 
     const syncButton = page.getByRole("button", { name: "Sync pull requests now" });
     await syncButton.click();

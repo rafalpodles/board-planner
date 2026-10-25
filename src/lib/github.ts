@@ -245,8 +245,14 @@ export async function checkGithubToken(token: string, repositories: { owner: str
 
     for (const { owner, repo } of repositories) {
       const repository = await ask(`/repos/${owner}/${repo}`);
-      if (repository.status === 404 || repository.status === 403) {
+      if (repository.status === 404) {
         return { ok: false, error: `GitHub accepted this token, but it cannot read ${owner}/${repo}. Give it access to that repository. Nothing was saved.` };
+      }
+      if (repository.status === 403) {
+        return {
+          ok: false,
+          error: `GitHub refused this token for ${owner}/${repo} (403): it may need authorising for the organisation's single sign-on, or GitHub is limiting requests. Nothing was saved.`,
+        };
       }
       if (!repository.ok) return { ok: false, error: `GitHub answered ${repository.status} for ${owner}/${repo}. Nothing was saved.` };
       await repository.body?.cancel().catch(() => undefined);
