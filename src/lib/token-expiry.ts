@@ -6,7 +6,18 @@ import { forEachServedOrganisation } from "@/lib/organisation-jobs";
 import type { SchedulerStart } from "@/lib/scheduler";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const TICK_MS = 60 * 60 * 1000;
+const DEFAULT_TICK_MS = 60 * 60 * 1000;
+
+/** `TOKEN_EXPIRY_TICK_MS`: an hour unless set, `0` off; a value that is not a number falls back and says so. */
+export function tokenExpiryTickMs(raw = process.env.TOKEN_EXPIRY_TICK_MS): number {
+  if (raw === undefined || raw.trim() === "") return DEFAULT_TICK_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    console.warn(`TOKEN_EXPIRY_TICK_MS=${raw} is not a number of milliseconds; using ${DEFAULT_TICK_MS}`);
+    return DEFAULT_TICK_MS;
+  }
+  return parsed;
+}
 
 const PROVIDERS = [
   { name: "GitHub", field: "githubConnection", token: "githubToken" },
@@ -80,11 +91,21 @@ export async function tokenExpiryTick(now = new Date()): Promise<void> {
 
 let started = false;
 
-export function startTokenExpiryScheduler(): SchedulerStart<"already running"> {
+let ticking = false;
+
+export function startTokenExpiryScheduler(): SchedulerStart<"off" | "already running"> {
+  const tick = tokenExpiryTickMs();
   if (started) return { started: false, reason: "already running" };
+  if (tick === 0) return { started: false, reason: "off" };
   started = true;
   setInterval(() => {
-    tokenExpiryTick().catch((err) => console.error("Token expiry tick failed:", err));
-  }, TICK_MS).unref();
-  return { started: true, tickMs: TICK_MS };
+    if (ticking) return;
+    ticking = true;
+    tokenExpiryTick()
+      .catch((err) => console.error("Token expiry tick failed:", err))
+      .finally(() => {
+        ticking = false;
+      });
+  }, tick).unref();
+  return { started: true, tickMs: tick };
 }

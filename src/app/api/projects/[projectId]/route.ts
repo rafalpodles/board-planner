@@ -35,6 +35,7 @@ import { githubWebBase } from "@/lib/github-host";
 import { releaseProjectUploads } from "@/lib/upload-cleanup";
 import { DEFAULT_DEPLOYMENT_ENVIRONMENT } from "@/lib/github-deployments";
 import { checkGithubToken, parseRepoString } from "@/lib/github";
+import { checkGitlabToken, parseGitlabRepo } from "@/lib/gitlab";
 import { freshConnection, hideConnectionIdentity } from "@/lib/repository-connection";
 import { repositoriesOfProvider } from "@/lib/repo-match";
 import type { RepositoryFields } from "@/lib/repository";
@@ -103,6 +104,15 @@ const MCP_SERVERS_WRITE_ATTEMPTS = 3;
 const UNAUDITED = new Set(["repositories", "githubConnection", "gitlabConnection"]);
 
 const MOST_REPOSITORIES_CHECKED = 10;
+
+function gitlabProjectsOf(project: RepositoryFields): string[] {
+  const listed = repositoriesOfProvider(project, "gitlab");
+  const urls = listed.length > 0 ? listed : repositoryProvider(project) === "gitlab" ? [projectRepositoryUrl(project)] : [];
+  return urls
+    .slice(0, MOST_REPOSITORIES_CHECKED)
+    .map((url) => parseGitlabRepo(url))
+    .filter((path): path is string => !!path);
+}
 
 function githubRepositoriesOf(project: RepositoryFields): { owner: string; repo: string }[] {
   const listed = repositoriesOfProvider(project, "github");
@@ -408,6 +418,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     }
   }
   const incomingGithubToken = typeof updates.githubToken === "string" ? updates.githubToken : undefined;
+  const incomingGitlabToken = typeof updates.gitlabToken === "string" ? updates.gitlabToken : undefined;
   const incomingTokens = ["githubToken", "gitlabToken", "codaToken"] as const;
   const storingAToken = incomingTokens.some(
     (field) => typeof updates[field] === "string" && updates[field]
@@ -454,7 +465,16 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
   } else if (incomingGithubToken === "") {
     updates.githubConnection = freshConnection();
   }
-  if (typeof updates.gitlabToken === "string") updates.gitlabConnection = freshConnection();
+  if (incomingGitlabToken) {
+    const stored = await db.Project.findById(projectId, "repositoryUrl repositories githubRepo gitlabRepo gitlabHost").lean();
+    if (!stored) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    const after = { ...stored, ...updates } as never as RepositoryFields & { gitlabHost?: string };
+    const checked = await checkGitlabToken(after.gitlabHost || "https://gitlab.com", incomingGitlabToken, gitlabProjectsOf(after));
+    if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 });
+    updates.gitlabConnection = freshConnection({ login: checked.login, expiresAt: checked.expiresAt });
+  } else if (typeof updates.gitlabToken === "string") {
+    updates.gitlabConnection = freshConnection();
+  }
 
   const written = await writeProjectSettings(db, projectId, updates, pmServers, repositoriesBefore);
   if ("error" in written) {

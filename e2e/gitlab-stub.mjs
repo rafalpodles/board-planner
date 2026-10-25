@@ -14,6 +14,8 @@ import { readBody, serve } from "./stub-guard.mjs";
  *   commits       — what `/search?scope=commits` searches for the `search` parameter, by
  *                   substring of the message as GitLab does, so `GL-3` also finds `GL-30`
  *   fail          — any of "mergeRequests", "branches", "commits": that endpoint answers 500
+ *   username      — who `/user` says the token belongs to (BP-1109)
+ *   expiresAt     — the `expires_at` day `/personal_access_tokens/self` answers, or null
  *
  * `GET /asked` returns `{ path, search, token }` for every API request since the last reset.
  */
@@ -23,7 +25,7 @@ const PORT = Number(process.env.GITLAB_STUB_PORT ?? 3999);
 
 const DEFAULTS = { project: "e2e-group/e2e-project", token: "glpat-e2e" };
 
-let fixture = { ...DEFAULTS, mergeRequests: [], branches: [], commits: [], fail: [] };
+let fixture = { ...DEFAULTS, mergeRequests: [], branches: [], commits: [], fail: [], username: "gitlab-owner", expiresAt: null };
 let asked = [];
 
 function json(res, body, status = 200) {
@@ -43,6 +45,8 @@ function reset(body = {}) {
     branches: body.branches ?? [],
     commits: body.commits ?? [],
     fail: body.fail ?? [],
+    username: body.username ?? "gitlab-owner",
+    expiresAt: body.expiresAt ?? null,
   };
   asked = [];
 }
@@ -72,6 +76,29 @@ serve({
 
     const token = req.headers["private-token"] ?? null;
     asked.push({ path: pathname, search: searchParams.get("search"), token });
+
+    // What a token check asks before the token is stored (BP-1109)
+    if (req.method === "GET" && (pathname === "/api/v4/user" || pathname === "/api/v4/personal_access_tokens/self")) {
+      if (token !== fixture.token) {
+        json(res, { message: "401 Unauthorized" }, 401);
+        return;
+      }
+      json(res, pathname === "/api/v4/user" ? { username: fixture.username } : { expires_at: fixture.expiresAt });
+      return;
+    }
+    const whole = /^\/api\/v4\/projects\/([^/]+)$/.exec(pathname);
+    if (req.method === "GET" && whole) {
+      if (token !== fixture.token) {
+        json(res, { message: "401 Unauthorized" }, 401);
+        return;
+      }
+      if (decodeURIComponent(whole[1]) !== fixture.project) {
+        json(res, { message: "404 Project Not Found" }, 404);
+        return;
+      }
+      json(res, { path_with_namespace: fixture.project });
+      return;
+    }
 
     const route = /^\/api\/v4\/projects\/([^/]+)\/(merge_requests|repository\/branches|search)$/.exec(
       pathname

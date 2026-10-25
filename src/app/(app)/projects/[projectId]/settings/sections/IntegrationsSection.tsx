@@ -793,9 +793,14 @@ export function IntegrationsSection({
                   />
                   <div className="flex flex-wrap gap-2">
                     {gitlab.value.gitlabToken.trim() && project.repositoryProvider === "gitlab" ? (
-                      <Button size="sm" disabled={gitlabSyncing} onClick={saveGitlabTokenAndSync}>
-                        {gitlabSyncing ? "Saving..." : "Save token and sync"}
-                      </Button>
+                      <>
+                        <Button size="sm" disabled={gitlabSyncing} onClick={saveGitlabTokenAndSync}>
+                          {gitlabSyncing ? "Saving..." : "Save token and sync"}
+                        </Button>
+                        <span className="self-center text-xs text-text-muted">
+                          Checks the token with GitLab before it is stored.
+                        </span>
+                      </>
                     ) : (
                       project.gitlabTokenSet &&
                       project.repositoryProvider === "gitlab" && (

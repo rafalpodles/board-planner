@@ -176,6 +176,8 @@ function devServerEnv(origin: string) {
     // Off, so a tick cannot re-sync a project mid-spec and overwrite what the spec set up.
     // The specs drive the sync themselves, which is the half a person can see.
     GITHUB_SYNC_TICK_MS: "0",
+    // Short, so a spec can watch a token's expiry be announced; nothing else seeds an expiry (BP-1109)
+    TOKEN_EXPIRY_TICK_MS: "1500",
     // The mail server above. `isEmailConfigured()` wants all three, and without them the whole
     // e-mail column of the notification grid is unreachable from a browser (BP-465).
     SMTP_HOST: MAIL_SERVER.host,

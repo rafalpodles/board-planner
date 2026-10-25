@@ -258,7 +258,9 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     console.log(
       tokenExpiry.started
         ? `Token expiry notices started — every ${tokenExpiry.tickMs}ms`
-        : "Token expiry notices were already running"
+        : tokenExpiry.reason === "off"
+          ? "Token expiry notices are off (TOKEN_EXPIRY_TICK_MS=0)"
+          : "Token expiry notices were already running"
     );
 
     const { startLicencePull } = await import("@/lib/licence-pull");
