@@ -26,15 +26,23 @@ function fakeDb(opts: {
   }));
   const updateOne = vi.fn(async () => ({ modifiedCount: opts.claimed ?? 1 }));
   const owners = opts.owners ?? ["a1"];
-  const db = {
-    Project: { find, updateOne },
-    Grant: { find: () => ({ select: () => ({ lean: async () => owners.map((subject) => ({ subject })) }) }) },
-    User: {
-      find: () => ({
-        select: () => ({ lean: async () => owners.filter((id) => !(opts.deactivated ?? []).includes(id)).map((_id) => ({ _id })) }),
-      }),
-    },
-  };
+  const grants = [
+    ...owners.map((subject) => ({ subject, relation: "owner", objectType: "project", object: "p1" })),
+    { subject: "member1", relation: "member", objectType: "project", object: "p1" },
+  ];
+  const users = [...owners, "member1"].map((_id) => ({ _id, deactivatedAt: (opts.deactivated ?? []).includes(_id) ? new Date() : null }));
+  const grantFind = vi.fn((filter: Record<string, unknown>) => ({
+    select: () => ({
+      lean: async () =>
+        grants.filter((g) => g.relation === filter.relation && g.objectType === filter.objectType && (g.object === filter.object || filter.object === "p2")),
+    }),
+  }));
+  const userFind = vi.fn((filter: { _id: { $in: string[] }; deactivatedAt?: null }) => ({
+    select: () => ({
+      lean: async () => users.filter((u) => filter._id.$in.includes(u._id) && (!("deactivatedAt" in filter) || u.deactivatedAt === null)),
+    }),
+  }));
+  const db = { Project: { find, updateOne }, Grant: { find: grantFind }, User: { find: userFind } };
   return { db: db as never, find, updateOne };
 }
 
@@ -80,10 +88,30 @@ describe("telling a board's owners that its token expires (BP-1109)", () => {
   });
 
   it("leaves a board with no living owner untold, having claimed it", async () => {
-    const { db } = fakeDb({ github: [project({ expiresAt: inThreeDays })], owners: ["gone"], deactivated: ["gone"] });
+    const { db, updateOne } = fakeDb({ github: [project({ expiresAt: inThreeDays })], owners: ["gone"], deactivated: ["gone"] });
 
     expect(await notifyExpiringTokens(db, now)).toBe(0);
+    expect(updateOne).toHaveBeenCalledTimes(1);
     expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it("claims before it tells, so a second replica's tick finds the expiry taken", async () => {
+    const order: string[] = [];
+    const { db, updateOne } = fakeDb({ github: [project({ expiresAt: inThreeDays })] });
+    updateOne.mockImplementationOnce(async () => (order.push("claim"), { modifiedCount: 1 }));
+    createNotifications.mockImplementationOnce(async () => void order.push("notify"));
+
+    await notifyExpiringTokens(db, now);
+
+    expect(order).toEqual(["claim", "notify"]);
+  });
+
+  it("links the mail and the chat message to the board's integration settings", async () => {
+    const { db } = fakeDb({ github: [project({ expiresAt: inThreeDays })] });
+
+    await notifyExpiringTokens(db, now);
+
+    expect(createNotifications.mock.calls[0][1].email).toMatchObject({ projectRef: "ORB", section: "integrations" });
   });
 
   it("names GitLab for a GitLab token", async () => {
@@ -102,6 +130,7 @@ describe("TOKEN_EXPIRY_TICK_MS", () => {
     expect(tokenExpiryTickMs("0")).toBe(0);
     expect(tokenExpiryTickMs("1500")).toBe(1500);
     expect(tokenExpiryTickMs("1h")).toBe(3_600_000);
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(tokenExpiryTickMs("5")).toBe(3_600_000);
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 });

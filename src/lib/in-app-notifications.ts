@@ -27,6 +27,8 @@ export interface NotificationEmail {
    *  number it is the board itself. */
   projectRef?: string;
   taskNumber?: number;
+  /** A settings section of the board, for a notice the reader acts on there */
+  section?: string;
   /** Lets the footer tell an assignee why they got this without a second query per recipient. */
   assigneeId?: string;
 }

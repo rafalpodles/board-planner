@@ -36,8 +36,11 @@ export function taskPath(projectRef: string, taskRef: string | number): string {
 export function notificationPath(link: {
   projectRef?: string;
   taskNumber?: number;
+  /** Where on the board, for a notice about the board rather than a task */
+  section?: string;
 }): string | undefined {
   if (!link.projectRef) return undefined;
+  if (link.section) return `${projectPath(link.projectRef)}/settings?section=${encodeURIComponent(link.section)}`;
   return link.taskNumber === undefined
     ? projectPath(link.projectRef)
     : taskPath(link.projectRef, link.taskNumber);

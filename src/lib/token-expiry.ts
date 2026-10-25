@@ -8,11 +8,11 @@ import type { SchedulerStart } from "@/lib/scheduler";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_TICK_MS = 60 * 60 * 1000;
 
-/** `TOKEN_EXPIRY_TICK_MS`: an hour unless set, `0` off; a value that is not a number falls back and says so. */
+/** `TOKEN_EXPIRY_TICK_MS`: an hour unless set, `0` off; anything else under a second, or not a number, falls back and says so. */
 export function tokenExpiryTickMs(raw = process.env.TOKEN_EXPIRY_TICK_MS): number {
   if (raw === undefined || raw.trim() === "") return DEFAULT_TICK_MS;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) {
+  if (!Number.isFinite(parsed) || parsed < 0 || (parsed > 0 && parsed < 1000)) {
     console.warn(`TOKEN_EXPIRY_TICK_MS=${raw} is not a number of milliseconds; using ${DEFAULT_TICK_MS}`);
     return DEFAULT_TICK_MS;
   }
@@ -68,8 +68,9 @@ export async function notifyExpiringTokens(db: ScopedDb, now = new Date()): Prom
           kicker: "Token expiring",
           taskKey: project.key,
           taskTitle: project.name,
-          taskMeta: `The ${provider.name} token expires on ${day}`,
+          taskMeta: `The ${provider.name} token expires on ${day}. Pull requests stop linking after that: paste a new token before then.`,
           projectRef: project.key,
+          section: "integrations",
         },
       });
       sent += 1;

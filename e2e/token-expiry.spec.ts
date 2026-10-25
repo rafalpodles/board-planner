@@ -47,21 +47,24 @@ test("a board's owner is told once that its GitHub token expires, and the notice
   expect(await noticesFor(OWNER_ID)).toHaveLength(1);
 });
 
-test("a token already rejected, or a week and more away, is announced to nobody", async () => {
+test("a token already rejected is announced to nobody, while one beside it that is not is", async () => {
   await seedRepository({ repositoryUrl: "https://github.com/e2e-org/expiring", githubToken: "github_pat_e2e_expiring" });
-  const projects = (await db()).collection("projects");
-  await projects.updateOne(
+  await (await db()).collection("projects").updateOne(
     { _id: PROJECT_ID },
-    { $set: { githubConnection: { expiresAt: new Date(Date.now() + 3 * 86_400_000), rejectedAt: new Date() } } }
-  );
-  // The control: a GitLab token on the same board, far from its expiry
-  await projects.updateOne(
-    { _id: PROJECT_ID },
-    { $set: { gitlabToken: "enc:v3:not-read", gitlabConnection: { expiresAt: new Date(Date.now() + 30 * 86_400_000), rejectedAt: null } } }
+    {
+      $set: {
+        githubConnection: { expiresAt: new Date(Date.now() + 3 * 86_400_000), rejectedAt: new Date() },
+        // The control, on the same board and the same tick: a GitLab token that is not rejected
+        gitlabToken: "enc:v3:not-read",
+        gitlabConnection: { expiresAt: new Date(Date.now() + 2 * 86_400_000), rejectedAt: null },
+      },
+    }
   );
 
-  await new Promise((resolve) => setTimeout(resolve, 4_000));
-  expect(await noticesFor(OWNER_ID)).toHaveLength(0);
+  await expect.poll(async () => (await noticesFor(OWNER_ID)).length, { timeout: 20_000 }).toBe(1);
+  await new Promise((resolve) => setTimeout(resolve, 3_000));
+  const notices = await noticesFor(OWNER_ID);
+  expect(notices.map((notice) => notice.title)).toEqual([`The GitLab token of ${PROJECT_NAME} expires on ${notices[0]?.title.split(" expires on ")[1]}`]);
 });
 
 test.describe("a GitLab token is checked before it is stored", () => {

@@ -1064,6 +1064,16 @@ describe("PUT /api/projects/[projectId] checks a GitHub token before storing it 
     expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
+  it("checks the GitLab project the same save points the board at", async () => {
+    const response = await PUT(
+      putRequest({ repositoryUrl: "https://gitlab.com/orbit-group/orbit-app", gitlabToken: "glpat-live" }),
+      ctx()
+    );
+
+    expect(response.status).toBe(200);
+    expect(checkGitlabToken).toHaveBeenCalledWith("https://gitlab.com", "glpat-live", ["orbit-group/orbit-app"]);
+  });
+
   it("stores who a GitLab token belongs to and when it expires, in the same write", async () => {
     const expiresAt = new Date("2027-01-24T00:00:00Z");
     checkGitlabToken.mockResolvedValueOnce({ ok: true, login: "gl-owner", expiresAt } as never);

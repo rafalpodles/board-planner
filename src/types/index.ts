@@ -1979,7 +1979,7 @@ export interface INotification {
   type: NotificationType;
   task?: Types.ObjectId | ITask;
   project: Types.ObjectId | IProject;
-  actor: Types.ObjectId | IUser;
+  actor?: Types.ObjectId | IUser;
   title: string;
   digestTitle?: string;
   body: string;
@@ -1998,7 +1998,7 @@ export interface ApiNotification {
   type: NotificationType;
   task?: { _id: string; taskNumber: number; title: string } | string | null;
   project: { _id: string; key: string; name: string } | string;
-  actor: { _id: string; username: string; fullName: string } | string;
+  actor?: { _id: string; username: string; fullName: string } | string;
   title: string;
   body: string;
   read: boolean;

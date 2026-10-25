@@ -100,9 +100,11 @@ src/
   shared team channel in `project.notificationChannels`, which is unchanged and has no recipient.
   Accounts with no stored grid fall back to the old `emailNotifications` boolean, so nothing was
   migrated. The bell hides rows rather than skipping the write — `Notification.inApp` — because the
-  digest is assembled from those documents. Five of the seven rows *filter* a recipient list built
+  digest is assembled from those documents. Five of the eight rows *filter* a recipient list built
   from a task's assignee and watchers; `board_access` goes to the one person whose grant was added
-  or changed, and is the only row with no task; `task_created` has no such list and instead *selects* its
+  or changed; `token_expiring` goes to a board's living owners, once per token a week before its
+  GitHub or GitLab token expires (`src/lib/token-expiry.ts`, its own tick), and like `board_access`
+  names no task — it is also the one row with no actor; `task_created` has no such list and instead *selects* its
   audience from the ticks themselves (`src/lib/board-feed.ts`), bounded by
   `BOARD_FEED_FANOUT_LIMIT`. It is the one row the legacy fallback leaves off, so adding it
   subscribed nobody
@@ -165,6 +167,9 @@ AI_DAILY_PERCENT=         # one UTC day may use at most AI_DAILY_PERCENT (20) of
                           # 429 naming the number and the renewal. An organisation's own key is counted, never
                           # refused. Each person is also held to 20 AI Assist generations per 15 minutes (BP-323)
 PM_MAX_TOKENS=            # Optional — PM agent max output tokens per call (default: 8192)
+TOKEN_EXPIRY_TICK_MS=     # Optional — how often expiring GitHub/GitLab tokens are looked for and their
+                          # board's owners told, once per token, a week ahead (default 3600000; 0 off;
+                          # under 1000 or not a number falls back to the default and says so) (BP-1109)
 PM_SCHEDULER_TICK_MS=     # Optional — PM autonomy scheduler tick (default: 300000)
 WEBHOOK_SIGNING_SECRET=   # Optional — HMACs outgoing webhook deliveries (x-boardplanner-signature)
                           # as set; with ORGANISATION_DOMAIN each organisation signs with its own key,
