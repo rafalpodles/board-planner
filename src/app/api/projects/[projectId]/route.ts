@@ -437,7 +437,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
 
   let githubConnection: ReturnType<typeof freshConnection> | undefined;
   if (incomingGithubToken) {
-    const stored = await db.Project.findById(projectId).select("repositoryUrl repositories githubRepo gitlabRepo gitlabHost").lean();
+    const stored = await db.Project.findById(projectId, "repositoryUrl repositories githubRepo gitlabRepo gitlabHost").lean();
     if (!stored) return NextResponse.json({ error: "Project not found" }, { status: 404 });
     const checked = await checkGithubToken(incomingGithubToken, githubRepositoriesOf({ ...stored, ...updates } as never));
     if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 });

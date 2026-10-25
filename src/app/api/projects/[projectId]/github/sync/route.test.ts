@@ -33,7 +33,8 @@ vi.mock("@/lib/github-deployments", () => ({ syncGithubDeployments }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
-vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
+const projectUpdateOne = vi.hoisted(() => vi.fn(async () => ({ modifiedCount: 1 })));
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne, updateOne: projectUpdateOne } }));
 // `find` is the second pass BP-610 added: the tasks this round contradicts without visiting.
 // Every test here drives a round whose matches are its whole story, so it answers with nothing.
 vi.mock("@/models/task", () => ({

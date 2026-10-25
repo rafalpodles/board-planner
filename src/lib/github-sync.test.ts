@@ -37,7 +37,8 @@ vi.mock("@/lib/github-deployments", () => ({ syncGithubDeployments }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
-vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
+const projectUpdateOne = vi.hoisted(() => vi.fn(async () => ({ modifiedCount: 1 })));
+vi.mock("@/models/project", () => ({ Project: { find: projectFind, updateOne: projectUpdateOne } }));
 // `find` is the second pass BP-610 added: the tasks this round contradicts without visiting.
 // Every test here drives a round whose matches are its whole story, so it answers with nothing.
 vi.mock("@/models/task", () => ({
@@ -49,6 +50,7 @@ vi.mock("@/lib/github", async (importOriginal) => ({
 }));
 
 const { syncGithubPullRequests, githubSyncTick, syncTickMs } = await import("./github-sync");
+const { GitHubRefused, GitHubRateLimited } = await import("@/lib/github");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { DEFAULT_ORGANISATION_ID } = await import("@/lib/organisation-field");
 const db = scopedToDefaultOrganisation();
@@ -206,7 +208,11 @@ describe("the background tick", () => {
   it("asks only about projects that have a token to ask with", async () => {
     await githubSyncTick();
 
-    expect(projectFind.mock.calls[0][0]).toEqual({ githubToken: { $nin: [null, ""] }, organisation: DEFAULT_ORGANISATION_ID });
+    expect(projectFind.mock.calls[0][0]).toEqual({
+      githubToken: { $nin: [null, ""] },
+      "githubConnection.rejectedAt": null,
+      organisation: DEFAULT_ORGANISATION_ID,
+    });
   });
 
   // One unreachable repository must not cost every other board its refresh
@@ -253,6 +259,76 @@ describe("the background tick", () => {
     await githubSyncTick();
 
     expect(syncGithubDeployments).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("a token GitHub rejects (BP-1108)", () => {
+
+  it("marks the project rejected, says so once without a stack, and reads no deployments for it", async () => {
+    plan.value = "pro";
+    fetchPullRequests.mockRejectedValue(new GitHubRefused(401));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await githubSyncTick();
+
+    expect(projectUpdateOne).toHaveBeenCalledWith(
+      { _id: "p1", "githubConnection.rejectedAt": null, organisation: DEFAULT_ORGANISATION_ID },
+      { $set: { "githubConnection.rejectedAt": expect.any(Date) } }
+    );
+    expect(warn.mock.calls).toEqual([["GitHub rejected the token of BP; its sync is paused until a new one is saved"]]);
+    expect(error).not.toHaveBeenCalled();
+    expect(syncGithubDeployments).not.toHaveBeenCalled();
+  });
+
+  it("stays silent when the project was already marked by an earlier sync", async () => {
+    fetchPullRequests.mockRejectedValue(new GitHubRefused(401));
+    projectUpdateOne.mockResolvedValueOnce({ modifiedCount: 0 });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await githubSyncTick();
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it("does not take a rate limit or another refusal for a dead token", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const refusal of [new GitHubRateLimited("limited", new Date()), new GitHubRefused(403), new GitHubRefused(404)]) {
+      projectUpdateOne.mockClear();
+      fetchPullRequests.mockRejectedValueOnce(refusal);
+
+      await githubSyncTick();
+
+      expect(projectUpdateOne).not.toHaveBeenCalled();
+    }
+    expect(error).toHaveBeenCalledTimes(3);
+  });
+
+  it("records what a sync that worked linked, which also lifts an earlier rejection", async () => {
+    await syncGithubPullRequests(db, project(), "u1");
+
+    expect(projectUpdateOne).toHaveBeenCalledWith(
+      { _id: "p1", organisation: DEFAULT_ORGANISATION_ID },
+      {
+        $set: {
+          "githubConnection.rejectedAt": null,
+          "githubConnection.lastSyncAt": expect.any(Date),
+          "githubConnection.lastSyncLinked": 1,
+          "githubConnection.lastSyncTasks": 1,
+        },
+      }
+    );
+  });
+
+  it("answers a person's sync with the rejection, not a network failure", async () => {
+    fetchPullRequests.mockRejectedValue(new GitHubRefused(401));
+
+    await expect(syncGithubPullRequests(db, project(), "u1")).rejects.toMatchObject({
+      message: "GitHub rejected this project's token: it has expired or was revoked",
+      firstSeen: true,
+    });
   });
 });
 

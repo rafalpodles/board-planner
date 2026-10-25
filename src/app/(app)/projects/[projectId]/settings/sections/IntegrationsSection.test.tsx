@@ -279,6 +279,84 @@ describe("IntegrationsSection additional repositories", () => {
   });
 });
 
+describe("IntegrationsSection and the GitHub token's state (BP-1108)", () => {
+  const year = new Date().getFullYear();
+  const connection = (over: Record<string, unknown> = {}) => ({
+    rejectedAt: null,
+    login: "rafalpodles",
+    expiresAt: `${year + 1}-01-24T09:00:00Z`,
+    lastSyncAt: `${year}-10-25T17:40:00Z`,
+    lastSyncLinked: 12,
+    lastSyncTasks: 11,
+    ...over,
+  });
+  const github = (over: Partial<ApiProject> = {}) =>
+    renderSection({
+      repositoryUrl: "https://github.com/o/r",
+      repositoryProvider: "github",
+      githubTokenSet: true,
+      ...over,
+    });
+  const openGithub = () => fireEvent.click(screen.getByRole("button", { name: "Configure GitHub" }));
+  beforeEach(() => {
+    api.put.mockReset();
+    api.post.mockReset();
+    api.get.mockClear();
+    toast.mockReset();
+  });
+
+  it("badges a rejected token instead of calling it Connected, and says when it stopped", () => {
+    github({ githubConnection: connection({ rejectedAt: `${year}-10-18T07:12:00Z` }) as never });
+
+    expect(screen.getByText("Token rejected")).toBeTruthy();
+    expect(screen.queryByText("Connected")).toBeNull();
+    expect(screen.getByText("Pull requests stopped linking on 18 Oct")).toBeTruthy();
+    openGithub();
+    expect(screen.getByText(/^GitHub rejected this token on 18 Oct/)).toBeTruthy();
+  });
+
+  it("says whose working token it is, when it expires, and what the last sync linked", () => {
+    github({ githubConnection: connection() as never });
+
+    expect(screen.getByText("Connected")).toBeTruthy();
+    openGithub();
+    const status = screen.getByRole("status").textContent;
+    expect(status).toContain(`Token of rafalpodles, expires 24 Jan ${year + 1}.`);
+    expect(status).toContain("12 pull requests linked to 11 tasks.");
+  });
+
+  it("saves a typed token, and only the token, before it syncs on it", async () => {
+    github({ githubConnection: connection({ rejectedAt: `${year}-10-18T07:12:00Z` }) as never });
+    openGithub();
+    api.put.mockResolvedValue({ _id: "p1", githubTokenSet: true });
+    api.post.mockResolvedValue({ prsLinked: 3, tasksLinked: 2, prsUnlinked: 0, autoTransitioned: 0 });
+
+    expect(screen.queryByRole("button", { name: "Save token and sync" })).toBeNull();
+    fireEvent.change(screen.getByLabelText(/Access token/), { target: { value: " github_pat_new " } });
+    expect(screen.queryByRole("button", { name: "Sync pull requests now" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save token and sync" }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith("/api/projects/p1/github/sync", {}));
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1", { githubToken: "github_pat_new" });
+    expect(api.put.mock.invocationCallOrder[0]).toBeLessThan(api.post.mock.invocationCallOrder[0]);
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith("/api/projects/p1"));
+    expect((screen.getByLabelText(/Access token/) as HTMLInputElement).value).toBe("");
+  });
+
+  it("does not sync when the token is refused, and keeps it on screen", async () => {
+    github();
+    openGithub();
+    api.put.mockRejectedValue(new Error("GitHub accepted this token, but it cannot read o/r. Nothing was saved."));
+
+    fireEvent.change(screen.getByLabelText(/Access token/), { target: { value: "github_pat_blind" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save token and sync" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("GitHub accepted this token, but it cannot read o/r. Nothing was saved.", "error"));
+    expect(api.post).not.toHaveBeenCalled();
+    expect((screen.getByLabelText(/Access token/) as HTMLInputElement).value).toBe("github_pat_blind");
+  });
+});
+
 describe("deploymentsNote", () => {
   it("says what a manual sync did with deployments, and nothing when it did not read them", () => {
     expect(deploymentsNote(undefined)).toBe("");
