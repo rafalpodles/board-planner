@@ -2,6 +2,7 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { E2E_MONGODB_URI, MEMBER_ID, MEMBER_USERNAME, OUTSIDER_FULL_NAME, PROJECT_KEY, seed, seedAssignmentOutsider } from "./seed";
 import { signIn } from "./session";
+import { GITHUB_STUB_URL } from "../playwright.config";
 
 /**
  * BP-469: the project's audit log — "every settings change on this project, newest first".
@@ -136,6 +137,8 @@ async function detailsOnceStored(page: Page, count: number): Promise<StoredRow[]
  */
 test("a settings save names each value before and after, and never a token", async ({ page }) => {
   const TOKEN = "ghp_e2e_audit_never_in_the_log";
+  // The token is checked against the repository before it is stored (BP-1108)
+  await page.request.post(`${GITHUB_STUB_URL}/control`, { data: { repository: "orbit-dev/orbit" } });
   await signIn(page);
   expect(await openAuditLog(page)).toEqual([]);
 
