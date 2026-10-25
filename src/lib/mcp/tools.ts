@@ -351,7 +351,7 @@ export function registerPlannerTools(server: McpServer): void {
           .optional()
           .describe("true: only tasks that have children — the epics, each with how many of its children are done; false: only tasks with none"),
         fields: z
-          .record(z.any())
+          .record(z.string(), z.any())
           .optional()
           .describe(
             "Filter by project-defined fields, keyed by field name, e.g. { \"Difficulty\": \"L\" } — all must match. " +
@@ -546,7 +546,7 @@ export function registerPlannerTools(server: McpServer): void {
         sprint: SPRINT_PARAM,
         recurrence: RECURRENCE_PARAM,
         fields: z
-          .record(z.any())
+          .record(z.string(), z.any())
           .optional()
           .describe(
             "Project-defined fields keyed by field name, e.g. { \"Owoce\": \"Apples\" }. " +
@@ -637,7 +637,7 @@ export function registerPlannerTools(server: McpServer): void {
         sprint: SPRINT_PARAM,
         recurrence: RECURRENCE_PARAM,
         fields: z
-          .record(z.any())
+          .record(z.string(), z.any())
           .optional()
           .describe(
             "Project-defined fields keyed by field name. Only the named fields change; " +

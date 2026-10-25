@@ -173,7 +173,7 @@ describe("update_task and the agent that runs it", () => {
   // BP-518: the description told an AI client this needed an instance admin, when since BP-358
   // the choice belongs to whoever may edit the task — see task-service.ts's agentUsableOnProject.
   it("tells the caller who may actually choose an agent, not the retired instance-admin rule", () => {
-    const description = registered().get("update_task")!.schema.shape.agent.description;
+    const description = (registered().get("update_task")!.schema.shape.agent as z.ZodType).description;
 
     expect(description).not.toMatch(/admin/i);
     expect(description).toMatch(/a project agent may be chosen by anyone who can edit the task/i);
