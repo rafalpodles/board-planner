@@ -219,6 +219,18 @@ describe("lineFor", () => {
     });
   });
 
+  it("links a token_expiring row to the board's integration settings, where the token is replaced (BP-1109)", () => {
+    const line = lineFor(
+      { type: "token_expiring", title: "The GitHub token of Test Project expires on 28 Oct", task: undefined, project: PROJECT_REF },
+      origin
+    );
+    expect(line).toEqual({
+      key: "TP",
+      title: "The GitHub token of Test Project expires on 28 Oct",
+      url: "https://app.example.com/projects/TP/settings?section=integrations",
+    });
+  });
+
   it("gives a board_access row no link when the instance does not know its own address", () => {
     const line = lineFor(
       { type: "board_access", title: "Admin added you", task: undefined, project: PROJECT_REF },

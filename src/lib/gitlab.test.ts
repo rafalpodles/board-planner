@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  checkGitlabToken,
   fetchMergeRequests,
   fetchMergedRequests,
   fetchTaskBranches,
   fetchTaskCommits,
   matchMRsToTasks,
+  parseGitlabExpiry,
   parseGitlabRepo,
 } from "./gitlab";
 
@@ -352,5 +354,68 @@ describe("fetchMergedRequests", () => {
     const result = await fetchMergedRequests("https://gitlab.example.com", "g/p", "tok", new Date("2026-01-01"));
     expect(safeFetch).toHaveBeenCalledTimes(5);
     expect(result.complete).toBe(false);
+  });
+});
+
+describe("checking a GitLab token before it is stored (BP-1109)", () => {
+  const answer = (status: number, body: unknown = {}) => Promise.resolve(new Response(JSON.stringify(body), { status }));
+  const paths = () => safeFetch.mock.calls.map(([url]) => new URL(String(url)).pathname + new URL(String(url)).search);
+
+  beforeEach(() => safeFetch.mockReset());
+
+  it("names whose token it is and its expiry, after reading each project and its merge requests", async () => {
+    safeFetch
+      .mockImplementationOnce(() => answer(200, { username: "gl-owner" }))
+      .mockImplementationOnce(() => answer(200, { expires_at: "2027-01-24" }))
+      .mockImplementation(() => answer(200, []));
+
+    const checked = await checkGitlabToken("https://gitlab.example.com/", "glpat-x", ["group/app"]);
+
+    expect(checked).toEqual({ ok: true, login: "gl-owner", expiresAt: new Date("2027-01-24T00:00:00Z") });
+    expect(paths()).toEqual([
+      "/api/v4/user",
+      "/api/v4/personal_access_tokens/self",
+      "/api/v4/projects/group%2Fapp",
+      "/api/v4/projects/group%2Fapp/merge_requests?per_page=1",
+    ]);
+    expect(safeFetch.mock.calls[0][1].headers).toEqual({ "PRIVATE-TOKEN": "glpat-x" });
+  });
+
+  it("stores a token GitLab will not date, with no expiry known", async () => {
+    safeFetch.mockImplementationOnce(() => answer(200, { username: "gl-owner" })).mockImplementationOnce(() => answer(404));
+
+    expect(await checkGitlabToken("https://gitlab.example.com", "glpat-x", [])).toEqual({ ok: true, login: "gl-owner", expiresAt: null });
+  });
+
+  it.each([
+    [[401], "GitLab rejected this token"],
+    [[200, 404, 404], "cannot read group/app"],
+    [[200, 404, 200, 403], "read_api scope"],
+  ])("refuses %j with a reason a person can act on", async (statuses, reason) => {
+    for (const status of statuses) safeFetch.mockImplementationOnce(() => answer(status, { username: "x" }));
+
+    const checked = await checkGitlabToken("https://gitlab.example.com", "glpat-x", ["group/app"]);
+
+    expect(checked.ok).toBe(false);
+    expect(!checked.ok && checked.error).toContain(reason);
+    expect(!checked.ok && checked.error).toContain("Nothing was saved");
+  });
+
+  it("says GitLab could not be reached rather than blaming the token", async () => {
+    safeFetch.mockImplementationOnce(() => Promise.reject(new Error("ENOTFOUND")));
+
+    expect(await checkGitlabToken("https://gitlab.example.com", "glpat-x", [])).toEqual({
+      ok: false,
+      error: "GitLab could not be reached to check this token. Nothing was saved.",
+    });
+  });
+
+  it.each([
+    ["2027-01-24", "2027-01-24T00:00:00.000Z"],
+    [null, null],
+    ["", null],
+    ["24/01/2027", null],
+  ])("reads expires_at %j", (value, iso) => {
+    expect(parseGitlabExpiry(value as string | null)?.toISOString() ?? null).toBe(iso);
   });
 });
