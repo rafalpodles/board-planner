@@ -175,5 +175,6 @@ test("a new token saved with Save changes clears the rejection at once, without 
   await expect(page.getByText("Token rejected", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("status").filter({ hasText: "Token of" })).toContainText("Token of token-owner");
   const asked: string[] = await (await page.request.get(`${GITHUB_STUB_URL}/asked`)).json();
-  expect(asked.some((path) => path.endsWith("/pulls") && !path.includes("per_page"))).toBe(false);
+  // One listing is the save's own check; a sync asks twice, open and closed
+  expect(asked.filter((path) => path.endsWith("/pulls"))).toHaveLength(1);
 });
