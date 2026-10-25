@@ -15,6 +15,7 @@ import { sprintScopeFromParam, sprintScopeToQuery, isSprintScopeShape } from "@/
 import { APP_NAME } from "@/lib/brand";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { BoardLoadFailed } from "@/components/ui/LoadFailed";
+import { TokenRejectedBanner } from "@/components/kanban/TokenRejectedBanner";
 
 function boardDocumentTitle(project: ApiProject | null, tasks: ApiTask[]): string | null {
   if (!project) return null;
@@ -86,6 +87,7 @@ export default function KanbanPage() {
         onSummary={() => setShowSummary(true)}
         summaryOnPhone={summaryEntitlement.entitled}
       />
+      <TokenRejectedBanner project={board.project} />
       {showSummary && (
         <SummaryModal
           projectId={projectId}

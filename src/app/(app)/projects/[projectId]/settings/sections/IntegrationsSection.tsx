@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { SecretField } from "@/components/ui/SecretField";
 import { SettingRow } from "@/components/settings/SettingRow";
+import { ConnectionStatus } from "@/components/settings/ConnectionStatus";
 import { diffById } from "@/lib/row-diff";
 import { distinctRowNames } from "@/lib/row-names";
 import { SettingsCard, EmptyState } from "@/components/settings/SettingsCard";
@@ -324,6 +325,89 @@ export function IntegrationsSection({
     return updated;
   }
 
+  const githubTokenTyped = github.value.githubToken.trim() !== "";
+
+  async function reloadProject() {
+    replaceProject(await api.get(`/api/projects/${projectId}`));
+  }
+
+  async function syncGithub() {
+    setGithubSyncing(true);
+    try {
+      const result = await api.post(`/api/projects/${projectId}/github/sync`, {});
+      toast(
+        `Synced: ${result.prsLinked} PRs linked to ${result.tasksLinked} tasks${
+          result.prsUnlinked > 0
+            ? `, ${result.prsUnlinked} stale ${result.prsUnlinked === 1 ? "link" : "links"} removed`
+            : ""
+        }${
+          result.autoTransitioned > 0 ? `, ${result.autoTransitioned} auto-transitioned` : ""
+        }${repositoriesNote(result.failed)}${deploymentsNote(result.deployments)}`,
+        "success",
+      );
+    } catch (err) {
+      fail(err, "Sync failed");
+    } finally {
+      await reloadProject().catch(() => undefined);
+      setGithubSyncing(false);
+    }
+  }
+
+  // Only the token is saved: an edited environment stays a pending change for Save all
+  async function saveGithubTokenAndSync() {
+    setGithubSyncing(true);
+    try {
+      await replaceAndReturn({ githubToken: github.value.githubToken.trim() });
+    } catch (err) {
+      fail(err, "The token was not saved");
+      setGithubSyncing(false);
+      return;
+    }
+    github.set("githubToken", "");
+    github.rebase((prev) => ({ ...prev, githubToken: "" }));
+    await syncGithub();
+  }
+
+  async function syncGitlab() {
+    setGitlabSyncing(true);
+    try {
+      const result = await api.post(`/api/projects/${projectId}/gitlab/sync`, {});
+      toast(
+        `Synced: ${result.prsLinked} MRs linked to ${result.tasksLinked} tasks${
+          result.prsUnlinked > 0
+            ? `, ${result.prsUnlinked} stale ${result.prsUnlinked === 1 ? "link" : "links"} removed`
+            : ""
+        }${
+          result.autoTransitioned > 0 ? `, ${result.autoTransitioned} auto-transitioned` : ""
+        }${repositoriesNote(result.failed)}`,
+        "success",
+      );
+    } catch (err) {
+      fail(err, "Sync failed");
+    } finally {
+      await reloadProject().catch(() => undefined);
+      setGitlabSyncing(false);
+    }
+  }
+
+  // The host goes with the token, because a new host without its token clears the stored one
+  async function saveGitlabTokenAndSync() {
+    setGitlabSyncing(true);
+    let updated;
+    try {
+      updated = await replaceAndReturn({
+        gitlabHost: gitlab.value.gitlabHost.trim(),
+        gitlabToken: gitlab.value.gitlabToken.trim(),
+      });
+    } catch (err) {
+      fail(err, "The token was not saved");
+      setGitlabSyncing(false);
+      return;
+    }
+    gitlab.commit({ gitlabHost: updated.gitlabHost || "https://gitlab.com", gitlabToken: "" });
+    await syncGitlab();
+  }
+
   function addWebhook() {
     if (!newWebhookUrl.trim()) return;
     webhooks.set("webhooks", [
@@ -594,6 +678,9 @@ export function IntegrationsSection({
                     Links pull requests to tasks by task key in the branch name
                     or PR title. Uses the repository URL above.
                   </p>
+                  {project.githubTokenSet && (
+                    <ConnectionStatus provider="GitHub" connection={project.githubConnection} requests="pull requests" />
+                  )}
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>
                       <Input
@@ -607,12 +694,20 @@ export function IntegrationsSection({
                         placeholder={
                           project.githubTokenSet
                             ? "Set — enter a new token to replace"
-                            : "ghp_... (fine-grained or classic)"
+                            : "github_pat_... or ghp_..."
                         }
                       />
                       <p className="mt-1 text-xs text-text-muted">
-                        Needs <code>repo</code> scope (read access to pull
-                        requests).
+                        A fine-grained token for this repository, read-only: Pull requests, Commit statuses,
+                        Contents, and Deployments for Insights.{" "}
+                        <a
+                          className="text-primary underline"
+                          href={`${project.githubWebBase || "https://github.com"}/settings/personal-access-tokens/new`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Create one on GitHub
+                        </a>
                       </p>
                     </div>
                     <div>
@@ -631,46 +726,24 @@ export function IntegrationsSection({
                       </p>
                     </div>
                   </div>
-                  {project.githubTokenSet && (
-                    <div>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={githubSyncing}
-                        onClick={async () => {
-                          setGithubSyncing(true);
-                          try {
-                            const result = await api.post(
-                              `/api/projects/${projectId}/github/sync`,
-                              {},
-                            );
-                            toast(
-                              `Synced: ${result.prsLinked} PRs linked to ${result.tasksLinked} tasks${
-                                result.prsUnlinked > 0
-                                  ? `, ${result.prsUnlinked} stale ${
-                                      result.prsUnlinked === 1 ? "link" : "links"
-                                    } removed`
-                                  : ""
-                              }${
-                                result.autoTransitioned > 0
-                                  ? `, ${result.autoTransitioned} auto-transitioned`
-                                  : ""
-                              }${repositoriesNote(result.failed)}${deploymentsNote(result.deployments)}`,
-                              "success",
-                            );
-                          } catch (err) {
-                            fail(err, "Sync failed");
-                          } finally {
-                            setGithubSyncing(false);
-                          }
-                        }}
-                      >
-                        {githubSyncing
-                          ? "Syncing..."
-                          : "Sync pull requests now"}
-                      </Button>
-                    </div>
-                  )}
+                  <div className="flex flex-wrap items-center gap-3">
+                    {githubTokenTyped ? (
+                      <>
+                        <Button size="sm" disabled={githubSyncing} onClick={saveGithubTokenAndSync}>
+                          {githubSyncing ? "Saving..." : "Save token and sync"}
+                        </Button>
+                        <span className="text-xs text-text-muted">
+                          Checks the token with GitHub before it is stored.
+                        </span>
+                      </>
+                    ) : (
+                      project.githubTokenSet && (
+                        <Button size="sm" variant="secondary" disabled={githubSyncing} onClick={syncGithub}>
+                          {githubSyncing ? "Syncing..." : "Sync pull requests now"}
+                        </Button>
+                      )
+                    )}
+                  </div>
                 </>
               );
             case "gitlab":
@@ -681,6 +754,9 @@ export function IntegrationsSection({
                     repository URL above; a self-hosted instance is recognised
                     by the host below.
                   </p>
+                  {project.gitlabTokenSet && (
+                    <ConnectionStatus provider="GitLab" connection={project.gitlabConnection} requests="merge requests" />
+                  )}
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Input
                       label="Host"
@@ -716,45 +792,18 @@ export function IntegrationsSection({
                     }
                   />
                   <div className="flex flex-wrap gap-2">
-                    {project.gitlabTokenSet &&
+                    {gitlab.value.gitlabToken.trim() && project.repositoryProvider === "gitlab" ? (
+                      <Button size="sm" disabled={gitlabSyncing} onClick={saveGitlabTokenAndSync}>
+                        {gitlabSyncing ? "Saving..." : "Save token and sync"}
+                      </Button>
+                    ) : (
+                      project.gitlabTokenSet &&
                       project.repositoryProvider === "gitlab" && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={gitlabSyncing}
-                          onClick={async () => {
-                            setGitlabSyncing(true);
-                            try {
-                              const result = await api.post(
-                                `/api/projects/${projectId}/gitlab/sync`,
-                                {},
-                              );
-                              toast(
-                                `Synced: ${result.prsLinked} MRs linked to ${result.tasksLinked} tasks${
-                                  result.prsUnlinked > 0
-                                    ? `, ${result.prsUnlinked} stale ${
-                                      result.prsUnlinked === 1 ? "link" : "links"
-                                    } removed`
-                                    : ""
-                                }${
-                                  result.autoTransitioned > 0
-                                    ? `, ${result.autoTransitioned} auto-transitioned`
-                                    : ""
-                                }${repositoriesNote(result.failed)}`,
-                                "success",
-                              );
-                            } catch (err) {
-                              fail(err, "Sync failed");
-                            } finally {
-                              setGitlabSyncing(false);
-                            }
-                          }}
-                        >
-                          {gitlabSyncing
-                            ? "Syncing..."
-                            : "Sync merge requests now"}
+                        <Button size="sm" variant="secondary" disabled={gitlabSyncing} onClick={syncGitlab}>
+                          {gitlabSyncing ? "Syncing..." : "Sync merge requests now"}
                         </Button>
-                      )}
+                      )
+                    )}
                     {project.gitlabTokenSet && (
                       <Button
                         size="sm"
