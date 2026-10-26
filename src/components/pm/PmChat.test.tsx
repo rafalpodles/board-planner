@@ -912,4 +912,38 @@ describe("mentions in the composer (BP-1106)", () => {
     expect(container.querySelector("span.mention")?.getAttribute("title")).toBe("@member");
     expect(container.querySelector("span.mention")?.classList.contains("mention-self")).toBe(true);
   });
+
+  // BP-1113. The chip under the answer read "TP-5 → @member" beside a bubble that said "@Mia Member"
+  it("names the person an action chip assigned, by the name the bubble uses", async () => {
+    api.get.mockImplementation((path: string) =>
+      path.includes("/pm/messages")
+        ? Promise.resolve({
+            messages: [
+              {
+                _id: "m1",
+                project: "p1",
+                role: "assistant",
+                content: "Done.",
+                actions: [
+                  { tool: "assign_task", summary: "TP-5 → @member" },
+                  { tool: "assign_task", summary: "TP-6 → @stranger" },
+                ],
+                trigger: { type: "chat" },
+                triggeredBy: null,
+                createdAt: "2026-10-10T10:00:00Z",
+              },
+            ],
+            nextCursor: null,
+          })
+        : path.includes("/assignable-users")
+          ? Promise.resolve([{ _id: "u1", username: "member", fullName: "Mia Member" }])
+          : path.includes("/tasks")
+            ? Promise.resolve([])
+            : Promise.resolve(PROJECT)
+    );
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+
+    expect(await screen.findByText("TP-5 → @Mia Member")).toBeTruthy();
+    expect(screen.getByText("TP-6 → @stranger")).toBeTruthy();
+  });
 });

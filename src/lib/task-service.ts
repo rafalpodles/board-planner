@@ -56,6 +56,7 @@ import { supersedableStates } from "@/lib/task-decisions";
 import { populateWithin, type ScopedDb } from "@/lib/db-scope";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
 import { withAiMark } from "@/lib/pm/username";
+import { nameMentions } from "@/lib/mention-names";
 import { currentGeneratedBy } from "@/lib/ai-generated";
 import { actingThrough, provenanceFields } from "@/lib/activity-source";
 
@@ -1501,7 +1502,7 @@ export async function addComment(
     db.Task.findByIdAndUpdate(taskId, { $addToSet: { watchers: actor.id } }),
   ]);
 
-  const [project, mentionedIds] = await Promise.all([
+  const [project, mentionedPeople] = await Promise.all([
     db.Project.findById(projectId, "key name columns").lean(),
     resolveMentions(db, bodyText),
   ]);
@@ -1514,7 +1515,10 @@ export async function addComment(
   dispatchWebhooks(db, projectId, "comment_added", eventPayload);
   dispatchNotifications(db, projectId, "comment_added", eventPayload);
   const column = getProjectColumns(project).find((c) => c.id === String(task.status));
-  const excerpt = bodyText.trim().substring(0, 120);
+  const mentionedIds = mentionedPeople.map((p) => p.id);
+  const excerpt = nameMentions(bodyText.trim(), mentionedPeople).substring(0, 120);
+  const authorName = (populated?.author as { fullName?: string } | undefined)?.fullName?.trim() || actor.username;
+  const author = withAiMark(authorName, actor.username);
   const sharedEmail = {
     taskKey,
     taskTitle: task.title,
@@ -1522,7 +1526,7 @@ export async function addComment(
       { label: column?.label ?? String(task.status), tone: pillToneForRole(column?.role) },
     ],
     taskMeta: project?.name ?? "",
-    quote: { who: withAiMark(actor.username, actor.username), text: excerpt },
+    quote: { who: author, text: excerpt },
     projectRef: project?.key,
     taskNumber: task.taskNumber,
     assigneeId: assigneeIdOf(task),
@@ -1552,8 +1556,8 @@ export async function addComment(
       taskId,
       projectId,
       actorId: actor.id,
-      title: `${withAiMark(actor.username, actor.username)} mentioned you in ${taskKey}`,
-      digestTitle: `${withAiMark(actor.username, actor.username)} mentioned you`,
+      title: `${author} mentioned you in ${taskKey}`,
+      digestTitle: `${author} mentioned you`,
       body: excerpt,
       recipientIds: mentionedIds,
       email: { kicker: "You were mentioned", ...sharedEmail },

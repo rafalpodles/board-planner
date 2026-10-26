@@ -1,13 +1,14 @@
 "use client";
 
 import { isErasedLabel } from "@/lib/erased-label";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { ApiActivityLog, DELETED_AGENT, LinkDirection, STATUS_LABELS, TaskStatus } from "@/types";
 import { timeAgo } from "@/lib/time";
 import { describeLinkChange } from "@/lib/link-phrasing";
 import { withAiMark } from "@/lib/pm/username";
+import { nameOf, peopleByUsername, type MentionablePerson } from "@/lib/mention-names";
 import { SourceBadge } from "@/components/ui/SourceBadge";
 
 interface ActivityTimelineProps {
@@ -18,6 +19,8 @@ interface ActivityTimelineProps {
   // Bumped by the parent when something outside this component wrote an activity entry
   refreshKey?: number;
   visible?: boolean;
+  // The board's people, so an assignee change names them; without it the usernames stand
+  people?: readonly MentionablePerson[];
 }
 
 function actionIcon(action: string) {
@@ -127,12 +130,14 @@ function actorName(log: ApiActivityLog): string {
 }
 
 // What a deleted account was rewritten to in history, which is an identifier and not a name
-function assigneeLabel(value: string): string {
+function assigneeLabel(value: string, people: ReadonlyMap<string, MentionablePerson>): string {
   if (!value) return "unassigned";
-  return isErasedLabel(value) ? "a deleted user" : value;
+  if (isErasedLabel(value)) return "a deleted user";
+  const person = people.get(value.toLowerCase());
+  return person ? nameOf(person) : value;
 }
 
-function describeAction(log: ApiActivityLog): string {
+function describeAction(log: ApiActivityLog, people: ReadonlyMap<string, MentionablePerson>): string {
   const userName = actorName(log);
 
   switch (log.action) {
@@ -142,8 +147,8 @@ function describeAction(log: ApiActivityLog): string {
       return `${userName} changed status from ${formatValue("status", log.oldValue)} to ${formatValue("status", log.newValue)}`;
     case "updated":
       if (log.field === "assignee") {
-        const from = assigneeLabel(log.oldValue);
-        const to = assigneeLabel(log.newValue);
+        const from = assigneeLabel(log.oldValue, people);
+        const to = assigneeLabel(log.newValue, people);
         return `${userName} changed assignee from ${from} to ${to}`;
       }
       if (log.field === "agent" && !log.customField) {
@@ -217,6 +222,8 @@ function describeAction(log: ApiActivityLog): string {
   }
 }
 
+const NOBODY: readonly MentionablePerson[] = [];
+
 export function ActivityTimeline({
   projectId,
   taskId,
@@ -224,6 +231,7 @@ export function ActivityTimeline({
   onCountChange,
   refreshKey = 0,
   visible = true,
+  people: boardPeople = NOBODY,
 }: ActivityTimelineProps) {
   const [logs, setLogs] = useState<ApiActivityLog[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -232,6 +240,7 @@ export function ActivityTimeline({
   // same reason Comments next door has one (BP-577)
   const [reading, setReading] = useState(true);
   const api = useApi();
+  const people = useMemo(() => peopleByUsername(boardPeople), [boardPeople]);
   const loadSeq = useRef(0);
   const loadedKey = useRef(refreshKey);
 
@@ -324,7 +333,7 @@ export function ActivityTimeline({
               {actionIcon(log.action)}
             </span>
             <div className="flex-1 min-w-0 break-words text-text-muted">
-              {describeAction(log)}
+              {describeAction(log, people)}
               {log.action === "updated" && log.field === "description" && !log.customField && log.oldValue && (
                 <details className="mt-1">
                   <summary className="cursor-pointer text-xs text-primary">What it said before</summary>

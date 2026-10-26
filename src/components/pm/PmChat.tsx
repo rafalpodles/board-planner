@@ -14,7 +14,7 @@ import { SuggestionList } from "@/components/ui/SuggestionList";
 import { useTriggerAutocomplete } from "@/hooks/use-trigger-autocomplete";
 import { useEditorTriggers, useMentionablePeople } from "@/hooks/use-editor-triggers";
 import { useAuth } from "@/hooks/use-auth";
-import type { MentionablePerson } from "@/lib/remark-mentions";
+import { nameMentions, type MentionablePerson } from "@/lib/mention-names";
 import { timeAgo } from "@/lib/time";
 import { downscaleImage, estimateImageTokens } from "@/lib/image-resize";
 import { isPmLockedByInstance, isPmRunnable, pmDisabledReason } from "@/lib/pm/gate";
@@ -563,7 +563,7 @@ export function PmChat({
           const chip = (
             <span className="inline-flex items-center gap-1 text-xs bg-bg-input border border-border rounded-full px-2 py-0.5 text-text-muted hover:text-text transition-colors">
               <span>{ACTION_ICONS[a.tool] || "•"}</span>
-              {a.summary}
+              {nameMentions(a.summary, people)}
             </span>
           );
           const href = taskPath(projectId, a.taskKey!);

@@ -2,10 +2,11 @@
 
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Component, useMemo, type ReactNode } from "react";
+import { Component, useEffect, useMemo, type ReactNode } from "react";
 import { remarkTaskReferences, type ReferenceScope } from "@/lib/task-references";
 import { remarkMentions, type MentionablePerson } from "@/lib/remark-mentions";
 import { tooCostlyToParse } from "@/lib/markdown-cost";
+import { listenForPillCopies } from "@/lib/mention-copy";
 
 // "//evil.example" is a protocol-relative URL and "/\\evil.example" is folded into one by some
 // parsers — both start with a slash and both leave the origin. Same check safeNextPath makes,
@@ -121,6 +122,8 @@ export function MarkdownContent({
   // rebuild the plugin — and re-parse the markdown — on every render it happens to do
   const key = scope?.key ?? "";
   const former = (scope?.formerKeys ?? []).join(",");
+  const drawsPills = Boolean(mentions?.length);
+  useEffect(() => (drawsPills ? listenForPillCopies() : undefined), [drawsPills]);
   const plugins = useMemo(
     () => [
       remarkGfm,

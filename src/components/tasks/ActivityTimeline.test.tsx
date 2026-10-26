@@ -32,6 +32,13 @@ describe("ActivityTimeline", () => {
     await waitFor(() => expect(screen.getByText(/Owner Name created this task/)).toBeTruthy());
   });
 
+  // BP-1113. History stores the assignee as a username, which read as a handle beside names
+  it("names the people an assignee change was between, and leaves someone who left the board as written", async () => {
+    api.get.mockResolvedValue([{ ...log, action: "updated", field: "assignee", oldValue: "gone", newValue: "Bob" }]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" people={[{ username: "bob", fullName: "Bob Builder" }]} />);
+    await waitFor(() => expect(screen.getByText(/changed assignee from gone to Bob Builder/)).toBeTruthy());
+  });
+
   // typeof null === "object", so a deleted user used to take the populated branch and throw
   it("says Deleted user when the user was deleted", async () => {
     api.get.mockResolvedValue([{ ...log, user: null }]);

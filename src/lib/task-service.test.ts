@@ -97,7 +97,9 @@ const commentCreate = vi.fn(async () => ({ _id: "c1" }));
 const createNotificationsMock = vi.fn();
 const notifyBoardFeedMock = vi.fn();
 const collectRecipientsMock = vi.fn((_task?: unknown): string[] => []);
-const resolveMentionsMock = vi.fn(async (_db?: unknown, _body?: string): Promise<string[]> => []);
+const resolveMentionsMock = vi.fn(
+  async (_db?: unknown, _body?: string): Promise<{ id: string; username: string; fullName: string }[]> => []
+);
 const workerFindOne = vi.fn();
 const taskFindById = vi.fn();
 // Whether this occurrence has already minted its successor. Null is "not yet", which is what
@@ -165,10 +167,11 @@ function agentInTheCatalog(doc: Record<string, unknown> | null) {
     return { lean: () => Promise.resolve(visible) };
   });
 }
+const commentAuthor = vi.hoisted(() => ({ populated: { _id: "c1" } as Record<string, unknown> }));
 vi.mock("@/models/comment", () => ({
   Comment: {
     create: commentCreate,
-    findOne: () => ({ populate: async () => ({ _id: "c1" }) }),
+    findOne: () => ({ populate: async () => commentAuthor.populated }),
   },
 }));
 const sprintExists = vi.fn();
@@ -4820,7 +4823,8 @@ describe("a comment mentioning a watcher", () => {
     findOne.mockReturnValue({ _id: "t1", taskNumber: 7, title: "x", status: "doing" });
     projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     collectRecipientsMock.mockReturnValue(watchers);
-    resolveMentionsMock.mockResolvedValue(mentions);
+    resolveMentionsMock.mockResolvedValue(mentions.map((id) => ({ id, username: "bob", fullName: "Bob Builder" })));
+    commentAuthor.populated = { _id: "c1" };
   }
 
   const notificationsByType = (): Record<string, Record<string, unknown>> =>
@@ -4866,6 +4870,25 @@ describe("a comment mentioning a watcher", () => {
       title: "owner mentioned you in TP-7",
       digestTitle: "owner mentioned you",
     });
+  });
+
+  // BP-1113. The bell, the mail and the digest read the excerpt and the title as text, where the
+  // comment's pill is not there to turn a handle into a name
+  it("names the author and whoever the comment mentions, and keeps the username in the webhook", async () => {
+    setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
+    commentAuthor.populated = { _id: "c1", author: { username: "owner", fullName: "Olga Owner" } };
+    await addComment(db, "p1", "t1", "@bob look at this, and @stranger too", { id: "actor", username: "owner" });
+
+    const byType = notificationsByType();
+    expect(byType.mentioned).toMatchObject({
+      title: "Olga Owner mentioned you in TP-7",
+      digestTitle: "Olga Owner mentioned you",
+      body: "@Bob Builder look at this, and @stranger too",
+    });
+    expect(byType.comment_added.body).toBe("@Bob Builder look at this, and @stranger too");
+    expect((byType.mentioned.email as { quote: { who: string } }).quote.who).toBe("Olga Owner");
+    const webhook = (dispatchWebhooks as ReturnType<typeof vi.fn>).mock.calls.find((c) => c[2] === "comment_added");
+    expect(webhook?.[3].data).toMatchObject({ commentBody: "@bob look at this, and @stranger too", author: "owner" });
   });
 
   // BP-942: the PM's comment reaches people in their mail, their bell and their team chat, where nothing

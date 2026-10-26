@@ -289,16 +289,22 @@ export function collectRecipients(task: {
   return ids;
 }
 
+export interface MentionedPerson {
+  id: string;
+  username: string;
+  fullName: string;
+}
+
 /**
- * Parse @mentions from comment body and resolve to user IDs.
+ * Parse @mentions from comment body and resolve them to the people they name.
  */
-export async function resolveMentions(db: ScopedDb, body: string): Promise<string[]> {
+export async function resolveMentions(db: ScopedDb, body: string): Promise<MentionedPerson[]> {
   const usernames = mentionedUsernames(body);
   if (usernames.length === 0) return [];
 
   const users = await db.User.find(
     { username: { $in: usernames } },
-    "_id"
+    "_id username fullName"
   ).lean();
-  return users.map((u) => String(u._id));
+  return users.map((u) => ({ id: String(u._id), username: u.username, fullName: u.fullName }));
 }
