@@ -19,7 +19,7 @@ const { api } = vi.hoisted(() => ({
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-open-task", () => ({ useOpenTask: () => vi.fn() }));
-vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ isAdmin: true }) }));
+vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ isAdmin: true, user: { username: "member" } }) }));
 vi.mock("@/lib/board-refresh", () => ({ emitBoardRefresh: vi.fn(), subscribeBoardRefresh: () => () => {} }));
 vi.mock("@/hooks/use-poll-while-visible", () => ({ usePollWhileVisible: () => {} }));
 const media = vi.hoisted(() => ({ wide: true }));
@@ -546,6 +546,31 @@ describe("a turn that streams its answer (BP-1037)", () => {
     await act(async () => stream.close());
   });
 
+  it("marks the reader's own mention in the text as it arrives", async () => {
+    api.get.mockImplementation((path: string) =>
+      path.includes("/pm/messages")
+        ? Promise.resolve({ messages: [], nextCursor: null })
+        : path.includes("/assignable-users")
+          ? Promise.resolve([
+              { _id: "u1", username: "member", fullName: "Mia Member" },
+              { _id: "u2", username: "owner", fullName: "Olga Owner" },
+            ])
+          : path.includes("/tasks")
+            ? Promise.resolve([])
+            : Promise.resolve(PROJECT)
+    );
+    const stream = await startTurn();
+
+    await act(async () => stream.push(event("delta", { text: "Ask @member or @owner." })));
+    const live = await screen.findByTestId("pm-live-text");
+    await waitFor(() => expect(live.querySelectorAll("span.mention")).toHaveLength(2));
+    expect([...live.querySelectorAll("span.mention")].map((el) => [el.textContent, el.classList.contains("mention-self")])).toEqual([
+      ["@Mia Member", true],
+      ["@Olga Owner", false],
+    ]);
+    await act(async () => stream.close());
+  });
+
   it("starts the text again when the agent makes another call, because only the last call's text is the answer", async () => {
     const stream = await startTurn();
 
@@ -883,6 +908,8 @@ describe("mentions in the composer (BP-1106)", () => {
     );
     const { container } = render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
 
-    await waitFor(() => expect(container.querySelector("span.mention")?.getAttribute("title")).toBe("Mia Member"));
+    await waitFor(() => expect(container.querySelector("span.mention")?.textContent).toBe("@Mia Member"));
+    expect(container.querySelector("span.mention")?.getAttribute("title")).toBe("@member");
+    expect(container.querySelector("span.mention")?.classList.contains("mention-self")).toBe(true);
   });
 });

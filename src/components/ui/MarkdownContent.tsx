@@ -102,6 +102,8 @@ export function MarkdownContent({
   children,
   // The people a `@username` may name here; each one renders as a pill and anyone else as text
   mentions,
+  // Whose mentions are drawn as the reader's own
+  reader,
   // One line inside a row of other things — an acceptance criterion next to its checkbox — where a
   // block-level paragraph would break the row onto its own line
   inline = false,
@@ -111,6 +113,7 @@ export function MarkdownContent({
 }: {
   children: string;
   mentions?: readonly MentionablePerson[];
+  reader?: string;
   inline?: boolean;
   scope?: ReferenceScope | null;
 }) {
@@ -122,9 +125,9 @@ export function MarkdownContent({
     () => [
       remarkGfm,
       ...(key ? [remarkTaskReferences({ key, formerKeys: former ? former.split(",") : [] })] : []),
-      ...(mentions?.length ? [remarkMentions(mentions)] : []),
+      ...(mentions?.length ? [remarkMentions(mentions, reader)] : []),
     ],
-    [key, former, mentions]
+    [key, former, mentions, reader]
   );
 
   const body = typeof children === "string" ? children : "";

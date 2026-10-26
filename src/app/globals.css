@@ -322,8 +322,17 @@ body {
   border-radius: 9999px;
   padding: 0.05em 0.45em;
   font-weight: 500;
-  box-decoration-break: clone;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
   cursor: default;
+}
+.mention-self {
+  background-color: var(--color-primary-solid);
+  color: #fff;
 }
 
 .prose table {

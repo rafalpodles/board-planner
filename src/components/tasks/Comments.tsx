@@ -325,7 +325,7 @@ export function Comments({
               </div>
             ) : (
               <div className="text-sm prose prose-sm max-w-none overflow-x-auto">
-                <MarkdownContent mentions={people} scope={scope}>{comment.body}</MarkdownContent>
+                <MarkdownContent mentions={people} reader={user?.username} scope={scope}>{comment.body}</MarkdownContent>
               </div>
             )}
 

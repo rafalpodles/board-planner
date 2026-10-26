@@ -252,9 +252,9 @@ test("inline code is a badge and a mention a pill naming the person, neither fen
     });
   const clear = "rgba(0, 0, 0, 0)";
 
-  const mention = page.locator("span.mention", { hasText: "@member" });
+  const mention = page.locator("span.mention", { hasText: "@E2E Member" });
   await expect(mention).toBeVisible();
-  await expect(mention).toHaveAttribute("title", "E2E Member");
+  await expect(mention).toHaveAttribute("title", "@member");
   const pill = await look(mention);
   expect(pill.background).not.toBe(clear);
   expect(pill.radius).toBeGreaterThan(8);
@@ -269,6 +269,35 @@ test("inline code is a badge and a mention a pill naming the person, neither fen
   const block = page.locator("pre > code", { hasText: "npm run build" });
   await expect(block).toBeVisible();
   expect(await look(block)).toMatchObject({ fences: ["none", "none"], background: clear });
+});
+
+// BP-1112. The pill read `@member`, the account's username, and a mention of the reader looked like
+// anybody else's
+test("a mention names the person, and the reader's own stands apart from the others", async ({ page }) => {
+  await openTask(page, FINISHED_TASK_NUMBER);
+
+  const posted = taskWrite(page, "POST", `/tasks/${FINISHED_TASK_ID}/comments`);
+  await composer(page).fill(`@${ADMIN_USERNAME} and @member, both of you please`);
+  await page.getByRole("button", { name: "Comment" }).click();
+  await expectWritten(posted, 201);
+
+  const comment = page.locator(".prose", { hasText: "both of you please" });
+  const own = comment.locator("span.mention", { hasText: "@E2E Admin" });
+  const other = comment.locator("span.mention", { hasText: "@E2E Member" });
+  await expect(own).toHaveAttribute("title", `@${ADMIN_USERNAME}`);
+  await expect(other).toHaveAttribute("title", "@member");
+  await expect(comment).not.toContainText(`@${ADMIN_USERNAME} `);
+
+  await expect(own).toHaveClass(/\bmention-self\b/);
+  await expect(other).not.toHaveClass(/\bmention-self\b/);
+  const paint = (element: Locator) =>
+    element.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { background: style.backgroundColor, color: style.color };
+    });
+  const [ownPaint, otherPaint] = [await paint(own), await paint(other)];
+  expect(ownPaint.background).not.toBe(otherPaint.background);
+  expect(ownPaint.color).not.toBe(otherPaint.color);
 });
 
 // BP-1105. A username may hold a dot, and the mention stopped at it: `@jan.kowalski` asked for
@@ -297,8 +326,8 @@ test("a dotted username is offered, mentioned and told whole, and an e-mail addr
   await expectWritten(posted, 201);
 
   const comment = page.locator(".prose", { hasText: "ops@member.example" });
-  await expect(comment.locator("em span.mention")).toHaveText([`@${DOTTED_USERNAME}`]);
-  await expect(comment.locator("span.mention")).toHaveAttribute("title", DOTTED_FULL_NAME);
+  await expect(comment.locator("em span.mention")).toHaveText([`@${DOTTED_FULL_NAME}`]);
+  await expect(comment.locator("span.mention")).toHaveAttribute("title", `@${DOTTED_USERNAME}`);
 
   await expect.poll(() => mentionsStoredFor(DOTTED_ID)).toBe(1);
   // Dispatched with the first, so it has landed by now if it was ever going to

@@ -14,14 +14,34 @@ const pills = (container: HTMLElement) =>
   [...container.querySelectorAll("span.mention")].map((el) => ({
     text: el.textContent,
     title: el.getAttribute("title"),
+    self: el.classList.contains("mention-self"),
   }));
 
 describe("a mention", () => {
-  it("renders a person of this board as a pill naming them on hover", () => {
+  it("renders a person of this board as a pill with their name, and their username on hover", () => {
     const { container } = render(<MarkdownContent mentions={PEOPLE}>{"@member could you look?"}</MarkdownContent>);
 
-    expect(pills(container)).toEqual([{ text: "@member", title: "Mia Member" }]);
-    expect(container.textContent).toBe("@member could you look?");
+    expect(pills(container)).toEqual([{ text: "@Mia Member", title: "@member", self: false }]);
+    expect(container.textContent).toBe("@Mia Member could you look?");
+  });
+
+  it("names a person with no full name by their username", () => {
+    const { container } = render(
+      <MarkdownContent mentions={[{ username: "bot", fullName: " " }]}>{"@bot"}</MarkdownContent>
+    );
+
+    expect(pills(container)).toEqual([{ text: "@bot", title: "@bot", self: false }]);
+  });
+
+  it("marks the reader's own mentions, whatever case the mention was written in, and nobody else's", () => {
+    const { container } = render(
+      <MarkdownContent mentions={PEOPLE} reader="Member">{"@MEMBER and @jan.kowalski"}</MarkdownContent>
+    );
+
+    expect(pills(container).map((p) => [p.text, p.self])).toEqual([
+      ["@Mia Member", true],
+      ["@Jan Kowalski", false],
+    ]);
   });
 
   it("keeps a dotted username whole and leaves the full stop that ends the sentence", () => {
@@ -29,14 +49,14 @@ describe("a mention", () => {
       <MarkdownContent mentions={PEOPLE}>{"thanks @jan.kowalski. And @member."}</MarkdownContent>
     );
 
-    expect(pills(container).map((p) => p.text)).toEqual(["@jan.kowalski", "@member"]);
-    expect(container.textContent).toBe("thanks @jan.kowalski. And @member.");
+    expect(pills(container).map((p) => p.title)).toEqual(["@jan.kowalski", "@member"]);
+    expect(container.textContent).toBe("thanks @Jan Kowalski. And @Mia Member.");
   });
 
   it("matches the username whatever case it was written in", () => {
     const { container } = render(<MarkdownContent mentions={PEOPLE}>{"@Member"}</MarkdownContent>);
 
-    expect(pills(container)).toEqual([{ text: "@Member", title: "Mia Member" }]);
+    expect(pills(container)).toEqual([{ text: "@Mia Member", title: "@member", self: false }]);
   });
 
   it("leaves someone the board cannot mention as the text that was written", () => {
@@ -73,7 +93,7 @@ describe("a mention", () => {
 
     expect(container.querySelector("strong")?.textContent).toBe("done");
     expect(container.querySelectorAll("li")).toHaveLength(2);
-    expect(pills(container).map((p) => p.text)).toEqual(["@member"]);
+    expect(pills(container).map((p) => p.text)).toEqual(["@Mia Member"]);
   });
 });
 
