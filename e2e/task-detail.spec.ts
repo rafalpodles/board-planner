@@ -346,6 +346,7 @@ test("copying a comment puts back the username each pill was written as", async 
     expect(half.text).toBe("Admin, I typed @E2E Member by hand, the pill is @member");
     expect(half.html).toContain("Admin, I typed");
     expect(half.html).not.toContain(`@${ADMIN_USERNAME}`);
+    expect(half.html).not.toContain("@E2E Admin");
   });
 });
 
