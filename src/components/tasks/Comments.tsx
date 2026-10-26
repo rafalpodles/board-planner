@@ -15,7 +15,7 @@ import { Avatar } from "@/components/tasks/detail/atoms";
 import type { ReferenceScope } from "@/lib/task-references";
 import { useTriggerAutocomplete, type Trigger } from "@/hooks/use-trigger-autocomplete";
 import { SuggestionList } from "@/components/ui/SuggestionList";
-import { useEditorTriggers, useMentionablePeople } from "@/hooks/use-editor-triggers";
+import { useEditorTriggers, useMentionablePeople, type Person } from "@/hooks/use-editor-triggers";
 import { COMMENT_BODY_MAX_LENGTH } from "@/lib/identifiers";
 import { AiBadge } from "@/components/ui/AiBadge";
 import { SourceBadge } from "@/components/ui/SourceBadge";
@@ -33,6 +33,8 @@ interface CommentsProps {
   onMutated?: () => void;
   /** The board these comments belong to, so a written task key becomes a link to that task */
   scope?: ReferenceScope | null;
+  // The board's people, when the caller already holds them, so they are not fetched twice
+  people?: Person[];
 }
 
 export function Comments({
@@ -43,6 +45,7 @@ export function Comments({
   onMutated,
   refreshKey = 0,
   scope,
+  people: knownPeople,
 }: CommentsProps) {
   const [comments, setComments] = useState<ApiComment[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -214,7 +217,8 @@ export function Comments({
 
   // Two instances, one per composer: each owns a textarea, and the edit box used to share the new
   // comment's state through a "target" flag threaded into every handler.
-  const people = useMentionablePeople(projectId);
+  const fetchedPeople = useMentionablePeople(knownPeople ? null : projectId);
+  const people = knownPeople ?? fetchedPeople;
   const triggers = useEditorTriggers(projectId, scope?.key, people);
   const newMention = useTriggerAutocomplete(triggers, textareaRef, setBody);
   const editMention = useTriggerAutocomplete(triggers, editTextareaRef, setEditBody);

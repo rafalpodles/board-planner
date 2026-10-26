@@ -300,6 +300,76 @@ test("a mention names the person, and the reader's own stands apart from the oth
   expect(ownPaint.color).not.toBe(otherPaint.color);
 });
 
+// BP-1113. The pill shows the name, and a copy of it pasted into another comment mentioned nobody
+test("copying a comment puts back the username each pill was written as", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openTask(page, FINISHED_TASK_NUMBER);
+
+  const posted = taskWrite(page, "POST", `/tasks/${FINISHED_TASK_ID}/comments`);
+  await composer(page).fill(`@${ADMIN_USERNAME}, I typed @E2E Member by hand, the pill is @member`);
+  await page.getByRole("button", { name: "Comment" }).click();
+  await expectWritten(posted, 201);
+
+  const body = page.locator(".prose p", { hasText: "the pill is" });
+  await expect(body).toHaveText("@E2E Admin, I typed @E2E Member by hand, the pill is @E2E Member");
+
+  const copy = async (fromOffsetInFirstPill: number) => {
+    await page.evaluate(() => navigator.clipboard.writeText(""));
+    await body.evaluate((p, offset) => {
+      const range = document.createRange();
+      range.setStart(p.querySelector("span.mention")!.firstChild!, offset);
+      range.setEndAfter(p.lastChild!);
+      const selection = document.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }, fromOffsetInFirstPill);
+    await page.keyboard.press("ControlOrMeta+c");
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).not.toBe("");
+    return page.evaluate(async () => {
+      const [item] = await navigator.clipboard.read();
+      return {
+        text: await (await item.getType("text/plain")).text(),
+        html: await (await item.getType("text/html")).text(),
+      };
+    });
+  };
+
+  await test.step("a whole comment comes back as it was typed, the hand-typed name included", async () => {
+    const whole = await copy(0);
+    expect(whole.text).toBe(`@${ADMIN_USERNAME}, I typed @E2E Member by hand, the pill is @member`);
+    expect(whole.html).toContain(`@${ADMIN_USERNAME}, I typed @E2E Member by hand, the pill is @member`);
+    expect(whole.html).not.toContain("data-username");
+  });
+
+  await test.step("a pill cut in half is copied as the part of the name that was selected", async () => {
+    const half = await copy(5);
+    expect(half.text).toBe("Admin, I typed @E2E Member by hand, the pill is @member");
+    expect(half.html).toContain("Admin, I typed");
+    expect(half.html).not.toContain(`@${ADMIN_USERNAME}`);
+    expect(half.html).not.toContain("@E2E Admin");
+  });
+});
+
+// BP-1113. History stores an assignee as a username, and read it out as one beside everybody's name
+test("the history tab names the person a task was assigned to", async ({ page }) => {
+  await openTask(page, FINISHED_TASK_NUMBER);
+
+  const saved = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
+  await page.getByRole("combobox", { name: "Assignee" }).click();
+  await page.getByRole("option", { name: "E2E Member" }).click();
+  await expectWritten(saved, 200);
+
+  await expect
+    .poll(async () => (await storedActivity(FINISHED_TASK_ID)).find((a) => a.field === "assignee")?.newValue)
+    .toBe("member");
+  await page.reload();
+
+  await page.getByRole("tab", { name: /History/ }).click();
+  const row = page.getByText(/changed assignee from .+ to E2E Member$/);
+  await expect(row).toBeVisible();
+  await expect(page.getByText(/changed assignee from .+ to member$/)).toHaveCount(0);
+});
+
 // BP-1105. A username may hold a dot, and the mention stopped at it: `@jan.kowalski` asked for
 // `jan` and told nobody. The domain of an e-mail address read as a mention of whoever had its name.
 test("a dotted username is offered, mentioned and told whole, and an e-mail address mentions nobody", async ({

@@ -15,7 +15,7 @@ import { BoardCannotClaim, ROLES_A_RUN_NEEDS } from "@/lib/claim-refusal";
 import { escalationColumnId } from "@/lib/escalation";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { taskKeyOf } from "@/lib/task-key";
-import { usernameOf } from "@/lib/usernames";
+import { displayNameOf } from "@/lib/usernames";
 import { logActivities, logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
@@ -48,7 +48,7 @@ import {
 import { normaliseRecurrence, nextOccurrence, keptAnchor } from "@/lib/recurrence";
 import type { NormalisedRecurrence } from "@/lib/recurrence";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
-import { canBeAssigned } from "@/lib/grants";
+import { canBeAssigned, onBoard } from "@/lib/grants";
 import { workerUsername } from "@/lib/worker-user";
 import { EXECUTION_LEASE_MS } from "@/lib/execution-lease";
 import { pmUserId } from "@/lib/pm/pm-user";
@@ -56,6 +56,7 @@ import { supersedableStates } from "@/lib/task-decisions";
 import { populateWithin, type ScopedDb } from "@/lib/db-scope";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
 import { withAiMark } from "@/lib/pm/username";
+import { nameMentions } from "@/lib/mention-names";
 import { currentGeneratedBy } from "@/lib/ai-generated";
 import { actingThrough, provenanceFields } from "@/lib/activity-source";
 
@@ -761,7 +762,7 @@ export async function createTask(
           { label: column?.label ?? status, tone: pillToneForRole(column?.role) },
           { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
         ],
-        taskMeta: [project.name, `created by ${await usernameOf(db, actorId)}`].filter(Boolean).join(" · "),
+        taskMeta: [project.name, `created by ${await displayNameOf(db, actorId)}`].filter(Boolean).join(" · "),
         projectRef: project.key,
         taskNumber: task.taskNumber,
       };
@@ -790,7 +791,7 @@ export async function createTask(
           { label: column?.label ?? status, tone: pillToneForRole(column?.role) },
           { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
         ],
-        taskMeta: [project.name, `created by ${await usernameOf(db, actorId)}`]
+        taskMeta: [project.name, `created by ${await displayNameOf(db, actorId)}`]
           .filter(Boolean)
           .join(" · "),
         projectRef: project.key,
@@ -943,7 +944,7 @@ async function announceStatusChange(db: ScopedDb, a: StatusChangeAnnouncement): 
   const status = String(a.task.status);
   const [project, actor] = await Promise.all([
     db.Project.findById(a.projectId, "key name").lean(),
-    usernameOf(db, a.actorId),
+    displayNameOf(db, a.actorId),
   ]);
   const taskKey = taskKeyOf(project?.key, a.task.taskNumber);
   const eventPayload = {
@@ -1426,7 +1427,7 @@ export async function updateTask(
       : String(task.assignee);
     const [project, actor] = await Promise.all([
       db.Project.findById(projectId, "key name columns").lean(),
-      usernameOf(db, actorId),
+      displayNameOf(db, actorId),
     ]);
     const taskKey = taskKeyOf(project?.key, task.taskNumber);
     const column = getProjectColumns(project).find((c) => c.id === String(task.status));
@@ -1501,7 +1502,7 @@ export async function addComment(
     db.Task.findByIdAndUpdate(taskId, { $addToSet: { watchers: actor.id } }),
   ]);
 
-  const [project, mentionedIds] = await Promise.all([
+  const [project, mentionedPeople] = await Promise.all([
     db.Project.findById(projectId, "key name columns").lean(),
     resolveMentions(db, bodyText),
   ]);
@@ -1514,7 +1515,13 @@ export async function addComment(
   dispatchWebhooks(db, projectId, "comment_added", eventPayload);
   dispatchNotifications(db, projectId, "comment_added", eventPayload);
   const column = getProjectColumns(project).find((c) => c.id === String(task.status));
-  const excerpt = bodyText.trim().substring(0, 120);
+  const mentionedIds = mentionedPeople.map((p) => p.id);
+  // Named only where the comment's own pill names them, so a watcher is not told the name of
+  // somebody outside the board
+  const nameable = await onBoard(db, projectId, mentionedIds).catch(() => new Set<string>());
+  const excerpt = nameMentions(bodyText.trim(), mentionedPeople.filter((p) => nameable.has(p.id))).substring(0, 120);
+  const authorName = (populated?.author as { fullName?: string } | undefined)?.fullName?.trim() || actor.username;
+  const author = withAiMark(authorName, actor.username);
   const sharedEmail = {
     taskKey,
     taskTitle: task.title,
@@ -1522,7 +1529,7 @@ export async function addComment(
       { label: column?.label ?? String(task.status), tone: pillToneForRole(column?.role) },
     ],
     taskMeta: project?.name ?? "",
-    quote: { who: withAiMark(actor.username, actor.username), text: excerpt },
+    quote: { who: author, text: excerpt },
     projectRef: project?.key,
     taskNumber: task.taskNumber,
     assigneeId: assigneeIdOf(task),
@@ -1552,8 +1559,8 @@ export async function addComment(
       taskId,
       projectId,
       actorId: actor.id,
-      title: `${withAiMark(actor.username, actor.username)} mentioned you in ${taskKey}`,
-      digestTitle: `${withAiMark(actor.username, actor.username)} mentioned you`,
+      title: `${author} mentioned you in ${taskKey}`,
+      digestTitle: `${author} mentioned you`,
       body: excerpt,
       recipientIds: mentionedIds,
       email: { kicker: "You were mentioned", ...sharedEmail },

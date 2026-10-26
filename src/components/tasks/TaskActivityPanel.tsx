@@ -3,6 +3,7 @@
 import { useRef, useState, KeyboardEvent } from "react";
 import { Comments } from "./Comments";
 import { ActivityTimeline } from "./ActivityTimeline";
+import { useMentionablePeople, type Person } from "@/hooks/use-editor-triggers";
 import type { ReferenceScope } from "@/lib/task-references";
 
 interface TaskActivityPanelProps {
@@ -13,6 +14,8 @@ interface TaskActivityPanelProps {
   commentRefreshKey?: number;
   /** Bumped when something outside this panel wrote a history row */
   historyRefreshKey?: number;
+  // The board's people, when the caller already holds them, so they are not fetched again
+  people?: Person[];
 }
 
 type Tab = "comments" | "history";
@@ -23,7 +26,10 @@ export function TaskActivityPanel({
   taskId,
   commentRefreshKey = 0,
   historyRefreshKey = 0,
+  people: knownPeople,
 }: TaskActivityPanelProps) {
+  const fetchedPeople = useMentionablePeople(knownPeople ? null : projectId);
+  const people = knownPeople ?? fetchedPeople;
   const [tab, setTab] = useState<Tab>("comments");
   const [commentCount, setCommentCount] = useState<number | null>(null);
   const [historyCount, setHistoryCount] = useState<number | null>(null);
@@ -98,6 +104,7 @@ export function TaskActivityPanel({
           projectId={projectId}
           taskId={taskId}
           scope={scope}
+          people={people}
           refreshKey={commentRefreshKey}
           hideHeading
           onCountChange={setCommentCount}
@@ -119,6 +126,7 @@ export function TaskActivityPanel({
           // Both only ever go up, so their sum changes whenever either does
           refreshKey={historyRefresh + historyRefreshKey}
           visible={tab === "history"}
+          people={people}
         />
       </div>
     </div>

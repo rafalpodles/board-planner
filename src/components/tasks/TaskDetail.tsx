@@ -312,7 +312,7 @@ function TaskDetailView({
   // What a written task key is measured against. Former keys included, because this board renamed
   // itself once and everything written before that still says the old prefix.
   const scope = { key: project.key, formerKeys: project.formerKeys };
-  const triggers = useEditorTriggers(projectId, project.key);
+  const triggers = useEditorTriggers(projectId, project.key, users);
   const taskKey = `${project.key}-${task.taskNumber}`;
   useDocumentTitle(`${taskKey} ${draft.title.trim() || task.title} — ${APP_NAME}`);
   // Not a plain lookup in the roster: that holds only people who reach the board, so a task
@@ -693,6 +693,7 @@ function TaskDetailView({
                 scope={scope}
                 commentRefreshKey={commentRefreshKey}
                 historyRefreshKey={historyWrites + savedCount}
+                people={users}
               />
             </section>
           </div>

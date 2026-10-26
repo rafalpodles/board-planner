@@ -2,7 +2,6 @@ import { test, expect, type Locator, type Page, type APIRequestContext } from "@
 import { ADMIN_AUTH } from "./api";
 import { db } from "./notification-grid";
 import {
-  ADMIN_USERNAME,
   DECOY_TASK_ID,
   DECOY_TASK_NUMBER,
   FINISHED_TASK_ID,
@@ -230,7 +229,7 @@ test.describe("the bell", () => {
     const theirs = await member.newPage();
     await signIn(theirs, "member");
 
-    const expected = `${ADMIN_USERNAME} removed ${PROJECT_KEY}-${SIBLING_TASK_NUMBER} from ${PROJECT_KEY}-${FINISHED_TASK_NUMBER}'s children`;
+    const expected = `${ADMIN_FULL_NAME} removed ${PROJECT_KEY}-${SIBLING_TASK_NUMBER} from ${PROJECT_KEY}-${FINISHED_TASK_NUMBER}'s children`;
     // Notification writes are fire-and-forget: the request that caused one has already answered by
     // the time the row exists, so this reloads until the server has it rather than reading once.
     await expect(async () => {
@@ -257,7 +256,7 @@ test.describe("the bell", () => {
     const member = await page.context().browser()!.newContext();
     const theirs = await member.newPage();
     await signIn(theirs, "member");
-    const expected = `${ADMIN_USERNAME} removed ${PROJECT_KEY}-${SIBLING_TASK_NUMBER} from ${PROJECT_KEY}-${FINISHED_TASK_NUMBER}'s children`;
+    const expected = `${ADMIN_FULL_NAME} removed ${PROJECT_KEY}-${SIBLING_TASK_NUMBER} from ${PROJECT_KEY}-${FINISHED_TASK_NUMBER}'s children`;
     await expect(async () => {
       await theirs.goto("/notifications");
       await expect(exactly(theirs, expected)).toBeVisible({ timeout: 3_000 });

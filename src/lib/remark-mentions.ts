@@ -1,19 +1,15 @@
 import type { Root } from "mdast";
 import { replaceMentions } from "@/lib/mentions";
+import { nameOf, peopleByUsername, type MentionablePerson } from "@/lib/mention-names";
 
-export interface MentionablePerson {
-  username: string;
-  fullName: string;
-}
+export type { MentionablePerson } from "@/lib/mention-names";
 
 /**
  * Turns `@username` into a pill naming the person, for the people this board can mention, and
  * leaves any other `@word` as the text it was. The reader's own mentions get a pill of their own.
  */
 export function remarkMentions(people: readonly MentionablePerson[], reader?: string) {
-  const byUsername = new Map(
-    people.filter((p) => typeof p.username === "string").map((p) => [p.username.toLowerCase(), p])
-  );
+  const byUsername = peopleByUsername(people);
   const readerKey = reader?.toLowerCase();
 
   return () => (tree: Root) => {
@@ -31,14 +27,11 @@ export function remarkMentions(people: readonly MentionablePerson[], reader?: st
           hProperties: {
             className: self ? ["mention", "mention-self"] : ["mention"],
             title: `@${person.username}`,
+            "data-username": person.username,
           },
         },
         children: [{ type: "text", value: `@${nameOf(person)}` }],
       };
     });
   };
-}
-
-function nameOf(person: MentionablePerson): string {
-  return (typeof person.fullName === "string" && person.fullName.trim()) || person.username;
 }

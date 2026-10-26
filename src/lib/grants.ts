@@ -214,6 +214,16 @@ export async function projectAudienceFilter(
   return audienceFilterFrom(grants.map((g) => g.subject));
 }
 
+/** Which of these people this board's pickers and mention pills know: its audience, people only. */
+export async function onBoard(db: ScopedDb, projectId: string, userIds: string[]): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set();
+  const users = await db.User.find(
+    { ...(await projectAudienceFilter(db, projectId)), _id: { $in: userIds }, kind: { $ne: "machine" }, deactivatedAt: null },
+    "_id"
+  ).lean();
+  return new Set(users.map((u) => String(u._id)));
+}
+
 /**
  * The filter, for a caller that already holds the project's grant rows. Splitting it out is not
  * tidiness: /members reads those rows for the relation map anyway, and having it call

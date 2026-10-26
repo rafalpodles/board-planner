@@ -238,6 +238,9 @@ test("the PM says so when the hand-over it just made cannot complete", async ({ 
   const summary = actions.find((a) => a.tool === "assign_task")?.summary ?? "";
   expect(summary).toContain(`${PROJECT_KEY}-${task.number} → @admin`);
   expect(summary).toMatch(/no agent is named on it/);
+  // BP-1113. Stored as the handle the model reads back, shown as the name the bubble uses
+  await expect(page.getByText(`${PROJECT_KEY}-${task.number} → @E2E Admin`, { exact: false })).toBeVisible();
+  await expect(page.getByText(`${PROJECT_KEY}-${task.number} → @admin`, { exact: false })).toHaveCount(0);
 });
 
 test("and says so when the project is not enabled for workers at all", async ({ page }) => {

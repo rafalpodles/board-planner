@@ -15,8 +15,10 @@ import {
   KEPT_TASK_KEY,
   MEMBER_ID,
   MEMBER_PASSWORD,
+  MEMBER_FULL_NAME,
   MEMBER_USERNAME,
   OUTSIDER_ID,
+  OUTSIDER_FULL_NAME,
   OUTSIDER_USERNAME,
   PROJECT_ID,
   PROJECT_KEY,
@@ -104,7 +106,7 @@ const ADMIN_FULL_NAME = "E2E Admin";
 
 const ASSIGNED = `${TASK_KEY} assigned to you`;
 const COMMENTED = `New comment on ${TASK_KEY}`;
-const MENTIONED = `${ADMIN_USERNAME} mentioned you in ${TASK_KEY}`;
+const MENTIONED = `${ADMIN_FULL_NAME} mentioned you in ${TASK_KEY}`;
 const KEPT_ASSIGNED = `${KEPT_TASK_KEY} assigned to you`;
 
 test.beforeEach(seed);
@@ -324,6 +326,9 @@ test("the bell counts assign, comment and mention, and reading them takes them o
     // Deliberately not the project key beside it: the title already reads "TP-3", so asserting
     // "TP" would hold with the project unresolved and prove nothing.
     await expect(feedRow(member, ASSIGNED)).toContainText(ADMIN_FULL_NAME);
+    // BP-1113. The excerpt is the comment as text, where no pill turns the handle into a name
+    await expect(feedRow(member, MENTIONED)).toContainText(`@${MEMBER_FULL_NAME} anything blocking this?`);
+    await expect(feedRow(member, MENTIONED)).not.toContainText(`@${MEMBER_USERNAME} `);
   });
 
   // The control the three assertions above rest on: same board, same three events, and the only
@@ -694,6 +699,12 @@ test("a mention cannot reach somebody who has no grant on the board", async ({ b
   await test.step("the person with a grant is told", async () => {
     await expectUnreadBadge(member, 1);
     await expectFeed(member, { carries: [MENTIONED], omits: [] });
+    // BP-1113. The excerpt names people the way the comment's pill does, and the pill knows only
+    // the board: the stranger's name is not handed to the board's watchers
+    await expect(feedRow(member, MENTIONED)).toContainText(
+      `@${MEMBER_FULL_NAME} @${OUTSIDER_USERNAME} either of you free for this?`
+    );
+    await expect(feedRow(member, MENTIONED)).not.toContainText(OUTSIDER_FULL_NAME);
   });
 
   // Measured at the source. The stranger has no board to open and no screen to check, and an empty

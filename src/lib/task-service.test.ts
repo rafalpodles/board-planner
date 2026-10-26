@@ -92,12 +92,14 @@ const projectFindOne = vi.fn();
 const userFindOne = vi.fn();
 // The notification mails name the person who moved the task, so every announcing path resolves
 // the actor's username now
-const userFindById = vi.fn(() => ({ lean: async () => ({ username: "actor" }) }));
+const userFindById = vi.fn(() => ({ lean: async () => ({ username: "actor", fullName: "Ada Actor" }) }));
 const commentCreate = vi.fn(async () => ({ _id: "c1" }));
 const createNotificationsMock = vi.fn();
 const notifyBoardFeedMock = vi.fn();
 const collectRecipientsMock = vi.fn((_task?: unknown): string[] => []);
-const resolveMentionsMock = vi.fn(async (_db?: unknown, _body?: string): Promise<string[]> => []);
+const resolveMentionsMock = vi.fn(
+  async (_db?: unknown, _body?: string): Promise<{ id: string; username: string; fullName: string }[]> => []
+);
 const workerFindOne = vi.fn();
 const taskFindById = vi.fn();
 // Whether this occurrence has already minted its successor. Null is "not yet", which is what
@@ -165,10 +167,11 @@ function agentInTheCatalog(doc: Record<string, unknown> | null) {
     return { lean: () => Promise.resolve(visible) };
   });
 }
+const commentAuthor = vi.hoisted(() => ({ populated: { _id: "c1" } as Record<string, unknown> }));
 vi.mock("@/models/comment", () => ({
   Comment: {
     create: commentCreate,
-    findOne: () => ({ populate: async () => ({ _id: "c1" }) }),
+    findOne: () => ({ populate: async () => commentAuthor.populated }),
   },
 }));
 const sprintExists = vi.fn();
@@ -191,16 +194,20 @@ vi.mock("@/lib/pm/triggers", () => ({ onTaskStatusChanged: vi.fn().mockResolvedV
  * here — the tests below that care set it explicitly, and everything else assigns freely, the way
  * it did before BP-400.
  */
+const onBoardMock = vi.fn(async (ids: string[]) => new Set(ids));
 const canBeAssignedMock = vi.fn(async (_db?: unknown, _userId?: string, _projectId?: string) => true);
 vi.mock("@/lib/grants", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/grants")>()),
   canBeAssigned: (db: unknown, userId: string, projectId: string) => canBeAssignedMock(db, userId, projectId),
+  onBoard: (_db: unknown, _projectId: string, ids: string[]) => onBoardMock(ids),
 }));
 
 beforeEach(() => {
   // Cleared as well as re-answered: the assertions below that count calls are otherwise reading
   // every earlier test's calls too, and pass or fail on the order the file happens to run in.
   canBeAssignedMock.mockClear();
+  onBoardMock.mockReset();
+  onBoardMock.mockImplementation(async (ids: string[]) => new Set(ids));
   canBeAssignedMock.mockResolvedValue(true);
   // claimNextTask looks the PM account up on every call (BP-419). The default is an instance that
   // has never run one, so a test saying nothing about the PM gets the pre-BP-419 filter and the
@@ -3566,7 +3573,7 @@ describe("assigning somebody who cannot reach the board", () => {
       populate: () => ({ lean: () => Promise.resolve(task) }),
     });
     userFindOne.mockResolvedValue({ _id: "u2", username: "kuba" });
-    userFindById.mockReturnValue({ lean: async () => ({ username: "kuba" }) });
+    userFindById.mockReturnValue({ lean: async () => ({ username: "kuba", fullName: "Kuba" }) });
   });
 
   // Restores the module-level implementation, which answers "actor" — mockReturnValue above would
@@ -4777,7 +4784,7 @@ describe("createTask handing the task to somebody", () => {
         { label: "Ready", tone: "todo" },
         { label: "Medium", tone: "neutral" },
       ],
-      taskMeta: "Board Planner · created by actor",
+      taskMeta: "Board Planner · created by Ada Actor",
       projectRef: "BP",
       taskNumber: 7,
     });
@@ -4820,7 +4827,9 @@ describe("a comment mentioning a watcher", () => {
     findOne.mockReturnValue({ _id: "t1", taskNumber: 7, title: "x", status: "doing" });
     projectFindOne.mockReturnValue({ lean: () => Promise.resolve(board) });
     collectRecipientsMock.mockReturnValue(watchers);
-    resolveMentionsMock.mockResolvedValue(mentions);
+    resolveMentionsMock.mockResolvedValue(mentions.map((id) => ({ id, username: "bob", fullName: "Bob Builder" })));
+    commentAuthor.populated = { _id: "c1" };
+    onBoardMock.mockImplementation(async (ids: string[]) => new Set(ids));
   }
 
   const notificationsByType = (): Record<string, Record<string, unknown>> =>
@@ -4868,16 +4877,50 @@ describe("a comment mentioning a watcher", () => {
     });
   });
 
+  // BP-1113. The bell, the mail and the digest read the excerpt and the title as text, where the
+  // comment's pill is not there to turn a handle into a name
+  it("names the author and whoever the comment mentions, and keeps the username in the webhook", async () => {
+    setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
+    commentAuthor.populated = { _id: "c1", author: { username: "owner", fullName: "Olga Owner" } };
+    await addComment(db, "p1", "t1", "@bob look at this, and @stranger too", { id: "actor", username: "owner" });
+
+    const byType = notificationsByType();
+    expect(byType.mentioned).toMatchObject({
+      title: "Olga Owner mentioned you in TP-7",
+      digestTitle: "Olga Owner mentioned you",
+      body: "@Bob Builder look at this, and @stranger too",
+    });
+    expect(byType.comment_added.body).toBe("@Bob Builder look at this, and @stranger too");
+    expect((byType.mentioned.email as { quote: { who: string } }).quote.who).toBe("Olga Owner");
+    const webhook = (dispatchWebhooks as ReturnType<typeof vi.fn>).mock.calls.find((c) => c[2] === "comment_added");
+    expect(webhook?.[3].data).toMatchObject({ commentBody: "@bob look at this, and @stranger too", author: "owner" });
+  });
+
+  it("leaves the handle of a mentioned person the board does not know, as the comment's pill does", async () => {
+    setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
+    onBoardMock.mockResolvedValue(new Set());
+    await addComment(db, "p1", "t1", "@bob look at this", { id: "actor", username: "owner" });
+
+    const byType = notificationsByType();
+    expect(byType.mentioned.body).toBe("@bob look at this");
+    expect(byType.comment_added.body).toBe("@bob look at this");
+    expect(byType.mentioned.recipientIds).toEqual([MENTIONED_WATCHER]);
+  });
+
   // BP-942: the PM's comment reaches people in their mail, their bell and their team chat, where nothing
   // else says an AI wrote it, and "pm" reads like a colleague's handle
   it("names the PM as an AI wherever its comment is sent, and a person plainly", async () => {
     setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
+    commentAuthor.populated = { _id: "c1", author: { username: "pm", fullName: "PM Agent" } };
     await addComment(db, "p1", "t1", "@bob look at this", { id: "pm-id", username: "pm" });
 
     const byType = notificationsByType();
-    expect(byType.mentioned).toMatchObject({ title: "pm (AI) mentioned you in TP-7", digestTitle: "pm (AI) mentioned you" });
-    expect((byType.comment_added.email as { quote: { who: string } }).quote.who).toBe("pm (AI)");
-    expect((byType.mentioned.email as { quote: { who: string } }).quote.who).toBe("pm (AI)");
+    expect(byType.mentioned).toMatchObject({
+      title: "PM Agent (AI) mentioned you in TP-7",
+      digestTitle: "PM Agent (AI) mentioned you",
+    });
+    expect((byType.comment_added.email as { quote: { who: string } }).quote.who).toBe("PM Agent (AI)");
+    expect((byType.mentioned.email as { quote: { who: string } }).quote.who).toBe("PM Agent (AI)");
 
     // The signed webhook is a contract on the username; the team chat marks it where it is rendered
     const webhook = (dispatchWebhooks as ReturnType<typeof vi.fn>).mock.calls.find((c) => c[2] === "comment_added");
@@ -4980,7 +5023,7 @@ describe("what a rewritten updateTask still tells the assignee", () => {
       { label: "Doing", tone: "progress" },
       { label: "High", tone: "neutral" },
     ]);
-    expect(notification.email.taskMeta).toBe("Test Project · assigned by actor");
+    expect(notification.email.taskMeta).toBe("Test Project · assigned by Ada Actor");
     expect(notification.email.projectRef).toBe("TP");
     expect(notification.email.taskNumber).toBe(4);
   });
@@ -5051,7 +5094,7 @@ describe("what a status change tells a watcher", () => {
       "arrow",
       { label: "Under review", tone: "review" },
     ]);
-    expect(notification.email.taskMeta).toBe("Test Project · moved by actor");
+    expect(notification.email.taskMeta).toBe("Test Project · moved by Ada Actor");
     expect(notification.email.projectRef).toBe("TP");
   });
 });

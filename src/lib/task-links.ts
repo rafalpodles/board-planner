@@ -5,7 +5,7 @@ import { dispatchNotifications } from "@/lib/notifications";
 import { createNotifications, collectRecipients, assigneeIdOf } from "@/lib/in-app-notifications";
 import { describeLinkChange } from "@/lib/link-phrasing";
 import { taskKeyOf } from "@/lib/task-key";
-import { usernameOf } from "@/lib/usernames";
+import { namesOf } from "@/lib/usernames";
 import { DependencyType, LinkDirection, RelationType } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
 
@@ -420,9 +420,9 @@ async function announce(
 ): Promise<void> {
   if (facts.length === 0) return;
 
-  const [project, actor] = await Promise.all([
+  const [project, { username: actor, displayName: actorName }] = await Promise.all([
     db.Project.findById(projectId, "key name").lean(),
-    usernameOf(db, actorId),
+    namesOf(db, actorId),
   ]);
   const keyOf = (end: LinkSubject) => taskKeyOf(project?.key, end.taskNumber);
 
@@ -443,7 +443,7 @@ async function announce(
 
   const sentence = (row: (typeof rows)[number], self: string) =>
     describeLinkChange({
-      actor,
+      actor: actorName,
       action: row.fact.action,
       direction: row.direction,
       self,
