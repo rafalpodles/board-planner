@@ -33,9 +33,9 @@ describe("a mention", () => {
     expect(pills(container)).toEqual([{ text: "@bot", title: "@bot", self: false }]);
   });
 
-  it("marks the reader's own mentions, whatever case either was written in, and nobody else's", () => {
+  it("marks the reader's own mentions, whatever case the mention was written in, and nobody else's", () => {
     const { container } = render(
-      <MarkdownContent mentions={PEOPLE} reader="Member">{"@member and @jan.kowalski"}</MarkdownContent>
+      <MarkdownContent mentions={PEOPLE} reader="Member">{"@MEMBER and @jan.kowalski"}</MarkdownContent>
     );
 
     expect(pills(container).map((p) => [p.text, p.self])).toEqual([

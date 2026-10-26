@@ -323,6 +323,7 @@ body {
   padding: 0.05em 0.45em;
   font-weight: 500;
   box-decoration-break: clone;
+  white-space: nowrap;
   cursor: default;
 }
 .mention-self {

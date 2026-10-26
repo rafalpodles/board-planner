@@ -33,8 +33,12 @@ export function remarkMentions(people: readonly MentionablePerson[], reader?: st
             title: `@${person.username}`,
           },
         },
-        children: [{ type: "text", value: `@${person.fullName?.trim() || person.username}` }],
+        children: [{ type: "text", value: `@${nameOf(person)}` }],
       };
     });
   };
+}
+
+function nameOf(person: MentionablePerson): string {
+  return (typeof person.fullName === "string" && person.fullName.trim()) || person.username;
 }
