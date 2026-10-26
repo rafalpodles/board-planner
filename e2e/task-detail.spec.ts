@@ -300,6 +300,53 @@ test("a mention names the person, and the reader's own stands apart from the oth
   expect(ownPaint.color).not.toBe(otherPaint.color);
 });
 
+// BP-1113. The pill shows the name, and a copy of it pasted into another comment mentioned nobody
+test("copying a comment puts back the username each pill was written as", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openTask(page, FINISHED_TASK_NUMBER);
+
+  const posted = taskWrite(page, "POST", `/tasks/${FINISHED_TASK_ID}/comments`);
+  await composer(page).fill(`@member and @${ADMIN_USERNAME}, please read this`);
+  await page.getByRole("button", { name: "Comment" }).click();
+  await expectWritten(posted, 201);
+
+  const body = page.locator(".prose p", { hasText: "please read this" });
+  await expect(body).toHaveText("@E2E Member and @E2E Admin, please read this");
+
+  await body.evaluate((p) => {
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    const selection = document.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await page.keyboard.press("ControlOrMeta+c");
+
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(`@member and @${ADMIN_USERNAME}, please read this`);
+});
+
+// BP-1113. History stores an assignee as a username, and read it out as one beside everybody's name
+test("the history tab names the person a task was assigned to", async ({ page }) => {
+  await openTask(page, FINISHED_TASK_NUMBER);
+
+  const saved = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
+  await page.getByRole("combobox", { name: "Assignee" }).click();
+  await page.getByRole("option", { name: "E2E Member" }).click();
+  await expectWritten(saved, 200);
+
+  await expect
+    .poll(async () => (await storedActivity(FINISHED_TASK_ID)).find((a) => a.field === "assignee")?.newValue)
+    .toBe("member");
+  await page.reload();
+
+  await page.getByRole("tab", { name: /History/ }).click();
+  const row = page.getByText(/changed assignee from .+ to E2E Member$/);
+  await expect(row).toBeVisible();
+  await expect(page.getByText(/changed assignee from .+ to member$/)).toHaveCount(0);
+});
+
 // BP-1105. A username may hold a dot, and the mention stopped at it: `@jan.kowalski` asked for
 // `jan` and told nobody. The domain of an e-mail address read as a mention of whoever had its name.
 test("a dotted username is offered, mentioned and told whole, and an e-mail address mentions nobody", async ({

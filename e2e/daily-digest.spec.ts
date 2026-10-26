@@ -8,6 +8,7 @@ import {
   BYSTANDER_USERNAME,
   MEMBER_ID,
   MEMBER_PASSWORD,
+  MEMBER_FULL_NAME,
   MEMBER_USERNAME,
   PROJECT_KEY,
   PROJECT_NAME,
@@ -450,8 +451,8 @@ test("every kind of row reaches the morning message as a line of its own", async
     `${key}: assigned to you`,
     `${key}: moved to In Progress`,
     `${key}: New comment`,
-    `${key}: ${MEMBER_USERNAME} mentioned you`,
-    `${key}: ${MEMBER_USERNAME} linked this task to ${other}`,
+    `${key}: ${MEMBER_FULL_NAME} mentioned you`,
+    `${key}: ${MEMBER_FULL_NAME} linked this task to ${other}`,
     `—: ${unresolved}`,
   ];
 

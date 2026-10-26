@@ -19,6 +19,7 @@ export const ADMIN_PASSWORD = "test1234";
 // withProjectAccess short-circuits on the instance-admin check, so nothing an admin does can
 // tell whether the grants path still works.
 export const MEMBER_USERNAME = "member";
+export const MEMBER_FULL_NAME = "E2E Member";
 export const MEMBER_PASSWORD = "test1234";
 
 // A genuine project owner: reaches "admin"-need routes through a Grant `relation: "owner"`, with
@@ -1153,7 +1154,7 @@ async function seedBoard(withSessions: boolean) {
       _id: MEMBER_ID,
       username: MEMBER_USERNAME,
       password: MEMBER_PASSWORD_HASH,
-      fullName: "E2E Member",
+      fullName: MEMBER_FULL_NAME,
       // Not "admin": this account has no standing on the instance at all, and everything it can
       // reach on this project it reaches through the grant below
       role: "member",

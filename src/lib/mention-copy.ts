@@ -19,15 +19,38 @@ export function withUsernames(selected: string, pills: readonly CopiedPill[]): s
   return text;
 }
 
+function rangesOf(selection: Selection): Range[] {
+  return Array.from({ length: selection.rangeCount }, (_, i) => selection.getRangeAt(i));
+}
+
+// Chrome moves a selection that starts or ends at an inline-block's edge to inside its text, so a
+// pill selected whole is not "contained" by the selection; what counts is all of its text being in it
+function wholeIn(ranges: Range[], pill: HTMLElement): boolean {
+  const text = pill.firstChild;
+  if (!text) return false;
+  const end = text.textContent?.length ?? 0;
+  return ranges.some((r) => r.isPointInRange(text, 0) && r.isPointInRange(text, end));
+}
+
+function widenedToPills(range: Range, pills: HTMLElement[]): Range {
+  const wide = range.cloneRange();
+  const start = pills.find((pill) => pill.contains(wide.startContainer));
+  const end = pills.find((pill) => pill.contains(wide.endContainer));
+  if (start) wide.setStartBefore(start);
+  if (end) wide.setEndAfter(end);
+  return wide;
+}
+
 function copyPillsAsTyped(event: ClipboardEvent) {
   const selection = document.getSelection();
   if (!selection || selection.isCollapsed || !event.clipboardData) return;
 
-  const pills = [...document.querySelectorAll<HTMLElement>(PILL)].filter((el) => selection.containsNode(el, false));
+  const ranges = rangesOf(selection);
+  const pills = [...document.querySelectorAll<HTMLElement>(PILL)].filter((el) => wholeIn(ranges, el));
   if (pills.length === 0) return;
 
   const html = document.createElement("div");
-  for (let i = 0; i < selection.rangeCount; i++) html.append(selection.getRangeAt(i).cloneContents());
+  for (const range of ranges) html.append(widenedToPills(range, pills).cloneContents());
   for (const pill of html.querySelectorAll<HTMLElement>(PILL)) pill.replaceWith(`@${pill.dataset.username}`);
 
   event.clipboardData.setData(

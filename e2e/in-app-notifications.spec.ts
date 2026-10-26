@@ -15,6 +15,7 @@ import {
   KEPT_TASK_KEY,
   MEMBER_ID,
   MEMBER_PASSWORD,
+  MEMBER_FULL_NAME,
   MEMBER_USERNAME,
   OUTSIDER_ID,
   OUTSIDER_USERNAME,
@@ -104,7 +105,7 @@ const ADMIN_FULL_NAME = "E2E Admin";
 
 const ASSIGNED = `${TASK_KEY} assigned to you`;
 const COMMENTED = `New comment on ${TASK_KEY}`;
-const MENTIONED = `${ADMIN_USERNAME} mentioned you in ${TASK_KEY}`;
+const MENTIONED = `${ADMIN_FULL_NAME} mentioned you in ${TASK_KEY}`;
 const KEPT_ASSIGNED = `${KEPT_TASK_KEY} assigned to you`;
 
 test.beforeEach(seed);
@@ -324,6 +325,9 @@ test("the bell counts assign, comment and mention, and reading them takes them o
     // Deliberately not the project key beside it: the title already reads "TP-3", so asserting
     // "TP" would hold with the project unresolved and prove nothing.
     await expect(feedRow(member, ASSIGNED)).toContainText(ADMIN_FULL_NAME);
+    // BP-1113. The excerpt is the comment as text, where no pill turns the handle into a name
+    await expect(feedRow(member, MENTIONED)).toContainText(`@${MEMBER_FULL_NAME} anything blocking this?`);
+    await expect(feedRow(member, MENTIONED)).not.toContainText(`@${MEMBER_USERNAME} `);
   });
 
   // The control the three assertions above rest on: same board, same three events, and the only
