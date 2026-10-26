@@ -92,7 +92,7 @@ const projectFindOne = vi.fn();
 const userFindOne = vi.fn();
 // The notification mails name the person who moved the task, so every announcing path resolves
 // the actor's username now
-const userFindById = vi.fn(() => ({ lean: async () => ({ username: "actor" }) }));
+const userFindById = vi.fn(() => ({ lean: async () => ({ username: "actor", fullName: "Ada Actor" }) }));
 const commentCreate = vi.fn(async () => ({ _id: "c1" }));
 const createNotificationsMock = vi.fn();
 const notifyBoardFeedMock = vi.fn();
@@ -4780,7 +4780,7 @@ describe("createTask handing the task to somebody", () => {
         { label: "Ready", tone: "todo" },
         { label: "Medium", tone: "neutral" },
       ],
-      taskMeta: "Board Planner · created by actor",
+      taskMeta: "Board Planner · created by Ada Actor",
       projectRef: "BP",
       taskNumber: 7,
     });
@@ -4895,12 +4895,16 @@ describe("a comment mentioning a watcher", () => {
   // else says an AI wrote it, and "pm" reads like a colleague's handle
   it("names the PM as an AI wherever its comment is sent, and a person plainly", async () => {
     setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
+    commentAuthor.populated = { _id: "c1", author: { username: "pm", fullName: "PM Agent" } };
     await addComment(db, "p1", "t1", "@bob look at this", { id: "pm-id", username: "pm" });
 
     const byType = notificationsByType();
-    expect(byType.mentioned).toMatchObject({ title: "pm (AI) mentioned you in TP-7", digestTitle: "pm (AI) mentioned you" });
-    expect((byType.comment_added.email as { quote: { who: string } }).quote.who).toBe("pm (AI)");
-    expect((byType.mentioned.email as { quote: { who: string } }).quote.who).toBe("pm (AI)");
+    expect(byType.mentioned).toMatchObject({
+      title: "PM Agent (AI) mentioned you in TP-7",
+      digestTitle: "PM Agent (AI) mentioned you",
+    });
+    expect((byType.comment_added.email as { quote: { who: string } }).quote.who).toBe("PM Agent (AI)");
+    expect((byType.mentioned.email as { quote: { who: string } }).quote.who).toBe("PM Agent (AI)");
 
     // The signed webhook is a contract on the username; the team chat marks it where it is rendered
     const webhook = (dispatchWebhooks as ReturnType<typeof vi.fn>).mock.calls.find((c) => c[2] === "comment_added");
@@ -5003,7 +5007,7 @@ describe("what a rewritten updateTask still tells the assignee", () => {
       { label: "Doing", tone: "progress" },
       { label: "High", tone: "neutral" },
     ]);
-    expect(notification.email.taskMeta).toBe("Test Project · assigned by actor");
+    expect(notification.email.taskMeta).toBe("Test Project · assigned by Ada Actor");
     expect(notification.email.projectRef).toBe("TP");
     expect(notification.email.taskNumber).toBe(4);
   });
@@ -5074,7 +5078,7 @@ describe("what a status change tells a watcher", () => {
       "arrow",
       { label: "Under review", tone: "review" },
     ]);
-    expect(notification.email.taskMeta).toBe("Test Project · moved by actor");
+    expect(notification.email.taskMeta).toBe("Test Project · moved by Ada Actor");
     expect(notification.email.projectRef).toBe("TP");
   });
 });

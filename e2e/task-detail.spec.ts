@@ -306,25 +306,47 @@ test("copying a comment puts back the username each pill was written as", async 
   await openTask(page, FINISHED_TASK_NUMBER);
 
   const posted = taskWrite(page, "POST", `/tasks/${FINISHED_TASK_ID}/comments`);
-  await composer(page).fill(`@member and @${ADMIN_USERNAME}, please read this`);
+  await composer(page).fill(`@${ADMIN_USERNAME}, I typed @E2E Member by hand, the pill is @member`);
   await page.getByRole("button", { name: "Comment" }).click();
   await expectWritten(posted, 201);
 
-  const body = page.locator(".prose p", { hasText: "please read this" });
-  await expect(body).toHaveText("@E2E Member and @E2E Admin, please read this");
+  const body = page.locator(".prose p", { hasText: "the pill is" });
+  await expect(body).toHaveText("@E2E Admin, I typed @E2E Member by hand, the pill is @E2E Member");
 
-  await body.evaluate((p) => {
-    const range = document.createRange();
-    range.selectNodeContents(p);
-    const selection = document.getSelection()!;
-    selection.removeAllRanges();
-    selection.addRange(range);
+  const copy = async (fromOffsetInFirstPill: number) => {
+    await page.evaluate(() => navigator.clipboard.writeText(""));
+    await body.evaluate((p, offset) => {
+      const range = document.createRange();
+      range.setStart(p.querySelector("span.mention")!.firstChild!, offset);
+      range.setEndAfter(p.lastChild!);
+      const selection = document.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }, fromOffsetInFirstPill);
+    await page.keyboard.press("ControlOrMeta+c");
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).not.toBe("");
+    return page.evaluate(async () => {
+      const [item] = await navigator.clipboard.read();
+      return {
+        text: await (await item.getType("text/plain")).text(),
+        html: await (await item.getType("text/html")).text(),
+      };
+    });
+  };
+
+  await test.step("a whole comment comes back as it was typed, the hand-typed name included", async () => {
+    const whole = await copy(0);
+    expect(whole.text).toBe(`@${ADMIN_USERNAME}, I typed @E2E Member by hand, the pill is @member`);
+    expect(whole.html).toContain(`@${ADMIN_USERNAME}, I typed @E2E Member by hand, the pill is @member`);
+    expect(whole.html).not.toContain("data-username");
   });
-  await page.keyboard.press("ControlOrMeta+c");
 
-  await expect
-    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toBe(`@member and @${ADMIN_USERNAME}, please read this`);
+  await test.step("a pill cut in half is copied as the part of the name that was selected", async () => {
+    const half = await copy(5);
+    expect(half.text).toBe("Admin, I typed @E2E Member by hand, the pill is @member");
+    expect(half.html).toContain("Admin, I typed");
+    expect(half.html).not.toContain(`@${ADMIN_USERNAME}`);
+  });
 });
 
 // BP-1113. History stores an assignee as a username, and read it out as one beside everybody's name

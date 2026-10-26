@@ -3,18 +3,33 @@ const PILL = "span.mention[data-username]";
 export interface CopiedPill {
   shown: string;
   username: string;
+  // How many times the pill's text appears in the selection before the pill itself
+  before: number;
 }
 
-/** The selected text with each pill, in order, written back as the `@username` it was typed as. */
+const spaced = (text: string) => text.replace(/\s+/g, " ");
+
+function occurrences(text: string, of: string): number {
+  let count = 0;
+  for (let at = text.indexOf(of); at >= 0 && of; at = text.indexOf(of, at + of.length)) count++;
+  return count;
+}
+
+function nth(text: string, of: string, n: number): number {
+  let at = text.indexOf(of);
+  for (let i = 0; i < n && at >= 0; i++) at = text.indexOf(of, at + of.length);
+  return at;
+}
+
+/** The selected text with each pill written back as the `@username` it was typed as. */
 export function withUsernames(selected: string, pills: readonly CopiedPill[]): string {
   let text = selected;
-  let from = 0;
-  for (const { shown, username } of pills) {
-    const at = text.indexOf(shown, from);
+  // Last first, so a replacement never moves the text an earlier pill is counted in
+  for (const { shown, username, before } of [...pills].reverse()) {
+    const name = spaced(shown);
+    const at = nth(text, name, before);
     if (at < 0) continue;
-    const typed = `@${username}`;
-    text = text.slice(0, at) + typed + text.slice(at + shown.length);
-    from = at + typed.length;
+    text = text.slice(0, at) + `@${username}` + text.slice(at + name.length);
   }
   return text;
 }
@@ -25,11 +40,18 @@ function rangesOf(selection: Selection): Range[] {
 
 // Chrome moves a selection that starts or ends at an inline-block's edge to inside its text, so a
 // pill selected whole is not "contained" by the selection; what counts is all of its text being in it
-function wholeIn(ranges: Range[], pill: HTMLElement): boolean {
+function wholeIn(ranges: Range[], pill: HTMLElement): number {
   const text = pill.firstChild;
-  if (!text) return false;
+  if (!text) return -1;
   const end = text.textContent?.length ?? 0;
-  return ranges.some((r) => r.isPointInRange(text, 0) && r.isPointInRange(text, end));
+  return ranges.findIndex((r) => r.isPointInRange(text, 0) && r.isPointInRange(text, end));
+}
+
+function textBefore(ranges: Range[], index: number, pill: HTMLElement): string {
+  const head = ranges[index].cloneRange();
+  if (pill.contains(head.startContainer)) head.collapse(true);
+  else head.setEndBefore(pill);
+  return [...ranges.slice(0, index).map(String), head.toString()].join("");
 }
 
 function widenedToPills(range: Range, pills: HTMLElement[]): Range {
@@ -46,20 +68,29 @@ function copyPillsAsTyped(event: ClipboardEvent) {
   if (!selection || selection.isCollapsed || !event.clipboardData) return;
 
   const ranges = rangesOf(selection);
-  const pills = [...document.querySelectorAll<HTMLElement>(PILL)].filter((el) => wholeIn(ranges, el));
+  const pills = [...document.querySelectorAll<HTMLElement>(PILL)]
+    .map((el) => ({ el, range: wholeIn(ranges, el) }))
+    .filter((p) => p.range >= 0);
   if (pills.length === 0) return;
 
-  const html = document.createElement("div");
-  for (const range of ranges) html.append(widenedToPills(range, pills).cloneContents());
-  for (const pill of html.querySelectorAll<HTMLElement>(PILL)) pill.replaceWith(`@${pill.dataset.username}`);
+  const copied = pills.map(({ el, range }) => {
+    const shown = el.textContent ?? "";
+    return {
+      shown,
+      username: el.dataset.username ?? "",
+      before: occurrences(spaced(textBefore(ranges, range, el)), spaced(shown)),
+    };
+  });
 
-  event.clipboardData.setData(
-    "text/plain",
-    withUsernames(
-      selection.toString(),
-      pills.map((el) => ({ shown: el.textContent ?? "", username: el.dataset.username ?? "" }))
-    )
-  );
+  const html = document.createElement("div");
+  const whole = pills.map((p) => p.el);
+  for (const range of ranges) html.append(widenedToPills(range, whole).cloneContents());
+  for (const clone of html.querySelectorAll<HTMLElement>(PILL)) {
+    const selectedWhole = copied.some((p) => p.username === clone.dataset.username && p.shown === clone.textContent);
+    clone.replaceWith(selectedWhole ? `@${clone.dataset.username}` : (clone.textContent ?? ""));
+  }
+
+  event.clipboardData.setData("text/plain", withUsernames(selection.toString(), copied));
   event.clipboardData.setData("text/html", html.innerHTML);
   event.preventDefault();
 }

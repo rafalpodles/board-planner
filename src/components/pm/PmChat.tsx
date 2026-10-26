@@ -490,7 +490,7 @@ export function PmChat({
             showStatus(toolStatus(data.tool, data.phase));
           } else if (eventLine === "action") {
             setLiveActions((prev) => [...prev, data]);
-            showStatus(data.summary);
+            showStatus(nameMentions(data.summary, people));
             emitBoardRefresh(projectId);
           } else if (eventLine === "done" || eventLine === "error") {
             finished = true;

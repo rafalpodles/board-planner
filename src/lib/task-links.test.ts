@@ -152,7 +152,7 @@ vi.mock("@/models/task", () => ({
 vi.mock("@/models/project", () => ({
   Project: { findOne: () => lean({ key: "BP", name: "Board Planner" }) },
 }));
-vi.mock("@/lib/usernames", () => ({ usernameOf: async () => "rafal", displayNameOf: async () => "Rafał Podleś" }));
+vi.mock("@/lib/usernames", () => ({ namesOf: async () => ({ username: "rafal", displayName: "Rafał Podleś" }) }));
 vi.mock("@/lib/activity", () => ({
   logActivities: (scope: unknown, rows: unknown[]) => logActivities(scope, rows),
 }));
