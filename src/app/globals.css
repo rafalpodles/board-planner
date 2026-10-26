@@ -325,6 +325,10 @@ body {
   box-decoration-break: clone;
   cursor: default;
 }
+.mention-self {
+  background-color: var(--color-primary-solid);
+  color: #fff;
+}
 
 .prose table {
   border-collapse: collapse;
