@@ -152,7 +152,7 @@ vi.mock("@/models/task", () => ({
 vi.mock("@/models/project", () => ({
   Project: { findOne: () => lean({ key: "BP", name: "Board Planner" }) },
 }));
-vi.mock("@/lib/usernames", () => ({ usernameOf: async () => "rafal" }));
+vi.mock("@/lib/usernames", () => ({ usernameOf: async () => "rafal", displayNameOf: async () => "Rafał Podleś" }));
 vi.mock("@/lib/activity", () => ({
   logActivities: (scope: unknown, rows: unknown[]) => logActivities(scope, rows),
 }));
@@ -291,7 +291,7 @@ describe("addTaskLink", () => {
     const notified = notifiedTasks();
     expect(notified.map((n) => n.taskId).sort()).toEqual(["child", "new", "old"]);
     expect(notified.find((n) => n.taskId === "old")?.title).toBe(
-      "rafal removed BP-11 from BP-9's children"
+      "Rafał Podleś removed BP-11 from BP-9's children"
     );
     expect(
       createNotifications.mock.calls.find(
@@ -318,7 +318,7 @@ describe("addTaskLink", () => {
 
     const forChild = notifiedTasks().filter((n) => n.taskId === "child");
     expect(forChild).toHaveLength(1);
-    expect(forChild[0].title).toBe("rafal made BP-10 the parent of BP-11");
+    expect(forChild[0].title).toBe("Rafał Podleś made BP-10 the parent of BP-11");
   });
 
   it("says nothing when the same link is sent again", async () => {
@@ -888,11 +888,11 @@ describe("what leaves the building", () => {
       })
     );
     expect(digestTitles).toEqual({
-      a: "rafal marked this task as blocked by BP-2",
-      b: "rafal marked BP-1 as blocked by this task",
-      old: "rafal removed BP-11 from this task's children",
-      new: "rafal made this task the parent of BP-11",
-      child: "rafal made BP-10 the parent of this task",
+      a: "Rafał Podleś marked this task as blocked by BP-2",
+      b: "Rafał Podleś marked BP-1 as blocked by this task",
+      old: "Rafał Podleś removed BP-11 from this task's children",
+      new: "Rafał Podleś made this task the parent of BP-11",
+      child: "Rafał Podleś made BP-10 the parent of this task",
     });
   });
 
@@ -908,7 +908,7 @@ describe("what leaves the building", () => {
       kicker: "Tasks linked",
       taskKey: "BP-1",
       taskTitle: "Task 1",
-      taskMeta: "Board Planner · rafal marked BP-1 as a duplicate of BP-2",
+      taskMeta: "Board Planner · Rafał Podleś marked BP-1 as a duplicate of BP-2",
       projectRef: "BP",
       taskNumber: 1,
       assigneeId: "u-assignee",

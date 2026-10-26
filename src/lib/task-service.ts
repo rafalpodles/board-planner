@@ -15,7 +15,7 @@ import { BoardCannotClaim, ROLES_A_RUN_NEEDS } from "@/lib/claim-refusal";
 import { escalationColumnId } from "@/lib/escalation";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { taskKeyOf } from "@/lib/task-key";
-import { usernameOf } from "@/lib/usernames";
+import { displayNameOf } from "@/lib/usernames";
 import { logActivities, logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
@@ -762,7 +762,7 @@ export async function createTask(
           { label: column?.label ?? status, tone: pillToneForRole(column?.role) },
           { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
         ],
-        taskMeta: [project.name, `created by ${await usernameOf(db, actorId)}`].filter(Boolean).join(" · "),
+        taskMeta: [project.name, `created by ${await displayNameOf(db, actorId)}`].filter(Boolean).join(" · "),
         projectRef: project.key,
         taskNumber: task.taskNumber,
       };
@@ -791,7 +791,7 @@ export async function createTask(
           { label: column?.label ?? status, tone: pillToneForRole(column?.role) },
           { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
         ],
-        taskMeta: [project.name, `created by ${await usernameOf(db, actorId)}`]
+        taskMeta: [project.name, `created by ${await displayNameOf(db, actorId)}`]
           .filter(Boolean)
           .join(" · "),
         projectRef: project.key,
@@ -944,7 +944,7 @@ async function announceStatusChange(db: ScopedDb, a: StatusChangeAnnouncement): 
   const status = String(a.task.status);
   const [project, actor] = await Promise.all([
     db.Project.findById(a.projectId, "key name").lean(),
-    usernameOf(db, a.actorId),
+    displayNameOf(db, a.actorId),
   ]);
   const taskKey = taskKeyOf(project?.key, a.task.taskNumber);
   const eventPayload = {
@@ -1427,7 +1427,7 @@ export async function updateTask(
       : String(task.assignee);
     const [project, actor] = await Promise.all([
       db.Project.findById(projectId, "key name columns").lean(),
-      usernameOf(db, actorId),
+      displayNameOf(db, actorId),
     ]);
     const taskKey = taskKeyOf(project?.key, task.taskNumber);
     const column = getProjectColumns(project).find((c) => c.id === String(task.status));
