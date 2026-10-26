@@ -129,6 +129,7 @@ export const GROUPS = {
     "external-integrations.spec.ts",
     "integrations-panel.spec.ts",
     "github-token-state.spec.ts",
+    "token-expiry.spec.ts",
     "project-repositories.spec.ts",
     "coda-pro.spec.ts",
     "release-notes.spec.ts",

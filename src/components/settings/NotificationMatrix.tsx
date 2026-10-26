@@ -13,6 +13,7 @@ const ROW_LABEL: Record<NotificationType, string> = {
   comment_added: "A task you follow gets a comment",
   task_linked: "A task you follow gains or loses a dependency",
   board_access: "You are added to a board, or your role on one changes",
+  token_expiring: "A GitHub or GitLab token on a board you own expires within a week",
   // Replaced on the project screen, where "a board" has an answer — see PROJECT_ROW_LABEL
   task_created: "Anybody creates a task on a board",
 };
@@ -21,6 +22,7 @@ const ROW_LABEL: Record<NotificationType, string> = {
 const PROJECT_ROW_LABEL: Partial<Record<NotificationType, string>> = {
   task_created: "Anybody creates a task on this board",
   board_access: "Your role on this board changes",
+  token_expiring: "This board's GitHub or GitLab token expires within a week",
 };
 
 const OFF = { inApp: false, email: false, chat: false };

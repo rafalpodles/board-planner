@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import mongoose from "mongoose";
-import { CODA_STUB_URL, GITHUB_STUB_URL } from "../playwright.config";
+import { CODA_STUB_URL, GITHUB_STUB_URL, GITLAB_STUB_URL } from "../playwright.config";
 import { E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 import { signIn } from "./session";
 import { e2eLicence, useLicenceKey } from "./licence-key";
@@ -280,7 +280,7 @@ test.describe("GitLab", () => {
 
   test("clears the stored token when the host changes without a replacement", async ({ page }) => {
     await signIn(page);
-    await configureGitlab(page, "https://gitlab.example.com", "glpat-original");
+    await configureGitlab(page, GITLAB_STUB_URL, "glpat-e2e");
     await expect(page.getByLabel("Access token")).toHaveAttribute(
       "placeholder",
       "Set — enter a new token to replace"
@@ -308,7 +308,7 @@ test.describe("GitLab", () => {
 
   test("Disconnect resets the host to default and clears the token", async ({ page }) => {
     await signIn(page);
-    await configureGitlab(page, "https://gitlab.example.com", "glpat-original");
+    await configureGitlab(page, GITLAB_STUB_URL, "glpat-e2e");
 
     await page.getByRole("button", { name: "Disconnect" }).click();
     await expect(page.getByLabel("Host")).toHaveValue("https://gitlab.com");

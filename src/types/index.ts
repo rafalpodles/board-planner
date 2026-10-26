@@ -1063,6 +1063,8 @@ export interface RepositoryConnection {
   lastSyncAt: Date | null;
   lastSyncLinked: number;
   lastSyncTasks: number;
+  /** The expiry an owner has already been told about, so one token is announced once */
+  expiryNotifiedFor: Date | null;
 }
 
 export type ApiRepositoryConnection = {
@@ -1930,11 +1932,12 @@ export type NotificationType =
   | "mentioned"
   | "task_created"
   | "task_linked"
-  | "board_access";
+  | "board_access"
+  | "token_expiring";
 
 // The order the settings grid renders them in. task_created is last because it is the only row
 // that selects its recipients by the tick itself; board_access has exactly one, the person whose
-// grant changed, and is the one row that names no task.
+// grant changed, and with token_expiring is one of the two rows that name no task.
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "task_assigned",
   "mentioned",
@@ -1942,6 +1945,7 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
   "comment_added",
   "task_linked",
   "board_access",
+  "token_expiring",
   "task_created",
 ];
 
@@ -1975,7 +1979,7 @@ export interface INotification {
   type: NotificationType;
   task?: Types.ObjectId | ITask;
   project: Types.ObjectId | IProject;
-  actor: Types.ObjectId | IUser;
+  actor?: Types.ObjectId | IUser;
   title: string;
   digestTitle?: string;
   body: string;
@@ -1994,7 +1998,7 @@ export interface ApiNotification {
   type: NotificationType;
   task?: { _id: string; taskNumber: number; title: string } | string | null;
   project: { _id: string; key: string; name: string } | string;
-  actor: { _id: string; username: string; fullName: string } | string;
+  actor?: { _id: string; username: string; fullName: string } | string;
   title: string;
   body: string;
   read: boolean;

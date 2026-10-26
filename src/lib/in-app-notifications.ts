@@ -27,6 +27,8 @@ export interface NotificationEmail {
    *  number it is the board itself. */
   projectRef?: string;
   taskNumber?: number;
+  /** A settings section of the board, for a notice the reader acts on there */
+  section?: string;
   /** Lets the footer tell an assignee why they got this without a second query per recipient. */
   assigneeId?: string;
 }
@@ -37,7 +39,8 @@ interface NotifyParams {
   type: NotificationType;
   taskId?: string;
   projectId: string;
-  actorId: string;
+  /** Who did it, and so who is not told; absent for what the board announces by itself */
+  actorId?: string;
   title: string;
   digestTitle?: string;
   body?: string;
@@ -122,7 +125,7 @@ async function notify(db: ScopedDb, {
         type,
         task: taskId ? new Types.ObjectId(taskId) : undefined,
         project: new Types.ObjectId(projectId),
-        actor: new Types.ObjectId(actorId),
+        actor: actorId ? new Types.ObjectId(actorId) : undefined,
         title,
         digestTitle,
         body: body || "",
@@ -172,6 +175,8 @@ function reasonFor(
   switch (type) {
     case "board_access":
       return `You're getting this because your access to ${boardName} changed.`;
+    case "token_expiring":
+      return `You're getting this because you own ${boardName}.`;
     case "task_assigned":
       return `You're getting this because ${taskKey} was assigned to you.`;
     case "mentioned":

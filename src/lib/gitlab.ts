@@ -1,4 +1,4 @@
-import { allowLoopbackIn, escapeRegex, ParsedPR, projectKeyPattern } from "./github";
+import { allowLoopbackIn, escapeRegex, ParsedPR, projectKeyPattern, type TokenCheck } from "./github";
 import { safeFetch, logUpstreamFailure, readBoundedJson, MAX_RESPONSE_BYTES } from "./safe-fetch";
 
 export const GITLAB_DESTINATION = { allowLoopback: allowLoopbackIn() };
@@ -11,6 +11,56 @@ interface GitLabMR {
   merged_at: string | null;
   source_branch: string;
   updated_at: string;
+}
+
+/**
+ * Before a token is stored: does GitLab take it, and can it read each project's merge requests. The
+ * expiry comes from `/personal_access_tokens/self`, which a group or project token or an older GitLab
+ * may not answer; then the token is stored with no expiry known.
+ */
+export async function checkGitlabToken(host: string, token: string, projectPaths: string[]): Promise<TokenCheck> {
+  const base = host.replace(/\/+$/, "");
+  const ask = (path: string) =>
+    safeFetch(`${base}/api/v4${path}`, { headers: { "PRIVATE-TOKEN": token }, signal: AbortSignal.timeout(15000) }, GITLAB_DESTINATION);
+  try {
+    const user = await ask("/user");
+    if (user.status === 401) return { ok: false, error: "GitLab rejected this token: it is wrong, expired or revoked. Nothing was saved." };
+    if (!user.ok) return { ok: false, error: `GitLab answered ${user.status} when asked who this token belongs to. Nothing was saved.` };
+    const { username } = (await readBoundedJson(user, MAX_RESPONSE_BYTES)) as { username?: string };
+
+    let expiresAt: Date | null = null;
+    const self = await ask("/personal_access_tokens/self");
+    if (self.ok) {
+      const { expires_at } = (await readBoundedJson(self, MAX_RESPONSE_BYTES)) as { expires_at?: string | null };
+      expiresAt = parseGitlabExpiry(expires_at);
+    } else {
+      await self.body?.cancel().catch(() => undefined);
+    }
+
+    for (const path of projectPaths) {
+      const project = await ask(`/projects/${encodeURIComponent(path)}`);
+      await project.body?.cancel().catch(() => undefined);
+      if (project.status === 404 || project.status === 403) {
+        return { ok: false, error: `GitLab accepted this token, but it cannot read ${path}. Give it access to that project. Nothing was saved.` };
+      }
+      if (!project.ok) return { ok: false, error: `GitLab answered ${project.status} for ${path}. Nothing was saved.` };
+      const requests = await ask(`/projects/${encodeURIComponent(path)}/merge_requests?per_page=1`);
+      await requests.body?.cancel().catch(() => undefined);
+      if (!requests.ok) {
+        return { ok: false, error: `This token can see ${path} but not its merge requests. It needs the read_api scope. Nothing was saved.` };
+      }
+    }
+    return { ok: true, login: username ?? "", expiresAt };
+  } catch {
+    return { ok: false, error: "GitLab could not be reached to check this token. Nothing was saved." };
+  }
+}
+
+/** GitLab answers a day, `2027-01-24`; the token stops working at the start of it, in UTC. */
+export function parseGitlabExpiry(value: string | null | undefined): Date | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const at = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(at.getTime()) ? null : at;
 }
 
 export async function fetchMergeRequests(

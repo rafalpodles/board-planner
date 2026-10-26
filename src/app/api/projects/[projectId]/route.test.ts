@@ -29,6 +29,11 @@ vi.mock("@/lib/model-keys", () => ({ modelKeyAvailability }));
 vi.mock("@/lib/model-check", () => ({ refuseModel }));
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 const checkGithubToken = vi.hoisted(() => vi.fn(async () => ({ ok: true, login: "octo", expiresAt: null })));
+const checkGitlabToken = vi.hoisted(() => vi.fn(async () => ({ ok: true, login: "gl", expiresAt: null })));
+vi.mock("@/lib/gitlab", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/gitlab")>()),
+  checkGitlabToken,
+}));
 vi.mock("@/lib/github", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/github")>()),
   checkGithubToken,
@@ -1047,6 +1052,37 @@ describe("PUT /api/projects/[projectId] checks a GitHub token before storing it 
     // In the settings write itself, so the answer carries it and no second write can fail apart from it
     expect(projectFindOneAndUpdate.mock.calls[0][1].githubConnection).toMatchObject({ login: "rafalpodles", expiresAt, rejectedAt: null, lastSyncAt: null });
     expect(JSON.stringify(projectUpdateOne.mock.calls)).not.toContain("githubConnection");
+  });
+
+  it("checks a GitLab token at the host the same save names, and refuses one GitLab will not take (BP-1109)", async () => {
+    checkGitlabToken.mockResolvedValueOnce({ ok: false, error: "GitLab rejected this token: it is wrong, expired or revoked. Nothing was saved." } as never);
+
+    const refused = await PUT(putRequest({ gitlabHost: "https://gitlab.example.com", gitlabToken: "glpat-dead" }), ctx());
+
+    expect(refused.status).toBe(400);
+    expect(checkGitlabToken).toHaveBeenCalledWith("https://gitlab.example.com", "glpat-dead", []);
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("checks the GitLab project the same save points the board at", async () => {
+    const response = await PUT(
+      putRequest({ repositoryUrl: "https://gitlab.com/orbit-group/orbit-app", gitlabToken: "glpat-live" }),
+      ctx()
+    );
+
+    expect(response.status).toBe(200);
+    expect(checkGitlabToken).toHaveBeenCalledWith("https://gitlab.com", "glpat-live", ["orbit-group/orbit-app"]);
+  });
+
+  it("stores who a GitLab token belongs to and when it expires, in the same write", async () => {
+    const expiresAt = new Date("2027-01-24T00:00:00Z");
+    checkGitlabToken.mockResolvedValueOnce({ ok: true, login: "gl-owner", expiresAt } as never);
+
+    const response = await PUT(putRequest({ gitlabToken: "glpat-live" }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(checkGitlabToken).toHaveBeenCalledWith("https://gitlab.com", "glpat-live", []);
+    expect(projectFindOneAndUpdate.mock.calls[0][1].gitlabConnection).toMatchObject({ login: "gl-owner", expiresAt, expiryNotifiedFor: null });
   });
 
   it("refuses a token that is not a string rather than storing it unchecked and unsealed", async () => {

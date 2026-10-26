@@ -253,6 +253,16 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
           : "Digest scheduler was already running"
     );
 
+    const { startTokenExpiryScheduler } = await import("@/lib/token-expiry");
+    const tokenExpiry = startTokenExpiryScheduler();
+    console.log(
+      tokenExpiry.started
+        ? `Token expiry notices started — every ${tokenExpiry.tickMs}ms`
+        : tokenExpiry.reason === "off"
+          ? "Token expiry notices are off (TOKEN_EXPIRY_TICK_MS=0)"
+          : "Token expiry notices were already running"
+    );
+
     const { startLicencePull } = await import("@/lib/licence-pull");
     const licencePull = startLicencePull();
     console.log(licencePull.started ? "Licence pull started" : `Licence pull is off (${licencePull.reason})`);

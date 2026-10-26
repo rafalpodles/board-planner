@@ -10,10 +10,11 @@ const notificationSchema = new Schema<INotification>(
       enum: NOTIFICATION_TYPES,
       required: true,
     },
-    // Absent only on board_access, which is about a board rather than any task on it
+    // Absent only on board_access and token_expiring, which are about a board rather than any task on it
     task: { type: Schema.Types.ObjectId, ref: "Task" },
     project: { type: Schema.Types.ObjectId, ref: "Project", required: true },
-    actor: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    // Absent only on token_expiring, which nobody did
+    actor: { type: Schema.Types.ObjectId, ref: "User" },
     title: { type: String, required: true },
     // The title as read beside the row's own task key, for writers whose title names it mid-sentence
     digestTitle: { type: String },

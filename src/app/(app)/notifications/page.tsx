@@ -18,6 +18,7 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   task_created: "New task",
   task_linked: "Dependency",
   board_access: "Board access",
+  token_expiring: "Token expiring",
 };
 
 export default function NotificationsPage() {
@@ -67,6 +68,7 @@ export default function NotificationsPage() {
     const taskRef =
       n.task && typeof n.task === "object" ? n.task.taskNumber : n.task;
     if (n.type === "board_access") return projectRef ? projectPath(projectRef) : "/notifications";
+    if (n.type === "token_expiring") return projectRef ? `${projectPath(projectRef)}/settings?section=integrations` : "/notifications";
     if (!projectRef || !taskRef) return "/notifications";
     return taskPath(projectRef, taskRef);
   }

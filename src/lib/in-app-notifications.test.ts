@@ -154,6 +154,24 @@ beforeEach(() => {
   accessLookupFails = false;
 });
 
+describe("a notice nobody caused (BP-1109)", () => {
+  it("is written to every recipient, with no actor, and says why they got it", async () => {
+    const { actorId: _actorId, ...withoutActor } = NOTIFICATION;
+    await createNotifications(scopedToDefaultOrganisation(), {
+      ...withoutActor,
+      type: "token_expiring",
+      taskId: undefined,
+      title: "The GitHub token of BP expires on 28 Oct",
+    });
+
+    const rows = insertMany.mock.calls[0][0] as { recipient: unknown; actor?: unknown }[];
+    expect(rows.map((row) => String(row.recipient)).sort()).toEqual([ASSIGNEE, WATCHER].sort());
+    expect(rows.every((row) => row.actor === undefined)).toBe(true);
+    const mails = await sentMails();
+    expect(mails[0].text).toContain("You're getting this because you own");
+  });
+});
+
 describe("notification emails", () => {
   it("links back to the task the notification is about", async () => {
     await createNotifications(scopedToDefaultOrganisation(), NOTIFICATION);

@@ -6,6 +6,7 @@ import {
   projectPath,
   projectRefFromPathname,
   taskPath,
+  notificationPath,
 } from "./urls";
 
 describe("projectRefFromPathname", () => {
@@ -115,5 +116,12 @@ describe("taskRefFromPathname", () => {
     expect(taskRefFromPathname("/projects/TP/tasks")).toBeUndefined();
     expect(taskRefFromPathname("/my-tasks")).toBeUndefined();
     expect(taskRefFromPathname(null)).toBeUndefined();
+  });
+});
+
+describe("a notice about a board's settings (BP-1109)", () => {
+  it("links to the section it names, and to the board without one", () => {
+    expect(notificationPath({ projectRef: "ORB", section: "integrations" })).toBe("/projects/ORB/settings?section=integrations");
+    expect(notificationPath({ projectRef: "ORB" })).toBe("/projects/ORB");
   });
 });

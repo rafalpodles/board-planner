@@ -156,6 +156,11 @@ test("a token close to its expiry is badged with the days left", async ({ page }
 
   await expect(page.getByText("Expires in 3 days")).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: "This token expires on" })).toBeVisible();
+  // The expiry tick announces this token within seconds (BP-1109); wait for it here rather than let
+  // its write land after the next spec has seeded
+  await expect
+    .poll(async () => (await db()).collection("notifications").countDocuments({ type: "token_expiring" }), { timeout: 20_000 })
+    .toBeGreaterThan(0);
 });
 
 test("a new token saved with Save changes clears the rejection at once, without a sync", async ({ page }) => {

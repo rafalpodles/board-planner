@@ -6,7 +6,7 @@ import type { ApiProject } from "@/types";
 
 afterEach(cleanup);
 
-const rejected = { rejectedAt: `${new Date().getFullYear()}-10-18T12:00:00Z`, login: "", expiresAt: null, lastSyncAt: null, lastSyncLinked: 0, lastSyncTasks: 0 };
+const rejected = { rejectedAt: `${new Date().getFullYear()}-10-18T12:00:00Z`, login: "", expiresAt: null, lastSyncAt: null, lastSyncLinked: 0, lastSyncTasks: 0, expiryNotifiedFor: null };
 const project = (over: Partial<ApiProject> = {}) =>
   ({ key: "BP", canAdmin: true, githubTokenSet: true, githubConnection: rejected, ...over }) as ApiProject;
 
