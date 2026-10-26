@@ -1049,8 +1049,8 @@ test.describe("mentions in the chat box", () => {
     await box.fill("");
     await say(page, "assign it to @member", { say: "Done." });
     await expect(reply(page)).toContainText("Done.");
-    const mention = bubbles(page).locator("span.mention", { hasText: "@member" }).first();
-    await expect(mention).toHaveAttribute("title", "E2E Member");
+    const mention = bubbles(page).locator("span.mention", { hasText: "@E2E Member" }).first();
+    await expect(mention).toHaveAttribute("title", "@member");
   });
 
   // The floating panel closes on Escape; the one that closes the list must leave it and the draft

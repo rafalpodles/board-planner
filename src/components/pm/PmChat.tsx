@@ -13,6 +13,7 @@ import { MarkdownContent } from "@/components/ui/MarkdownContent";
 import { SuggestionList } from "@/components/ui/SuggestionList";
 import { useTriggerAutocomplete } from "@/hooks/use-trigger-autocomplete";
 import { useEditorTriggers, useMentionablePeople } from "@/hooks/use-editor-triggers";
+import { useAuth } from "@/hooks/use-auth";
 import type { MentionablePerson } from "@/lib/remark-mentions";
 import { timeAgo } from "@/lib/time";
 import { downscaleImage, estimateImageTokens } from "@/lib/image-resize";
@@ -65,10 +66,12 @@ function LiveAnswer({
   handle,
   onGrow,
   mentions,
+  reader,
 }: {
   handle: RefObject<LiveAnswerHandle | null>;
   onGrow: () => void;
   mentions: readonly MentionablePerson[];
+  reader?: string;
 }) {
   const [text, setText] = useState("");
   useImperativeHandle(handle, () => ({ append: (chunk) => setText((prev) => prev + chunk), clear: () => setText("") }), []);
@@ -78,7 +81,7 @@ function LiveAnswer({
   if (!text) return null;
   return (
     <div className="text-sm prose-sm break-words" data-testid="pm-live-text">
-      <MarkdownContent mentions={mentions}>{text}</MarkdownContent>
+      <MarkdownContent mentions={mentions} reader={reader}>{text}</MarkdownContent>
     </div>
   );
 }
@@ -114,6 +117,7 @@ export function PmChat({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const people = useMentionablePeople(projectId);
+  const { user } = useAuth();
   const triggers = useEditorTriggers(projectId, project?.key, people);
   const mention = useTriggerAutocomplete(triggers, inputRef, setInput);
   const [liveActions, setLiveActions] = useState<{ tool: string; taskKey?: string; summary: string }[]>([]);
@@ -728,7 +732,7 @@ export function PmChat({
                 </div>
               )}
               <div className="text-sm prose-sm break-words">
-                <MarkdownContent mentions={people}>{m.content || (m.attachments?.length ? "" : "…")}</MarkdownContent>
+                <MarkdownContent mentions={people} reader={user?.username}>{m.content || (m.attachments?.length ? "" : "…")}</MarkdownContent>
               </div>
               {actionChips(m.actions)}
               <p className="text-[10px] text-text-muted mt-1">{timeAgo(m.createdAt)}</p>
@@ -740,7 +744,7 @@ export function PmChat({
             <div className="max-w-[85%] bg-bg-card border border-border rounded-lg px-3 py-2">
               <p className="mb-1 mr-1.5 inline-block text-[11px] font-medium text-text-muted">PM Agent</p>
               <AiBadge />
-              <LiveAnswer handle={liveAnswer} onGrow={followLiveAnswer} mentions={people} />
+              <LiveAnswer handle={liveAnswer} onGrow={followLiveAnswer} mentions={people} reader={user?.username} />
               <div
                 className="flex items-center gap-2 text-sm text-text-muted"
                 role="status"

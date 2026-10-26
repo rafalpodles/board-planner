@@ -883,6 +883,7 @@ describe("mentions in the composer (BP-1106)", () => {
     );
     const { container } = render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
 
-    await waitFor(() => expect(container.querySelector("span.mention")?.getAttribute("title")).toBe("Mia Member"));
+    await waitFor(() => expect(container.querySelector("span.mention")?.textContent).toBe("@Mia Member"));
+    expect(container.querySelector("span.mention")?.getAttribute("title")).toBe("@member");
   });
 });
