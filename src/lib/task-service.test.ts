@@ -194,10 +194,12 @@ vi.mock("@/lib/pm/triggers", () => ({ onTaskStatusChanged: vi.fn().mockResolvedV
  * here — the tests below that care set it explicitly, and everything else assigns freely, the way
  * it did before BP-400.
  */
+const onBoardMock = vi.fn(async (ids: string[]) => new Set(ids));
 const canBeAssignedMock = vi.fn(async (_db?: unknown, _userId?: string, _projectId?: string) => true);
 vi.mock("@/lib/grants", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/grants")>()),
   canBeAssigned: (db: unknown, userId: string, projectId: string) => canBeAssignedMock(db, userId, projectId),
+  onBoard: (_db: unknown, _projectId: string, ids: string[]) => onBoardMock(ids),
 }));
 
 beforeEach(() => {
@@ -4825,6 +4827,7 @@ describe("a comment mentioning a watcher", () => {
     collectRecipientsMock.mockReturnValue(watchers);
     resolveMentionsMock.mockResolvedValue(mentions.map((id) => ({ id, username: "bob", fullName: "Bob Builder" })));
     commentAuthor.populated = { _id: "c1" };
+    onBoardMock.mockImplementation(async (ids: string[]) => new Set(ids));
   }
 
   const notificationsByType = (): Record<string, Record<string, unknown>> =>
@@ -4889,6 +4892,17 @@ describe("a comment mentioning a watcher", () => {
     expect((byType.mentioned.email as { quote: { who: string } }).quote.who).toBe("Olga Owner");
     const webhook = (dispatchWebhooks as ReturnType<typeof vi.fn>).mock.calls.find((c) => c[2] === "comment_added");
     expect(webhook?.[3].data).toMatchObject({ commentBody: "@bob look at this, and @stranger too", author: "owner" });
+  });
+
+  it("leaves the handle of a mentioned person the board does not know, as the comment's pill does", async () => {
+    setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
+    onBoardMock.mockResolvedValue(new Set());
+    await addComment(db, "p1", "t1", "@bob look at this", { id: "actor", username: "owner" });
+
+    const byType = notificationsByType();
+    expect(byType.mentioned.body).toBe("@bob look at this");
+    expect(byType.comment_added.body).toBe("@bob look at this");
+    expect(byType.mentioned.recipientIds).toEqual([MENTIONED_WATCHER]);
   });
 
   // BP-942: the PM's comment reaches people in their mail, their bell and their team chat, where nothing

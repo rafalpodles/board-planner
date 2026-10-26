@@ -48,7 +48,7 @@ import {
 import { normaliseRecurrence, nextOccurrence, keptAnchor } from "@/lib/recurrence";
 import type { NormalisedRecurrence } from "@/lib/recurrence";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
-import { canBeAssigned } from "@/lib/grants";
+import { canBeAssigned, onBoard } from "@/lib/grants";
 import { workerUsername } from "@/lib/worker-user";
 import { EXECUTION_LEASE_MS } from "@/lib/execution-lease";
 import { pmUserId } from "@/lib/pm/pm-user";
@@ -1516,7 +1516,10 @@ export async function addComment(
   dispatchNotifications(db, projectId, "comment_added", eventPayload);
   const column = getProjectColumns(project).find((c) => c.id === String(task.status));
   const mentionedIds = mentionedPeople.map((p) => p.id);
-  const excerpt = nameMentions(bodyText.trim(), mentionedPeople).substring(0, 120);
+  // Named only where the comment's own pill names them, so a watcher is not told the name of
+  // somebody outside the board
+  const nameable = await onBoard(db, projectId, mentionedIds);
+  const excerpt = nameMentions(bodyText.trim(), mentionedPeople.filter((p) => nameable.has(p.id))).substring(0, 120);
   const authorName = (populated?.author as { fullName?: string } | undefined)?.fullName?.trim() || actor.username;
   const author = withAiMark(authorName, actor.username);
   const sharedEmail = {

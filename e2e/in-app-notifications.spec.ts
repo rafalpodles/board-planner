@@ -18,6 +18,7 @@ import {
   MEMBER_FULL_NAME,
   MEMBER_USERNAME,
   OUTSIDER_ID,
+  OUTSIDER_FULL_NAME,
   OUTSIDER_USERNAME,
   PROJECT_ID,
   PROJECT_KEY,
@@ -698,6 +699,12 @@ test("a mention cannot reach somebody who has no grant on the board", async ({ b
   await test.step("the person with a grant is told", async () => {
     await expectUnreadBadge(member, 1);
     await expectFeed(member, { carries: [MENTIONED], omits: [] });
+    // BP-1113. The excerpt names people the way the comment's pill does, and the pill knows only
+    // the board: the stranger's name is not handed to the board's watchers
+    await expect(feedRow(member, MENTIONED)).toContainText(
+      `@${MEMBER_FULL_NAME} @${OUTSIDER_USERNAME} either of you free for this?`
+    );
+    await expect(feedRow(member, MENTIONED)).not.toContainText(OUTSIDER_FULL_NAME);
   });
 
   // Measured at the source. The stranger has no board to open and no screen to check, and an empty
