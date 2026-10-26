@@ -3569,7 +3569,7 @@ describe("assigning somebody who cannot reach the board", () => {
       populate: () => ({ lean: () => Promise.resolve(task) }),
     });
     userFindOne.mockResolvedValue({ _id: "u2", username: "kuba" });
-    userFindById.mockReturnValue({ lean: async () => ({ username: "kuba" }) });
+    userFindById.mockReturnValue({ lean: async () => ({ username: "kuba", fullName: "Kuba" }) });
   });
 
   // Restores the module-level implementation, which answers "actor" — mockReturnValue above would
