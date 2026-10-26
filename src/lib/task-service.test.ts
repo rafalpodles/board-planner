@@ -206,6 +206,8 @@ beforeEach(() => {
   // Cleared as well as re-answered: the assertions below that count calls are otherwise reading
   // every earlier test's calls too, and pass or fail on the order the file happens to run in.
   canBeAssignedMock.mockClear();
+  onBoardMock.mockReset();
+  onBoardMock.mockImplementation(async (ids: string[]) => new Set(ids));
   canBeAssignedMock.mockResolvedValue(true);
   // claimNextTask looks the PM account up on every call (BP-419). The default is an instance that
   // has never run one, so a test saying nothing about the PM gets the pre-BP-419 filter and the
