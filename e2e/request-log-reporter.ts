@@ -11,7 +11,7 @@ import type { Reporter, TestCase, TestResult } from "@playwright/test/reporter";
 export default class RequestLogReporter implements Reporter {
   private readonly file: string | null;
 
-  constructor(dir: string | undefined = process.env.E2E_REQUEST_LOG_DIR) {
+  constructor({ dir = process.env.E2E_REQUEST_LOG_DIR }: { dir?: string } = {}) {
     if (!dir) {
       this.file = null;
       return;
