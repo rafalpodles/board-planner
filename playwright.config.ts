@@ -230,7 +230,13 @@ function devServerEnv(origin: string) {
     // a deployment to quieten the indicator: outside a production build it opens both of those.
     // Only here; a developer running `next dev` by hand gets none of the three.
     E2E: "1",
-    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${JSON.stringify(`${__dirname}/e2e/keep-idle-connections.cjs`)}`.trim(),
+    NODE_OPTIONS: [
+      process.env.NODE_OPTIONS ?? "",
+      `--require ${JSON.stringify(`${__dirname}/e2e/keep-idle-connections.cjs`)}`,
+      `--require ${JSON.stringify(`${__dirname}/e2e/request-log.cjs`)}`,
+    ]
+      .join(" ")
+      .trim(),
   };
 }
 
@@ -248,7 +254,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   // `stub-crash-reporter` fails a run whose stubs reported a crash; on its own, `list` would
   // leave the line in the log for whoever scrolls back (BP-581)
-  reporter: [["list"], ["./e2e/stub-crash-reporter.ts"]],
+  reporter: [["list"], ["./e2e/stub-crash-reporter.ts"], ["./e2e/request-log-reporter.ts"]],
   // Kept next to the tests, where e2e/.gitignore covers it — the repo root does not ignore
   // Playwright's default test-results/
   outputDir: "./e2e/.artifacts",
