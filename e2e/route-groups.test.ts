@@ -1,7 +1,7 @@
 import { mkdtempSync, readdirSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import nextConfig from "../next.config";
 import { GROUP_NAMES, type GroupName } from "./groups.ts";
 import { computeAffectedGroups } from "./affected-groups.ts";
@@ -9,6 +9,7 @@ import MEASURED from "./route-groups.json" with { type: "json" };
 import RequestLogReporter from "./request-log-reporter.ts";
 import {
   REWRITES,
+  backToBack,
   groupsOf,
   measureCallers,
   routeResolver,
@@ -73,6 +74,34 @@ const tests: TestWindow[] = [
   { start: 300, end: 400, group: "automation", spec: "worker-controls.spec.ts" },
 ];
 const call = (t: number, path: string, direct = true): LoggedRequest => ({ t, method: "POST", path, direct });
+
+describe("backToBack", () => {
+  it("stretches each test to the next one's start and the last to the end of its run", () => {
+    const run = [
+      { start: 300, end: 350, group: "people", spec: "b.spec.ts" },
+      { start: 100, end: 150, group: "people", spec: "a.spec.ts" },
+    ];
+    expect(backToBack(run, 900).map(({ start, end }) => [start, end])).toEqual([
+      [100, 300],
+      [300, 900],
+    ]);
+  });
+
+  it("ends a test the runner heard of after the next one started where that one starts", () => {
+    const run = [
+      { start: 100, end: 320, group: "people", spec: "a.spec.ts" },
+      { start: 300, end: 400, group: "people", spec: "b.spec.ts" },
+    ];
+    expect(backToBack(run, undefined).map(({ start, end }) => [start, end])).toEqual([
+      [100, 300],
+      [300, 400],
+    ]);
+  });
+
+  it("keeps a run's last test as it was when the run's end was not written", () => {
+    expect(backToBack([{ start: 1, end: 5, group: "people", spec: "a.spec.ts" }], undefined)[0].end).toBe(5);
+  });
+});
 
 describe("measureCallers", () => {
   it("names the group and spec of the test running when a spec called a route", () => {
@@ -155,7 +184,11 @@ describe("e2e/route-groups.json", () => {
 });
 
 describe("RequestLogReporter", () => {
-  it("writes each test's window from the worker's own clock, with its group and spec", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("writes each test from when the worker started it to when the runner heard it end, then the run's end", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(5000);
     const dir = mkdtempSync(join(tmpdir(), "request-log-"));
     const reporter = new RequestLogReporter({ dir });
     const test = {
@@ -163,19 +196,21 @@ describe("RequestLogReporter", () => {
       location: { file: "/repo/e2e/claim-ownership.spec.ts" },
     };
     reporter.onTestEnd(test as never, { startTime: new Date(1000), duration: 250 } as never);
+    vi.setSystemTime(6000);
+    reporter.onEnd();
 
     const [file] = readdirSync(dir);
     expect(file).toMatch(/^tests-.*\.ndjson$/);
-    expect(JSON.parse(readFileSync(join(dir, file), "utf8"))).toEqual({
-      start: 1000,
-      end: 1250,
-      group: "automation",
-      spec: "claim-ownership.spec.ts",
-    });
+    const lines = readFileSync(join(dir, file), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(lines).toEqual([
+      { start: 1000, end: 5000, group: "automation", spec: "claim-ownership.spec.ts" },
+      { runEnd: 6000 },
+    ]);
   });
 
   it("writes nothing without a directory", () => {
     const reporter = new RequestLogReporter({ dir: "" });
     expect(() => reporter.onTestEnd({} as never, {} as never)).not.toThrow();
+    expect(() => reporter.onEnd()).not.toThrow();
   });
 });

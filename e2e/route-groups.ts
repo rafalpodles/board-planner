@@ -26,6 +26,18 @@ export interface TestWindow {
 
 export type RouteGroups = Record<string, readonly string[]>;
 
+/**
+ * One run's tests, each stretched to the start of the next and the last to the end of the run, so
+ * an `afterAll` belongs to the test before it. With `workers: 1` nothing else runs in between.
+ */
+export function backToBack(tests: readonly TestWindow[], runEnd: number | undefined): TestWindow[] {
+  const ordered = [...tests].sort((a, b) => a.start - b.start);
+  return ordered.map((test, i) => ({
+    ...test,
+    end: ordered[i + 1]?.start ?? Math.max(test.end, runEnd ?? test.end),
+  }));
+}
+
 // next.config.ts's rewrites, which the server applies after the request was logged under the
 // path the spec asked for. route-groups.test.ts fails when the two lists disagree.
 export const REWRITES: readonly { source: string; destination: string }[] = [

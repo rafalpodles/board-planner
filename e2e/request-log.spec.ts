@@ -2,11 +2,12 @@ import { test, expect } from "@playwright/test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { BASE_URL } from "../playwright.config";
 
 /**
  * BP-1081. The route → group map is only as good as the server's log of who called what: a spec's
- * own request has to come out `direct`, and a page's fetch must not, or every route a page loads
- * would pin every group.
+ * own request has to come out `direct`, through Playwright or Node's own fetch, and a page's fetch
+ * must not, or every route a page loads would pin every group.
  */
 
 const dir = process.env.E2E_REQUEST_LOG_DIR;
@@ -22,12 +23,15 @@ function logged(path: string): { t: number; method: string; path: string; direct
 
 test("the app server logs a spec's own request as direct and a page's fetch as not", async ({ page, request }) => {
   const ownPath = `/api/request-log-probe/${randomUUID()}`;
+  const nodePath = `/api/request-log-probe/${randomUUID()}`;
   const pagePath = `/api/request-log-probe/${randomUUID()}`;
 
   await request.post(`${ownPath}?with=query`);
+  await fetch(`${BASE_URL}${nodePath}`, { method: "POST" });
   await page.goto("/login");
   await page.evaluate((path) => fetch(path), pagePath);
 
   await expect.poll(() => logged(ownPath)).toEqual([{ t: expect.any(Number), method: "POST", path: ownPath, direct: true }]);
+  await expect.poll(() => logged(nodePath)).toEqual([{ t: expect.any(Number), method: "POST", path: nodePath, direct: true }]);
   await expect.poll(() => logged(pagePath)).toEqual([{ t: expect.any(Number), method: "GET", path: pagePath, direct: false }]);
 });

@@ -4,9 +4,10 @@ import type { Reporter, TestCase, TestResult } from "@playwright/test/reporter";
 
 /**
  * With E2E_REQUEST_LOG_DIR set, writes when each test ran and in which group, so e2e/route-groups.ts
- * can tell which test made each request e2e/request-log.cjs logged (BP-1081). The times come from
- * the worker, which started the test, not from when the runner heard about it: a `beforeAll`'s
- * first request can reach the server before the runner does.
+ * can tell which test made each request e2e/request-log.cjs logged (BP-1081). A test starts when
+ * the worker says it did, which is before its `beforeAll`, and ends when the runner hears it has:
+ * `result.duration` leaves `beforeAll` out. An `afterAll` runs after that, so the end of the run is
+ * written too, and e2e/route-groups.ts stretches each test to the start of the next one.
  */
 export default class RequestLogReporter implements Reporter {
   private readonly file: string | null;
@@ -22,14 +23,18 @@ export default class RequestLogReporter implements Reporter {
 
   onTestEnd(test: TestCase, result: TestResult): void {
     if (!this.file) return;
-    const start = result.startTime.getTime();
     const window = {
-      start,
-      end: start + result.duration,
+      start: result.startTime.getTime(),
+      end: Date.now(),
       group: test.parent.project()?.name ?? "",
       spec: basename(test.location.file),
     };
     appendFileSync(this.file, `${JSON.stringify(window)}\n`);
+  }
+
+  onEnd(): void {
+    if (!this.file) return;
+    appendFileSync(this.file, `${JSON.stringify({ runEnd: Date.now() })}\n`);
   }
 
   printsToStdio(): boolean {

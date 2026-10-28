@@ -491,6 +491,8 @@ jobs:
           path: e2e/.request-log
           include-hidden-files: true
           if-no-files-found: error
+          # A re-run of a failed job uploads under the same name as its first attempt
+          overwrite: true
           retention-days: 7
 
       # The trace is the only way to see what the page looked like when a run fails on a machine
@@ -517,6 +519,7 @@ jobs:
     needs: e2e
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
