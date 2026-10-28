@@ -27,6 +27,7 @@ const routeFor = routeResolver(ROUTE_FILES);
 describe("routeResolver", () => {
   it("prefers a static segment to a dynamic one, as Next does", () => {
     expect(routeFor("/api/projects/p1/tasks/claim")).toBe("src/app/api/projects/[projectId]/tasks/claim/route.ts");
+    expect(routeFor("/api/projects/p1/tasks/claim?after=t1")).toBe("src/app/api/projects/[projectId]/tasks/claim/route.ts");
     expect(routeFor("/api/projects/p1/tasks/t1")).toBe("src/app/api/projects/[projectId]/tasks/[taskId]/route.ts");
     expect(routeFor("/api/projects/p1/tasks/t1/status")).toBe(
       "src/app/api/projects/[projectId]/tasks/[taskId]/status/route.ts"
@@ -156,7 +157,7 @@ describe("e2e/route-groups.json", () => {
 describe("RequestLogReporter", () => {
   it("writes each test's window from the worker's own clock, with its group and spec", () => {
     const dir = mkdtempSync(join(tmpdir(), "request-log-"));
-    const reporter = new RequestLogReporter(dir);
+    const reporter = new RequestLogReporter({ dir });
     const test = {
       parent: { project: () => ({ name: "automation" }) },
       location: { file: "/repo/e2e/claim-ownership.spec.ts" },
@@ -174,7 +175,7 @@ describe("RequestLogReporter", () => {
   });
 
   it("writes nothing without a directory", () => {
-    const reporter = new RequestLogReporter(undefined);
+    const reporter = new RequestLogReporter({ dir: "" });
     expect(() => reporter.onTestEnd({} as never, {} as never)).not.toThrow();
   });
 });

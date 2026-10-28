@@ -49,6 +49,7 @@ export const GROUPS = {
     "ai-keys.spec.ts",
     "search.spec.ts",
     "search-page.spec.ts",
+    "request-log.spec.ts",
   ],
   board: [
     "not-found.spec.ts",

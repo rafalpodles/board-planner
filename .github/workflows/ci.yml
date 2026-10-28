@@ -472,6 +472,8 @@ jobs:
           E2E_PASSWORDLESS_SERVER: ${{ matrix.group == 'people' && '1' || '' }}
           # And the one with ORGANISATION_DOMAIN set, where organisations live on subdomains (BP-670)
           E2E_ORGANISATIONS_SERVER: ${{ matrix.group == 'people' && '1' || '' }}
+          # Every request the app server received and when each test ran, for route_groups below (BP-1081)
+          E2E_REQUEST_LOG_DIR: ${{ github.workspace }}/e2e/.request-log
         # Next's dev server sometimes answers a bare 404 page for routes that exist, and keeps doing so
         # until the process ends (BP-1042). A per-test retry runs on the same process, so the tests that
         # failed run once more on a fresh one; a real failure fails again and the job stays red.
@@ -481,6 +483,15 @@ jobs:
             rm -rf e2e/.artifacts-first-pass && cp -R e2e/.artifacts e2e/.artifacts-first-pass
             npx playwright test --project=${{ matrix.group }} --last-failed
           fi
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && steps.affected.outputs.run == 'true' }}
+        with:
+          name: request-log-${{ matrix.group }}-${{ matrix.shard }}
+          path: e2e/.request-log
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
       # The trace is the only way to see what the page looked like when a run fails on a machine
       # nobody can open
@@ -493,6 +504,42 @@ jobs:
             e2e/.artifacts-first-pass
           include-hidden-files: true
           retention-days: 7
+
+  route_groups:
+    # A change to a route file runs the groups whose specs call it directly, and e2e/route-groups.json
+    # is where most of them come from: measured from the request logs the e2e jobs above upload,
+    # because a hand-kept table drifted from them within weeks (BP-1081). This job holds a push to
+    # that: a spec calling a route from a group a change to the route would not run fails here,
+    # naming both. Only the groups that ran are measured, so a pull request checks what it touched;
+    # a run of every group that passed also writes the map it measured, as the `route-groups`
+    # artifact, which is how the file is regenerated. Like plan_e2e, it needs no `npm ci`.
+    name: Route files — every direct caller is in the plan
+    needs: e2e
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: request-log-*
+          path: request-logs
+      - name: Every direct caller is in its route's plan
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/route-groups.ts check request-logs
+      - name: The map this run measured
+        id: measured
+        if: ${{ !cancelled() && needs.e2e.result == 'success' && (github.ref_name == 'main' || github.event_name == 'workflow_dispatch') }}
+        run: |
+          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/route-groups.ts write request-logs
+          git diff --stat -- e2e/route-groups.json
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && steps.measured.outcome == 'success' }}
+        with:
+          name: route-groups
+          path: e2e/route-groups.json
+          retention-days: 30
 
   # The one check main's ruleset requires: a required per-job check would wait forever on an e2e
   # group plan_e2e left out. `groups.test.ts` fails when a job is missing from `needs`.
@@ -509,6 +556,7 @@ jobs:
       - backup
       - plan_e2e
       - e2e
+      - route_groups
     if: always()
     runs-on: ubuntu-latest
     steps:
