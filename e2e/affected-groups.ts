@@ -11,6 +11,11 @@
  * so ambiguity always resolves to "all".
  */
 import { GROUPS, GROUP_NAMES, type GroupName } from "./groups.ts";
+import MEASURED from "./route-groups.json" with { type: "json" };
+
+// Groups whose specs call a route file directly, from a CI run's request log (BP-1081). Added to
+// what OWNED says rather than replacing it: the log knows only the routes some spec calls.
+const CALLED_BY: Readonly<Record<string, readonly GroupName[]>> = MEASURED as Record<string, GroupName[]>;
 
 const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   // Components — search/, pm/ and settings/ are NOT here: SearchLayer, SearchTrigger and
@@ -199,6 +204,7 @@ export function computeAffectedGroups(changedFiles: readonly string[]): GroupNam
     )[0];
     if (!match) return [...GROUP_NAMES];
     match.groups.forEach((g) => groups.add(g));
+    CALLED_BY[file]?.forEach((g) => groups.add(g));
     if (rendersAScreen(file)) groups.add("a11y");
   }
 
