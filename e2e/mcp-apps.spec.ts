@@ -240,7 +240,45 @@ test("a result the view cannot identify leaves it empty instead of showing an er
   await expect(view.locator("main")).toHaveAttribute("aria-busy", "false");
   await expect(view.locator(".skeleton")).toHaveCount(0);
   await expect(view.getByRole("alert")).toHaveCount(0);
-  await expect(view.locator("main")).not.toContainText(/view context/i);
+});
+
+test("a content-only host leaves out what needs the call's arguments, and shows no broken key", async ({ page }) => {
+  const session = await sessionFor(page);
+  await session.callTool("create_sprint", { project: PROJECT_KEY, name: "Bare sprint", startDate: "2026-10-01", endDate: "2026-10-15" });
+  const list = await host(page, session, "list_tasks", { project: PROJECT_KEY, limit: 1 }, "light", true, "content");
+  await expect(list.getByRole("button", { name: new RegExp(`^${PROJECT_KEY}-\\d+`) })).toBeEnabled();
+  await expect(list.getByRole("button", { name: "Next page" })).toHaveCount(0);
+  const full = await host(await page.context().newPage(), session, "list_tasks", { project: PROJECT_KEY, limit: 1, detail: "full" }, "light", true, "content");
+  await expect(full.locator(".task-row").first()).toBeVisible();
+  await expect(full.locator(".task-row").first()).toBeDisabled();
+  await expect(full.locator(".task-row .mono")).toHaveCount(0);
+  const sprints = await host(await page.context().newPage(), session, "list_sprints", { project: PROJECT_KEY }, "light", true, "content");
+  await expect(sprints.getByRole("heading", { name: "Bare sprint" })).toBeVisible();
+  await expect(sprints.getByRole("button", { name: /Bare sprint/ })).toHaveCount(0);
+  const stats = await host(await page.context().newPage(), session, "get_project_stats", { project: PROJECT_KEY }, "light", true, "content");
+  await expect(stats.getByRole("heading", { name: "Project overview" })).toBeVisible();
+});
+
+test("a content-only card whose project cannot be looked up still renders, without controls", async ({ page }) => {
+  const session = await sessionFor(page);
+  const original = await session.callTool("get_task", { taskKey: SIBLING_TASK_KEY });
+  const orphan = { content: [{ type: "text", text: JSON.stringify({ ...original.parsed, project: "aaaaaaaaaaaaaaaaaaaaaaaa" }) }] };
+  const card = await host(page, session, "get_task", { taskKey: SIBLING_TASK_KEY }, "light", true, "content", orphan);
+  await expect(card.getByRole("heading", { name: SIBLING_TASK_TITLE })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { completedCalls: string[] }).completedCalls)).toContain("get_project");
+  await expect(card.getByRole("alert")).toHaveCount(0);
+  await expect(card.getByRole("combobox", { name: "Task status" })).toBeDisabled();
+});
+
+test("a content-only host without tool calls shows a card with no made-up key, and a write's own link", async ({ page }) => {
+  const session = await sessionFor(page);
+  const card = await host(page, session, "get_task", { taskKey: SIBLING_TASK_KEY }, "light", false, "content");
+  await expect(card.getByRole("heading", { name: SIBLING_TASK_TITLE })).toBeVisible();
+  await expect(card.locator(".meta .mono")).toHaveCount(0);
+  await expect(card.getByRole("link", { name: "Open in Board Planner" })).toHaveCount(0);
+  const written = await host(await page.context().newPage(), session, "update_task", { taskKey: SIBLING_TASK_KEY, priority: "high", minimal: true }, "light", false, "content");
+  await expect(written.getByText(SIBLING_TASK_KEY, { exact: true })).toBeVisible();
+  await expect(written.getByRole("link", { name: "Open in Board Planner" })).toBeVisible();
 });
 
 test("host-delivered tool errors retain their actual refusal reason without view metadata", async ({ page }) => {

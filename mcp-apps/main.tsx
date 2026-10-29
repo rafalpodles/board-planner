@@ -44,12 +44,12 @@ function taskKey(view: View) {
   if (row.key) return row.key;
   const requested = String(view.args.taskKey ?? "");
   const project = String(view.args.project ?? prefix(requested));
-  return row.taskNumber != null ? `${project.toUpperCase()}-${row.taskNumber}` : requested.toUpperCase();
+  return row.taskNumber != null && project ? `${project.toUpperCase()}-${row.taskNumber}` : requested.toUpperCase();
 }
 async function withTaskKey(view: View): Promise<View> {
   const row = view.data as Row & { project?: unknown };
   if (row.key || view.args.taskKey || view.args.project || !isId(row.project) || row.taskNumber == null || !app.getHostCapabilities()?.serverTools) return view;
-  const project = (await call("get_project", { identifier: row.project })) as { key?: string; columns?: Column[] };
+  const project = await (call("get_project", { identifier: row.project }) as Promise<{ key?: string; columns?: Column[] }>).catch(() => ({ key: undefined, columns: undefined }));
   if (!project.key) return view;
   if (project.columns) columnsByProject.set(project.key.toUpperCase(), project.columns);
   return { ...view, args: { ...view.args, taskKey: `${project.key}-${row.taskNumber}` } };
@@ -211,6 +211,7 @@ function Progress({ total = 0, done = 0, caption = true, name = "Tasks completed
 function TaskCard({ view, busy, interactive }: { view: View; busy: boolean; interactive: boolean }) {
   const row = view.data as Row;
   const key = taskKey(view);
+  const editable = interactive && !!key;
   const category = row.category ?? "task";
   const checked = row.checklist?.filter((item) => item.done).length ?? 0;
   const due = shortDate(row.dueDate);
@@ -220,9 +221,9 @@ function TaskCard({ view, busy, interactive }: { view: View; busy: boolean; inte
       <div className="card-title">
         <h1>{row.title}</h1>
         <div className="meta">
-          <span className="mono">{key}</span><span className="sep" aria-hidden="true">•</span>
+          {key && <><span className="mono">{key}</span><span className="sep" aria-hidden="true">•</span></>}
           <Assignee value={row.assignee} /><span className="sep" aria-hidden="true">•</span>
-          <StatusSelect view={view} status={row.status} busy={busy} interactive={interactive} onChange={changeStatus} />
+          <StatusSelect view={view} status={row.status} busy={busy} interactive={editable} onChange={changeStatus} />
         </div>
       </div>
       <ExternalLink url={taskUrl(view, key)} label="Open in Board Planner" className="open"><Icon d={external} size={18} /></ExternalLink>
@@ -241,7 +242,7 @@ function TaskCard({ view, busy, interactive }: { view: View; busy: boolean; inte
       <h2>Acceptance criteria <span>{checked}/{row.checklist.length}</span></h2>
       <Progress total={row.checklist.length} done={checked} caption={false} name="Acceptance criteria completed" />
       {row.checklist.map((item) => <label key={item._id} className="criterion">
-        <input type="checkbox" checked={item.done} disabled={!interactive} aria-disabled={busy} onChange={(event) => toggle(item._id, event.target.checked)} />
+        <input type="checkbox" checked={item.done} disabled={!editable} aria-disabled={busy} onChange={(event) => toggle(item._id, event.target.checked)} />
         <span className={item.done ? "completed" : ""}>{item.text}</span>
       </label>)}
     </section>}
@@ -259,9 +260,9 @@ function TaskList({ view, busy, interactive }: { view: View; busy: boolean; inte
     {[...groups].sort(([a], [b]) => order(a) - order(b)).map(([status, tasks]) => <section className="group" key={status}>
       <h2><span className="swatch" style={{ background: column(view, status)?.color ?? "#6b7280" }} aria-hidden="true" />{label(view, status)}<span className="count">{tasks.length}</span></h2>
       <div className="rows">{tasks.map((row, index) => {
-        const key = row.key ?? `${String(view.args.project).toUpperCase()}-${row.taskNumber}`;
-        return <button className="task-row" key={`${key}-${index}`} disabled={!interactive} aria-disabled={busy} onClick={() => openTask(key)}>
-          <span className="mono">{key}</span>
+        const key = row.key ?? (view.args.project && row.taskNumber != null ? `${String(view.args.project).toUpperCase()}-${row.taskNumber}` : "");
+        return <button className="task-row" key={`${key}-${index}`} disabled={!interactive || !key} aria-disabled={busy} onClick={() => openTask(key)}>
+          {key && <span className="mono">{key}</span>}
           <span className="row-title">{row.title}</span>
           {view.tool !== "my_tasks" && <Avatar value={row.assignee} size={20} />}
           <span className="swatch" style={{ background: priorityColor[row.priority ?? "medium"] ?? priorityColor.medium }} aria-hidden="true" /><span className="sr-only">{row.priority ?? "medium"} priority</span>

@@ -14,6 +14,17 @@ describe("viewContext", () => {
     expect(viewContext({}, "mcp__board-planner__get_task", undefined, task)).toEqual({ tool: "get_task", args: {}, argsKnown: false });
   });
 
+  it("trusts the host's tool name over the payload's shape", () => {
+    const emptyPage = { total: 0, returned: 0, offset: 100, nextOffset: null, tasks: [] };
+    expect(viewContext(undefined, "my_tasks", { offset: 100 }, emptyPage)).toEqual({ tool: "my_tasks", args: { offset: 100 }, argsKnown: true });
+    expect(viewContext(undefined, "create_task", { project: "BP", title: "T" }, task)?.tool).toBe("create_task");
+  });
+
+  it("does not trust arguments for a tool guessed from the payload", () => {
+    const emptyPage = { total: 0, returned: 0, offset: 100, nextOffset: null, tasks: [] };
+    expect(viewContext(undefined, undefined, { offset: 100 }, emptyPage)).toEqual({ tool: "list_tasks", args: { offset: 100 }, argsKnown: false });
+  });
+
   it("falls back to the payload's shape when the host names nothing", () => {
     expect(viewContext(undefined, undefined, undefined, task)).toEqual({ tool: "get_task", args: {}, argsKnown: false });
   });

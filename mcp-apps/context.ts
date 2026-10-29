@@ -35,6 +35,7 @@ export function toolFromShape(data: unknown): string | undefined {
 export function viewContext(meta: unknown, hostTool: unknown, hostArgs: Record<string, unknown> | undefined, data: unknown): ViewContext | undefined {
   const sent = meta as ViewMeta | undefined;
   if (sent?.tool) return { tool: sent.tool, args: sent.arguments ?? {}, origin: sent.origin, argsKnown: true };
-  const tool = hostToolName(hostTool) ?? toolFromShape(data);
-  return tool ? { tool, args: hostArgs ?? {}, argsKnown: !!hostArgs } : undefined;
+  const named = hostToolName(hostTool);
+  const tool = named ?? toolFromShape(data);
+  return tool ? { tool, args: hostArgs ?? {}, argsKnown: !!named && !!hostArgs } : undefined;
 }
