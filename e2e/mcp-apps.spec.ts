@@ -8,8 +8,8 @@ test.beforeEach(async () => { await seed(); });
 /** A small MCP Apps host, forwarding every tools/call to the real authenticated /api/mcp.
  * The iframe has no credential. Its HTML comes from resources/read, not a test copy of the UI.
  */
-/** What the host passes on: everything, the call's tool info and arguments without the result's _meta, or the result's content alone. */
-type Forwarded = "all" | "toolInfo" | "content";
+/** What the host passes on: everything, the call's tool info and arguments without the result's _meta, its tool info alone, or the result's content alone. */
+type Forwarded = "all" | "toolInfo" | "toolName" | "content";
 async function host(page: Page, session: McpSession, tool: string, args: Record<string, unknown>, theme = "light", interactive = true, forward: Forwarded = "all", replaced?: unknown) {
   const discovered = await session.call("tools/list");
   const tools = discovered.body.result?.tools as { name: string; _meta?: { ui?: { resourceUri?: string } } }[];
@@ -24,7 +24,7 @@ async function host(page: Page, session: McpSession, tool: string, args: Record<
   expect(initial.raw.result?._meta).toHaveProperty(["boardplanner/view", "tool"], tool);
   const withoutMeta = { ...initial.raw.result, _meta: undefined };
   const delivered = replaced ?? (forward === "all" ? initial.raw.result : withoutMeta);
-  const toolInfo = forward === "toolInfo" ? { id: 1, tool: tools.find((t) => t.name === tool) } : undefined;
+  const toolInfo = forward === "toolInfo" || forward === "toolName" ? { id: 1, tool: tools.find((t) => t.name === tool) } : undefined;
   await page.exposeFunction("forwardTool", async (params: { name: string; arguments: Record<string, unknown> }) => {
     const called = await session.callTool(params.name, params.arguments);
     expect(called.status, called.text).toBe(200);
@@ -40,7 +40,7 @@ async function host(page: Page, session: McpSession, tool: string, args: Record<
       const message = event.data;
       if (message.method === 'ui/notifications/initialized') {
         window.ready = true;
-        if (${scriptJson(forward !== "content")}) window.send('ui/notifications/tool-input', {arguments: ${scriptJson(args)}});
+        if (${scriptJson(forward === "all" || forward === "toolInfo")}) window.send('ui/notifications/tool-input', {arguments: ${scriptJson(args)}});
         window.send('ui/notifications/tool-result', ${scriptJson(delivered)});
         return;
       }
@@ -259,16 +259,21 @@ test("a content-only host leaves out what needs the call's arguments, and shows 
   await expect(stats.getByRole("heading", { name: "Project overview" })).toBeVisible();
 });
 
-test("a content-only card whose project cannot be looked up still renders, without controls", async ({ page }) => {
-  const session = await sessionFor(page);
-  const original = await session.callTool("get_task", { taskKey: SIBLING_TASK_KEY });
-  const orphan = { content: [{ type: "text", text: JSON.stringify({ ...original.parsed, project: "aaaaaaaaaaaaaaaaaaaaaaaa" }) }] };
-  const card = await host(page, session, "get_task", { taskKey: SIBLING_TASK_KEY }, "light", true, "content", orphan);
-  await expect(card.getByRole("heading", { name: SIBLING_TASK_TITLE })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => (window as unknown as { completedCalls: string[] }).completedCalls)).toContain("get_project");
-  await expect(card.getByRole("alert")).toHaveCount(0);
-  await expect(card.getByRole("combobox", { name: "Task status" })).toBeDisabled();
-});
+for (const [tool, forward] of [["get_task", "content"], ["update_task", "toolName"]] as const) {
+  test(`a ${tool} card whose project cannot be looked up still renders, without controls (${forward})`, async ({ page }) => {
+    const session = await sessionFor(page);
+    await session.callTool("update_task", { taskKey: SIBLING_TASK_KEY, acceptanceCriteria: "- [ ] Orphan criterion" });
+    const original = await session.callTool("get_task", { taskKey: SIBLING_TASK_KEY });
+    const orphan = { content: [{ type: "text", text: JSON.stringify({ ...original.parsed, project: "aaaaaaaaaaaaaaaaaaaaaaaa" }) }] };
+    const args = tool === "get_task" ? { taskKey: SIBLING_TASK_KEY } : { taskKey: SIBLING_TASK_KEY, priority: "low" };
+    const card = await host(page, session, tool, args, "light", true, forward, orphan);
+    await expect(card.getByRole("heading", { name: SIBLING_TASK_TITLE })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (window as unknown as { completedCalls: string[] }).completedCalls)).toContain("get_project");
+    await expect(card.locator("main")).toHaveAttribute("aria-busy", "false");
+    await expect(card.getByRole("alert")).toHaveCount(0);
+    await expect(card.getByRole("checkbox", { name: "Orphan criterion" })).toBeDisabled();
+  });
+}
 
 test("a content-only host without tool calls shows a card with no made-up key, and a write's own link", async ({ page }) => {
   const session = await sessionFor(page);

@@ -103,7 +103,7 @@ async function receive(result: CallToolResult) {
     let view: View = { ...context, data };
     if (taskTools.has(view.tool)) view = await withTaskKey(view);
     // A write may answer with a minimal row or unpopulated refs: show the saved task.
-    if (taskTools.has(view.tool) && view.tool !== "get_task" && app.getHostCapabilities()?.serverTools) view = { ...view, data: await call("get_task", { taskKey: taskKey(view) }) };
+    if (taskTools.has(view.tool) && view.tool !== "get_task" && taskKey(view) && app.getHostCapabilities()?.serverTools) view = { ...view, data: await call("get_task", { taskKey: taskKey(view) }) };
     view = await withColumns(view);
     if (id === generation) { current = view; update(current, false, ""); }
   } catch (error) {
