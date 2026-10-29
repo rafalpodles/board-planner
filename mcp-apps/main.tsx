@@ -54,8 +54,13 @@ async function withTaskKey(view: View): Promise<View> {
   if (project.columns) columnsByProject.set(project.key.toUpperCase(), project.columns);
   return { ...view, args: { ...view.args, taskKey: `${project.key}-${row.taskNumber}` } };
 }
+function rowsProject(view: View) {
+  const keys = ((view.data as { tasks?: Row[] }).tasks ?? []).map((row) => row.key).filter((key): key is string => !!key);
+  const projects = new Set(keys.map(prefix));
+  return projects.size === 1 ? [...projects][0] : "";
+}
 async function withColumns(view: View): Promise<View> {
-  const project = taskTools.has(view.tool) ? prefix(taskKey(view)) : String(view.args.project ?? "").toUpperCase();
+  const project = taskTools.has(view.tool) ? prefix(taskKey(view)) : String(view.args.project ?? rowsProject(view)).toUpperCase();
   if (!project || !app.getHostCapabilities()?.serverTools) return view;
   if (!columnsByProject.has(project)) columnsByProject.set(project, ((await call("get_project", { identifier: project })) as { columns?: Column[] }).columns ?? []);
   const sprint = taskTools.has(view.tool) ? (view.data as Row).sprint : undefined;

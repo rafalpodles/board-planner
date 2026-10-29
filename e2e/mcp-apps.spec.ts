@@ -226,6 +226,7 @@ test("a host that forwards only the result's content still shows the card, list,
   await expect.poll(async () => (await storedTask(SIBLING_TASK_NUMBER))?.status).toBe(TARGET_COLUMN.id);
   await expect(card.getByRole("alert")).toHaveCount(0);
   const search = await host(await page.context().newPage(), session, "search_tasks", { query: SIBLING_TASK_KEY }, "light", true, "content");
+  await expect(search.locator(".group h2")).toContainText(TARGET_COLUMN.label);
   await search.getByRole("button", { name: new RegExp(SIBLING_TASK_KEY) }).click();
   await expect(search.getByRole("heading", { name: SIBLING_TASK_TITLE })).toBeVisible();
   const stats = await host(await page.context().newPage(), session, "get_project_stats", { project: PROJECT_KEY }, "light", true, "content");
