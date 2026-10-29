@@ -48,7 +48,7 @@ function taskKey(view: View) {
 }
 async function withTaskKey(view: View): Promise<View> {
   const row = view.data as Row & { project?: unknown };
-  if (row.key || view.args.taskKey || !isId(row.project) || row.taskNumber == null || !app.getHostCapabilities()?.serverTools) return view;
+  if (row.key || view.args.taskKey || view.args.project || !isId(row.project) || row.taskNumber == null || !app.getHostCapabilities()?.serverTools) return view;
   const project = (await call("get_project", { identifier: row.project })) as { key?: string; columns?: Column[] };
   if (!project.key) return view;
   if (project.columns) columnsByProject.set(project.key.toUpperCase(), project.columns);
