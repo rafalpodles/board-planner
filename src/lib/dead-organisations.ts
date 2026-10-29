@@ -86,7 +86,7 @@ export async function adminAddresses(organisation: Types.ObjectId): Promise<stri
  * days, so a person who signed in months ago may use it daily), an API token, a worker, a refreshed connected
  * app. An organisation with nobody in it is as old as it is.
  */
-async function lastActiveOf(organisation: Types.ObjectId, madeAt: Date): Promise<Date> {
+export async function lastActiveOf(organisation: Types.ObjectId, madeAt: Date): Promise<Date> {
   const db = scoped(organisation);
   const latest = async (read: PromiseLike<unknown>, field: string): Promise<number> => {
     const value = ((await read) as Record<string, unknown> | null)?.[field];

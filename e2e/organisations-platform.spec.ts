@@ -18,6 +18,7 @@ import {
   signInOn,
   type OrganisationFixture,
 } from "./organisations";
+import { withDb } from "./platform-sign-in";
 
 test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
 
@@ -70,6 +71,26 @@ test.describe("BP-892: the platform operator is the licence service, not an orga
     expect(String(rows[0].subject)).toBe(ACME.organisation.toHexString());
     expect(rows[0].keyId).toBe(E2E_PLATFORM_REQUEST_KEY.keyId);
     for (const row of rows) expect(row).not.toHaveProperty("organisation");
+  });
+
+  test("each organisation's last use is the latest sign of anybody in it, and the dead-organisation notice is named (BP-1115)", async ({ request }) => {
+    const longAgo = new Date("2026-03-04T05:06:07.000Z");
+    const notice = new Date("2026-05-01T00:00:00.000Z");
+    const organisation = GLOBEX.organisation as never;
+    await withDb(async (db) => {
+      await db.collection("users").updateMany({ organisation }, { $set: { createdAt: longAgo, lastSignInAt: longAgo } });
+      for (const name of ["sessions", "apitokens"]) await db.collection(name).updateMany({ organisation }, { $set: { lastUsedAt: longAgo } });
+      await db.collection("workers").updateMany({ organisation }, { $set: { lastSeenAt: longAgo } });
+      await db.collection("oauthtokens").updateMany({ organisation }, { $set: { createdAt: longAgo } });
+      await db.collection("organisations").updateOne({ _id: organisation }, { $set: { deadNoticeAt: notice } });
+    });
+
+    const response = await signedGet(request, "/api/platform/organisations");
+    expect(response.status(), await response.text()).toBe(200);
+    const bySlug = Object.fromEntries((await response.json()).organisations.map((row: { slug: string }) => [row.slug, row]));
+    expect(bySlug.globex).toMatchObject({ lastActiveAt: longAgo.toISOString(), deadNoticeAt: notice.toISOString() });
+    expect(Date.parse(bySlug.acme.lastActiveAt)).toBeGreaterThan(longAgo.getTime());
+    expect(bySlug.acme.deadNoticeAt).toBeNull();
   });
 
   test("the listing pages by organisation, and a signature covers the query it was made for", async ({ request }) => {
