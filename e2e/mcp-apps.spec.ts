@@ -221,6 +221,7 @@ test("a host that forwards only the result's content still shows the card, list,
   const card = await host(page, session, "get_task", { taskKey: SIBLING_TASK_KEY }, "light", true, "content");
   await expect(card.getByRole("heading", { name: SIBLING_TASK_TITLE })).toBeVisible();
   await expect(card.getByText(SIBLING_TASK_KEY, { exact: true })).toBeVisible();
+  await card.locator("#root").screenshot({ path: test.info().outputPath("content-only-card.png") });
   await card.getByRole("combobox", { name: "Task status" }).selectOption(TARGET_COLUMN.id);
   await expect.poll(async () => (await storedTask(SIBLING_TASK_NUMBER))?.status).toBe(TARGET_COLUMN.id);
   await expect(card.getByRole("alert")).toHaveCount(0);
