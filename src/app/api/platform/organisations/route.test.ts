@@ -46,6 +46,16 @@ describe("GET /api/platform/organisations", () => {
     expect(lastActiveOf).toHaveBeenCalledWith(id, id.getTimestamp());
   });
 
+  it("never dates an organisation after now, from an id minted with a clock running ahead, as the sweep does", async () => {
+    const ahead = Types.ObjectId.createFromTime(Math.floor(Date.now() / 1000) + 86_400);
+    rows.value = [{ _id: ahead, name: "Ahead", slug: "ahead" }];
+    lastActiveOf.mockResolvedValue(new Date());
+
+    await list();
+
+    expect(lastActiveOf.mock.calls[0][1].getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
   it("has neither for a deleted organisation, and reads nothing inside it", async () => {
     rows.value = [{ _id: new Types.ObjectId(), name: "Gone", slug: "gone", deletedAt: new Date() }];
 

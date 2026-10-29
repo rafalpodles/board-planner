@@ -34,7 +34,7 @@ export const GET = withPlatformRequest(async (request, { keyId }) => {
         db.Project.countDocuments({}),
         organisationUsage(db),
         aiUsageSummary(db),
-        lastActiveOf(row._id, row._id.getTimestamp()),
+        lastActiveOf(row._id, new Date(Math.min(row._id.getTimestamp().getTime(), Date.now()))),
       ]);
       const licence = licenceOf(row);
       const active = licence?.verdict === "valid" || licence?.verdict === "grace";
