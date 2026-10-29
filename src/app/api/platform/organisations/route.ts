@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { scoped } from "@/lib/db-scope";
 import { aiUsageSummary } from "@/lib/ai-gateway/summary";
+import { lastActiveOf } from "@/lib/dead-organisations";
 import { licenceOf } from "@/lib/organisation";
 import { organisationUsage } from "@/lib/organisation-limits";
 import { logPlatformAudit, withPlatformRequest } from "@/lib/platform-route";
@@ -21,18 +22,19 @@ export const GET = withPlatformRequest(async (request, { keyId }) => {
   const rows = await Organisation.find(after ? { _id: { $gt: after } } : {})
     .sort({ _id: 1 })
     .limit(limit + 1)
-    .select("name slug licenceKey suspendedAt deletedAt")
+    .select("name slug licenceKey suspendedAt deletedAt deadNoticeAt")
     .lean();
   const page = rows.slice(0, limit);
 
   const organisations = await Promise.all(
     page.map(async (row) => {
       const db = scoped(row._id);
-      const [members, projects, usage, ai] = row.deletedAt ? [0, 0, null, null] : await Promise.all([
+      const [members, projects, usage, ai, lastActiveAt] = row.deletedAt ? [0, 0, null, null, null] : await Promise.all([
         db.User.countDocuments({ kind: { $ne: "machine" }, deactivatedAt: null }),
         db.Project.countDocuments({}),
         organisationUsage(db),
         aiUsageSummary(db),
+        lastActiveOf(row._id, row._id.getTimestamp()),
       ]);
       const licence = licenceOf(row);
       const active = licence?.verdict === "valid" || licence?.verdict === "grace";
@@ -47,6 +49,8 @@ export const GET = withPlatformRequest(async (request, { keyId }) => {
         projects,
         usage,
         ai,
+        lastActiveAt,
+        deadNoticeAt: row.deadNoticeAt ?? null,
         suspendedAt: row.suspendedAt ?? null,
         deletedAt: row.deletedAt ?? null,
       };
