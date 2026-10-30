@@ -220,7 +220,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     env:
-      # Not the 4.4 of every other job: MongoDB publishes no macOS arm64 build of it
+      # Not the 4.4 the Linux jobs serve: MongoDB publishes no macOS arm64 build of it
       MONGODB_VERSION: 7.0.14
     steps:
       - uses: actions/checkout@v7
