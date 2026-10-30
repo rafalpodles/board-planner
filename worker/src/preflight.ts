@@ -702,13 +702,6 @@ export function pathWithTools(paths: Record<string, string>, currentPath: string
   return [...additions, ...existing].join(":");
 }
 
-// `npm ci` and `npm run build` are unconditional in the gates, so a repository without a lockfile
-// or without those scripts fails every task forever with nothing saying why. Checked per bound
-// repository, because a worker can serve several.
-/**
- * What a checkout needs of the machine that runs its gates. `node` is the Node those gates would run
- * on (null when none could be found on the PATH they get); leave it undefined to skip that check.
- */
 function declaresWorkspaces(manifest: string | null): boolean {
   try {
     return manifest !== null && Boolean((JSON.parse(manifest) as { workspaces?: unknown }).workspaces);
@@ -717,6 +710,13 @@ function declaresWorkspaces(manifest: string | null): boolean {
   }
 }
 
+// `npm ci` and `npm run build` are unconditional in the gates, so a repository without a lockfile
+// or without those scripts fails every task forever with nothing saying why. Checked per bound
+// repository, because a worker can serve several.
+/**
+ * What a checkout needs of the machine that runs its gates. `node` is the Node those gates would run
+ * on (null when none could be found on the PATH they get); leave it undefined to skip that check.
+ */
 export function checkRepo(
   read: (path: string) => string | null,
   repoPath: string,
@@ -726,8 +726,8 @@ export function checkRepo(
   const checks: PreflightCheck[] = [];
   const packageRoot = join(repoPath, workingDirectory);
 
-  // A member of an npm workspace has its lockfile at the root, and `npm ci` finds it there; a plain
-  // subdirectory does not, whatever the root holds
+  // A member of an npm workspace has its lockfile at the root, and `npm ci` finds it there. A root
+  // with no workspaces has no such members. Which directories are members is left to `npm ci`
   const hasLock =
     read(join(packageRoot, "package-lock.json")) !== null ||
     (read(join(repoPath, "package-lock.json")) !== null && declaresWorkspaces(read(join(repoPath, "package.json"))));

@@ -1065,9 +1065,9 @@ checkout, and a machine credential cannot set them.
 - **The same confinement, with one home more.** Writes go to the worktree, the command's own temp
   directory and a home of the run's own (`HOME`, with `CFFIXED_USER_HOME` and
   `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=…` because the JVM reads neither `HOME` nor `TMPDIR` on macOS,
-  which also prints a "Picked up JAVA_TOOL_OPTIONS" line on stderr), beside the worktree under a root no confined process can write, kept from install to
-  test and removed with the worktree. Not a shared cache: code one project's install ran could poison
-  another's, and pip checks no lockfile hash the way npm does. So every run downloads again, and a
+  which also prints a "Picked up JAVA_TOOL_OPTIONS" line on stderr), beside the worktree under a
+  root no confined process can write, kept from install to test and removed with the worktree. Not
+  a shared cache: code one project's install ran could poison another's, and pip checks no lockfile hash the way npm does. So every run downloads again, and a
   version manager that lives under your real home (pyenv shims, rustup proxies) will not find its
   toolchains: put the real binary on the worker's `PATH`.
 - **A custom install has no network unless you say so.** `npm ci` keeps the network because

@@ -206,7 +206,8 @@ export async function runConfinedProgram(
       HOME: home.path,
       CFFIXED_USER_HOME: home.path,
       TMPDIR: temp,
-      JAVA_TOOL_OPTIONS: `-Djava.io.tmpdir=${temp}`,
+      // Quoted: the JVM splits this on whitespace, and an operator's TMPDIR may hold a space
+      JAVA_TOOL_OPTIONS: `"-Djava.io.tmpdir=${temp}"`,
     })
   );
 }

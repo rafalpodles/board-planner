@@ -70,7 +70,7 @@ describeOnMac("the Builds gate on a project's own commands", () => {
     expect(options?.env?.HOME).toBe(context.gateHome.path);
     expect(options?.env?.CFFIXED_USER_HOME).toBe(context.gateHome.path);
     expect(options?.env?.TMPDIR).toMatch(/\/cp-gate-[^/]+$/);
-    expect(options?.env?.JAVA_TOOL_OPTIONS).toBe(`-Djava.io.tmpdir=${options?.env?.TMPDIR}`);
+    expect(options?.env?.JAVA_TOOL_OPTIONS).toBe(`"-Djava.io.tmpdir=${options?.env?.TMPDIR}"`);
     expect(options?.env).not.toHaveProperty("npm_config_cache");
     expect(profileOf(install)).toContain(context.gateHome.path);
   });
