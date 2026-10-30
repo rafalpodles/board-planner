@@ -40,7 +40,7 @@ Both are derived, never hard-coded — the checks are in the skill's `references
 
 ## Tech stack
 - Next.js 16 (App Router) + TypeScript
-- MongoDB 4.4+ (Railway) + Mongoose ODM — aggregations must avoid 5.0-only operators (`$dateTrunc`, `$dateAdd`/`$dateDiff`, `$setWindowFields`, `$lookup` mixing `localField`/`foreignField` with an inline `pipeline`)
+- MongoDB 4.4+ (Railway) + Mongoose ODM — aggregations must avoid 5.0-only operators (`$dateTrunc`, `$dateAdd`/`$dateDiff`, `$setWindowFields`, `$lookup` mixing `localField`/`foreignField` with an inline `pipeline`); `src/lib/mongo-floor.test.ts` refuses them in `src/` and `scripts/`, and every CI job but the macOS worker smoke runs on `mongo:4.4` (BP-1082)
 - Tailwind CSS 4
 - Session cookie (browser) + Bearer token (API tokens, OAuth)
 - MCP server: the `/api/mcp` route, tools in `src/lib/mcp/` (OAuth, or a Bearer API token)
