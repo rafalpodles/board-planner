@@ -4,6 +4,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { App, applyDocumentTheme, applyHostStyleVariables, type McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { VIEW_META, viewContext } from "./context";
 import "./style.css";
 
 type Person = string | { username?: string; fullName?: string } | null | undefined;
@@ -15,10 +16,7 @@ type Row = {
 };
 type Sprint = { id?: string; _id?: string; name: string; status?: string; goal?: string; startDate?: string; endDate?: string; taskCount?: number; doneCount?: number };
 type Column = { id: string; label: string; color?: string };
-type View = { tool: string; args: Record<string, unknown>; origin?: string; data: Record<string, unknown> | Sprint[]; columns?: Column[] };
-type ViewMeta = { tool?: string; arguments?: Record<string, unknown>; origin?: string };
-
-const VIEW_META = "boardplanner/view";
+type View = { tool: string; args: Record<string, unknown>; origin?: string; argsKnown: boolean; data: Record<string, unknown> | Sprint[]; columns?: Column[] };
 const app = new App({ name: "Board Planner", version: "1.0.0" }, {}, { autoResize: true });
 const columnsByProject = new Map<string, Column[]>();
 const sprintNames = new Map<string, string>();
@@ -28,6 +26,7 @@ const categoryColor: Record<string, string> = { bug: "#d93025", "user-story": "#
 let generation = 0;
 let locked = false;
 let current: View | undefined;
+let hostArgs: Record<string, unknown> | undefined;
 const history: View[] = [];
 let update: (view: View | undefined, busy: boolean, error: string) => void = () => {};
 
@@ -45,10 +44,23 @@ function taskKey(view: View) {
   if (row.key) return row.key;
   const requested = String(view.args.taskKey ?? "");
   const project = String(view.args.project ?? prefix(requested));
-  return row.taskNumber != null ? `${project.toUpperCase()}-${row.taskNumber}` : requested.toUpperCase();
+  return row.taskNumber != null && project ? `${project.toUpperCase()}-${row.taskNumber}` : requested.toUpperCase();
+}
+async function withTaskKey(view: View): Promise<View> {
+  const row = view.data as Row & { project?: unknown };
+  if (row.key || view.args.taskKey || view.args.project || !isId(row.project) || row.taskNumber == null || !app.getHostCapabilities()?.serverTools) return view;
+  const project = await (call("get_project", { identifier: row.project }) as Promise<{ key?: string; columns?: Column[] }>).catch(() => ({ key: undefined, columns: undefined }));
+  if (!project.key) return view;
+  if (project.columns) columnsByProject.set(project.key.toUpperCase(), project.columns);
+  return { ...view, args: { ...view.args, taskKey: `${project.key}-${row.taskNumber}` } };
+}
+function rowsProject(view: View) {
+  const keys = ((view.data as { tasks?: Row[] }).tasks ?? []).map((row) => row.key).filter((key): key is string => !!key);
+  const projects = new Set(keys.map(prefix));
+  return projects.size === 1 ? [...projects][0] : "";
 }
 async function withColumns(view: View): Promise<View> {
-  const project = taskTools.has(view.tool) ? prefix(taskKey(view)) : String(view.args.project ?? "").toUpperCase();
+  const project = taskTools.has(view.tool) ? prefix(taskKey(view)) : String(view.args.project ?? rowsProject(view)).toUpperCase();
   if (!project || !app.getHostCapabilities()?.serverTools) return view;
   if (!columnsByProject.has(project)) columnsByProject.set(project, ((await call("get_project", { identifier: project })) as { columns?: Column[] }).columns ?? []);
   const sprint = taskTools.has(view.tool) ? (view.data as Row).sprint : undefined;
@@ -67,7 +79,9 @@ function sprintName(value: Row["sprint"]) {
 }
 function taskUrl(view: View, key: string) {
   const parts = key.match(/^(.+)-(\d+)$/);
-  if (!view.origin || !parts) return undefined;
+  const sent = (view.data as Row).url;
+  if (!view.origin) return sent && /^https?:\/\//.test(sent) ? sent : undefined;
+  if (!parts) return undefined;
   try {
     const base = new URL(view.origin);
     if (!["https:", "http:"].includes(base.protocol)) return undefined;
@@ -86,11 +100,15 @@ async function receive(result: CallToolResult) {
   update(current, true, "");
   try {
     const data = payload(result) as View["data"];
-    const meta = result._meta?.[VIEW_META] as ViewMeta | undefined;
-    if (!meta?.tool) throw new Error("This result has no Board Planner view context.");
-    let view: View = { tool: meta.tool, args: meta.arguments ?? {}, origin: meta.origin, data };
+    const context = viewContext(result._meta?.[VIEW_META], app.getHostContext()?.toolInfo?.tool?.name, hostArgs, data);
+    if (!context) {
+      if (id === generation) { current = undefined; update(undefined, false, ""); }
+      return;
+    }
+    let view: View = { ...context, data };
+    if (taskTools.has(view.tool)) view = await withTaskKey(view);
     // A write may answer with a minimal row or unpopulated refs: show the saved task.
-    if (taskTools.has(view.tool) && view.tool !== "get_task" && app.getHostCapabilities()?.serverTools) view = { ...view, data: await call("get_task", { taskKey: taskKey(view) }) };
+    if (taskTools.has(view.tool) && view.tool !== "get_task" && taskKey(view) && app.getHostCapabilities()?.serverTools) view = { ...view, data: await call("get_task", { taskKey: taskKey(view) }) };
     view = await withColumns(view);
     if (id === generation) { current = view; update(current, false, ""); }
   } catch (error) {
@@ -114,7 +132,7 @@ async function action(work: () => Promise<View>, parent?: View) {
 }
 function openTask(key: string) {
   const source = current!;
-  void action(async () => withColumns({ ...source, tool: "get_task", args: { taskKey: key }, data: await call("get_task", { taskKey: key }), columns: undefined }), source);
+  void action(async () => withColumns({ ...source, tool: "get_task", args: { taskKey: key }, argsKnown: true, data: await call("get_task", { taskKey: key }), columns: undefined }), source);
 }
 async function reload(source: View, key: string): Promise<View> {
   return { ...source, data: await call("get_task", { taskKey: key }) };
@@ -144,7 +162,7 @@ function followPage(view: View, offset: number) {
 function openSprint(view: View, sprint: Sprint) {
   void action(async () => {
     const args = { project: view.args.project, sprint: sprint.id ?? sprint._id };
-    return { ...view, tool: "get_sprint", args, data: await call("get_sprint", args) };
+    return { ...view, tool: "get_sprint", args, argsKnown: true, data: await call("get_sprint", args) };
   }, view);
 }
 function hostStyle(context?: McpUiHostContext) {
@@ -198,6 +216,7 @@ function Progress({ total = 0, done = 0, caption = true, name = "Tasks completed
 function TaskCard({ view, busy, interactive }: { view: View; busy: boolean; interactive: boolean }) {
   const row = view.data as Row;
   const key = taskKey(view);
+  const editable = interactive && !!key;
   const category = row.category ?? "task";
   const checked = row.checklist?.filter((item) => item.done).length ?? 0;
   const due = shortDate(row.dueDate);
@@ -207,9 +226,9 @@ function TaskCard({ view, busy, interactive }: { view: View; busy: boolean; inte
       <div className="card-title">
         <h1>{row.title}</h1>
         <div className="meta">
-          <span className="mono">{key}</span><span className="sep" aria-hidden="true">•</span>
+          {key && <><span className="mono">{key}</span><span className="sep" aria-hidden="true">•</span></>}
           <Assignee value={row.assignee} /><span className="sep" aria-hidden="true">•</span>
-          <StatusSelect view={view} status={row.status} busy={busy} interactive={interactive} onChange={changeStatus} />
+          <StatusSelect view={view} status={row.status} busy={busy} interactive={editable} onChange={changeStatus} />
         </div>
       </div>
       <ExternalLink url={taskUrl(view, key)} label="Open in Board Planner" className="open"><Icon d={external} size={18} /></ExternalLink>
@@ -228,7 +247,7 @@ function TaskCard({ view, busy, interactive }: { view: View; busy: boolean; inte
       <h2>Acceptance criteria <span>{checked}/{row.checklist.length}</span></h2>
       <Progress total={row.checklist.length} done={checked} caption={false} name="Acceptance criteria completed" />
       {row.checklist.map((item) => <label key={item._id} className="criterion">
-        <input type="checkbox" checked={item.done} disabled={!interactive} aria-disabled={busy} onChange={(event) => toggle(item._id, event.target.checked)} />
+        <input type="checkbox" checked={item.done} disabled={!editable} aria-disabled={busy} onChange={(event) => toggle(item._id, event.target.checked)} />
         <span className={item.done ? "completed" : ""}>{item.text}</span>
       </label>)}
     </section>}
@@ -246,19 +265,19 @@ function TaskList({ view, busy, interactive }: { view: View; busy: boolean; inte
     {[...groups].sort(([a], [b]) => order(a) - order(b)).map(([status, tasks]) => <section className="group" key={status}>
       <h2><span className="swatch" style={{ background: column(view, status)?.color ?? "#6b7280" }} aria-hidden="true" />{label(view, status)}<span className="count">{tasks.length}</span></h2>
       <div className="rows">{tasks.map((row, index) => {
-        const key = row.key ?? `${String(view.args.project).toUpperCase()}-${row.taskNumber}`;
-        return <button className="task-row" key={`${key}-${index}`} disabled={!interactive} aria-disabled={busy} onClick={() => openTask(key)}>
-          <span className="mono">{key}</span>
+        const key = row.key ?? (view.args.project && row.taskNumber != null ? `${String(view.args.project).toUpperCase()}-${row.taskNumber}` : "");
+        return <button className="task-row" key={`${key}-${index}`} disabled={!interactive || !key} aria-disabled={busy} onClick={() => openTask(key)}>
+          {key && <span className="mono">{key}</span>}
           <span className="row-title">{row.title}</span>
           {view.tool !== "my_tasks" && <Avatar value={row.assignee} size={20} />}
           <span className="swatch" style={{ background: priorityColor[row.priority ?? "medium"] ?? priorityColor.medium }} aria-hidden="true" /><span className="sr-only">{row.priority ?? "medium"} priority</span>
         </button>;
       })}</div>
     </section>)}
-    <div className="pagination">
+    {view.argsKnown && <div className="pagination">
       {offset > 0 && <button disabled={!interactive} aria-disabled={busy} onClick={() => followPage(view, Math.max(0, offset - Number(view.args.limit ?? 50)))}>Previous page</button>}
       {data.nextOffset != null && <button disabled={!interactive} aria-disabled={busy} onClick={() => followPage(view, data.nextOffset!)}>Next page</button>}
-    </div>
+    </div>}
     {data.truncated && <p className="caption">Search is limited to 50 matches. Refine your query to see other tasks.</p>}
   </section>;
 }
@@ -269,7 +288,7 @@ function SprintView({ view, busy, interactive }: { view: View; busy: boolean; in
     {!sprints.length && <p className="empty-state">No sprints yet.</p>}
     {sprints.map((sprint) => <article className="card sprint" key={sprint.id ?? sprint._id}>
       <div className="sprint-header">
-        <h2>{view.tool === "list_sprints" ? <button className="link" disabled={!interactive} aria-disabled={busy} onClick={() => openSprint(view, sprint)}>{sprint.name} ›</button> : sprint.name}</h2>
+        <h2>{view.tool === "list_sprints" && view.args.project ? <button className="link" disabled={!interactive} aria-disabled={busy} onClick={() => openSprint(view, sprint)}>{sprint.name} ›</button> : sprint.name}</h2>
         <span className="chip">{sprint.status}</span>
       </div>
       <p className="caption">{shortDate(sprint.startDate)} – {shortDate(sprint.endDate)}</p>
@@ -284,7 +303,7 @@ function Stats({ view }: { view: View }) {
   const order = (status: string) => view.columns?.findIndex((c) => c.id === status) ?? 0;
   const peak = Math.max(1, ...(stats.velocity ?? []).map((week) => week.count));
   return <section aria-label="Project statistics" className="card">
-    <h1 className="plain">{String(view.args.project)} overview</h1>
+    <h1 className="plain">{view.args.project ? `${String(view.args.project)} overview` : "Project overview"}</h1>
     <div className="tiles">
       <div><strong>{stats.total}</strong><span>Tasks</span></div>
       <div><strong>{stats.done}</strong><span>Done</span></div>
@@ -316,12 +335,13 @@ function Widget() {
     <span className="sr-only" role="status">{busy ? "Loading…" : ""}</span>
     {!!history.length && <button className="back" aria-disabled={busy} onClick={() => { if (locked) return; current = history.pop(); update(current, false, ""); }}>← Back</button>}
     {error && <p className="error" role="alert">{error}</p>}
-    {!view && !error && <Skeleton />}
+    {!view && !error && busy && <Skeleton />}
     {view && (taskTools.has(view.tool) ? <TaskCard view={view} busy={busy} interactive={interactive} /> : view.tool === "get_project_stats" ? <Stats view={view} /> : ["get_sprint", "list_sprints"].includes(view.tool) ? <SprintView view={view} busy={busy} interactive={interactive} /> : <TaskList view={view} busy={busy} interactive={interactive} />)}
     {view && !interactive && <p className="caption">This host displays the view without tool interactions.</p>}
   </main>;
 }
 createRoot(document.getElementById("root")!).render(<Widget />);
+app.ontoolinput = (params) => { hostArgs = params.arguments; };
 app.ontoolresult = receive;
 app.onhostcontextchanged = hostStyle;
 app.ontoolcancelled = () => { ++generation; locked = false; update(current, false, "The request was cancelled."); };

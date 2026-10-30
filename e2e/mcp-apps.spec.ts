@@ -8,7 +8,9 @@ test.beforeEach(async () => { await seed(); });
 /** A small MCP Apps host, forwarding every tools/call to the real authenticated /api/mcp.
  * The iframe has no credential. Its HTML comes from resources/read, not a test copy of the UI.
  */
-async function host(page: Page, session: McpSession, tool: string, args: Record<string, unknown>, theme = "light", interactive = true) {
+/** What the host passes on: everything, the call's tool info and arguments without the result's _meta, its tool info alone, or the result's content alone. */
+type Forwarded = "all" | "toolInfo" | "toolName" | "content";
+async function host(page: Page, session: McpSession, tool: string, args: Record<string, unknown>, theme = "light", interactive = true, forward: Forwarded = "all", replaced?: unknown) {
   const discovered = await session.call("tools/list");
   const tools = discovered.body.result?.tools as { name: string; _meta?: { ui?: { resourceUri?: string } } }[];
   const uri = tools.find((t) => t.name === tool)?._meta?.ui?.resourceUri;
@@ -19,6 +21,10 @@ async function host(page: Page, session: McpSession, tool: string, args: Record<
   expect(content.text).not.toMatch(/<script[^>]+src=|<link[^>]+stylesheet/);
   const initial = await session.callTool(tool, args);
   expect(initial.raw.result?.isError, initial.text).not.toBe(true);
+  expect(initial.raw.result?._meta).toHaveProperty(["boardplanner/view", "tool"], tool);
+  const withoutMeta = { ...initial.raw.result, _meta: undefined };
+  const delivered = replaced ?? (forward === "all" ? initial.raw.result : withoutMeta);
+  const toolInfo = forward === "toolInfo" || forward === "toolName" ? { id: 1, tool: tools.find((t) => t.name === tool) } : undefined;
   await page.exposeFunction("forwardTool", async (params: { name: string; arguments: Record<string, unknown> }) => {
     const called = await session.callTool(params.name, params.arguments);
     expect(called.status, called.text).toBe(200);
@@ -34,13 +40,13 @@ async function host(page: Page, session: McpSession, tool: string, args: Record<
       const message = event.data;
       if (message.method === 'ui/notifications/initialized') {
         window.ready = true;
-        window.send('ui/notifications/tool-input', {arguments: ${scriptJson(args)}});
-        window.send('ui/notifications/tool-result', ${scriptJson(initial.raw.result)});
+        if (${scriptJson(forward === "all" || forward === "toolInfo")}) window.send('ui/notifications/tool-input', {arguments: ${scriptJson(args)}});
+        window.send('ui/notifications/tool-result', ${scriptJson(delivered)});
         return;
       }
       if (message.id == null) return;
       let result;
-      if (message.method === 'ui/initialize') result = {protocolVersion:'2026-01-26',hostInfo:{name:'e2e-host',version:'1'},hostCapabilities:{${interactive ? 'serverTools:{},' : ''}openLinks:{}},hostContext:{theme:${scriptJson(theme)},displayMode:'inline'}};
+      if (message.method === 'ui/initialize') result = {protocolVersion:'2026-01-26',hostInfo:{name:'e2e-host',version:'1'},hostCapabilities:{${interactive ? 'serverTools:{},' : ''}openLinks:{}},hostContext:{theme:${scriptJson(theme)},displayMode:'inline',${toolInfo ? `toolInfo:${scriptJson(toolInfo)},` : ""}}};
       else if (message.method === 'tools/call') {
         window.calls.push(message.params);
         if (window.deferTool === message.params.name) {
@@ -193,6 +199,94 @@ test("a host without tool interactions still renders the task", async ({ page })
   await expect(card.getByText("This host displays the view without tool interactions.")).toBeVisible();
 });
 
+test("a host that drops the result's _meta but names the call still renders an interactive card and a paged list", async ({ page }) => {
+  const session = await sessionFor(page);
+  const card = await host(page, session, "get_task", { taskKey: SIBLING_TASK_KEY }, "light", true, "toolInfo");
+  await expect(card.getByRole("heading", { name: SIBLING_TASK_TITLE })).toBeVisible();
+  await expect(card.getByText(SIBLING_TASK_KEY, { exact: true })).toBeVisible();
+  await card.getByRole("combobox", { name: "Task status" }).selectOption(TARGET_COLUMN.id);
+  await expect.poll(async () => (await storedTask(SIBLING_TASK_NUMBER))?.status).toBe(TARGET_COLUMN.id);
+  await expect(card.getByRole("alert")).toHaveCount(0);
+  const listPage = await page.context().newPage();
+  const list = await host(listPage, session, "list_tasks", { project: PROJECT_KEY, limit: 1 }, "light", true, "toolInfo");
+  await list.getByRole("button", { name: "Next page" }).click();
+  await expect.poll(() => listPage.evaluate(() => (window as unknown as { calls: unknown[] }).calls)).toContainEqual(expect.objectContaining({ name: "list_tasks", arguments: { project: PROJECT_KEY, limit: 1, offset: 1 } }));
+  await expect(list.locator("main")).toHaveAttribute("aria-busy", "false");
+  await expect(list.getByRole("alert")).toHaveCount(0);
+});
+
+test("a host that forwards only the result's content still shows the card, list, stats and a write's saved task", async ({ page }) => {
+  const session = await sessionFor(page);
+  await session.callTool("update_task", { taskKey: SIBLING_TASK_KEY, description: "Saved description" });
+  const card = await host(page, session, "get_task", { taskKey: SIBLING_TASK_KEY }, "light", true, "content");
+  await expect(card.getByRole("heading", { name: SIBLING_TASK_TITLE })).toBeVisible();
+  await expect(card.getByText(SIBLING_TASK_KEY, { exact: true })).toBeVisible();
+  await card.locator("#root").screenshot({ path: test.info().outputPath("content-only-card.png") });
+  await card.getByRole("combobox", { name: "Task status" }).selectOption(TARGET_COLUMN.id);
+  await expect.poll(async () => (await storedTask(SIBLING_TASK_NUMBER))?.status).toBe(TARGET_COLUMN.id);
+  await expect(card.getByRole("alert")).toHaveCount(0);
+  const search = await host(await page.context().newPage(), session, "search_tasks", { query: SIBLING_TASK_KEY }, "light", true, "content");
+  await expect(search.locator(".group h2")).toContainText(TARGET_COLUMN.label);
+  await search.getByRole("button", { name: new RegExp(SIBLING_TASK_KEY) }).click();
+  await expect(search.getByRole("heading", { name: SIBLING_TASK_TITLE })).toBeVisible();
+  const stats = await host(await page.context().newPage(), session, "get_project_stats", { project: PROJECT_KEY }, "light", true, "content");
+  await expect(stats.getByRole("heading", { name: "Status distribution" })).toBeVisible();
+  const written = await host(await page.context().newPage(), session, "update_task", { taskKey: SIBLING_TASK_KEY, title: "Renamed through a bare host", minimal: true }, "light", true, "content");
+  await expect(written.getByRole("heading", { name: "Renamed through a bare host" })).toBeVisible();
+  await expect(written.getByRole("region", { name: "Description" })).toContainText("Saved description");
+});
+
+test("a result the view cannot identify leaves it empty instead of showing an error", async ({ page }) => {
+  const session = await sessionFor(page);
+  const view = await host(page, session, "get_task", { taskKey: SIBLING_TASK_KEY }, "light", true, "content", { content: [{ type: "text", text: JSON.stringify({ comments: [] }) }] });
+  await expect(view.locator("main")).toHaveAttribute("aria-busy", "false");
+  await expect(view.locator(".skeleton")).toHaveCount(0);
+  await expect(view.getByRole("alert")).toHaveCount(0);
+});
+
+test("a content-only host leaves out what needs the call's arguments, and shows no broken key", async ({ page }) => {
+  const session = await sessionFor(page);
+  await session.callTool("create_sprint", { project: PROJECT_KEY, name: "Bare sprint", startDate: "2026-10-01", endDate: "2026-10-15" });
+  const list = await host(page, session, "list_tasks", { project: PROJECT_KEY, limit: 1 }, "light", true, "content");
+  await expect(list.getByRole("button", { name: new RegExp(`^${PROJECT_KEY}-\\d+`) })).toBeEnabled();
+  await expect(list.getByRole("button", { name: "Next page" })).toHaveCount(0);
+  const full = await host(await page.context().newPage(), session, "list_tasks", { project: PROJECT_KEY, limit: 1, detail: "full" }, "light", true, "content");
+  await expect(full.locator(".task-row").first()).toBeVisible();
+  await expect(full.locator(".task-row").first()).toBeDisabled();
+  await expect(full.locator(".task-row .mono")).toHaveCount(0);
+  const sprints = await host(await page.context().newPage(), session, "list_sprints", { project: PROJECT_KEY }, "light", true, "content");
+  await expect(sprints.getByRole("heading", { name: "Bare sprint" })).toBeVisible();
+  await expect(sprints.getByRole("button", { name: /Bare sprint/ })).toHaveCount(0);
+  const stats = await host(await page.context().newPage(), session, "get_project_stats", { project: PROJECT_KEY }, "light", true, "content");
+  await expect(stats.getByRole("heading", { name: "Project overview" })).toBeVisible();
+});
+
+for (const [tool, forward] of [["get_task", "content"], ["update_task", "toolName"]] as const) {
+  test(`a ${tool} card whose project cannot be looked up still renders, without controls (${forward})`, async ({ page }) => {
+    const session = await sessionFor(page);
+    await session.callTool("update_task", { taskKey: SIBLING_TASK_KEY, acceptanceCriteria: "- [ ] Orphan criterion" });
+    const original = await session.callTool("get_task", { taskKey: SIBLING_TASK_KEY });
+    const orphan = { content: [{ type: "text", text: JSON.stringify({ ...original.parsed, project: "aaaaaaaaaaaaaaaaaaaaaaaa" }) }] };
+    const args = tool === "get_task" ? { taskKey: SIBLING_TASK_KEY } : { taskKey: SIBLING_TASK_KEY, priority: "low" };
+    const card = await host(page, session, tool, args, "light", true, forward, orphan);
+    await expect(card.getByRole("heading", { name: SIBLING_TASK_TITLE })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (window as unknown as { completedCalls: string[] }).completedCalls)).toContain("get_project");
+    await expect(card.locator("main")).toHaveAttribute("aria-busy", "false");
+    await expect(card.getByRole("alert")).toHaveCount(0);
+    await expect(card.getByRole("checkbox", { name: "Orphan criterion" })).toBeDisabled();
+  });
+}
+
+test("a content-only host without tool calls shows a card with no made-up key, and a write's own link", async ({ page }) => {
+  const session = await sessionFor(page);
+  const card = await host(page, session, "get_task", { taskKey: SIBLING_TASK_KEY }, "light", false, "content");
+  await expect(card.getByRole("heading", { name: SIBLING_TASK_TITLE })).toBeVisible();
+  await expect(card.locator(".meta .mono")).toHaveCount(0);
+  await expect(card.getByRole("link", { name: "Open in Board Planner" })).toHaveCount(0);
+  const written = await host(await page.context().newPage(), session, "update_task", { taskKey: SIBLING_TASK_KEY, priority: "high", minimal: true }, "light", false, "content");
+  await expect(written.getByText(SIBLING_TASK_KEY, { exact: true })).toBeVisible();
+  await expect(written.getByRole("link", { name: "Open in Board Planner" })).toBeVisible();
+});
 
 test("host-delivered tool errors retain their actual refusal reason without view metadata", async ({ page }) => {
   const session = await sessionFor(page);
