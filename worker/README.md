@@ -1071,15 +1071,19 @@ checkout, and a machine credential cannot set them.
   version manager that lives under your real home (pyenv shims, rustup proxies) will not find its
   toolchains: put the real binary on the worker's `PATH`.
 - **A custom install has no direct connection off the machine unless you say so.** `npm ci` keeps
-  the network because `--ignore-scripts` and the pins above stop the repository's code running during it. `pip install .`,
+  the network because `--ignore-scripts` and the pins above stop the repository's code running
+  during it, on npm 11; npm 10 ignores `allow-git`, so **BP-812** stays open there. `pip install .`,
   `build.rs` and a Maven plugin do run it, reads are open, and so with the network that code could
   send off anything this user can read. Set `CP_ALLOW_INSTALL_NETWORK=1` in the worker's own
   environment to accept that on this machine; the fleet shows the cost in amber. It is an environment
   variable because nothing the server or the agent can reach may widen a sandbox. Without it an
   install that needs the network fails with `operation not permitted`, and the gate's reason names
   the variable. Build and test stay loopback-only either way, short of `CP_ALLOW_UNCONFINED_AGENT`, so a project
-  with dependencies fetches them in the install command or vendors them. "Loopback-only" stops a
-  direct connection off the machine; **Safety** lists what it does not stop.
+  with dependencies fetches them in the install command or vendors them. That is enough for Go. pip
+  needs `--target` on Homebrew's Python, and Maven with JUnit 5 needs `mvn test` as the install, which
+  runs the tests with the network open. The command's home is fresh, so `~/.m2/settings.xml`,
+  `pip.conf` and registry tokens are not used. "Loopback-only" stops a direct connection off the
+  machine; **Safety** lists what it does not stop.
 - **Whose command it is.** A command runs on the machine of whoever the task is assigned to, chosen
   by the project's owner. It is confined the way `npm test` is, and like `npm test` it can read what
   this user can and reach what listens on this machine, so enrol a machine only on projects whose
