@@ -803,10 +803,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     // Empty where Codex is not installed and signed in, which is what both users below read as absent
     const codexPath = resolvedToolPath("codex") || undefined;
     const npmPath = resolvedToolPath("npm");
-    // The same value rebind() matched this project's checkout against — the server's own record
-    // of the project's repository, never re-read from repoPath/.git at execution time.
     const gateFor: PipelineDeps["gateFor"] = (entry, runner, timeoutMs, fallbacks) =>
       gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath, codex: codexPath }, timeoutMs, fallbacks, gateCommandsOf(taskConfig));
+    // The same value rebind() matched this project's checkout against — the server's own record
+    // of the project's repository, never re-read from repoPath/.git at execution time.
     const remoteUrl = bound.get(task.projectId)?.remote;
     const several = bound.get(task.projectId)?.repositories ?? [];
 
