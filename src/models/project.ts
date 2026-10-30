@@ -238,6 +238,10 @@ const projectSchema = new Schema<IProject>(
         model: { type: String, default: "opus" },
         fallbackModel: { type: String, default: "sonnet" },
         reviewModel: { type: String, default: "opus" },
+        installCommand: { type: String, default: "" },
+        buildCommand: { type: String, default: "" },
+        testCommand: { type: String, default: "" },
+        workingDirectory: { type: String, default: "" },
       },
       // A plain field, not a policy one, and since BP-358 not a fallback either: an agent travels
       // on the claim response resolved from the TASK, and this is only the one the task picker

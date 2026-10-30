@@ -31,6 +31,7 @@ afterEach(() => {
 const context: GateContext = {
   worktreePath: "/wt",
   worktreeDir: { path: "/wt", dev: 0, ino: 0 },
+  gateHome: { path: "/wt.home", dev: 0, ino: 1 },
   task: claimedTask({}),
   result: { status: "completed", summary: "did it", filesChanged: ["a.ts"], testsAdded: [], blockedReason: "" },
   diff: {

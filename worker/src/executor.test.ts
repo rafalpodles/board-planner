@@ -190,6 +190,22 @@ describe("createExecutor", () => {
     expect(prompt.indexOf("untrusted party")).toBeLessThan(prompt.indexOf("tidy the imports"));
   });
 
+  // BP-985: the brief forbids what a project's commands name, which an agent can only obey if told them
+  it("names the project's own gate commands, and says nothing on the npm gates", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+    const own = workerConfig({ buildCommand: "go build ./...", testCommand: "./bin/test", workingDirectory: "svc" });
+
+    await createExecutor(own, runner, CLAUDE_PATH).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
+
+    const promptOf = (call: number) => {
+      const args = run.mock.calls[call][1] as string[];
+      return args[args.indexOf("--append-system-prompt") + 1];
+    };
+    expect(promptOf(0)).toContain("This project's own commands are `go build ./...`, `./bin/test` in svc.");
+    expect(promptOf(1)).not.toContain("This project's own commands");
+  });
+
   // An agent told to commit and unable to would report itself blocked
   it("tells the agent the worker commits, since it no longer can", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });

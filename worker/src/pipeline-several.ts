@@ -662,6 +662,7 @@ export async function runTaskInRepositories(
       const verdict = await legGate.run({
         worktreePath: leg.worktree.path,
         worktreeDir: leg.worktree.dir,
+        gateHome: leg.worktree.gateHome,
         task,
         result: leg.state.lastResult,
         diff,

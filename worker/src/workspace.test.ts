@@ -66,6 +66,7 @@ const POINTER_FILES = {
 function fakeDisk(names: string[] = []) {
   return {
     names: vi.fn(() => names),
+    makeDir: vi.fn<WorktreeDisk["makeDir"]>(),
     discard: vi.fn<WorktreeDisk["discard"]>(),
     forget: vi.fn<WorktreeDisk["forget"]>(),
     nonce: () => "a1",
@@ -661,6 +662,16 @@ describe("createWorkspace", () => {
     });
   });
 
+  it("removes an attempt's gate home with its worktree, since nothing registers it with git", async () => {
+    const { runner } = fakeGit(baseFromRemote("base1"));
+    const disk = fakeDisk(["CP-158.old", "CP-158.old.home", "CP-159.old.home"]);
+
+    await createWorkspace(config, runner, gitPath, () => ({}), REMOTE_URL, undefined, POINTER_FILES, disk).destroy("CP-158");
+
+    expect(disk.discard).toHaveBeenCalledWith("/worktrees", "/worktrees/CP-158.old.home");
+    expect(disk.discard).not.toHaveBeenCalledWith("/worktrees", "/worktrees/CP-159.old.home");
+  });
+
   it("throws when git fails to create the worktree", async () => {
     const { runner } = fakeGit(
       baseFromRemote("base1", {
@@ -725,6 +736,8 @@ describe("createWorkspace", () => {
     );
 
     expect(result.path).toBe("/worktrees/CP-158.a1");
+    expect(result.gateHome.path).toBe("/worktrees/CP-158.a1.home");
+    expect(disk.makeDir).toHaveBeenCalledWith("/worktrees/CP-158.a1.home");
     expect(disk.discard).toHaveBeenCalledWith("/worktrees", "/worktrees/CP-158");
     expect(disk.forget).toHaveBeenCalledWith("/repo/.git/worktrees", expect.any(Function));
     expect(run).toHaveBeenCalledWith(
@@ -796,6 +809,36 @@ describe("createWorkspace", () => {
       await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, files, disk).destroy("CP-158");
 
       expect(disk.discard.mock.calls.map(([, path]) => path)).toEqual(["/worktrees/CP-158.mine"]);
+    });
+
+    // Measured with two real clones: the second clone's `create` took the first's home mid-run, and
+    // every multi-repository run on its own commands ended as tampering at its first gate
+    it("leaves the gate home of another clone's worktree, which has no pointer of its own", async () => {
+      const { runner } = fakeGit({ [GIT_DIR]: { stdout: "/repo/.git\n" } });
+      const disk = fakeDisk(["CP-158.mine", "CP-158.mine.home", "CP-158.theirs", "CP-158.theirs.home"]);
+      const files = pointers({ "CP-158.theirs": "gitdir: /sibling/.git/worktrees/CP-158.theirs\n" });
+      await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, files, disk).destroy("CP-158");
+
+      expect(disk.discard.mock.calls.map(([, path]) => path)).toEqual(["/worktrees/CP-158.mine", "/worktrees/CP-158.mine.home"]);
+    });
+
+    // A gate command can write anything in its home, so a `.git` there must not make it another clone's
+    it("sweeps a gate home whatever pointer a command left in it", async () => {
+      const { runner } = fakeGit({ [GIT_DIR]: { stdout: "/repo/.git\n" } });
+      const disk = fakeDisk(["CP-158.mine.home"]);
+      const files = pointers({ "CP-158.mine.home": "gitdir: /sibling/.git/worktrees/x\n" });
+      await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, files, disk).destroy("CP-158");
+
+      expect(disk.discard.mock.calls.map(([, path]) => path)).toEqual(["/worktrees/CP-158.mine.home"]);
+    });
+
+    it("sweeps the gate home of this clone's registered worktree, whatever a step wrote in that worktree's pointer", async () => {
+      const { runner } = fakeGit({ [GIT_DIR]: { stdout: "/repo/.git\n" }, "worktree list --porcelain": { stdout: "worktree /worktrees/CP-158.mine\n" } });
+      const disk = fakeDisk(["CP-158.mine", "CP-158.mine.home"]);
+      const files = pointers({ "CP-158.mine": "gitdir: /nonexistent/x/y\n" });
+      await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, files, disk).destroy("CP-158");
+
+      expect(disk.discard.mock.calls.map(([, path]) => path)).toEqual(["/worktrees/CP-158.mine", "/worktrees/CP-158.mine.home"]);
     });
 
     it("still sweeps an unregistered leftover whose pointer is unreadable or names nothing", async () => {

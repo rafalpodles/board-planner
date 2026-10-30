@@ -1,7 +1,20 @@
 import { Gate } from "../types.js";
 import { isProtectedPath } from "./protected-paths.js";
 
-const TEST_FILE = /\.(test|spec)\.[jt]sx?$/;
+const TEST_FILE = new RegExp(
+  [
+    /\.(test|spec)\.[jt]sx?$/,
+    /(^|\/)test_[^/]+\.py$/,
+    /_test\.(py|go|rb|exs|dart|cc|cpp)$/,
+    /_spec\.rb$/,
+    /(^|\/)tests\/.+\.(py|rs)$/,
+    /(^|\/)src\/test\/.+\.(java|kt|groovy|scala)$/,
+    /(Test|Tests)\.(java|kt|cs|php|swift)$/,
+    /[a-z0-9]IT\.(java|kt)$/,
+  ]
+    .map((pattern) => pattern.source)
+    .join("|")
+);
 const NO_TEST_EXPECTED =
   /\.(md|mdx|txt|json|ya?ml|toml|lock|sum|css|scss|svg|png|jpe?g|gif|webp|ico)$/i;
 

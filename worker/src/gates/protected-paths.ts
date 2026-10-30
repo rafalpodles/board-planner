@@ -1,6 +1,7 @@
 import { posix } from "node:path";
 
 import { DiffStats, Gate } from "../types.js";
+import { GateCommands, namedByGateCommand, NPM_GATES } from "./gate-commands.js";
 
 // The CLI loads these from its cwd as instructions and configuration, above any "untrusted data"
 // boundary a prompt can draw
@@ -20,7 +21,9 @@ export const PROTECTED_PATHS_BRIEF = [
   "agent instruction files (CLAUDE.md, AGENTS.md, AGENTS.override.md, .mcp.json),",
   "the repository's own git metadata (.gitattributes, .gitmodules),",
   "container and CI manifests (Dockerfile, docker-compose.yml, .gitlab-ci.yml, Jenkinsfile),",
-  "and the build manifests of other ecosystems (pyproject.toml, Cargo.toml, go.mod, pom.xml, Gemfile and their lockfiles).",
+  "the build manifests of other ecosystems (pyproject.toml, Cargo.toml, go.mod, pom.xml, Gemfile and their lockfiles),",
+  "their entry points and test configuration (gradlew, mvnw, justfile, Taskfile.yml, noxfile.py, pytest.ini, conftest.py, build.rs, .cargo/, .mvn/, gradle/wrapper/),",
+  "and any file this project's own build, test or install command names.",
   "If the task cannot be finished without touching one of those, do not touch it: return status 'blocked' naming the file and what you would have changed in it.",
   "A human does that part.",
 ].join(" ");
@@ -62,10 +65,10 @@ export const AGENT_INSTRUCTION_FILE =
 export const EXECUTABLE_CONFIG_FILE =
   /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|\.npmrc|\.yarnrc(\.yml)?|binding\.gyp)$|(^|\/)(next|vite|vitest|webpack|rollup|jest|babel|astro|svelte|nuxt|tailwind|postcss|playwright|esbuild|metro|remix|gatsby)\.config\.[cm]?[jt]sx?$|(^|\/)(\.babelrc(\.[cm]?js(on)?)?|Makefile|CMakeLists\.txt|\.gitattributes|\.gitmodules)$|(^|\/)(\.husky|\.github\/workflows|\.github\/actions|scripts)\//i;
 
-// Manifests that decide what runs *after* this change lands, in a repository this worker's gates
-// cannot execute at all. A non-JS repo fails the build gate on `npm ci` before reading anything, so
-// nothing here is executed locally — which is exactly why it was invisible to the list above and
-// why leaving it out was worse than not supporting those repos: the gates report as having run.
+// Manifests and entry points that decide what runs, here on a project's own gate commands (BP-985)
+// and *after* this change lands everywhere: the job package.json and scripts/ do for the npm gates,
+// so an agent cannot rewrite what `./gradlew test` executes and have the gate pass having judged
+// nothing. The commands themselves name more, which `protectedPathsGate` adds.
 //
 // The hazard is the same one .github/workflows carries. Under an agent that merges without a
 // review gate, a change to a build backend, a task runner or a dependency pin reaches the default
@@ -75,7 +78,7 @@ export const EXECUTABLE_CONFIG_FILE =
 // (root and worker/), and an agent editing worker/package.json is doing the same thing as
 // one editing the root — so anchoring to the root would protect the least interesting one.
 export const BUILD_MANIFEST_FILE =
-  /(^|\/)(pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|requirements[^/]*\.txt|setup\.(py|cfg)|tox\.ini|pom\.xml|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|gradle\.properties|Gemfile(\.lock)?|Rakefile|Cargo\.(toml|lock)|go\.(mod|sum)|composer\.(json|lock)|mix\.exs|pubspec\.yaml|Dockerfile|docker-compose\.ya?ml|\.gitlab-ci\.ya?ml|Jenkinsfile)$/i;
+  /(^|\/)(pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|requirements[^/]*\.txt|setup\.(py|cfg)|tox\.ini|pom\.xml|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|gradle\.properties|Gemfile(\.lock)?|Rakefile|Cargo\.(toml|lock)|go\.(mod|sum)|composer\.(json|lock)|mix\.exs|pubspec\.yaml|Dockerfile|docker-compose\.ya?ml|\.gitlab-ci\.ya?ml|Jenkinsfile|gradlew(\.bat)?|mvnw(\.cmd)?|\.?justfile|Taskfile(\.dist)?\.ya?ml|noxfile\.py|\.?pytest\.ini|conftest\.py|build\.rs)$|(^|\/)(gradle\/wrapper|\.mvn|\.cargo)\//i;
 
 /**
  * A file that decides what CI itself does.
@@ -116,8 +119,9 @@ export function isProtectedPath(file: string): boolean {
   );
 }
 
-export function protectedPaths(files: string[]): string[] {
-  return files.filter(isProtectedPath);
+/** What the gate refuses: the list above, and whatever this project's own commands name. */
+export function protectedPaths(files: string[], commands: GateCommands = NPM_GATES): string[] {
+  return files.filter((file) => isProtectedPath(file) || namedByGateCommand(file, commands));
 }
 
 /**
@@ -149,7 +153,7 @@ export function escapingSymlinks(
   });
 }
 
-export function protectedPathsGate(): Gate {
+export function protectedPathsGate(commands: GateCommands = NPM_GATES): Gate {
   return {
     name: "protected-paths",
     async run({ diff }) {
@@ -179,7 +183,7 @@ export function protectedPathsGate(): Gate {
         };
       }
 
-      const hits = protectedPaths(diff.changedFiles);
+      const hits = protectedPaths(diff.changedFiles, commands);
       if (hits.length === 0) return { ok: true, reason: "" };
 
       return {

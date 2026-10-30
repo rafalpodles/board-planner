@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
+  isProtectedPath,
   isWorkflowPath,
   protectedPathsGate,
   PROTECTED_PATHS_BRIEF,
   workflowPaths,
 } from "./protected-paths.js";
 import { DiffStats, GateContext } from "../types.js";
+import { gateCommandsOf } from "./gate-commands.js";
 
 function context(
   changedFiles: string[],
@@ -255,6 +257,23 @@ describe("protectedPathsGate", () => {
 // rule. Two descriptions drift, and the way this one would drift is silent: a family added to the
 // patterns and not to the brief means an agent confidently editing a file that will be refused —
 // which is the failure this whole thing exists to stop, reintroduced by a rename.
+describe("what a project's own gate commands run", () => {
+  const commands = gateCommandsOf({ testCommand: "./bin/test --fast", workingDirectory: "svc" });
+
+  it("is refused to the agent, or it could turn the gate green having judged nothing", async () => {
+    const verdict = await protectedPathsGate(commands).run(context(["svc/app.py", "svc/bin/test"]));
+
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain("svc/bin/test");
+    expect(verdict.reason).not.toContain("svc/app.py");
+  });
+
+  it("leaves everything else alone, and means nothing to a project on the npm gates", async () => {
+    expect((await protectedPathsGate(commands).run(context(["svc/app.py"]))).ok).toBe(true);
+    expect((await protectedPathsGate().run(context(["svc/bin/test"]))).ok).toBe(true);
+  });
+});
+
 describe("what the agent is told matches what the gate refuses", () => {
   const refusedExamples = [
     "package.json",
@@ -273,6 +292,18 @@ describe("what the agent is told matches what the gate refuses", () => {
     ".gitattributes",
     ".gitmodules",
     ".github/actions/setup/action.yml",
+    "gradlew",
+    "mvnw",
+    "justfile",
+    ".justfile",
+    "Taskfile.yml",
+    "noxfile.py",
+    "pytest.ini",
+    "conftest.py",
+    "build.rs",
+    ".cargo/config.toml",
+    ".mvn/wrapper/maven-wrapper.properties",
+    "gradle/wrapper/gradle-wrapper.properties",
   ];
 
   it("warns about every family the gate actually refuses", async () => {
@@ -280,7 +311,7 @@ describe("what the agent is told matches what the gate refuses", () => {
 
     for (const path of refusedExamples) {
       // the gate refuses it...
-      // awaited inside the loop on purpose: the failure message has to name the path
+      expect(isProtectedPath(path), `the gate lets ${path} through`).toBe(true);
       // ...and the agent was told the name of the thing it is
       // A family is named either by a filename or by the directory it lives in — `.husky/` covers
       // every hook inside it, and the brief says so rather than listing them

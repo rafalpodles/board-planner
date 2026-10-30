@@ -576,7 +576,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // Written into repos.json; defaults to the single REPO every other test uses
       repos?: string[];
       // Replaces the single p1 assignment; each entry binds by remote the way the server's do
-      assignments?: { project: string; remote: string; repositories?: { id: string; name: string; remote: string }[] }[];
+      assignments?: { project: string; remote: string; policy?: Record<string, unknown>; repositories?: { id: string; name: string; remote: string }[] }[];
       // How many passes the loop is allowed before it is stopped. One is a single pass, which is
       // what almost every test here wants; two is what it takes to see whether a project is
       // claimed from AGAIN.
@@ -596,6 +596,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       fetchImpl?: typeof fetch;
       gh?: { token?: string; user?: string };
       unresolvedTools?: string[];
+      path?: string;
       // The node the gates would find first on their PATH, and the version it reports (BP-1101)
       gateNode?: { path: string; version: string; code?: number; stdout?: string };
       deliverable?: boolean;
@@ -683,7 +684,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     let stop = (): void => {};
     const worker = createWorker({
-      env: { ...ENV, CP_STATE_DIR: stateDir, ...(opts.gateNode ? { PATH: `${dirname(opts.gateNode.path)}:/usr/bin` } : {}) },
+      env: { ...ENV, CP_STATE_DIR: stateDir, ...(opts.path ? { PATH: opts.path } : {}), ...(opts.gateNode ? { PATH: `${dirname(opts.gateNode.path)}:/usr/bin` } : {}) },
       runner: {
         ...(opts.leftovers
           ? {
@@ -902,17 +903,73 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // BP-733. Without the tool the step is refused as a machine fault and the task released with its
   // attempt refunded — so a worker still claiming would take the same task on every poll, and for
   // npm run the whole paid Implement step before the build gate refused it.
-  it.each([["npm"], ["claude"]])("claims nothing at all when preflight found no %s", async (tool) => {
+  it("claims nothing at all when preflight found no claude", async () => {
     const { claims, claimed, logError, claudeArgs } = await runOneTask(undefined, undefined, {
-      unresolvedTools: [tool],
+      unresolvedTools: ["claude"],
     });
 
     expect(claims).toBe(0);
     expect(claimed).toBe(false);
     expect(claudeArgs).toEqual([]);
-    expect(logError).toHaveBeenCalledWith(
-      `not claiming any work: ${tool} could not be found on this machine, and every task needs it`
-    );
+    expect(logError).toHaveBeenCalledWith("not claiming any work: claude could not be found on this machine, and every task needs it");
+  });
+
+  it("claims nothing from a project on the npm gates when preflight found no npm", async () => {
+    const { claims, claimed, logError, claudeArgs } = await runOneTask(undefined, undefined, { unresolvedTools: ["npm"] });
+
+    expect(claims).toBe(0);
+    expect(claimed).toBe(false);
+    expect(claudeArgs).toEqual([]);
+    expect(logError).toHaveBeenCalledWith(expect.stringContaining("not claiming for project p1"));
+    expect(logError).toHaveBeenCalledWith(expect.stringContaining("npm could not be found on this machine"));
+  });
+
+  // BP-985
+  describe("a project that names its own gate commands", () => {
+    const OWN = { project: "p1", remote: REMOTE, policy: { buildCommand: "sh --version", testCommand: "sh --version" } };
+    const noPackageFiles = (path: string) => (!path.endsWith("package.json") && !path.endsWith("package-lock.json") && existsSync(path) ? readFileSync(path, "utf8") : null);
+
+    it("is claimed from with no npm on the machine and no package.json in the checkout", async () => {
+      const { claims } = await runOneTask(undefined, undefined, { unresolvedTools: ["npm"], assignments: [OWN], readFile: noPackageFiles, path: "/usr/bin:/bin" });
+
+      expect(claims).toBeGreaterThan(0);
+    });
+
+    it("is not claimed from when a program its commands name is not on this machine, saying which", async () => {
+      const { claims, logError } = await runOneTask(undefined, undefined, {
+        assignments: [{ ...OWN, policy: { testCommand: "no-such-tool-bp985 run" } }],
+        readFile: noPackageFiles,
+        path: "/usr/bin:/bin",
+      });
+
+      expect(claims).toBe(0);
+      expect(logError).toHaveBeenCalledWith(expect.stringContaining("no-such-tool-bp985 is not on this worker's PATH"));
+    });
+  });
+
+  it("keeps one project's commands from another's on the same machine", async () => {
+    const run = await runOneTask(undefined, undefined, {
+      repos: [REPO, OTHER_REPO],
+      path: "/usr/bin:/bin",
+      assignments: [
+        { project: "p1", remote: REMOTE, policy: { testCommand: "no-such-tool-bp985 run" } },
+        { project: "p2", remote: OTHER_REMOTE },
+      ],
+    });
+
+    const blocked = Object.fromEntries((run.localConfig?.().projects ?? []).map((project) => [project.project, project.blocked]));
+    expect(blocked.p1).toContain("no-such-tool-bp985");
+    expect(blocked.p2 ?? "").not.toContain("no-such-tool-bp985");
+  });
+
+  it("reads the npm requirements from the working directory of a project that names one", async () => {
+    const { claims } = await runOneTask(undefined, undefined, {
+      assignments: [{ project: "p1", remote: REMOTE, policy: { workingDirectory: "apps/web" } }],
+      readFile: (path) =>
+        !path.includes("apps/web") ? null : path.endsWith("package.json") ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } }) : "{}",
+    });
+
+    expect(claims).toBeGreaterThan(0);
   });
 
   // BP-733, at the one composition point: each tool path preflight resolved reaches the spawn that
@@ -949,6 +1006,25 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       ]);
     });
 
+    // BP-985: from the assignment's policy, through the gates, to what the pull request says
+    it("runs a project's own commands in place of npm, and names them in the pull request", async () => {
+      const { everyCall } = await runOneTask(undefined, undefined, {
+        tasks: [THROUGH_EVERY_TOOL],
+        deliverable: true,
+        path: "/usr/bin:/bin",
+        assignments: [{ project: "p1", remote: REMOTE, policy: { installCommand: "env install", buildCommand: "env build", testCommand: "env check --fast" } }],
+        readFile: (path) => (path.endsWith("package.json") || path.endsWith("package-lock.json") ? null : existsSync(path) ? readFileSync(path, "utf8") : null),
+      });
+
+      const ran = everyCall.filter(([command]) => command === SANDBOX_COMMAND).map((argv) => argv.slice(-2).join(" "));
+      expect(ran).toEqual(expect.arrayContaining(["/usr/bin/env install", "/usr/bin/env build", "check --fast"]));
+      expect(ran.join(" ")).not.toContain("npm");
+      const created = everyCall.find((argv) => argv.includes("pr") && argv.includes("create")) ?? [];
+      const body = created[created.indexOf("--body") + 1];
+      expect(body).toContain("`env install`, `env build`");
+      expect(body).toContain("`env check --fast`");
+    });
+
     it("hands delivery the gh, which opens the pull request", async () => {
       const { everyCall, pushEnvs } = await runOneTask(undefined, undefined, {
         tasks: [THROUGH_EVERY_TOOL],
@@ -974,13 +1050,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     });
   });
 
-  it("names both when preflight found neither", async () => {
+  it("names claude when preflight found neither, since npm is a project's need and not the machine's", async () => {
     const { claims, logError } = await runOneTask(undefined, undefined, { unresolvedTools: ["claude", "npm"] });
 
     expect(claims).toBe(0);
-    expect(logError).toHaveBeenCalledWith(
-      "not claiming any work: claude and npm could not be found on this machine, and every task needs them"
-    );
+    expect(logError).toHaveBeenCalledWith("not claiming any work: claude could not be found on this machine, and every task needs it");
   });
 
   // A preflight that could not run resolved no tool at all, so every step would be refused the same

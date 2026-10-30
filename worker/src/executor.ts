@@ -1,5 +1,6 @@
 import { DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, modelOr, WorkerConfig } from "./config.js";
 import { agentEnv } from "./env.js";
+import { GateCommands, gateCommandsOf, NPM_GATES } from "./gates/gate-commands.js";
 import { PROTECTED_PATHS_BRIEF } from "./gates/protected-paths.js";
 import { Runner } from "./exec.js";
 import { confineTool, RecordedDir } from "./sandbox.js";
@@ -44,8 +45,16 @@ function checksNote(laterChecks: string[]): string {
   return ` You have no shell and cannot run anything. After this step the worker itself runs ${named.join(" and ")}, before anything is delivered, and lists what passed on the pull request — so do not say in your summary that it was not run.`;
 }
 
-function systemPromptFor(brief: StepBrief, repositories: readonly WorktreeRef[] = []): string {
-  const base = SYSTEM_PROMPT + checksNote(brief.laterChecks ?? []) + layoutNote(repositories);
+// The brief says not to change what these commands name, which an agent can only do if it is told them
+function gateCommandsNote(commands: GateCommands): string {
+  const named = [commands.installCommand, commands.buildCommand, commands.testCommand].filter(Boolean);
+  if (named.length === 0) return "";
+  const where = commands.workingDirectory ? ` in ${commands.workingDirectory}` : "";
+  return ` This project's own commands are ${named.map((command) => `\`${command}\``).join(", ")}${where}.`;
+}
+
+function systemPromptFor(brief: StepBrief, repositories: readonly WorktreeRef[] = [], commands: GateCommands = NPM_GATES): string {
+  const base = SYSTEM_PROMPT + gateCommandsNote(commands) + checksNote(brief.laterChecks ?? []) + layoutNote(repositories);
   const step = brief.prompt.trim();
   return step ? `${base}\n\nThis step: ${step}` : base;
 }
@@ -236,7 +245,7 @@ export function createExecutor(
 
       const agentArgs = agent.editArgs({
         prompt: buildPrompt(task),
-        systemPrompt: systemPromptFor(brief, repositories),
+        systemPrompt: systemPromptFor(brief, repositories, gateCommandsOf(config)),
         capability: brief.capability,
         model: agent.id === "claude" ? modelOr(brief.model || config.model, DEFAULT_MODEL) : brief.model.trim(),
         fallbackModel: agent.id === "claude" ? modelOr(brief.fallbackModel || config.fallbackModel, DEFAULT_FALLBACK_MODEL) : "",

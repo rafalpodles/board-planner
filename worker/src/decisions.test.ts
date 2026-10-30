@@ -18,6 +18,7 @@ import {
   sha256,
 } from "./decisions.js";
 import { claimedTask } from "./__fixtures__/task.js";
+import { gateCommandsOf } from "./gates/gate-commands.js";
 import { DiffStats } from "./types.js";
 import { recordDir } from "./sandbox.js";
 
@@ -191,6 +192,18 @@ describe("opening a decision", () => {
     const [record] = d.createDecision.mock.calls[0];
     expect(record.files).toEqual(["package.json", "src/a.ts"]);
     expect(record.protectedFiles).toEqual(["package.json"]);
+  });
+
+  it("shows a file the project's own command names as what tripped the gate", async () => {
+    const d = deps();
+    const base = input();
+    await openDecision(d, {
+      ...base,
+      diff: { ...base.diff, changedFiles: ["bin/test", "src/a.ts"] },
+      commands: gateCommandsOf({ testCommand: "./bin/test" }),
+    });
+
+    expect(d.createDecision.mock.calls[0][0].protectedFiles).toEqual(["bin/test"]);
   });
 
   /**

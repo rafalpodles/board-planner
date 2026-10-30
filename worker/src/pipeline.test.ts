@@ -1,3 +1,4 @@
+import { gateCommandsOf } from "./gates/gate-commands.js";
 import { describe, it, expect, vi } from "vitest";
 import { ApiClient, StatusIds } from "./api.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
@@ -116,7 +117,7 @@ const IDENTITY = { name: "The Operator", email: "operator@example.com" };
 const PIN = { workTree: "/wt", gitDir: "/repo/.git/worktrees/wt", pointer: "gitdir: /repo/.git/worktrees/wt\n", flagged: [] };
 
 function worktreeAt(baseSha: string, tampering: () => Promise<string | null> = async () => null) {
-  return { path: "/wt", baseSha, commitIdentity: IDENTITY, pin: PIN, dir: { path: "/wt", dev: 0, ino: 0 }, tampering };
+  return { path: "/wt", baseSha, commitIdentity: IDENTITY, pin: PIN, dir: { path: "/wt", dev: 0, ino: 0 }, gateHome: { path: "/wt.home", dev: 0, ino: 1 }, tampering };
 }
 
 // A worktree that starts dirty, the way the implement step actually leaves one, and goes clean the
@@ -1236,6 +1237,7 @@ describe("runTask", () => {
     expect(gate.run).toHaveBeenCalledWith({
       worktreePath: "/wt",
       worktreeDir: { path: "/wt", dev: 0, ino: 0 },
+      gateHome: { path: "/wt.home", dev: 0, ino: 1 },
       task: merging,
       result: completed,
       diff,
@@ -1820,7 +1822,9 @@ describe("runTask", () => {
   describe("offering the refused change to a person", () => {
     it("opens a decision, naming the gate and the change it judged", async () => {
       const openDecision = vi.fn<NonNullable<PipelineDeps["openDecision"]>>().mockResolvedValue(undefined);
+      const own = { ...config, testCommand: "./bin/test" };
       const h = harness({
+        config: own,
         openDecision,
         gateFor: () => rejectingGate("protected-paths", "it edits package.json"),
       });
@@ -1834,6 +1838,7 @@ describe("runTask", () => {
         worktreePath: "/wt",
         worktreeRoot: config.worktreeRoot,
         baseSha: "base1",
+        commands: gateCommandsOf(own),
       });
     });
 

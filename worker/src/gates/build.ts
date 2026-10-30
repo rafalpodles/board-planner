@@ -1,28 +1,27 @@
-import { CommandResult, Runner } from "../exec.js";
+import { Runner } from "../exec.js";
 import { Gate } from "../types.js";
-import { GIT_DEPENDENCIES_REFUSED_NOTE, LOOPBACK_ONLY_NOTE, refused, runConfinedNpm } from "./confined-npm.js";
+import { GIT_DEPENDENCIES_REFUSED_NOTE, LOOPBACK_ONLY_NOTE, outputTail, refused, runConfinedNpm } from "./confined-npm.js";
+import { gateDirectory, GateCommands, NPM_GATES, runOwnBuild, usesOwnCommands } from "./gate-commands.js";
 
-const MAX_REASON_CHARS = 2000;
 // --ignore-scripts: a lifecycle script from the worktree or any dependency would run as the
 // worker, outside the agent's tool allowlist and before the review gate reads a single line
 const INSTALL_ARGS = ["ci", "--ignore-scripts", "--no-audit", "--no-fund"];
 
-function outputTail(result: CommandResult): string {
-  const output = [result.stdout, result.stderr].filter((stream) => stream.trim()).join("\n");
-  if (output.length <= MAX_REASON_CHARS) return output;
-  return `[output truncated to the last ${MAX_REASON_CHARS} characters]\n${output.slice(-MAX_REASON_CHARS)}`;
-}
-
-export function buildGate(runner: Runner, npmPath: string, timeoutMs: number): Gate {
+export function buildGate(runner: Runner, npmPath: string, timeoutMs: number, commands: GateCommands = NPM_GATES): Gate {
   return {
     name: "build",
-    async run({ worktreePath, worktreeDir, signal }) {
+    async run(context) {
+      if (usesOwnCommands(commands)) return runOwnBuild(runner, commands, timeoutMs, context);
+      const { worktreeDir, signal } = context;
+      const place = gateDirectory(context.worktreePath, commands.workingDirectory);
+      if ("reason" in place) return { ok: false, reason: place.reason };
+      const cwd = place.path;
       const deadline = Date.now() + timeoutMs;
 
       // a worktree is a fresh checkout with no node_modules — skip this and every build fails with "next: command not found"
       // The one command allowed the npm cache, and the reason `confined-npm.ts` has a cache at all
       const install = await runConfinedNpm(runner, npmPath, INSTALL_ARGS, {
-        cwd: worktreePath,
+        cwd,
         worktree: worktreeDir,
         timeoutMs,
         signal,
@@ -53,7 +52,7 @@ export function buildGate(runner: Runner, npmPath: string, timeoutMs: number): G
       // No cache: the install has already filled node_modules, and this runs the worktree's own
       // build script — agent-written, like the tests
       const build = await runConfinedNpm(runner, npmPath, ["run", "build"], {
-        cwd: worktreePath,
+        cwd,
         worktree: worktreeDir,
         timeoutMs: remainingMs,
         signal,
@@ -69,7 +68,8 @@ export function buildGate(runner: Runner, npmPath: string, timeoutMs: number): G
       if (build.code !== 0) {
         return { ok: false, reason: `build failed (exit ${build.code}${build.loopbackOnly ? `; ${LOOPBACK_ONLY_NOTE}` : ""}):\n${outputTail(build)}` };
       }
-      return { ok: true, reason: "", commands: [`npm ${INSTALL_ARGS.join(" ")}`, "npm run build"] };
+      const ran = [`npm ${INSTALL_ARGS.join(" ")}`, "npm run build"];
+      return { ok: true, reason: "", commands: commands.workingDirectory ? ran.map((command) => `${command} (in ${commands.workingDirectory})`) : ran };
     },
   };
 }
