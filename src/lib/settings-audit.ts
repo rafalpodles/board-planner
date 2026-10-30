@@ -1,6 +1,7 @@
 import { hostOf, projectRepositoryUrl } from "@/lib/repository";
 import { DEFAULT_PM_AUTONOMY } from "@/types";
 import {
+  GATE_COMMAND_FIELDS,
   POLICY_FIELD_LABELS,
   PROJECT_POLICY_DEFAULTS,
   type ProjectPolicyField,
@@ -63,16 +64,19 @@ const PM_DEFAULTS = {
 };
 
 const MAX_SHOWN = 80;
+// A gate command runs on somebody's machine, so the trail keeps all of it: cut off, the end of one
+// could be changed and the row would show nothing changing
+const WHOLE_VALUE = Number.POSITIVE_INFINITY;
 
-export function auditValue(value: unknown): string {
+export function auditValue(value: unknown, maxShown = MAX_SHOWN): string {
   if (typeof value === "boolean") return value ? "on" : "off";
-  if (Array.isArray(value)) return value.length > 0 ? value.map(auditValue).join(", ") : "none";
+  if (Array.isArray(value)) return value.length > 0 ? value.map((item) => auditValue(item)).join(", ") : "none";
   const text =
     typeof value === "string" || typeof value === "number"
       ? String(value).replace(/\s+/g, " ").replace(/→/g, "->").trim()
       : "";
   if (!text) return "none";
-  return text.length > MAX_SHOWN ? `${text.slice(0, MAX_SHOWN - 1)}…` : text;
+  return text.length > maxShown ? `${text.slice(0, maxShown - 1)}…` : text;
 }
 
 // Whatever a pasted address carries besides where it points — a clone URL's credentials, a token
@@ -182,8 +186,11 @@ function policyChanges(before: Stored, after: Stored): string[] {
     const is = resolved(after, pinnedAfter);
     if (same(was, is) && pinnedBefore.has(field) === pinnedAfter.has(field)) continue;
 
-    const shown = (value: unknown, pinned: boolean) =>
-      pinned ? auditValue(value) : `${auditValue(value)} (default)`;
+    const whole = (GATE_COMMAND_FIELDS as readonly string[]).includes(field);
+    const shown = (value: unknown, pinned: boolean) => {
+      const text = auditValue(value, whole ? WHOLE_VALUE : MAX_SHOWN);
+      return pinned ? text : `${text} (default)`;
+    };
     const wasText = shown(was, pinnedBefore.has(field));
     const isText = shown(is, pinnedAfter.has(field));
     lines.push(

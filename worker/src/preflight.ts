@@ -132,7 +132,8 @@ export function checkGateCommands(commands: GateCommands, path: string): Preflig
     .map((program) => {
       const found = resolveGateProgram(program, "", path);
       return {
-        name: program,
+        // Prefixed: the server reads a row named `sandbox` as this machine's own, and a program may be called anything
+        name: `gate program ${program}`,
         ok: found !== null,
         detail: found ?? `${program} is not on this worker's PATH, and this project's gate commands run it`,
       };
@@ -711,11 +712,14 @@ export function pathWithTools(paths: Record<string, string>, currentPath: string
 export function checkRepo(
   read: (path: string) => string | null,
   repoPath: string,
-  node?: GateNode | null
+  node?: GateNode | null,
+  workingDirectory = ""
 ): PreflightCheck[] {
   const checks: PreflightCheck[] = [];
+  const packageRoot = join(repoPath, workingDirectory);
 
-  const hasLock = read(join(repoPath, "package-lock.json")) !== null;
+  // A member of an npm workspace has its lockfile at the root, and `npm ci` finds it there
+  const hasLock = [packageRoot, repoPath].some((root) => read(join(root, "package-lock.json")) !== null);
   checks.push({
     name: "package-lock.json",
     ok: hasLock,
@@ -726,7 +730,7 @@ export function checkRepo(
 
   let scripts: Record<string, unknown> = {};
   let engine: unknown;
-  const manifest = read(join(repoPath, "package.json"));
+  const manifest = read(join(packageRoot, "package.json"));
   if (manifest !== null) {
     try {
       const parsed = JSON.parse(manifest) as { scripts?: Record<string, unknown>; engines?: { node?: unknown } };

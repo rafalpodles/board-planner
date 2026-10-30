@@ -1,11 +1,11 @@
 import { accessSync, constants, lstatSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { Runner } from "../exec.js";
 import { agentEnv, INSTALL_NETWORK_OPT_IN, installNetworkAllowed } from "../env.js";
 import { firstOnPath } from "../node-engines.js";
 import { Network } from "../sandbox.js";
 import { GateContext, GateResult } from "../types.js";
-import { LOOPBACK_ONLY_NOTE, refused, runConfinedProgram } from "./confined-npm.js";
+import { LOOPBACK_ONLY_NOTE, outputTail, refused, runConfinedProgram } from "./confined-npm.js";
 
 export interface GateCommands {
   installCommand: string;
@@ -32,6 +32,12 @@ export function usesOwnCommands(commands: GateCommands): boolean {
 
 export function gateProgramOf(command: string): string {
   return command.split(/ +/)[0];
+}
+
+/** Whether a changed file is one a command names: `./bin/test`, or `manage.py` in `python manage.py test`. */
+export function namedByGateCommand(file: string, commands: GateCommands): boolean {
+  const words = [commands.installCommand, commands.buildCommand, commands.testCommand].flatMap((command) => (command ? command.split(/ +/) : []));
+  return words.some((word) => posix.join(commands.workingDirectory, word) === file);
 }
 
 /** Where the gate's commands run: the checkout, or a directory in it reached through no symlink. */
@@ -73,14 +79,6 @@ const named = (command: string, directory: string) => (directory ? `${command} (
 
 const INSTALL_NETWORK_NOTE = `outbound network is loopback-only for a project's own install unless this machine sets ${INSTALL_NETWORK_OPT_IN}=1`;
 
-const MAX_REASON_CHARS = 2000;
-
-function outputTail(stdout: string, stderr: string): string {
-  const output = [stdout, stderr].filter((stream) => stream.trim()).join("\n");
-  if (output.length <= MAX_REASON_CHARS) return output;
-  return `[output truncated to the last ${MAX_REASON_CHARS} characters]\n${output.slice(-MAX_REASON_CHARS)}`;
-}
-
 interface OwnStep {
   label: string;
   command: string;
@@ -89,19 +87,20 @@ interface OwnStep {
 }
 
 /**
- * The project's own commands for one gate, in order, sharing one timeout. Confined exactly as the
- * npm gates are, and what they execute is as agent-written as `npm test`; what is the owner's is
- * only which program to start.
+ * The project's own commands for one gate, in order, sharing one timeout. What they execute is as
+ * agent-written as `npm test`; what is the owner's is only which program to start. The directory is
+ * judged again before each: the install has just run code from the checkout, and that code can have
+ * replaced it.
  */
 async function runOwnSteps(runner: Runner, steps: OwnStep[], directory: string, timeoutMs: number, context: GateContext): Promise<GateResult> {
-  const place = gateDirectory(context.worktreePath, directory);
-  if ("reason" in place) return { ok: false, reason: place.reason };
   const deadline = Date.now() + timeoutMs;
 
   for (const { label, command, network, note } of steps) {
+    const place = gateDirectory(context.worktreePath, directory);
+    if ("reason" in place) return { ok: false, reason: place.reason };
     const [program, ...args] = command.split(/ +/);
     const path = resolveGateProgram(program, place.path, agentEnv().PATH ?? "");
-    if (!path) return { ok: false, reason: `${label} command: ${program} was not found on this machine` };
+    if (!path) return { ok: false, reason: `${label} command: ${program} was not found, or cannot be run` };
 
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) return { ok: false, reason: `the ${timeoutMs}ms budget ran out before the ${label} command started` };
@@ -118,7 +117,7 @@ async function runOwnSteps(runner: Runner, steps: OwnStep[], directory: string, 
     if (result.timedOut) return { ok: false, reason: `the ${label} command timed out after ${remainingMs}ms` };
     if (result.code !== 0) {
       const loopback = result.loopbackOnly ? `; ${note}` : "";
-      return { ok: false, reason: `the ${label} command failed (exit ${result.code}${loopback}):\n${outputTail(result.stdout, result.stderr)}` };
+      return { ok: false, reason: `the ${label} command failed (exit ${result.code}${loopback}):\n${outputTail(result)}` };
     }
   }
   return { ok: true, reason: "", commands: steps.map((step) => named(step.command, directory)) };

@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/Switch";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import {
+  GATE_COMMAND_FIELDS,
   POLICY_FIELD_LABELS,
   PROJECT_POLICY_DEFAULTS,
   PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS,
@@ -44,6 +45,7 @@ const MOVED_TO_BLOCKS = new Set([
 ]);
 
 const FIELDS = Object.keys(PROJECT_POLICY_DEFAULTS).filter((f) => !MOVED_TO_BLOCKS.has(f));
+const isCommand = (field: string) => (GATE_COMMAND_FIELDS as readonly string[]).includes(field);
 const PLACEHOLDERS: Record<string, string> = {
   installCommand: "npm ci",
   buildCommand: "npm run build",
@@ -122,6 +124,8 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
   const pinned = new Set(project.worker?.policyOverrides ?? []);
 
   const wanted = projectRemotes(project);
+  // Any command at all and the gates stop using npm, so a blank one is no command rather than npm's
+  const leftNpm = GATE_COMMAND_FIELDS.some((field) => Boolean(draft.value[field]));
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -350,7 +354,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                     // or a discard, under a label that has already changed
                     id={fieldId}
                     value={String(value)}
-                    placeholder={PLACEHOLDERS[field]}
+                    placeholder={leftNpm && isCommand(field) ? "none" : PLACEHOLDERS[field]}
                     className="flex-1"
                     disabled={!canEdit}
                     onChange={(e) =>

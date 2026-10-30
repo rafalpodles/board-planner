@@ -7,6 +7,7 @@ function context(diff: Partial<DiffStats>): GateContext {
   return {
     worktreePath: "/wt",
     worktreeDir: { path: "/wt", dev: 0, ino: 0 },
+    gateHome: { path: "/wt.home", dev: 0, ino: 1 },
     task: claimedTask({ taskKey: "CP-1", taskNumber: 1, title: "t", description: "d" }),
     result: {
       status: "completed",
@@ -68,13 +69,17 @@ describe("testPresenceGate", () => {
     "src/test/java/LoginTest.java",
     "LoginTest.kt",
     "spec/login_spec.rb",
+    "Tests/LoginTests.swift",
+    "test/login_test.exs",
+    "test/login_test.dart",
+    "src/login_test.cc",
   ])("takes %s for a test, so a repository on its own gate commands can pass", async (path) => {
     const verdict = await testPresenceGate().run(context({ changedFiles: ["src/login.x", path], patch: [`+++ b/${path}`, "+assert ok"].join("\n") }));
 
     expect(verdict).toMatchObject({ ok: true });
   });
 
-  it.each(["login.py", "pkg/login.go", "src/login.rs", "contest_results.py", "Latest.java"])("does not take %s for a test", async (path) => {
+  it.each(["login.py", "pkg/login.go", "src/login.rs", "contest_results.py", "Latest.java", "AUDIT.java", "GIT.kt"])("does not take %s for a test", async (path) => {
     const verdict = await testPresenceGate().run(context({ changedFiles: [path], patch: [`+++ b/${path}`, "+x"].join("\n") }));
 
     expect(verdict).toMatchObject({ ok: false, reason: "no test file was added or changed" });

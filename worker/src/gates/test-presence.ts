@@ -5,11 +5,11 @@ const TEST_FILE = new RegExp(
   [
     /\.(test|spec)\.[jt]sx?$/,
     /(^|\/)test_[^/]+\.py$/,
-    /_test\.(py|go|rb)$/,
+    /_test\.(py|go|rb|exs|dart|cc|cpp)$/,
     /_spec\.rb$/,
     /(^|\/)tests\/.+\.(py|rs)$/,
     /(^|\/)src\/test\/.+\.(java|kt|groovy|scala)$/,
-    /(Test|Tests|IT)\.(java|kt|cs|php)$/,
+    /[a-z0-9](Test|Tests|IT)\.(java|kt|cs|php|swift)$/,
   ]
     .map((pattern) => pattern.source)
     .join("|")

@@ -947,6 +947,21 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     });
   });
 
+  it("keeps one project's commands from another's on the same machine", async () => {
+    const run = await runOneTask(undefined, undefined, {
+      repos: [REPO, OTHER_REPO],
+      path: "/usr/bin:/bin",
+      assignments: [
+        { project: "p1", remote: REMOTE, policy: { testCommand: "no-such-tool-bp985 run" } },
+        { project: "p2", remote: OTHER_REMOTE },
+      ],
+    });
+
+    const blocked = Object.fromEntries((run.localConfig?.().projects ?? []).map((project) => [project.project, project.blocked]));
+    expect(blocked.p1).toContain("no-such-tool-bp985");
+    expect(blocked.p2 ?? "").not.toContain("no-such-tool-bp985");
+  });
+
   it("reads the npm requirements from the working directory of a project that names one", async () => {
     const { claims } = await runOneTask(undefined, undefined, {
       assignments: [{ project: "p1", remote: REMOTE, policy: { workingDirectory: "apps/web" } }],
@@ -989,6 +1004,25 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         "/opt/homebrew/bin/npm",
         "/opt/homebrew/bin/claude",
       ]);
+    });
+
+    // BP-985: from the assignment's policy, through the gates, to what the pull request says
+    it("runs a project's own commands in place of npm, and names them in the pull request", async () => {
+      const { everyCall } = await runOneTask(undefined, undefined, {
+        tasks: [THROUGH_EVERY_TOOL],
+        deliverable: true,
+        path: "/usr/bin:/bin",
+        assignments: [{ project: "p1", remote: REMOTE, policy: { installCommand: "env install", buildCommand: "env build", testCommand: "env check --fast" } }],
+        readFile: (path) => (path.endsWith("package.json") || path.endsWith("package-lock.json") ? null : existsSync(path) ? readFileSync(path, "utf8") : null),
+      });
+
+      const ran = everyCall.filter(([command]) => command === SANDBOX_COMMAND).map((argv) => argv.slice(-2).join(" "));
+      expect(ran).toEqual(expect.arrayContaining(["/usr/bin/env install", "/usr/bin/env build", "check --fast"]));
+      expect(ran.join(" ")).not.toContain("npm");
+      const created = everyCall.find((argv) => argv.includes("pr") && argv.includes("create")) ?? [];
+      const body = created[created.indexOf("--body") + 1];
+      expect(body).toContain("`env install`, `env build`");
+      expect(body).toContain("`env check --fast`");
     });
 
     it("hands delivery the gh, which opens the pull request", async () => {

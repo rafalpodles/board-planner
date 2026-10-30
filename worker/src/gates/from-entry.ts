@@ -95,7 +95,7 @@ export function gateFromEntry(
         entry.key
       );
     case "protected-paths":
-      return named(protectedPathsGate(), entry.key);
+      return named(protectedPathsGate(commands), entry.key);
     case "test-presence":
       return named(testPresenceGate(), entry.key);
     case "build":

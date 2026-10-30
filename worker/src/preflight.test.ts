@@ -6,7 +6,7 @@ import { CommandResult, createRunner, Runner } from "./exec.js";
 import { SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
 import { INSTALL_NETWORK_OPT_IN, UNCONFINED_ESCAPE_HATCH } from "./env.js";
 import { answerSandboxProbe, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
-import { checkGateCommands, checkRepo, INSTALL_NETWORK_CHECK, npmCacheCheck, pathWithTools, runPreflight } from "./preflight.js";
+import { checkGateCommands, checkRepo, INSTALL_NETWORK_CHECK, npmCacheCheck, pathWithTools, runPreflight, SANDBOX_CHECK } from "./preflight.js";
 
 const LOGGED_IN = JSON.stringify({
   loggedIn: true,
@@ -866,6 +866,25 @@ describe("the identity commits are authored as", () => {
 
 // BP-804: the Build gate refuses a cache that is a symlink, which reads as a machine fault at the
 // first Build gate unless it is said here first
+describe("checkRepo with a working directory", () => {
+  const files = (present: Record<string, string>) => (path: string) => present[path] ?? null;
+  const manifest = JSON.stringify({ scripts: { build: "tsc", test: "vitest" } });
+
+  it("reads the scripts there and takes the root's lockfile, as `npm ci` does for a workspace member", () => {
+    const checks = checkRepo(files({ "/r/package-lock.json": "{}", "/r/apps/web/package.json": manifest }), "/r", undefined, "apps/web");
+
+    expect(checks.every((check) => check.ok)).toBe(true);
+  });
+
+  it("still fails when neither place has a lockfile, or the scripts are only at the root", () => {
+    const noLock = checkRepo(files({ "/r/apps/web/package.json": manifest }), "/r", undefined, "apps/web");
+    const rootOnly = checkRepo(files({ "/r/package-lock.json": "{}", "/r/package.json": manifest }), "/r", undefined, "apps/web");
+
+    expect(noLock.find((check) => check.name === "package-lock.json")?.ok).toBe(false);
+    expect(rootOnly.find((check) => check.name === "build script")?.ok).toBe(false);
+  });
+});
+
 describe("what a project's own gate commands need of the machine", () => {
   const onThisMachine = process.env.PATH ?? "";
 
@@ -873,9 +892,16 @@ describe("what a project's own gate commands need of the machine", () => {
     const checks = checkGateCommands({ installCommand: "sh a", buildCommand: "sh b", testCommand: "no-such-tool-bp985 c", workingDirectory: "" }, onThisMachine);
 
     expect(checks.map((check) => [check.name, check.ok])).toEqual([
-      ["sh", true],
-      ["no-such-tool-bp985", false],
+      ["gate program sh", true],
+      ["gate program no-such-tool-bp985", false],
     ]);
+  });
+
+  it("cannot name a row after anything the server reads as the machine's own", () => {
+    const [row] = checkGateCommands({ installCommand: "", buildCommand: "", testCommand: "sandbox run", workingDirectory: "" }, "");
+
+    expect(row.name).not.toBe(SANDBOX_CHECK);
+    expect(row.ok).toBe(false);
   });
 
   it("leaves a program in the checkout to the gate, since no checkout exists yet", () => {

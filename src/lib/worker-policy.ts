@@ -32,6 +32,8 @@ export const PROJECT_POLICY_DEFAULTS = {
   workingDirectory: "",
 } as const;
 
+export const GATE_COMMAND_FIELDS = ["installCommand", "buildCommand", "testCommand"] as const;
+
 export const POLICY_FIELD_LABELS: Record<keyof typeof PROJECT_POLICY_DEFAULTS, string> = {
   baseBranch: "Base branch",
   taskTimeoutMs: "Timeout for one step (ms)",

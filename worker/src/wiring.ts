@@ -96,8 +96,6 @@ import { entryDirectory, workerVersion } from "./version.js";
 
 const MIN_REFRESH_INTERVAL_MS = 30_000;
 
-// gh is not here: without it delivery fails through the ordinary, charged path, so it ends.
-const TOOLS_A_STEP_SPAWNS = ["claude"] as const;
 
 // Every ambient thing the wiring used to reach for directly. main.ts is the one place that supplies
 // none of them; a test supplies whichever it needs to watch. The point of the split is that the
@@ -455,12 +453,6 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     if (!preflightFailed) lastRefresh = 0;
   }
 
-  // Where every spawn of a preflight-resolved tool reads its path from (BP-641, BP-733). `establishPreflight` runs
-  // at the top of `run()`, and again from drain only until it first succeeds, and sets the outer `preflight` this reads — a live read of that variable
-  // rather than a value snapshotted into a second one, so every caller shares the one place the
-  // resolution lives instead of each being handed its own copy (BP-641). Empty before that first
-  // preflight completes, or if the tool was never found; every reader downstream refuses on empty
-  // rather than falling back to the bare name on PATH.
   // What a project's gates need of this machine depends on which gates they are: npm and the
   // checkout's own npm scripts, or the programs its commands start
   function gateChecks(config: EffectiveConfig, repoPath: string, gateNode: GateNode | null): PreflightCheck[] {
@@ -468,10 +460,16 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     if (usesOwnCommands(commands)) return checkGateCommands(commands, childEnv().PATH ?? "");
     return [
       ...(preflight && !isAbsolute(preflight.paths.npm ?? "") ? [npmMissingForProject(repoPath)] : []),
-      ...checkRepo(deps.readFile, join(repoPath, commands.workingDirectory), gateNode),
+      ...checkRepo(deps.readFile, repoPath, gateNode, commands.workingDirectory),
     ];
   }
 
+  // Where every spawn of a preflight-resolved tool reads its path from (BP-641, BP-733). `establishPreflight` runs
+  // at the top of `run()`, and again from drain only until it first succeeds, and sets the outer `preflight` this reads — a live read of that variable
+  // rather than a value snapshotted into a second one, so every caller shares the one place the
+  // resolution lives instead of each being handed its own copy (BP-641). Empty before that first
+  // preflight completes, or if the tool was never found; every reader downstream refuses on empty
+  // rather than falling back to the bare name on PATH.
   function resolvedToolPath(tool: ResolvedTool): string {
     return preflight?.paths[tool] ?? "";
   }
@@ -959,18 +957,17 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
    * Read off the preflight row rather than asking the platform, because the row is the answer for
    * this machine — it confined a probe and watched it fail to escape.
    *
-   * So is a tool a step spawns that preflight never resolved (BP-733): the step is refused as a
-   * machine fault with the attempt refunded, so without this every poll would claim the same task
-   * again — for npm, after a full paid Implement step.
+   * So is claude, if preflight never resolved it (BP-733): the step is refused as a machine fault
+   * with the attempt refunded, so without this every poll would claim the same task again. gh is
+   * not here: without it delivery fails through the ordinary, charged path, so it ends. npm is a
+   * project's need and not the machine's, which `gateChecks` holds it to.
    */
   function claimBlocked(): string {
     if (leftovers) return leftovers;
     const row = preflight?.checks.find((check) => check.name === SANDBOX_CHECK);
     if (row && !row.ok) return row.detail;
     if (!preflight) return preflightFailed ? `preflight could not run: ${preflightError}` : "";
-    const missing = TOOLS_A_STEP_SPAWNS.filter((tool) => !isAbsolute(preflight?.paths[tool] ?? ""));
-    if (!missing.length) return "";
-    return `${missing.join(" and ")} could not be found on this machine, and every task needs ${missing.length > 1 ? "them" : "it"}`;
+    return isAbsolute(preflight.paths.claude ?? "") ? "" : "claude could not be found on this machine, and every task needs it";
   }
 
   const loop = createLoop({

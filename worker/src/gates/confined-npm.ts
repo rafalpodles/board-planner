@@ -182,10 +182,12 @@ export async function runConfinedNpm(runner: Runner, npmPath: string, args: stri
 }
 
 /**
- * One of a project's own commands (BP-985). It gets the run's `gateHome` as `HOME`: most toolchains
- * keep their downloads under it, go, pip, cargo, Maven and Gradle among them, and the real one is
- * not writable. Not the per-account cache npm gets: that is bounded by npm checking the lockfile's
- * hashes, and pip's cache is not, so code run by one project's install could poison another's.
+ * One of a project's own commands (BP-985). It gets the run's `gateHome` as its home: go, pip and
+ * cargo keep their downloads under `HOME`, and the real one is not writable. The JVM ignores `HOME`
+ * on macOS and asks the system, which answers `CFFIXED_USER_HOME` (measured under this sandbox: with
+ * only `HOME` moved Gradle dies on "Could not initialize native services" and Maven uses the
+ * operator's `~/.m2`). Not the per-account cache npm gets: that is bounded by npm checking the
+ * lockfile's hashes, and pip's cache is not, so code run by one project's install could poison another's.
  */
 export async function runConfinedProgram(
   runner: Runner,
@@ -198,8 +200,17 @@ export async function runConfinedProgram(
     runner,
     { ...rest, env: source, writable: [home] },
     (confinement) => confine(programPath, args, confinement),
-    (temp) => ({ ...(source ? agentEnv([], source) : agentEnv()), HOME: home.path, TMPDIR: temp })
+    (temp) => ({ ...(source ? agentEnv([], source) : agentEnv()), HOME: home.path, CFFIXED_USER_HOME: home.path, TMPDIR: temp })
   );
+}
+
+const MAX_REASON_CHARS = 2000;
+
+/** The end of what a failed command printed, which is where the reason is. */
+export function outputTail(result: Pick<CommandResult, "stdout" | "stderr">): string {
+  const output = [result.stdout, result.stderr].filter((stream) => stream.trim()).join("\n");
+  if (output.length <= MAX_REASON_CHARS) return output;
+  return `[output truncated to the last ${MAX_REASON_CHARS} characters]\n${output.slice(-MAX_REASON_CHARS)}`;
 }
 
 /** A refusal as a gate reports it: the worktree swapped under it is the run's, anything else the machine's. */

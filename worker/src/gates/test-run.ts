@@ -1,15 +1,7 @@
-import { CommandResult, Runner } from "../exec.js";
+import { Runner } from "../exec.js";
 import { Gate } from "../types.js";
-import { LOOPBACK_ONLY_NOTE, refused, runConfinedNpm } from "./confined-npm.js";
+import { LOOPBACK_ONLY_NOTE, outputTail, refused, runConfinedNpm } from "./confined-npm.js";
 import { gateDirectory, GateCommands, NPM_GATES, runOwnTests, usesOwnCommands } from "./gate-commands.js";
-
-const MAX_REASON_CHARS = 2000;
-
-function outputTail(result: CommandResult): string {
-  const output = [result.stdout, result.stderr].filter((stream) => stream.trim()).join("\n");
-  if (output.length <= MAX_REASON_CHARS) return output;
-  return `[output truncated to the last ${MAX_REASON_CHARS} characters]\n${output.slice(-MAX_REASON_CHARS)}`;
-}
 
 export function testRunGate(runner: Runner, npmPath: string, timeoutMs: number, commands: GateCommands = NPM_GATES): Gate {
   return {

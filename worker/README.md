@@ -848,6 +848,8 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   | `baseBranch` | project policy | `git ls-remote -- <url> refs/heads/<baseBranch>`, `git fetch --no-tags -- <url> <baseBranch>`, `gh pr create --base` | a git ref name, refused where an admin sets it and again in `applyPolicy`; delivery re-checks it and drops `--base` rather than pass a value that is not one, and the two remote calls keep it behind `--`. It no longer reaches `git diff` at all: since BP-382 the gates diff against the resolved base **sha**, and that sink refuses anything that is not `[0-9a-f]{7,64}` |
   | `model`, `fallbackModel`, `reviewModel` | project policy, a step, a review gate's params | `claude --model` | a model name, at `modelOr` — the one place all three overrides meet |
   | limits and timeouts | policy, gate params | numbers | parsed as numbers; a value that is not one is the default, never zero |
+  | `installCommand`, `buildCommand`, `testCommand` | project policy | a program and its arguments, with no shell | words split on spaces and refused where an admin sets it and again in `applyPolicy` if a shell would act on them; the program is a bare name resolved on this worker's `PATH`, or `./path` from the working directory |
+  | `workingDirectory` | project policy | the `cwd` of the gates' commands | a relative path with no leading dot in any part, same two places; each part is checked to be a real directory before each command, so a symlink is refused |
   | `taskKey` | the project's key and the task number | a directory under the worktree root (`<taskKey>.<nonce>`, a new name on every attempt), and a git branch | `^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$`, `pathFor` refuses a path that leaves the root, and `push` refuses a branch that is not a git ref name before building `<commit>:refs/heads/<branch>` out of it — git splits a push refspec at its *last* colon |
   | `capability`, `gateKind` | agent snapshot | a tool list, a gate | closed maps this side, so a server cannot widen what a step may do |
   | `title`, `description`, `prompt`, `focus`, summaries | claim, agent snapshot | prompt text, the PR title and body | option *values*, never positionals, and scrubbed before they reach a pull request. Prompt injection is a different problem and nothing here claims to solve it |
@@ -1060,12 +1062,13 @@ checkout, and a machine credential cannot set them.
   gate with neither an install nor a build command, and a Tests gate with no test command, refuse
   and name the setting rather than pass having judged nothing. A working directory on its own keeps
   npm, in that directory; it is resolved in the worktree and refused if any part of it is a symlink.
-- **The same confinement.** Writes go to the worktree, the command's own temp directory and a `HOME`
-  of the run's own, beside the worktree under a root no confined process can write, kept from
-  install to test and removed with the worktree. Not a shared cache: code one project's install ran
-  could poison another's, and pip checks no lockfile hash the way npm does. So every run downloads
-  again, and a version manager that lives under your real home (pyenv shims, rustup proxies) will
-  not find its toolchains: put the real binary on the worker's `PATH`.
+- **The same confinement, with one home more.** Writes go to the worktree, the command's own temp
+  directory and a home of the run's own (`HOME` and `CFFIXED_USER_HOME`, which is what the JVM reads
+  on macOS), beside the worktree under a root no confined process can write, kept from install to
+  test and removed with the worktree. Not a shared cache: code one project's install ran could poison
+  another's, and pip checks no lockfile hash the way npm does. So every run downloads again, and a
+  version manager that lives under your real home (pyenv shims, rustup proxies) will not find its
+  toolchains: put the real binary on the worker's `PATH`.
 - **A custom install has no network unless you say so.** `npm ci` keeps the network because
   `--ignore-scripts` and the pins above stop the repository's code running during it. `pip install .`,
   `build.rs` and a Maven plugin do run it, reads are open, and so with the network that code could
@@ -1075,14 +1078,24 @@ checkout, and a machine credential cannot set them.
   install that needs the network fails with `operation not permitted`, and the gate's reason names
   the variable. Build and test stay loopback-only either way.
 - **Whose command it is.** A command runs on the machine of whoever the task is assigned to, chosen
-  by the project's owner. That is no more than an agent the owner composes can already do with
-  `Read`, and the sandbox bounds both the same way, but enrol a machine only on projects whose owner
-  you trust.
+  by the project's owner. It is confined the way `npm test` is, and like `npm test` it can read what
+  this user can and reach what listens on this machine, so enrol a machine only on projects whose
+  owner you trust.
+- **What it runs stays out of the agent's reach.** On npm, `package.json` and `scripts/` are
+  protected so that an agent cannot change what `npm test` executes. The same list holds `gradlew`,
+  `mvnw`, `justfile`, `Taskfile.yml`, `noxfile.py`, `pytest.ini`, `conftest.py`, `build.rs`, `.cargo/`,
+  `.mvn/` and `gradle/wrapper/`, and the Protected-paths gate refuses any file a command names
+  (`./bin/test`, or `manage.py` in `python manage.py test`).
 - **Before a claim.** A program a command names that is not on this machine's `PATH` makes the
   project unusable here, with the reason, and a project on the npm gates is not claimed from without
-  npm. The worker itself no longer needs npm. `./path` programs are found at the gate, since no
-  checkout exists before the run.
-- **A worker older than this** ignores the fields and runs npm.
+  npm. The worker itself no longer needs npm. Three things are only known at the gate, where each
+  refuses with the reason and spends the attempt: a `./path` program, since no checkout exists before
+  the run; a working directory the change does not have; and a gate with no command to run, since the
+  agent is known only after the claim.
+- **Test-presence** recognises the usual test files of Python, Go, Ruby, Rust (`tests/`), the JVM,
+  .NET, PHP, Swift, Elixir, Dart and C++. Rust tests inline in `src/` are not recognised: take the
+  gate out of the agent for such a repository.
+- **From 1.10.0.** A worker older than that ignores the fields and runs npm.
 
 ## A project that lists several repositories
 
@@ -1119,7 +1132,8 @@ task of such a project inherits all of them; there is no per-task choice.
 
 What it does not do yet: a refusal in a run across several repositories offers no decision to accept
 (the worktrees are kept and the change is in the comment), the Review gate reads one repository's diff,
-and one base branch and one set of diff limits apply to all of them.
+and one base branch, one set of diff limits, one set of gate commands and one working directory apply
+to all of them.
 
 ## What a worker's credential grants
 
@@ -1157,7 +1171,7 @@ an agent merges because its sequence ends with a **Merge** step, and a change is
 the blocks that use them.
 
 **On the project** (Settings → Workers, the project owner; an instance admin can lock it off, and
-the lock wins): whether workers may run it at all, `baseBranch`, `taskTimeoutMs` and `runCeilingMs`. These describe the repository, so every machine
+the lock wins): whether workers may run it at all, `baseBranch`, `taskTimeoutMs`, `runCeilingMs` and the gate commands (`installCommand`, `buildCommand`, `testCommand`, `workingDirectory`). These describe the repository, so every machine
 serving that project runs under the same values.
 
 **On the worker** (Settings → Workers, the fleet console): what this machine is called, whether it

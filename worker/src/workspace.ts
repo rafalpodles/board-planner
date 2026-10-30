@@ -230,7 +230,10 @@ export function createWorkspace(
     const onDisk = [...known];
     for (const name of disk.names(root).filter((name) => taskKeyOf(name) === taskKey)) {
       const path = join(root, name);
-      if (!known.includes(path) && !(await belongsToAnotherClone(path))) onDisk.push(path);
+      // A gate home belongs to whoever its worktree does: it has no pointer of its own, and one a
+      // gate command wrote into it says nothing
+      const owner = path.endsWith(GATE_HOME_SUFFIX) ? path.slice(0, -GATE_HOME_SUFFIX.length) : path;
+      if (!known.includes(path) && !(await belongsToAnotherClone(owner))) onDisk.push(path);
     }
     for (const path of new Set(onDisk)) {
       disk.discard(root, path);

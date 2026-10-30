@@ -1,4 +1,5 @@
 import {
+  GATE_COMMAND_FIELDS,
   PROJECT_POLICY_DEFAULTS,
   isGateCommand,
   isGitRefName,
@@ -20,7 +21,7 @@ const STRING_FIELDS: ReadonlyMap<
   ["model", { valid: isModelName, expected: "a model name" }],
   ["fallbackModel", { valid: isModelName, expected: "a model name" }],
   ["reviewModel", { valid: isModelName, expected: "a model name" }],
-  ...["installCommand", "buildCommand", "testCommand"].map(
+  ...GATE_COMMAND_FIELDS.map(
     (field) =>
       [
         field,

@@ -135,6 +135,23 @@ describe("describeSettingsChanges", () => {
       ).toEqual(["Timeout for the whole run (ms): 5400000 (default) → 1800000"]);
     });
 
+    it("names a gate command's old and new value, and clearing it", () => {
+      const pinned = { worker: { policy: { testCommand: "pytest" }, policyOverrides: ["testCommand"] } };
+
+      expect(
+        changes({ worker: { policy: {}, policyOverrides: [] } }, { "worker.policy.testCommand": "pytest", "worker.policyOverrides": ["testCommand"] })
+      ).toEqual(["Test command: none (default) → pytest"]);
+      expect(changes(pinned, { "worker.policy.testCommand": "" })).toEqual(["Test command: pytest → none"]);
+      expect(changes(pinned, { "worker.policy.testCommand": "", "worker.policyOverrides": [] })).toEqual(["Test command: pytest → none (default)"]);
+    });
+
+    it("keeps the whole of a gate command: a change past the first 80 characters must not read as nothing", () => {
+      const head = `tool ${"a".repeat(100)}`;
+      const before = { worker: { policy: { testCommand: `${head} safe` }, policyOverrides: ["testCommand"] } };
+
+      expect(changes(before, { "worker.policy.testCommand": `${head} evil` })).toEqual([`Test command: ${head} safe → ${head} evil`]);
+    });
+
     it("shows a reset as going back to the default", () => {
       const before = { worker: { policy: { baseBranch: "develop" }, policyOverrides: ["baseBranch"] } };
 

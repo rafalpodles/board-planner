@@ -88,7 +88,7 @@ afterEach(cleanup);
 // switch widening the claim to unassigned work. A task now goes to the machine of the person it
 // was assigned to, so neither has anything left to say.
 describe("WorkersSection", () => {
-  it("shows what a gate runs by default, and sends a command typed over it", async () => {
+  it("shows what a gate runs by default", async () => {
     renderSection(true);
     await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
 
@@ -97,6 +97,17 @@ describe("WorkersSection", () => {
     expect(test.placeholder).toBe("npm test");
     expect((screen.getByLabelText("Working directory") as HTMLInputElement).placeholder).toBe("the repository's root");
     expect(screen.getByTestId("gate-commands-hint").textContent).toContain("CP_ALLOW_INSTALL_NETWORK=1");
+  });
+
+  it("stops promising npm for the blank commands once one is set, since none of them runs it then", async () => {
+    renderSection(true);
+    await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
+
+    fireEvent.change(screen.getByLabelText("Test command"), { target: { value: "go test ./..." } });
+
+    expect((screen.getByLabelText("Build command") as HTMLInputElement).placeholder).toBe("none");
+    expect((screen.getByLabelText("Install command") as HTMLInputElement).placeholder).toBe("none");
+    expect((screen.getByLabelText("Working directory") as HTMLInputElement).placeholder).toBe("the repository's root");
   });
 
   it("offers neither a nominee nor a claim scope", async () => {

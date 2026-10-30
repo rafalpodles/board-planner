@@ -1,18 +1,11 @@
-import { CommandResult, Runner } from "../exec.js";
+import { Runner } from "../exec.js";
 import { Gate } from "../types.js";
-import { GIT_DEPENDENCIES_REFUSED_NOTE, LOOPBACK_ONLY_NOTE, refused, runConfinedNpm } from "./confined-npm.js";
+import { GIT_DEPENDENCIES_REFUSED_NOTE, LOOPBACK_ONLY_NOTE, outputTail, refused, runConfinedNpm } from "./confined-npm.js";
 import { gateDirectory, GateCommands, NPM_GATES, runOwnBuild, usesOwnCommands } from "./gate-commands.js";
 
-const MAX_REASON_CHARS = 2000;
 // --ignore-scripts: a lifecycle script from the worktree or any dependency would run as the
 // worker, outside the agent's tool allowlist and before the review gate reads a single line
 const INSTALL_ARGS = ["ci", "--ignore-scripts", "--no-audit", "--no-fund"];
-
-function outputTail(result: CommandResult): string {
-  const output = [result.stdout, result.stderr].filter((stream) => stream.trim()).join("\n");
-  if (output.length <= MAX_REASON_CHARS) return output;
-  return `[output truncated to the last ${MAX_REASON_CHARS} characters]\n${output.slice(-MAX_REASON_CHARS)}`;
-}
 
 export function buildGate(runner: Runner, npmPath: string, timeoutMs: number, commands: GateCommands = NPM_GATES): Gate {
   return {

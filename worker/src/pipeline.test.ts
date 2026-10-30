@@ -116,7 +116,7 @@ const IDENTITY = { name: "The Operator", email: "operator@example.com" };
 const PIN = { workTree: "/wt", gitDir: "/repo/.git/worktrees/wt", pointer: "gitdir: /repo/.git/worktrees/wt\n", flagged: [] };
 
 function worktreeAt(baseSha: string, tampering: () => Promise<string | null> = async () => null) {
-  return { path: "/wt", baseSha, commitIdentity: IDENTITY, pin: PIN, dir: { path: "/wt", dev: 0, ino: 0 }, tampering };
+  return { path: "/wt", baseSha, commitIdentity: IDENTITY, pin: PIN, dir: { path: "/wt", dev: 0, ino: 0 }, gateHome: { path: "/wt.home", dev: 0, ino: 1 }, tampering };
 }
 
 // A worktree that starts dirty, the way the implement step actually leaves one, and goes clean the
@@ -1236,6 +1236,7 @@ describe("runTask", () => {
     expect(gate.run).toHaveBeenCalledWith({
       worktreePath: "/wt",
       worktreeDir: { path: "/wt", dev: 0, ino: 0 },
+      gateHome: { path: "/wt.home", dev: 0, ino: 1 },
       task: merging,
       result: completed,
       diff,

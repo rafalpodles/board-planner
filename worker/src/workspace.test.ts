@@ -811,6 +811,27 @@ describe("createWorkspace", () => {
       expect(disk.discard.mock.calls.map(([, path]) => path)).toEqual(["/worktrees/CP-158.mine"]);
     });
 
+    // Measured with two real clones: the second clone's `create` took the first's home mid-run, and
+    // every multi-repository run on its own commands ended as tampering at its first gate
+    it("leaves the gate home of another clone's worktree, which has no pointer of its own", async () => {
+      const { runner } = fakeGit({ [GIT_DIR]: { stdout: "/repo/.git\n" } });
+      const disk = fakeDisk(["CP-158.mine", "CP-158.mine.home", "CP-158.theirs", "CP-158.theirs.home"]);
+      const files = pointers({ "CP-158.theirs": "gitdir: /sibling/.git/worktrees/CP-158.theirs\n" });
+      await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, files, disk).destroy("CP-158");
+
+      expect(disk.discard.mock.calls.map(([, path]) => path)).toEqual(["/worktrees/CP-158.mine", "/worktrees/CP-158.mine.home"]);
+    });
+
+    // A gate command can write anything in its home, so a `.git` there must not make it another clone's
+    it("sweeps a gate home whatever pointer a command left in it", async () => {
+      const { runner } = fakeGit({ [GIT_DIR]: { stdout: "/repo/.git\n" } });
+      const disk = fakeDisk(["CP-158.mine.home"]);
+      const files = pointers({ "CP-158.mine.home": "gitdir: /sibling/.git/worktrees/x\n" });
+      await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, files, disk).destroy("CP-158");
+
+      expect(disk.discard.mock.calls.map(([, path]) => path)).toEqual(["/worktrees/CP-158.mine.home"]);
+    });
+
     it("still sweeps an unregistered leftover whose pointer is unreadable or names nothing", async () => {
       const { runner } = fakeGit({ [GIT_DIR]: { stdout: "/repo/.git\n" } });
       const disk = fakeDisk(["CP-158.empty", "CP-158.junk"]);

@@ -23,6 +23,7 @@ function ctx(changedLines: number): GateContext {
   return {
     worktreePath: "/wt",
     worktreeDir: { path: "/wt", dev: 0, ino: 0 },
+    gateHome: { path: "/wt.home", dev: 0, ino: 1 },
     task: { taskKey: "CP-1", title: "t", description: "", acceptanceCriteria: [] } as never,
     result: {} as never,
     diff: {
@@ -151,6 +152,7 @@ describe("gateFromEntry", () => {
         ...ctx(5),
         worktreePath,
         worktreeDir: recordDir(worktreePath),
+        gateHome: recordDir(worktreePath),
       });
     } finally {
       rmSync(worktreePath, { recursive: true, force: true });
