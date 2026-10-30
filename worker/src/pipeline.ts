@@ -860,6 +860,7 @@ export async function runTask(
         const verdict = await gate.run({
           worktreePath: worktree.path,
           worktreeDir: worktree.dir,
+          gateHome: worktree.gateHome,
           task,
           result: state.lastResult,
           diff,

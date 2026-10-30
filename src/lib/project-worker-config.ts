@@ -1,8 +1,10 @@
 import {
   PROJECT_POLICY_DEFAULTS,
+  isGateCommand,
   isGitRefName,
   isModelName,
   isProjectPolicyField,
+  isWorkingDirectory,
 } from "@/lib/worker-policy";
 
 const BOOLEAN_FIELDS: ReadonlySet<string> = new Set<string>();
@@ -10,13 +12,34 @@ const BOOLEAN_FIELDS: ReadonlySet<string> = new Set<string>();
 // Each string field with the shape its value has to have, because none of them stays data: they
 // reach a worker in the assignment policy and are spent as arguments to git and to the CLI. A
 // non-empty string was the only check, which let an option through — see worker-policy.ts.
-const STRING_FIELDS: ReadonlyMap<string, { valid: (value: string) => boolean; expected: string }> =
-  new Map([
-    ["baseBranch", { valid: isGitRefName, expected: "a git branch name" }],
-    ["model", { valid: isModelName, expected: "a model name" }],
-    ["fallbackModel", { valid: isModelName, expected: "a model name" }],
-    ["reviewModel", { valid: isModelName, expected: "a model name" }],
-  ]);
+const STRING_FIELDS: ReadonlyMap<
+  string,
+  { valid: (value: string) => boolean; expected: string; mayBeEmpty?: boolean }
+> = new Map([
+  ["baseBranch", { valid: isGitRefName, expected: "a git branch name" }],
+  ["model", { valid: isModelName, expected: "a model name" }],
+  ["fallbackModel", { valid: isModelName, expected: "a model name" }],
+  ["reviewModel", { valid: isModelName, expected: "a model name" }],
+  ...["installCommand", "buildCommand", "testCommand"].map(
+    (field) =>
+      [
+        field,
+        {
+          valid: isGateCommand,
+          expected: "one command with no shell syntax: a program and its arguments, separated by spaces",
+          mayBeEmpty: true,
+        },
+      ] as const
+  ),
+  [
+    "workingDirectory",
+    {
+      valid: isWorkingDirectory,
+      expected: "a path relative to the repository, with no leading dot in any part of it",
+      mayBeEmpty: true,
+    },
+  ],
+]);
 
 export type WorkerConfigPatch =
   | { ok: true; update: Record<string, unknown> }
@@ -85,10 +108,10 @@ export function parseProjectWorkerConfig(
         }
       } else if (STRING_FIELDS.has(field)) {
         const shape = STRING_FIELDS.get(field)!;
-        if (typeof value !== "string" || !value.trim()) {
+        if (typeof value !== "string" || (!value.trim() && !shape.mayBeEmpty)) {
           return { ok: false, error: `${field} must be a non-empty string` };
         }
-        if (!shape.valid(value.trim())) {
+        if (value.trim() && !shape.valid(value.trim())) {
           return { ok: false, error: `${field} must be ${shape.expected}` };
         }
       } else if (!isPositiveInt(value)) {

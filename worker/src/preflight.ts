@@ -1,9 +1,10 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
-import { childEnv, unconfinedAgentAllowed } from "./env.js";
+import { childEnv, INSTALL_NETWORK_OPT_IN, installNetworkAllowed, unconfinedAgentAllowed } from "./env.js";
 import { confine, recordDir, SANDBOX_COMMAND, UNCONFINED_ACCEPTED_DETAIL } from "./sandbox.js";
 import { npmCacheDir } from "./gates/confined-npm.js";
+import { GateCommands, gateProgramOf, resolveGateProgram } from "./gates/gate-commands.js";
 import { Runner } from "./exec.js";
 import { GateNode, nodeVerdict } from "./node-engines.js";
 import { CommitIdentity, resolveCommitIdentity } from "./commit.js";
@@ -16,9 +17,10 @@ import {
   usableAccount,
 } from "./github-account.js";
 
-// The four binaries the worker shells out to. Nothing here is optional. Each is spawned by the path
-// found here and refused without one (BP-733); a missing claude or npm stops the worker claiming at
-// all, and a missing git or gh fails the task until the attempt cap routes it to a human.
+// The four binaries the worker shells out to. Each is spawned by the path found here and refused
+// without one (BP-733); a missing claude stops the worker claiming at all, a missing npm stops it
+// claiming from a project on the npm gates, and a missing git or gh fails the task until the attempt
+// cap routes it to a human.
 export const TOOLS = ["git", "npm", "claude", "gh"] as const;
 export type ToolName = (typeof TOOLS)[number];
 
@@ -106,11 +108,49 @@ async function resolve(deps: PreflightDeps, tool: string): Promise<string> {
 }
 
 function missing(tool: ToolName): PreflightCheck {
+  // A project that names its own gate commands runs no npm, so this is a fact about some projects
+  // and not about the machine: `gateChecks` refuses the ones that need it
+  if (tool === "npm") {
+    return { name: tool, ok: true, warn: true, detail: "npm could not be found on this machine, so a project on the npm gates is not claimed from" };
+  }
   return {
     name: tool,
     ok: false,
     detail: `${tool} could not be found on this machine, and every task needs it`,
   };
+}
+
+export function npmMissingForProject(repoPath: string): PreflightCheck {
+  return { name: "npm", ok: false, detail: `npm could not be found on this machine, and the gates of ${repoPath} run it` };
+}
+
+/** The programs a project's own commands name, as far as they can be known before a checkout exists. */
+export function checkGateCommands(commands: GateCommands, path: string): PreflightCheck[] {
+  const programs = [commands.installCommand, commands.buildCommand, commands.testCommand].filter(Boolean).map(gateProgramOf);
+  return [...new Set(programs)]
+    .filter((program) => !program.startsWith("./"))
+    .map((program) => {
+      const found = resolveGateProgram(program, "", path);
+      return {
+        name: program,
+        ok: found !== null,
+        detail: found ?? `${program} is not on this worker's PATH, and this project's gate commands run it`,
+      };
+    });
+}
+
+export const INSTALL_NETWORK_CHECK = "install network";
+
+function installNetworkCheck(env: NodeJS.ProcessEnv): PreflightCheck[] {
+  if (!installNetworkAllowed(env)) return [];
+  return [
+    {
+      name: INSTALL_NETWORK_CHECK,
+      ok: true,
+      warn: true,
+      detail: `${INSTALL_NETWORK_OPT_IN} is set — a project's own install command runs code from the repository with the network open, and can send off anything this user can read`,
+    },
+  ];
 }
 
 async function runs(
@@ -631,6 +671,7 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
   );
   checks.push(await sandboxCheck(deps, env));
   checks.push(npmCacheCheck(deps.env));
+  checks.push(...installNetworkCheck(deps.env));
 
   return {
     ok: checks.every((c) => c.ok),

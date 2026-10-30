@@ -26,6 +26,10 @@ export const PROJECT_POLICY_DEFAULTS = {
   model: "opus",
   fallbackModel: "sonnet",
   reviewModel: "opus",
+  installCommand: "",
+  buildCommand: "",
+  testCommand: "",
+  workingDirectory: "",
 } as const;
 
 export const POLICY_FIELD_LABELS: Record<keyof typeof PROJECT_POLICY_DEFAULTS, string> = {
@@ -37,6 +41,10 @@ export const POLICY_FIELD_LABELS: Record<keyof typeof PROJECT_POLICY_DEFAULTS, s
   model: "Model",
   fallbackModel: "Fallback model",
   reviewModel: "Review model",
+  installCommand: "Install command",
+  buildCommand: "Build command",
+  testCommand: "Test command",
+  workingDirectory: "Working directory",
 };
 
 // Moved onto the blocks that use them — the Size gate, the Reviewed gate, the steps' models — and
@@ -71,6 +79,10 @@ export function isProjectPolicyField(name: string): name is ProjectPolicyField {
 // operator's own uid. Refused where an admin sets it, and again in the worker's own
 // applyPolicy — a value this instance never stored can still reach a worker from somewhere else.
 // Mirrored in worker/src/config.ts; server-values.contract.test.ts holds the two together.
+//
+// A gate command is a program to run, so it comes only from the project's owner and never from the
+// checkout. No shell reads it: words split on spaces, and what a shell would act on is refused
+// rather than passed along as a literal.
 const GIT_REF_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 const MAX_VALUE_CHARS = 255;
@@ -89,4 +101,23 @@ export function isGitRefName(value: string): boolean {
 
 export function isModelName(value: string): boolean {
   return value.length <= MAX_VALUE_CHARS && MODEL_NAME.test(value);
+}
+
+const GATE_COMMAND_WORD = /^[A-Za-z0-9._/=+:@%,~-]+$/;
+const GATE_PROGRAM = /^(?:[A-Za-z0-9_][A-Za-z0-9._+-]*|\.\/[A-Za-z0-9._+/-]+)$/;
+const WORKING_DIRECTORY = /^[A-Za-z0-9_][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/;
+const MAX_COMMAND_CHARS = 500;
+
+export function isGateCommand(value: string): boolean {
+  const [program, ...args] = value.split(/ +/);
+  return (
+    value.length <= MAX_COMMAND_CHARS &&
+    GATE_PROGRAM.test(program) &&
+    !program.split("/").includes("..") &&
+    args.every((word) => GATE_COMMAND_WORD.test(word))
+  );
+}
+
+export function isWorkingDirectory(value: string): boolean {
+  return value.length <= MAX_VALUE_CHARS && WORKING_DIRECTORY.test(value);
 }

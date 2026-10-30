@@ -60,6 +60,26 @@ describe("testPresenceGate", () => {
     expect(result.ok).toBe(true);
   });
 
+  it.each([
+    "tests/test_login.py",
+    "app/login_test.py",
+    "pkg/login_test.go",
+    "tests/login.rs",
+    "src/test/java/LoginTest.java",
+    "LoginTest.kt",
+    "spec/login_spec.rb",
+  ])("takes %s for a test, so a repository on its own gate commands can pass", async (path) => {
+    const verdict = await testPresenceGate().run(context({ changedFiles: ["src/login.x", path], patch: [`+++ b/${path}`, "+assert ok"].join("\n") }));
+
+    expect(verdict).toMatchObject({ ok: true });
+  });
+
+  it.each(["login.py", "pkg/login.go", "src/login.rs", "contest_results.py", "Latest.java"])("does not take %s for a test", async (path) => {
+    const verdict = await testPresenceGate().run(context({ changedFiles: [path], patch: [`+++ b/${path}`, "+x"].join("\n") }));
+
+    expect(verdict).toMatchObject({ ok: false, reason: "no test file was added or changed" });
+  });
+
   it("rejects a diff with no test file", async () => {
     const result = await testPresenceGate().run(
       context({ changedFiles: ["src/a.ts"], patch: sourceHunk.join("\n") })

@@ -90,14 +90,14 @@ export const GATE_KINDS: GateKind[] = [
   {
     key: "build",
     name: "Builds",
-    description: "Installs dependencies and builds the project.",
+    description: "Installs dependencies and builds the project, with npm or with the commands in Settings → Workers.",
     params: [],
     defaults: {},
   },
   {
     key: "test-run",
     name: "Tests pass",
-    description: "Runs the whole suite.",
+    description: "Runs the whole suite, with npm test or the test command in Settings → Workers.",
     params: [],
     defaults: {},
   },

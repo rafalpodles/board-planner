@@ -45,6 +45,10 @@ function project(over: Partial<ApiProject> = {}): ApiProject {
         model: "opus",
         fallbackModel: "sonnet",
         reviewModel: "opus",
+        installCommand: "",
+        buildCommand: "",
+        testCommand: "",
+        workingDirectory: "",
       },
       policyOverrides: [],
     },
@@ -84,6 +88,17 @@ afterEach(cleanup);
 // switch widening the claim to unassigned work. A task now goes to the machine of the person it
 // was assigned to, so neither has anything left to say.
 describe("WorkersSection", () => {
+  it("shows what a gate runs by default, and sends a command typed over it", async () => {
+    renderSection(true);
+    await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
+
+    const test = screen.getByLabelText("Test command") as HTMLInputElement;
+    expect(test.value).toBe("");
+    expect(test.placeholder).toBe("npm test");
+    expect((screen.getByLabelText("Working directory") as HTMLInputElement).placeholder).toBe("the repository's root");
+    expect(screen.getByTestId("gate-commands-hint").textContent).toContain("CP_ALLOW_INSTALL_NETWORK=1");
+  });
+
   it("offers neither a nominee nor a claim scope", async () => {
     renderSection(true);
     await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());

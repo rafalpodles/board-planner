@@ -53,6 +53,7 @@ import {
 } from "./github-account.js";
 import type { CommitIdentity } from "./commit.js";
 import { gateFromEntry } from "./gates/from-entry.js";
+import { gateCommandsOf, usesOwnCommands } from "./gates/gate-commands.js";
 import { createRunner, Runner } from "./exec.js";
 import { childEnv, codexSourceHome } from "./env.js";
 import { firstOnPath, GateNode } from "./node-engines.js";
@@ -62,7 +63,9 @@ import { createLoop } from "./loop.js";
 import { createOutbox, Store } from "./outbox.js";
 import { PipelineDeps, RunDisposition, runTask } from "./pipeline.js";
 import {
+  checkGateCommands,
   checkRepo,
+  npmMissingForProject,
   pathWithTools,
   PreflightCheck,
   PreflightDeps,
@@ -94,7 +97,7 @@ import { entryDirectory, workerVersion } from "./version.js";
 const MIN_REFRESH_INTERVAL_MS = 30_000;
 
 // gh is not here: without it delivery fails through the ordinary, charged path, so it ends.
-const TOOLS_A_STEP_SPAWNS = ["claude", "npm"] as const;
+const TOOLS_A_STEP_SPAWNS = ["claude"] as const;
 
 // Every ambient thing the wiring used to reach for directly. main.ts is the one place that supplies
 // none of them; a test supplies whichever it needs to watch. The point of the split is that the
@@ -390,6 +393,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       model: repo.config.model,
       fallbackModel: repo.config.fallbackModel,
       reviewModel: repo.config.reviewModel,
+      ...gateCommandsOf(repo.config),
     };
   }
 
@@ -457,6 +461,17 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // resolution lives instead of each being handed its own copy (BP-641). Empty before that first
   // preflight completes, or if the tool was never found; every reader downstream refuses on empty
   // rather than falling back to the bare name on PATH.
+  // What a project's gates need of this machine depends on which gates they are: npm and the
+  // checkout's own npm scripts, or the programs its commands start
+  function gateChecks(config: EffectiveConfig, repoPath: string, gateNode: GateNode | null): PreflightCheck[] {
+    const commands = gateCommandsOf(config);
+    if (usesOwnCommands(commands)) return checkGateCommands(commands, childEnv().PATH ?? "");
+    return [
+      ...(preflight && !isAbsolute(preflight.paths.npm ?? "") ? [npmMissingForProject(repoPath)] : []),
+      ...checkRepo(deps.readFile, join(repoPath, commands.workingDirectory), gateNode),
+    ];
+  }
+
   function resolvedToolPath(tool: ResolvedTool): string {
     return preflight?.paths[tool] ?? "";
   }
@@ -553,7 +568,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       const several = project.repositories.length > 1;
       const checked = project.repositories.map((repository) => ({
         repository,
-        checks: checkRepo(deps.readFile, repository.path, gateNode),
+        checks: gateChecks(project.config, repository.path, gateNode),
       }));
       // One failing checkout makes the project unusable, since a run needs every one of them; the
       // reason names the repository once there is more than one to tell apart.
@@ -831,7 +846,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             executor: createExecutor(taskConfig, deps.runner, claudePath, codexPath),
             collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
             gateFor: (entry, runner, timeoutMs, fallbacks) =>
-              gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath, codex: codexPath }, timeoutMs, fallbacks),
+              gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath, codex: codexPath }, timeoutMs, fallbacks, gateCommandsOf(taskConfig)),
             gitPath,
             recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
             logError: deps.logError,
@@ -863,7 +878,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           executor: createExecutor(taskConfig, deps.runner, claudePath, codexPath),
           collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
           gateFor: (entry, runner, timeoutMs, fallbacks) =>
-            gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath, codex: codexPath }, timeoutMs, fallbacks),
+            gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath, codex: codexPath }, timeoutMs, fallbacks, gateCommandsOf(taskConfig)),
           gitPath,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           logError: deps.logError,

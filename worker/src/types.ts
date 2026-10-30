@@ -129,6 +129,8 @@ export interface GateContext {
   worktreePath: string;
   /** What a gate that confines anything confines to, rather than `worktreePath` resolved again (BP-804). */
   worktreeDir: RecordedDir;
+  /** The `HOME` a project's own commands share across the run, beside the worktree and removed with it (BP-985). */
+  gateHome: RecordedDir;
   task: ClaimedTask;
   result: ExecutionResult;
   diff: DiffStats;

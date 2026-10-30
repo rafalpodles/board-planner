@@ -66,6 +66,7 @@ const POINTER_FILES = {
 function fakeDisk(names: string[] = []) {
   return {
     names: vi.fn(() => names),
+    makeDir: vi.fn<WorktreeDisk["makeDir"]>(),
     discard: vi.fn<WorktreeDisk["discard"]>(),
     forget: vi.fn<WorktreeDisk["forget"]>(),
     nonce: () => "a1",
@@ -661,6 +662,16 @@ describe("createWorkspace", () => {
     });
   });
 
+  it("removes an attempt's gate home with its worktree, since nothing registers it with git", async () => {
+    const { runner } = fakeGit(baseFromRemote("base1"));
+    const disk = fakeDisk(["CP-158.old", "CP-158.old.home", "CP-159.old.home"]);
+
+    await createWorkspace(config, runner, gitPath, () => ({}), REMOTE_URL, undefined, POINTER_FILES, disk).destroy("CP-158");
+
+    expect(disk.discard).toHaveBeenCalledWith("/worktrees", "/worktrees/CP-158.old.home");
+    expect(disk.discard).not.toHaveBeenCalledWith("/worktrees", "/worktrees/CP-159.old.home");
+  });
+
   it("throws when git fails to create the worktree", async () => {
     const { runner } = fakeGit(
       baseFromRemote("base1", {
@@ -725,6 +736,8 @@ describe("createWorkspace", () => {
     );
 
     expect(result.path).toBe("/worktrees/CP-158.a1");
+    expect(result.gateHome.path).toBe("/worktrees/CP-158.a1.home");
+    expect(disk.makeDir).toHaveBeenCalledWith("/worktrees/CP-158.a1.home");
     expect(disk.discard).toHaveBeenCalledWith("/worktrees", "/worktrees/CP-158");
     expect(disk.forget).toHaveBeenCalledWith("/repo/.git/worktrees", expect.any(Function));
     expect(run).toHaveBeenCalledWith(

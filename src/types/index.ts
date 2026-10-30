@@ -744,6 +744,10 @@ export interface ProjectWorkerPolicy {
   model: string;
   fallbackModel: string;
   reviewModel: string;
+  installCommand: string;
+  buildCommand: string;
+  testCommand: string;
+  workingDirectory: string;
 }
 
 export interface ProjectWorkerConfig {
