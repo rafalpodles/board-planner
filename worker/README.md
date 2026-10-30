@@ -1080,8 +1080,8 @@ checkout, and a machine credential cannot set them.
   install that needs the network fails with `operation not permitted`, and the gate's reason names
   the variable. Build and test stay loopback-only either way, short of `CP_ALLOW_UNCONFINED_AGENT`, so a project
   with dependencies fetches them in the install command or vendors them. That is enough for Go. pip
-  needs `--target` on Homebrew's Python, and Maven with JUnit 5 needs `mvn test` as the install, which
-  runs the tests with the network open. The command's home is fresh, so `~/.m2/settings.xml`,
+  needs `--target` on Homebrew's Python, and for Maven with JUnit 5 the install that worked is `mvn test`,
+  which runs the tests with the network open. The command's home is fresh, so `~/.m2/settings.xml`,
   `pip.conf` and registry tokens are not used. "Loopback-only" stops a direct connection off the
   machine; **Safety** lists what it does not stop.
 - **Whose command it is.** A command runs on the machine of whoever the task is assigned to, chosen
