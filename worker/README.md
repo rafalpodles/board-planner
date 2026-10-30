@@ -69,9 +69,12 @@ registration mints.
 | `CP_WORKER_NAME` | yes | — |
 | `CP_STATE_DIR` | no | `~/.boardplanner` |
 | `CP_ALLOW_UNCONFINED_AGENT` | no | unset |
+| `CP_ALLOW_INSTALL_NETWORK` | no | unset |
 
-The last one is not bootstrap and not a setting: it is a risk acceptance, and the only other thing
-read from the environment. It runs the agent with nothing confining its writes. `1`, `true` and
+The last two are not bootstrap and not settings: they are risk acceptances, and the only other
+things read from the environment. `CP_ALLOW_INSTALL_NETWORK` gives a project's own install command
+the network (see **A project's own gate commands**). `CP_ALLOW_UNCONFINED_AGENT` runs the agent with
+nothing confining its writes. For both, `1`, `true` and
 `yes` all mean yes, after trimming and lower-casing; anything else, including `0` and `false`,
 leaves the confinement on. See **Safety** for what accepting it means and why it is not a policy
 field. Everything else an operator can choose is worker policy, below.
@@ -1041,6 +1044,45 @@ checkout (BP-777).
 
 An entry that has gone missing, or has no `origin`, is skipped rather than failing the whole list —
 one stale line must not cost this machine every other checkout it could serve.
+
+## A project's own gate commands
+
+By default the Builds gate runs `npm ci --ignore-scripts` and `npm run build`, and the Tests gate
+runs `npm test`, at the repository's root. A project's owner can replace them in Settings → Workers
+with an install command, a build command, a test command and a working directory (**BP-985**). The
+values travel in the assignment like the rest of the project's policy; nothing is read from the
+checkout, and a machine credential cannot set them.
+
+- **No shell.** A command is words split on spaces. Quotes, `$`, `;`, `|`, `&`, `<` and `>` are
+  refused where it is saved and again in `applyPolicy`. The program is a bare name found on the
+  worker's own `PATH`, or `./path` from the working directory. A pipeline belongs in a script.
+- **Any command set means the project has left npm.** An empty install is then no install. A Builds
+  gate with neither an install nor a build command, and a Tests gate with no test command, refuse
+  and name the setting rather than pass having judged nothing. A working directory on its own keeps
+  npm, in that directory; it is resolved in the worktree and refused if any part of it is a symlink.
+- **The same confinement.** Writes go to the worktree, the command's own temp directory and a `HOME`
+  of the run's own, beside the worktree under a root no confined process can write, kept from
+  install to test and removed with the worktree. Not a shared cache: code one project's install ran
+  could poison another's, and pip checks no lockfile hash the way npm does. So every run downloads
+  again, and a version manager that lives under your real home (pyenv shims, rustup proxies) will
+  not find its toolchains: put the real binary on the worker's `PATH`.
+- **A custom install has no network unless you say so.** `npm ci` keeps the network because
+  `--ignore-scripts` and the pins above stop the repository's code running during it. `pip install .`,
+  `build.rs` and a Maven plugin do run it, reads are open, and so with the network that code could
+  send off anything this user can read. Set `CP_ALLOW_INSTALL_NETWORK=1` in the worker's own
+  environment to accept that on this machine; the fleet shows the cost in amber. It is an environment
+  variable because nothing the server or the agent can reach may widen a sandbox. Without it an
+  install that needs the network fails with `operation not permitted`, and the gate's reason names
+  the variable. Build and test stay loopback-only either way.
+- **Whose command it is.** A command runs on the machine of whoever the task is assigned to, chosen
+  by the project's owner. That is no more than an agent the owner composes can already do with
+  `Read`, and the sandbox bounds both the same way, but enrol a machine only on projects whose owner
+  you trust.
+- **Before a claim.** A program a command names that is not on this machine's `PATH` makes the
+  project unusable here, with the reason, and a project on the npm gates is not claimed from without
+  npm. The worker itself no longer needs npm. `./path` programs are found at the gate, since no
+  checkout exists before the run.
+- **A worker older than this** ignores the fields and runs npm.
 
 ## A project that lists several repositories
 
