@@ -200,7 +200,14 @@ export async function runConfinedProgram(
     runner,
     { ...rest, env: source, writable: [home] },
     (confinement) => confine(programPath, args, confinement),
-    (temp) => ({ ...(source ? agentEnv([], source) : agentEnv()), HOME: home.path, CFFIXED_USER_HOME: home.path, TMPDIR: temp })
+    // The JVM ignores TMPDIR on macOS too, and its own default is not writable here
+    (temp) => ({
+      ...(source ? agentEnv([], source) : agentEnv()),
+      HOME: home.path,
+      CFFIXED_USER_HOME: home.path,
+      TMPDIR: temp,
+      JAVA_TOOL_OPTIONS: `-Djava.io.tmpdir=${temp}`,
+    })
   );
 }
 

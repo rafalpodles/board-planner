@@ -871,9 +871,23 @@ describe("checkRepo with a working directory", () => {
   const manifest = JSON.stringify({ scripts: { build: "tsc", test: "vitest" } });
 
   it("reads the scripts there and takes the root's lockfile, as `npm ci` does for a workspace member", () => {
-    const checks = checkRepo(files({ "/r/package-lock.json": "{}", "/r/apps/web/package.json": manifest }), "/r", undefined, "apps/web");
+    const root = JSON.stringify({ workspaces: ["apps/*"] });
+    const checks = checkRepo(files({ "/r/package-lock.json": "{}", "/r/package.json": root, "/r/apps/web/package.json": manifest }), "/r", undefined, "apps/web");
 
     expect(checks.every((check) => check.ok)).toBe(true);
+  });
+
+  it("does not take the root's lockfile for a directory that is no workspace member, where `npm ci` fails", () => {
+    const plain = checkRepo(files({ "/r/package-lock.json": "{}", "/r/package.json": "{}", "/r/frontend/package.json": manifest }), "/r", undefined, "frontend");
+    const member = checkRepo(
+      files({ "/r/package-lock.json": "{}", "/r/package.json": JSON.stringify({ workspaces: ["frontend"] }), "/r/frontend/package.json": manifest }),
+      "/r",
+      undefined,
+      "frontend"
+    );
+
+    expect(plain.find((check) => check.name === "package-lock.json")?.ok).toBe(false);
+    expect(member.find((check) => check.name === "package-lock.json")?.ok).toBe(true);
   });
 
   it("still fails when neither place has a lockfile, or the scripts are only at the root", () => {

@@ -9,7 +9,8 @@ const TEST_FILE = new RegExp(
     /_spec\.rb$/,
     /(^|\/)tests\/.+\.(py|rs)$/,
     /(^|\/)src\/test\/.+\.(java|kt|groovy|scala)$/,
-    /[a-z0-9](Test|Tests|IT)\.(java|kt|cs|php|swift)$/,
+    /(Test|Tests)\.(java|kt|cs|php|swift)$/,
+    /[a-z0-9]IT\.(java|kt)$/,
   ]
     .map((pattern) => pattern.source)
     .join("|")

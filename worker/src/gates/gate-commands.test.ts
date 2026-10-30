@@ -70,6 +70,7 @@ describeOnMac("the Builds gate on a project's own commands", () => {
     expect(options?.env?.HOME).toBe(context.gateHome.path);
     expect(options?.env?.CFFIXED_USER_HOME).toBe(context.gateHome.path);
     expect(options?.env?.TMPDIR).toMatch(/\/cp-gate-[^/]+$/);
+    expect(options?.env?.JAVA_TOOL_OPTIONS).toBe(`-Djava.io.tmpdir=${options?.env?.TMPDIR}`);
     expect(options?.env).not.toHaveProperty("npm_config_cache");
     expect(profileOf(install)).toContain(context.gateHome.path);
   });
@@ -286,6 +287,13 @@ describe("namedByGateCommand", () => {
   it("finds a program and a script in the working directory", () => {
     expect(namedByGateCommand("svc/bin/test", named)).toBe(true);
     expect(namedByGateCommand("svc/manage.py", named)).toBe(true);
+  });
+
+  it("finds a path after an equals sign", () => {
+    const options = commands({ testCommand: "make --file=ci/test.mk", buildCommand: "env RUN=ci/run.sh make" });
+
+    expect(namedByGateCommand("ci/test.mk", options)).toBe(true);
+    expect(namedByGateCommand("ci/run.sh", options)).toBe(true);
   });
 
   it("takes a word for a path only where it is one", () => {

@@ -832,6 +832,15 @@ describe("createWorkspace", () => {
       expect(disk.discard.mock.calls.map(([, path]) => path)).toEqual(["/worktrees/CP-158.mine.home"]);
     });
 
+    it("sweeps the gate home of this clone's registered worktree, whatever a step wrote in that worktree's pointer", async () => {
+      const { runner } = fakeGit({ [GIT_DIR]: { stdout: "/repo/.git\n" }, "worktree list --porcelain": { stdout: "worktree /worktrees/CP-158.mine\n" } });
+      const disk = fakeDisk(["CP-158.mine", "CP-158.mine.home"]);
+      const files = pointers({ "CP-158.mine": "gitdir: /nonexistent/x/y\n" });
+      await createWorkspace(config, runner, gitPath, undefined, undefined, undefined, files, disk).destroy("CP-158");
+
+      expect(disk.discard.mock.calls.map(([, path]) => path)).toEqual(["/worktrees/CP-158.mine", "/worktrees/CP-158.mine.home"]);
+    });
+
     it("still sweeps an unregistered leftover whose pointer is unreadable or names nothing", async () => {
       const { runner } = fakeGit({ [GIT_DIR]: { stdout: "/repo/.git\n" } });
       const disk = fakeDisk(["CP-158.empty", "CP-158.junk"]);

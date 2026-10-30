@@ -73,6 +73,10 @@ describe("testPresenceGate", () => {
     "test/login_test.exs",
     "test/login_test.dart",
     "src/login_test.cc",
+    "Tests/URLTests.swift",
+    "tests/APITest.php",
+    "app/src/androidTest/java/JWTTest.kt",
+    "src/main/java/LoginIT.java",
   ])("takes %s for a test, so a repository on its own gate commands can pass", async (path) => {
     const verdict = await testPresenceGate().run(context({ changedFiles: ["src/login.x", path], patch: [`+++ b/${path}`, "+assert ok"].join("\n") }));
 

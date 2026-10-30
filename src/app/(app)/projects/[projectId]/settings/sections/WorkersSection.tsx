@@ -125,7 +125,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
 
   const wanted = projectRemotes(project);
   // Any command at all and the gates stop using npm, so a blank one is no command rather than npm's
-  const leftNpm = GATE_COMMAND_FIELDS.some((field) => Boolean(draft.value[field]));
+  const leftNpm = GATE_COMMAND_FIELDS.some((field) => String(draft.value[field]).trim() !== "");
 
   useEffect(() => {
     if (!isAdmin) return;

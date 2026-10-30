@@ -34,10 +34,10 @@ export function gateProgramOf(command: string): string {
   return command.split(/ +/)[0];
 }
 
-/** Whether a changed file is one a command names: `./bin/test`, or `manage.py` in `python manage.py test`. */
+/** Whether a changed file is one a command names as a word, or after `=`: `./bin/test`, `manage.py`, `--file=ci/test.mk`. */
 export function namedByGateCommand(file: string, commands: GateCommands): boolean {
   const words = [commands.installCommand, commands.buildCommand, commands.testCommand].flatMap((command) => (command ? command.split(/ +/) : []));
-  return words.some((word) => posix.join(commands.workingDirectory, word) === file);
+  return words.flatMap((word) => [word, word.slice(word.indexOf("=") + 1)]).some((word) => posix.join(commands.workingDirectory, word) === file);
 }
 
 /** Where the gate's commands run: the checkout, or a directory in it reached through no symlink. */

@@ -294,6 +294,7 @@ describe("what the agent is told matches what the gate refuses", () => {
     "gradlew",
     "mvnw",
     "justfile",
+    ".justfile",
     "Taskfile.yml",
     "noxfile.py",
     "pytest.ini",

@@ -78,7 +78,7 @@ export const EXECUTABLE_CONFIG_FILE =
 // (root and worker/), and an agent editing worker/package.json is doing the same thing as
 // one editing the root — so anchoring to the root would protect the least interesting one.
 export const BUILD_MANIFEST_FILE =
-  /(^|\/)(pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|requirements[^/]*\.txt|setup\.(py|cfg)|tox\.ini|pom\.xml|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|gradle\.properties|Gemfile(\.lock)?|Rakefile|Cargo\.(toml|lock)|go\.(mod|sum)|composer\.(json|lock)|mix\.exs|pubspec\.yaml|Dockerfile|docker-compose\.ya?ml|\.gitlab-ci\.ya?ml|Jenkinsfile|gradlew(\.bat)?|mvnw(\.cmd)?|justfile|Taskfile\.ya?ml|noxfile\.py|pytest\.ini|conftest\.py|build\.rs)$|(^|\/)(gradle\/wrapper|\.mvn|\.cargo)\//i;
+  /(^|\/)(pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|requirements[^/]*\.txt|setup\.(py|cfg)|tox\.ini|pom\.xml|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|gradle\.properties|Gemfile(\.lock)?|Rakefile|Cargo\.(toml|lock)|go\.(mod|sum)|composer\.(json|lock)|mix\.exs|pubspec\.yaml|Dockerfile|docker-compose\.ya?ml|\.gitlab-ci\.ya?ml|Jenkinsfile|gradlew(\.bat)?|mvnw(\.cmd)?|\.?justfile|Taskfile(\.dist)?\.ya?ml|noxfile\.py|\.?pytest\.ini|conftest\.py|build\.rs)$|(^|\/)(gradle\/wrapper|\.mvn|\.cargo)\//i;
 
 /**
  * A file that decides what CI itself does.

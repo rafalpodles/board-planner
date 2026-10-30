@@ -709,6 +709,14 @@ export function pathWithTools(paths: Record<string, string>, currentPath: string
  * What a checkout needs of the machine that runs its gates. `node` is the Node those gates would run
  * on (null when none could be found on the PATH they get); leave it undefined to skip that check.
  */
+function declaresWorkspaces(manifest: string | null): boolean {
+  try {
+    return manifest !== null && Boolean((JSON.parse(manifest) as { workspaces?: unknown }).workspaces);
+  } catch {
+    return false;
+  }
+}
+
 export function checkRepo(
   read: (path: string) => string | null,
   repoPath: string,
@@ -718,8 +726,11 @@ export function checkRepo(
   const checks: PreflightCheck[] = [];
   const packageRoot = join(repoPath, workingDirectory);
 
-  // A member of an npm workspace has its lockfile at the root, and `npm ci` finds it there
-  const hasLock = [packageRoot, repoPath].some((root) => read(join(root, "package-lock.json")) !== null);
+  // A member of an npm workspace has its lockfile at the root, and `npm ci` finds it there; a plain
+  // subdirectory does not, whatever the root holds
+  const hasLock =
+    read(join(packageRoot, "package-lock.json")) !== null ||
+    (read(join(repoPath, "package-lock.json")) !== null && declaresWorkspaces(read(join(repoPath, "package.json"))));
   checks.push({
     name: "package-lock.json",
     ok: hasLock,
@@ -749,7 +760,7 @@ export function checkRepo(
       ok,
       detail: ok
         ? `npm run ${script} is defined`
-        : `${repoPath} has no ${script} script, and the ${script} gate runs on every task`,
+        : `${packageRoot} has no ${script} script, and the ${script} gate runs on every task`,
     });
   }
 

@@ -1063,8 +1063,9 @@ checkout, and a machine credential cannot set them.
   and name the setting rather than pass having judged nothing. A working directory on its own keeps
   npm, in that directory; it is resolved in the worktree and refused if any part of it is a symlink.
 - **The same confinement, with one home more.** Writes go to the worktree, the command's own temp
-  directory and a home of the run's own (`HOME` and `CFFIXED_USER_HOME`, which is what the JVM reads
-  on macOS), beside the worktree under a root no confined process can write, kept from install to
+  directory and a home of the run's own (`HOME`, with `CFFIXED_USER_HOME` and
+  `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=…` because the JVM reads neither `HOME` nor `TMPDIR` on macOS,
+  which also prints a "Picked up JAVA_TOOL_OPTIONS" line on stderr), beside the worktree under a root no confined process can write, kept from install to
   test and removed with the worktree. Not a shared cache: code one project's install ran could poison
   another's, and pip checks no lockfile hash the way npm does. So every run downloads again, and a
   version manager that lives under your real home (pyenv shims, rustup proxies) will not find its
@@ -1084,8 +1085,12 @@ checkout, and a machine credential cannot set them.
 - **What it runs stays out of the agent's reach.** On npm, `package.json` and `scripts/` are
   protected so that an agent cannot change what `npm test` executes. The same list holds `gradlew`,
   `mvnw`, `justfile`, `Taskfile.yml`, `noxfile.py`, `pytest.ini`, `conftest.py`, `build.rs`, `.cargo/`,
-  `.mvn/` and `gradle/wrapper/`, and the Protected-paths gate refuses any file a command names
-  (`./bin/test`, or `manage.py` in `python manage.py test`).
+  `.mvn/` and `gradle/wrapper/`, and the Protected-paths gate refuses a file a command names
+  literally, as a word of its own or after `=`: `./bin/test`, `manage.py` in `python manage.py test`,
+  `ci/test.mk` in `make --file=ci/test.mk`. A file reached any other way is not covered: `go run
+  ./cmd/check` names a directory, and `python -m ci.tests` a module. Name the file, or keep such a
+  program under a protected path. The agent is told the project's commands, so that it can leave
+  these alone rather than lose a run finding out.
 - **Before a claim.** A program a command names that is not on this machine's `PATH` makes the
   project unusable here, with the reason, and a project on the npm gates is not claimed from without
   npm. The worker itself no longer needs npm. Three things are only known at the gate, where each
