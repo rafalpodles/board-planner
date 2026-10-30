@@ -1822,7 +1822,9 @@ describe("runTask", () => {
   describe("offering the refused change to a person", () => {
     it("opens a decision, naming the gate and the change it judged", async () => {
       const openDecision = vi.fn<NonNullable<PipelineDeps["openDecision"]>>().mockResolvedValue(undefined);
+      const own = { ...config, testCommand: "./bin/test" };
       const h = harness({
+        config: own,
         openDecision,
         gateFor: () => rejectingGate("protected-paths", "it edits package.json"),
       });
@@ -1836,7 +1838,7 @@ describe("runTask", () => {
         worktreePath: "/wt",
         worktreeRoot: config.worktreeRoot,
         baseSha: "base1",
-        commands: gateCommandsOf(config),
+        commands: gateCommandsOf(own),
       });
     });
 

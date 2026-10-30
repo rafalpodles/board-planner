@@ -886,7 +886,7 @@ describe("checkRepo with a working directory", () => {
       "frontend"
     );
 
-    expect(plain.find((check) => check.name === "package-lock.json")?.ok).toBe(false);
+    expect(plain.find((check) => check.name === "package-lock.json")).toMatchObject({ ok: false, detail: expect.stringContaining("/r/frontend has no package-lock.json") });
     expect(member.find((check) => check.name === "package-lock.json")?.ok).toBe(true);
   });
 

@@ -735,8 +735,8 @@ export function checkRepo(
     name: "package-lock.json",
     ok: hasLock,
     detail: hasLock
-      ? `present in ${repoPath}`
-      : `${repoPath} has no package-lock.json, and the build gate runs npm ci, which fails without one`,
+      ? `present for ${packageRoot}`
+      : `${packageRoot} has no package-lock.json, and the build gate runs npm ci, which fails without one`,
   });
 
   let scripts: Record<string, unknown> = {};
