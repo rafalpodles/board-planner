@@ -1067,17 +1067,19 @@ checkout, and a machine credential cannot set them.
   `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=…` because the JVM reads neither `HOME` nor `TMPDIR` on macOS,
   which also prints a "Picked up JAVA_TOOL_OPTIONS" line on stderr), beside the worktree under a
   root no confined process can write, kept from install to test and removed with the worktree. Not
-  a shared cache: code one project's install ran could poison another's, and pip checks no lockfile hash the way npm does. So every run downloads again, and a
+  a shared cache: code one project's install ran could poison another's, and pip checks no lockfile hash the way npm does. So every run with the network downloads again, and a
   version manager that lives under your real home (pyenv shims, rustup proxies) will not find its
   toolchains: put the real binary on the worker's `PATH`.
-- **A custom install has no network unless you say so.** `npm ci` keeps the network because
-  `--ignore-scripts` and the pins above stop the repository's code running during it. `pip install .`,
+- **A custom install has no direct connection off the machine unless you say so.** `npm ci` keeps
+  the network because `--ignore-scripts` and the pins above stop the repository's code running during it. `pip install .`,
   `build.rs` and a Maven plugin do run it, reads are open, and so with the network that code could
   send off anything this user can read. Set `CP_ALLOW_INSTALL_NETWORK=1` in the worker's own
   environment to accept that on this machine; the fleet shows the cost in amber. It is an environment
   variable because nothing the server or the agent can reach may widen a sandbox. Without it an
   install that needs the network fails with `operation not permitted`, and the gate's reason names
-  the variable. Build and test stay loopback-only either way.
+  the variable. Build and test stay loopback-only either way, short of `CP_ALLOW_UNCONFINED_AGENT`, so a project
+  with dependencies fetches them in the install command or vendors them. "Loopback-only" stops a
+  direct connection off the machine; **Safety** lists what it does not stop.
 - **Whose command it is.** A command runs on the machine of whoever the task is assigned to, chosen
   by the project's owner. It is confined the way `npm test` is, and like `npm test` it can read what
   this user can and reach what listens on this machine, so enrol a machine only on projects whose
