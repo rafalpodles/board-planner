@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  isProtectedPath,
   isWorkflowPath,
   protectedPathsGate,
   PROTECTED_PATHS_BRIEF,
@@ -310,7 +311,7 @@ describe("what the agent is told matches what the gate refuses", () => {
 
     for (const path of refusedExamples) {
       // the gate refuses it...
-      // awaited inside the loop on purpose: the failure message has to name the path
+      expect(isProtectedPath(path), `the gate lets ${path} through`).toBe(true);
       // ...and the agent was told the name of the thing it is
       // A family is named either by a filename or by the directory it lives in — `.husky/` covers
       // every hook inside it, and the brief says so rather than listing them

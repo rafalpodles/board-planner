@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentArgs, isAgentSpawn } from "../__fixtures__/agent-spawn.js";
+import { gateCommandsOf } from "./gate-commands.js";
 import { gateFromEntry } from "./from-entry.js";
 import { GateContext, SnapshotEntry } from "../types.js";
 import { CLAUDE_PATH, NPM_PATH } from "../__fixtures__/tool-paths.js";
@@ -160,6 +161,17 @@ describe("gateFromEntry", () => {
 
     expect(run).toHaveBeenCalled();
     for (const [, args] of run.mock.calls) expect(args).toContain(NPM_PATH);
+  });
+
+  // BP-985: a program an agent could rewrite turns the Tests gate green having judged nothing
+  it("hands the protected-paths gate the project's commands", async () => {
+    const own = gateCommandsOf({ testCommand: "./bin/test" });
+    const context = { ...ctx(5), diff: { ...ctx(5).diff, changedFiles: ["bin/test"] } };
+
+    const verdict = await gateFromEntry(entry({ gateKind: "protected-paths" }), idleRunner, tools, 1000, FALLBACKS, own)!.run(context);
+
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain("bin/test");
   });
 
   // That this list IS the catalog's is asserted in catalog-contract.test.ts, which reads the app's

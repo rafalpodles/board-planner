@@ -1,3 +1,4 @@
+import { gateCommandsOf } from "./gates/gate-commands.js";
 import { describe, it, expect, vi } from "vitest";
 import { ApiClient, StatusIds } from "./api.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
@@ -1835,6 +1836,7 @@ describe("runTask", () => {
         worktreePath: "/wt",
         worktreeRoot: config.worktreeRoot,
         baseSha: "base1",
+        commands: gateCommandsOf(config),
       });
     });
 

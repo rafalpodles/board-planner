@@ -3,6 +3,7 @@ import { createBudget } from "./budget.js";
 import { commitAll, MissingIdentityError, TamperedCheckoutError } from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { GateFallbacks } from "./gates/from-entry.js";
+import { gateCommandsOf } from "./gates/gate-commands.js";
 import { unexpectedHistory } from "./provenance.js";
 import { RunState, runStep } from "./steps.js";
 import { recordFor, RunRecord } from "./run-record.js";
@@ -946,6 +947,7 @@ export async function runTask(
                 baseSha: worktree.baseSha,
                 pin: worktree.pin,
                 dir: worktree.dir,
+                commands: gateCommandsOf(config),
               });
             } catch (error) {
               deps.logError?.(

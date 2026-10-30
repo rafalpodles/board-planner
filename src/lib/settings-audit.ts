@@ -64,8 +64,8 @@ const PM_DEFAULTS = {
 };
 
 const MAX_SHOWN = 80;
-// A gate command runs on somebody's machine, so the trail keeps all of it: cut off, the end of one
-// could be changed and the row would show nothing changing
+// A gate command runs on somebody's machine, and the directory says where, so the trail keeps all
+// of both: cut off, the end of one could be changed and the row would show nothing changing
 const WHOLE_VALUE = Number.POSITIVE_INFINITY;
 
 export function auditValue(value: unknown, maxShown = MAX_SHOWN): string {
@@ -186,7 +186,7 @@ function policyChanges(before: Stored, after: Stored): string[] {
     const is = resolved(after, pinnedAfter);
     if (same(was, is) && pinnedBefore.has(field) === pinnedAfter.has(field)) continue;
 
-    const whole = (GATE_COMMAND_FIELDS as readonly string[]).includes(field);
+    const whole = field === "workingDirectory" || (GATE_COMMAND_FIELDS as readonly string[]).includes(field);
     const shown = (value: unknown, pinned: boolean) => {
       const text = auditValue(value, whole ? WHOLE_VALUE : MAX_SHOWN);
       return pinned ? text : `${text} (default)`;

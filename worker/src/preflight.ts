@@ -765,7 +765,7 @@ export function checkRepo(
   }
 
   if (node !== undefined && typeof engine === "string" && engine.trim() !== "") {
-    checks.push(nodeEngineCheck(engine.trim(), node, repoPath));
+    checks.push(nodeEngineCheck(engine.trim(), node, packageRoot));
   }
 
   return checks;

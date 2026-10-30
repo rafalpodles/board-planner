@@ -152,6 +152,13 @@ describe("describeSettingsChanges", () => {
       expect(changes(before, { "worker.policy.testCommand": `${head} evil` })).toEqual([`Test command: ${head} safe → ${head} evil`]);
     });
 
+    it("keeps the whole of a working directory too", () => {
+      const head = "a".repeat(100);
+      const before = { worker: { policy: { workingDirectory: `${head}/one` }, policyOverrides: ["workingDirectory"] } };
+
+      expect(changes(before, { "worker.policy.workingDirectory": `${head}/two` })).toEqual([`Working directory: ${head}/one → ${head}/two`]);
+    });
+
     it("shows a reset as going back to the default", () => {
       const before = { worker: { policy: { baseBranch: "develop" }, policyOverrides: ["baseBranch"] } };
 

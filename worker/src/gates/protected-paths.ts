@@ -119,8 +119,9 @@ export function isProtectedPath(file: string): boolean {
   );
 }
 
-export function protectedPaths(files: string[]): string[] {
-  return files.filter(isProtectedPath);
+/** What the gate refuses: the list above, and whatever this project's own commands name. */
+export function protectedPaths(files: string[], commands: GateCommands = NPM_GATES): string[] {
+  return files.filter((file) => isProtectedPath(file) || namedByGateCommand(file, commands));
 }
 
 /**
@@ -182,7 +183,7 @@ export function protectedPathsGate(commands: GateCommands = NPM_GATES): Gate {
         };
       }
 
-      const hits = diff.changedFiles.filter((file) => isProtectedPath(file) || namedByGateCommand(file, commands));
+      const hits = protectedPaths(diff.changedFiles, commands);
       if (hits.length === 0) return { ok: true, reason: "" };
 
       return {

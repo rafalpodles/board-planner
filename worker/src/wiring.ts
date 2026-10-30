@@ -96,7 +96,6 @@ import { entryDirectory, workerVersion } from "./version.js";
 
 const MIN_REFRESH_INTERVAL_MS = 30_000;
 
-
 // Every ambient thing the wiring used to reach for directly. main.ts is the one place that supplies
 // none of them; a test supplies whichever it needs to watch. The point of the split is that the
 // joins between components are now assertable — in part A every whole-branch defect lived in a seam
@@ -806,6 +805,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const npmPath = resolvedToolPath("npm");
     // The same value rebind() matched this project's checkout against — the server's own record
     // of the project's repository, never re-read from repoPath/.git at execution time.
+    const gateFor: PipelineDeps["gateFor"] = (entry, runner, timeoutMs, fallbacks) =>
+      gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath, codex: codexPath }, timeoutMs, fallbacks, gateCommandsOf(taskConfig));
     const remoteUrl = bound.get(task.projectId)?.remote;
     const several = bound.get(task.projectId)?.repositories ?? [];
 
@@ -843,8 +844,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             repositories,
             executor: createExecutor(taskConfig, deps.runner, claudePath, codexPath),
             collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
-            gateFor: (entry, runner, timeoutMs, fallbacks) =>
-              gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath, codex: codexPath }, timeoutMs, fallbacks, gateCommandsOf(taskConfig)),
+            gateFor,
             gitPath,
             recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
             logError: deps.logError,
@@ -875,8 +875,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           ),
           executor: createExecutor(taskConfig, deps.runner, claudePath, codexPath),
           collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
-          gateFor: (entry, runner, timeoutMs, fallbacks) =>
-            gateFromEntry(entry, runner, { git: gitPath, npm: npmPath, claude: claudePath, codex: codexPath }, timeoutMs, fallbacks, gateCommandsOf(taskConfig)),
+          gateFor,
           gitPath,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           logError: deps.logError,
