@@ -168,11 +168,11 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mongo:
-        image: mongo:7
+        image: mongo:4.4
         ports:
           - 27017:27017
         options: >-
-          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-cmd "mongo --quiet --eval 'db.runCommand({ ping: 1 })'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -220,6 +220,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     env:
+      # Not the 4.4 of every other job: MongoDB publishes no macOS arm64 build of it
       MONGODB_VERSION: 7.0.14
     steps:
       - uses: actions/checkout@v7
@@ -289,11 +290,11 @@ jobs:
       contents: read
     services:
       mongo:
-        image: mongo:7
+        image: mongo:4.4
         ports:
           - 27017:27017
         options: >-
-          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-cmd "mongo --quiet --eval 'db.runCommand({ ping: 1 })'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
@@ -407,11 +408,11 @@ jobs:
         shard: [1, 2, 3]
     services:
       mongo:
-        image: mongo:7
+        image: mongo:4.4
         ports:
           - 27017:27017
         options: >-
-          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-cmd "mongo --quiet --eval 'db.runCommand({ ping: 1 })'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
