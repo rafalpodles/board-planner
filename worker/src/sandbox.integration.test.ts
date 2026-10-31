@@ -467,7 +467,8 @@ describe.skipIf(!onMac)("confine against the real sandbox", { timeout: 60_000 },
    * BP-720. A daemon fetches outside the profile, so `network-outbound` never sees it: each of these
    * reached a listener from a process with no network at all. The listener is on 127.0.0.1, which
    * loopback mode allows the process itself, so a request arriving there in loopback mode can only
-   * have come from a daemon the deny did not stop. Open mode is the control.
+   * have come from a daemon the deny did not stop. Open mode is the control. trustd on macOS 15.8.2
+   * refuses a private address by itself, so its control is that it answers at all (BP-1116).
    */
   describe("a fetch a daemon performs on the process's behalf", () => {
     let seen: string[] = [];
@@ -503,10 +504,14 @@ describe.skipIf(!onMac)("confine against the real sandbox", { timeout: 60_000 },
       seen = [];
     });
 
-    async function confinedRun(command: string, args: string[], network?: "open" | "loopback") {
+    function confinedProcess(command: string, args: string[], network?: "open" | "loopback") {
       const spawn = confine(command, args, { writable: [worktree], network, env: {} });
       if (!("command" in spawn)) throw new Error(`refused: ${spawn.refusal}`);
-      await runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 30_000 });
+      return runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 30_000 });
+    }
+
+    async function confinedRun(command: string, args: string[], network?: "open" | "loopback") {
+      await confinedProcess(command, args, network);
       await new Promise((done) => setTimeout(done, 1500));
       return seen.join(" ");
     }
@@ -529,12 +534,19 @@ describe.skipIf(!onMac)("confine against the real sandbox", { timeout: 60_000 },
 
     it.each([
       ["nsurlsessiond", "/usr/bin/osascript", backgroundSession, "/nsurl-DUMMY"],
-      ["trustd", "/usr/bin/security", verifyCert, "/ocsp-DUMMY"],
       ["WebKit's networking process", "/usr/bin/osascript", webView, "/webkit-DUMMY"],
     ])("%s fetches in open mode — the control — and not in loopback mode", async (_, command, args, path) => {
       expect(await confinedRun(command, args())).toContain(path);
       seen = [];
       expect(await confinedRun(command, args(), "loopback")).not.toContain("DUMMY");
+    }, 60_000);
+
+    it("trustd evaluates a certificate in open mode — the control — and not in loopback mode", async () => {
+      const evaluate = ["verify-cert", "-c", join(pki, "leaf.pem"), "-r", join(pki, "ca.pem"), "-p", "ssl"];
+
+      expect((await confinedProcess("/usr/bin/security", evaluate)).stdout).toContain("verification successful");
+      expect((await confinedProcess("/usr/bin/security", evaluate, "loopback")).stdout).not.toContain("verification successful");
+      expect(await confinedRun("/usr/bin/security", verifyCert(), "loopback")).not.toContain("DUMMY");
     }, 60_000);
   });
 
