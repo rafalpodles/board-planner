@@ -546,6 +546,7 @@ describe.skipIf(!onMac)("confine against the real sandbox", { timeout: 60_000 },
 
       expect((await confinedProcess("/usr/bin/security", evaluate)).stdout).toContain("verification successful");
       expect((await confinedProcess("/usr/bin/security", evaluate, "loopback")).stdout).not.toContain("verification successful");
+      seen = [];
       expect(await confinedRun("/usr/bin/security", verifyCert(), "loopback")).not.toContain("DUMMY");
     }, 60_000);
   });

@@ -451,7 +451,8 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   fetch a URL on a process's behalf, outside the profile, are denied by name in those two commands:
   nsurlsessiond (a background `NSURLSession`), trustd (the AIA and OCSP URLs of a certificate the
   test hands it) and WebKit's networking process — each reached a listener from a process with no
-  network at all. That is a denylist, and it closes those three, not the category. What else this
+  network at all, trustd only where it still fetches from a private address, which macOS 15.8.2's
+  refused. That is a denylist, and it closes those three, not the category. What else this
   does not close: seatbelt's `localhost` is every address this machine holds, so a listener here
   that forwards — an HTTP proxy, an SSH tunnel — is still a way out, and it ignores an IPv6 scope,
   so `fe80::1%en0` or `%utun0` is let through and a packet goes out on that link (narrowing it to
