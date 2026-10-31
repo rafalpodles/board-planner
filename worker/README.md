@@ -69,12 +69,9 @@ registration mints.
 | `CP_WORKER_NAME` | yes | — |
 | `CP_STATE_DIR` | no | `~/.boardplanner` |
 | `CP_ALLOW_UNCONFINED_AGENT` | no | unset |
-| `CP_ALLOW_INSTALL_NETWORK` | no | unset |
 
-The last two are not bootstrap and not settings: they are risk acceptances, and the only other
-things read from the environment. `CP_ALLOW_INSTALL_NETWORK` gives a project's own install command
-the network (see **A project's own gate commands**). `CP_ALLOW_UNCONFINED_AGENT` runs the agent with
-nothing confining its writes. For both, `1`, `true` and
+The last one is not bootstrap and not a setting: it is a risk acceptance, and the only other thing
+read from the environment. It runs the agent with nothing confining its writes. `1`, `true` and
 `yes` all mean yes, after trimming and lower-casing; anything else, including `0` and `false`,
 leaves the confinement on. See **Safety** for what accepting it means and why it is not a policy
 field. Everything else an operator can choose is worker policy, below.
@@ -1049,64 +1046,59 @@ one stale line must not cost this machine every other checkout it could serve.
 
 ## A project's own gate commands
 
-By default the Builds gate runs `npm ci --ignore-scripts` and `npm run build`, and the Tests gate
-runs `npm test`, at the repository's root. A project's owner can replace them in Settings → Workers
-with an install command, a build command, a test command and a working directory (**BP-985**). The
-values travel in the assignment like the rest of the project's policy; nothing is read from the
-checkout, and a machine credential cannot set them.
+By default the Builds gate runs `npm ci --ignore-scripts` and `npm run build`, and the Tests gate runs
+`npm test`, at the repository's root. From 1.10.0 a project's owner can replace them in Settings →
+Workers with an install command, a build command, a test command and a working directory (**BP-985**).
+The values travel in the assignment like the rest of the project's policy; nothing is read from the
+checkout, and a machine credential cannot set them. A worker says `gate-commands` in
+`X-CP-Capabilities`, and one that does not is neither offered nor given such a project, because it
+would run npm and report that as the project's check.
 
-- **No shell.** A command is words split on spaces. Quotes, `$`, `;`, `|`, `&`, `<` and `>` are
-  refused where it is saved and again in `applyPolicy`. The program is a bare name found on the
-  worker's own `PATH`, or `./path` from the working directory. A pipeline belongs in a script.
-- **Any command set means the project has left npm.** An empty install is then no install. A Builds
-  gate with neither an install nor a build command, and a Tests gate with no test command, refuse
-  and name the setting rather than pass having judged nothing. A working directory on its own keeps
-  npm, in that directory; it is resolved in the worktree and refused if any part of it is a symlink.
-- **The same confinement, with one home more.** Writes go to the worktree, the command's own temp
-  directory and a home of the run's own (`HOME`, with `CFFIXED_USER_HOME` and
+- **The opposite trade from the npm gates.** Those keep reads open and shut the network. These are
+  chosen by a person who may not own the machine, and development needs the network, so they keep the
+  network and shut the home: `sealedHomes` in `sandbox.ts` refuses `file-read-data` under the real
+  home, but for the worktree, the run's home, the clone's `.git`, the worker's `PATH` directories and
+  the program's own directory. Exact directories: `~/.cargo/bin` must not open
+  `~/.cargo/credentials.toml`. It also denies the login keychain's daemon, sockets under the home, and
+  launchd's ssh-agent socket. Measured on macOS 26.7: a planted file, `ls ~/.ssh` and
+  `security show-keychain-info` refused, while the network, git, go, python3, pip3, mvn, gradle and a
+  node under `~/.nvm` run. What it leaves open: files outside the home, a file's name and size by its
+  full path, and services on this machine. With the network on, what it can read it can send, so the
+  clone's git config is exposed. `CP_ALLOW_UNCONFINED_AGENT` drops all of it.
+- **No shell.** A command is words split on spaces. Anything a shell would act on is refused where it
+  is saved and again in `applyPolicy`, and so is a password in a URL, since a command reaches the
+  agent's prompt, the pull request and the audit log. The program is a bare name found on the worker's
+  own `PATH`, or `./path` from the working directory. A pipeline belongs in a script.
+- **Any command set means the project has left npm.** An empty install is then no install. A working
+  directory on its own keeps npm, in that directory; it is resolved in the worktree, checked again
+  before each command, and refused if any part of it is a symlink.
+- **A home of the run's own**, `<worktree>.home`: `HOME`, with `CFFIXED_USER_HOME` and
   `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=…` because the JVM reads neither `HOME` nor `TMPDIR` on macOS,
-  which also prints a "Picked up JAVA_TOOL_OPTIONS" line on stderr), beside the worktree under a
-  root no confined process can write, kept from install to test and removed with the worktree. Not
-  a shared cache: code one project's install ran could poison another's, and pip checks no lockfile hash the way npm does. So every run with the network downloads again, and a
-  version manager that lives under your real home (pyenv shims, rustup proxies) will not find its
-  toolchains: put the real binary on the worker's `PATH`.
-- **A custom install has no direct connection off the machine unless you say so.** `npm ci` keeps
-  the network because `--ignore-scripts` and the pins above stop the repository's code running
-  during it, on npm 11; npm 10 ignores `allow-git`, so **BP-812** stays open there. `pip install .`,
-  `build.rs` and a Maven plugin do run it, reads are open, and so with the network that code could
-  send off anything this user can read. Set `CP_ALLOW_INSTALL_NETWORK=1` in the worker's own
-  environment to accept that on this machine; the fleet shows the cost in amber. It is an environment
-  variable because nothing the server or the agent can reach may widen a sandbox. Without it an
-  install that needs the network fails with `operation not permitted`, and the gate's reason names
-  the variable. Build and test stay loopback-only either way, short of `CP_ALLOW_UNCONFINED_AGENT`, so a project
-  with dependencies fetches them in the install command or vendors them. That is enough for Go. pip
-  needs `--target` on Homebrew's Python, and for Maven with JUnit 5 the install that worked is `mvn test`,
-  which runs the tests with the network open. The command's home is fresh, so `~/.m2/settings.xml`,
-  `pip.conf` and registry tokens are not used. "Loopback-only" stops a direct connection off the
-  machine; **Safety** lists what it does not stop.
-- **Whose command it is.** A command runs on the machine of whoever the task is assigned to, chosen
-  by the project's owner. It is confined the way `npm test` is, and like `npm test` it can read what
-  this user can and reach what listens on this machine, so enrol a machine only on projects whose
-  owner you trust.
-- **What it runs stays out of the agent's reach.** On npm, `package.json` and `scripts/` are
-  protected so that an agent cannot change what `npm test` executes. The same list holds `gradlew`,
-  `mvnw`, `justfile`, `Taskfile.yml`, `noxfile.py`, `pytest.ini`, `conftest.py`, `build.rs`, `.cargo/`,
-  `.mvn/` and `gradle/wrapper/`, and the Protected-paths gate refuses a file a command names
-  literally, as a word of its own or after `=`: `./bin/test`, `manage.py` in `python manage.py test`,
-  `ci/test.mk` in `make --file=ci/test.mk`. A file reached any other way is not covered: `go run
-  ./cmd/check` names a directory, and `python -m ci.tests` a module. Name the file, or keep such a
-  program under a protected path. The agent is told the project's commands, so that it can leave
-  these alone rather than lose a run finding out.
-- **Before a claim.** A program a command names that is not on this machine's `PATH` makes the
-  project unusable here, with the reason, and a project on the npm gates is not claimed from without
-  npm. The worker itself no longer needs npm. Three things are only known at the gate, where each
-  refuses with the reason and spends the attempt: a `./path` program, since no checkout exists before
-  the run; a working directory the change does not have; and a gate with no command to run, since the
-  agent is known only after the claim.
-- **Test-presence** recognises the usual test files of Python, Go, Ruby, Rust (`tests/`), the JVM,
-  .NET, PHP, Swift, Elixir, Dart and C++. Rust tests inline in `src/` are not recognised: take the
-  gate out of the agent for such a repository.
-- **From 1.10.0.** A worker older than that ignores the fields and runs npm.
+  which also prints a "Picked up JAVA_TOOL_OPTIONS" line on stderr. Beside the worktree, under a root no
+  confined process can write. Kept from install to test, emptied after any step that changes the code
+  so that what one gate left cannot steer the gate after the change, and removed with the worktree.
+  Not a shared cache: code one project's install ran could poison another's, and pip checks no lockfile
+  hash the way npm does. So every run downloads again, which is why the gate's time limit here is the
+  project's step timeout rather than 10 minutes, whichever is longer.
+- **What it runs stays out of the agent's reach.** On npm, `package.json` and `scripts/` are protected
+  so that an agent cannot change what `npm test` executes. On a project's own commands
+  `OWN_COMMANDS_FILE` does the same for `gradlew`, `mvnw`, `justfile`, `conftest.py`, `GNUmakefile`,
+  `go.work` and the like, and the Protected-paths gate refuses a file a command names: as a word, after
+  `=` or a short option, or as the module of `-m`, in any case, because macOS runs `bin/test` for
+  `./bin/Test`. The agent is told the commands. A list closes names and not the category: `go run
+  ./cmd/check` names a directory, and a test can gut a suite from inside a test file.
+- **What a passed gate left is the gate's.** pytest's cache and a venv each carry a `.gitignore` of `*`,
+  which is how a hidden file looks, so `hiddenFromGit` takes the baseline after a passed gate as read,
+  at the next gate, the next commit and delivery. A step that writes the same thing is still refused.
+- **Before anybody pays.** A program a command names that is not on this machine's `PATH` makes the
+  project unusable here, with the reason. `gateConfigFault` stops the run before the first step for a
+  gate with no command, or a `./path` that is missing or not executable. A working directory the
+  checkout lacks is left to the gate: the task may be the one that creates it. A project on the npm
+  gates is not claimed from without npm; the worker itself no longer needs it.
+- **Test-presence** recognises other ecosystems' test files on these projects only: on the npm gates a
+  `foo_test.py` is a file `npm test` never runs. Rust tests inline in `src/` are not recognised.
+- **Whose command it is.** It runs on the machine of whoever the task is assigned to, chosen by the
+  project's owner, who can change it at any time. Run a worker only on projects whose owner you trust.
 
 ## A project that lists several repositories
 
