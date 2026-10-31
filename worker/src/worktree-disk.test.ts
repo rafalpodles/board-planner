@@ -48,7 +48,7 @@ describe("a gate home on disk", () => {
     expect(() => nodeWorktreeDisk.makeDir(join(dir, "home"))).toThrow(/EEXIST/);
   });
 
-  it("removes a tree without ever throwing, even one it cannot find", () => {
+  it("says nothing of a tree it cannot find", () => {
     dir = mkdtempSync(join(tmpdir(), "bp985-disk-"));
 
     expect(() => removeTree(join(dir, "gone"))).not.toThrow();

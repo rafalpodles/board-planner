@@ -176,6 +176,15 @@ describe("gateFromEntry", () => {
     expect(verdict.reason).toContain("bin/test");
   });
 
+  it("hands the test-presence gate the project's commands, or a Go test is not one", async () => {
+    const own = gateCommandsOf({ testCommand: "go test ./..." });
+    const context = { ...ctx(5), diff: { ...ctx(5).diff, changedFiles: ["a.go", "a_test.go"], patch: "+++ b/a_test.go\n+x" } };
+
+    const verdict = await gateFromEntry(entry({ gateKind: "test-presence" }), idleRunner, tools, 1000, FALLBACKS, own)!.run(context);
+
+    expect(verdict.ok).toBe(true);
+  });
+
   // That this list IS the catalog's is asserted in catalog-contract.test.ts, which reads the app's
   // source rather than importing it — drift is what makes a run die mid-task with "this worker
   // implements no gate of kind …", after the agent has already done the work.

@@ -959,6 +959,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     const blocked = Object.fromEntries((run.localConfig?.().projects ?? []).map((project) => [project.project, project.blocked]));
     expect(blocked.p1).toContain("no-such-tool-bp985");
+    expect(Object.keys(blocked).sort()).toEqual(["p1", "p2"]);
     expect(blocked.p2 ?? "").not.toContain("no-such-tool-bp985");
   });
 

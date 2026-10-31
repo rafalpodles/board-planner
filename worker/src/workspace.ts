@@ -111,7 +111,7 @@ export interface Worktree {
    */
   gateHome: RecordedDir;
   /**
-   * Replaces it with an empty one, after a step that could write: the next gate judges a new tree and
+   * Replaces it with an empty one, after a step that committed: the next gate judges a new tree and
    * must start clean. Never by emptying: a gate command can swap the directory for a link to the real
    * home, and this runs unconfined. `discard` moves whatever is there aside and follows nothing.
    */

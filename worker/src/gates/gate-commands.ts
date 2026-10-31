@@ -1,8 +1,9 @@
-import { accessSync, constants, lstatSync, readdirSync, statSync } from "node:fs";
+import { accessSync, constants, lstatSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import { Runner } from "../exec.js";
 import { agentEnv } from "../env.js";
 import { firstOnPath } from "../node-engines.js";
+import { RecordedDir } from "../sandbox.js";
 import { programDirectory } from "../sealed-home.js";
 import { GateContext, GateResult } from "../types.js";
 import { outputTail, refused, runConfinedProgram } from "./confined-npm.js";
@@ -97,6 +98,8 @@ interface OwnStep {
  * judged again before each: the install has just run code from the checkout, and that code can have
  * replaced it.
  */
+const installedInto = new WeakSet<RecordedDir>();
+
 async function runOwnSteps(runner: Runner, steps: OwnStep[], directory: string, timeoutMs: number, context: GateContext): Promise<GateResult> {
   const deadline = Date.now() + timeoutMs;
 
@@ -123,16 +126,9 @@ async function runOwnSteps(runner: Runner, steps: OwnStep[], directory: string, 
     if (result.code !== 0) {
       return { ok: false, reason: `the ${label} command failed (exit ${result.code}):\n${outputTail(result)}` };
     }
+    if (label === "install") installedInto.add(context.gateHome);
   }
   return { ok: true, reason: "", commands: steps.map((step) => named(step.command, directory)) };
-}
-
-function isEmptyDirectory(path: string): boolean {
-  try {
-    return readdirSync(path).length === 0;
-  } catch {
-    return false;
-  }
 }
 
 const NO_BUILD_COMMAND =
@@ -151,8 +147,9 @@ export function runOwnBuild(runner: Runner, commands: GateCommands, timeoutMs: n
 export function runOwnTests(runner: Runner, commands: GateCommands, timeoutMs: number, context: GateContext): Promise<GateResult> {
   if (!commands.testCommand) return Promise.resolve({ ok: false, reason: NO_TEST_COMMAND });
   const steps: OwnStep[] = [{ label: "test", command: commands.testCommand }];
-  // What an install put in the home is gone once a step has committed, and a sequence may have no build gate
-  if (commands.installCommand && isEmptyDirectory(context.gateHome.path)) steps.unshift({ label: "install", command: commands.installCommand });
+  // A sequence may have no build gate, and a step's commit replaces the home. An empty home would not
+  // say which: a venv in the worktree leaves it empty, and installing again would undo the build
+  if (commands.installCommand && !installedInto.has(context.gateHome)) steps.unshift({ label: "install", command: commands.installCommand });
   return runOwnSteps(runner, steps, commands.workingDirectory, timeoutMs, context);
 }
 
@@ -170,7 +167,9 @@ export function gateConfigFault(sequence: { gateKind?: string }[], commands: Gat
   const place = gateDirectory(worktreePath, commands.workingDirectory);
   if ("reason" in place) return null;
   // The first alone: an install is what makes `./.venv/bin/pytest` exist for the command after it
-  const [first] = [...(hasBuild ? [commands.installCommand, commands.buildCommand] : []), ...(hasTests ? [commands.installCommand, commands.testCommand] : [])].filter(Boolean);
+  const first = sequence
+    .flatMap(({ gateKind }) => (gateKind === "build" ? [commands.installCommand, commands.buildCommand] : gateKind === "test-run" ? [commands.installCommand, commands.testCommand] : []))
+    .find(Boolean);
   const program = first ? gateProgramOf(first) : "";
   if (program.startsWith("./") && !resolveGateProgram(program, place.path, "")) {
     return `${program} is named by a gate command, and this checkout has no such executable file`;

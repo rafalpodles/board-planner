@@ -302,11 +302,14 @@ function sealedHomeRules(homeNames: string[], readableNames: string[], ancestorN
   ];
 }
 
-// Every directory from a path up to the home it sits under, the home included
+export const directoryHolds = (directory: string, path: string): boolean =>
+  path === directory || path.startsWith(directory === "/" ? "/" : `${directory}/`);
+
+// Every directory from a path up to the outermost home it sits under, that home included
 function ancestorsUnder(homes: string[], paths: string[]): string[] {
   const found = new Set<string>();
   for (const path of paths) {
-    const home = homes.find((candidate) => path.startsWith(`${candidate}/`));
+    const [home] = homes.filter((candidate) => path.startsWith(`${candidate}/`)).sort((a, b) => a.length - b.length);
     if (!home) continue;
     for (let parent = dirname(path); parent.length >= home.length; parent = dirname(parent)) found.add(parent);
   }
@@ -360,6 +363,8 @@ export function confine(command: string, args: string[], options: ConfineOptions
 
   const names = resolved.map((_, index) => `W${index}`);
   const homes = options.sealedHomes?.homes ?? [];
+  const opensAHome = resolved.find((path) => homes.some((home) => directoryHolds(path, home)));
+  if (opensAHome) return { refusal: `refusing to shut a home and leave ${opensAHome} open: it holds that home` };
   const homeNames = homes.map((_, index) => `H${index}`);
   const readable = options.sealedHomes ? [...resolved, ...options.sealedHomes.readable] : [];
   const readableNames = readable.map((_, index) => `R${index}`);

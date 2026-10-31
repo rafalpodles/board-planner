@@ -679,13 +679,13 @@ export async function runTask(
     let ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, worktree.path);
 
     const onOwnCommands = usesOwnCommands(gateCommandsOf(config));
-    // Here and not at the gate, which is after the step somebody pays for. Released, attempt refunded:
-    // every task of this project meets the same settings, and charging each would walk the queue into
-    // escalation over one field somebody has only to fill in
+    // Here and not at the gate, which is after the step somebody pays for. Failed and not released: a
+    // refund would hold this task at the head of the queue for ever, with the tasks of agents the fault
+    // does not touch behind it. The pass ends, so one wrong setting takes a task a poll, not the queue
     const configFault = gateConfigFault(task.agent.sequence, gateCommandsOf(config), worktree.path);
     if (configFault) {
-      settle("machineFault", configFault);
-      await reporter.released(task, `this run stopped before any step: ${configFault}`);
+      settle("failed", configFault);
+      await reporter.failed(task, `this run stopped before any step: ${configFault}`);
       return "machine-fault";
     }
 
@@ -831,7 +831,7 @@ export async function runTask(
               // committed: `rev-parse` can fail after `commit` succeeded, and "nothing was
               // committed" would then be the one sentence a person checks and finds untrue.
               `${entry.name} failed: ${outcome.message}${
-                state.uncommittedWork ? keptWorktree(worktree.path) : ""
+                state.committed || state.uncommittedWork ? keptWorktree(worktree.path) : ""
               }`,
             );
           }

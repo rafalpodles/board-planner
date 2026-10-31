@@ -54,6 +54,24 @@ const deletedTestHunk = (path: string) => [
   ' it("works", () => {});',
 ];
 
+const OWN_TEST_FILES = [
+  "tests/test_login.py",
+  "app/login_test.py",
+  "pkg/login_test.go",
+  "tests/login.rs",
+  "src/test/java/LoginTest.java",
+  "LoginTest.kt",
+  "spec/login_spec.rb",
+  "Tests/LoginTests.swift",
+  "test/login_test.exs",
+  "test/login_test.dart",
+  "src/login_test.cc",
+  "Tests/URLTests.swift",
+  "tests/APITest.php",
+  "app/src/androidTest/java/JWTTest.kt",
+  "src/main/java/LoginIT.java",
+  ];
+
 describe("testPresenceGate", () => {
   it("accepts a diff that adds lines to a test file", async () => {
     const result = await testPresenceGate().run(
@@ -65,30 +83,14 @@ describe("testPresenceGate", () => {
     expect(result.ok).toBe(true);
   });
 
-  it.each([
-    "tests/test_login.py",
-    "app/login_test.py",
-    "pkg/login_test.go",
-    "tests/login.rs",
-    "src/test/java/LoginTest.java",
-    "LoginTest.kt",
-    "spec/login_spec.rb",
-    "Tests/LoginTests.swift",
-    "test/login_test.exs",
-    "test/login_test.dart",
-    "src/login_test.cc",
-    "Tests/URLTests.swift",
-    "tests/APITest.php",
-    "app/src/androidTest/java/JWTTest.kt",
-    "src/main/java/LoginIT.java",
-  ])("takes %s for a test, so a repository on its own gate commands can pass", async (path) => {
+  it.each(OWN_TEST_FILES)("takes %s for a test, so a repository on its own gate commands can pass", async (path) => {
     const verdict = await testPresenceGate(OWN).run(context({ changedFiles: ["src/login.x", path], patch: [`+++ b/${path}`, "+assert ok"].join("\n") }));
 
     expect(verdict).toMatchObject({ ok: true });
   });
 
-  it("takes none of those for a test on the npm gates, where `npm test` never runs them", async () => {
-    const verdict = await testPresenceGate().run(context({ changedFiles: ["src/billing.ts", "tools/foo_test.py"], patch: ["+++ b/tools/foo_test.py", "+assert ok"].join("\n") }));
+  it.each(OWN_TEST_FILES)("does not take %s for a test on the npm gates, where `npm test` never runs it", async (path) => {
+    const verdict = await testPresenceGate().run(context({ changedFiles: ["src/billing.ts", path], patch: [`+++ b/${path}`, "+assert ok"].join("\n") }));
 
     expect(verdict).toMatchObject({ ok: false, reason: "no test file was added or changed" });
   });

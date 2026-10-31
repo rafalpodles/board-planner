@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { dirReplaced, RecordedDir } from "./sandbox.js";
 import { ApiClient } from "./api.js";
 import { WorkerConfig } from "./config.js";
 import { Delivery } from "./delivery.js";
@@ -70,7 +71,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
   function run(
     sequence: SnapshotEntry[],
     steps: Record<string, (path: string) => void>,
-    gates: Record<string, (path: string, home: string) => void> = {},
+    gates: Record<string, (path: string, home: string, recorded: RecordedDir) => void> = {},
     afterCreate: (path: string) => void = () => {},
     seenAt: (created: string) => string = (created) => created,
     config: Partial<WorkerConfig> = {},
@@ -97,7 +98,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
       name: entry.name,
       run: async ({ worktreePath, gateHome }) => {
         ran.push(entry.key);
-        gates[entry.key]?.(worktreePath, gateHome.path);
+        gates[entry.key]?.(worktreePath, gateHome.path, gateHome);
         return { ok: true, reason: "" };
       },
     });
@@ -366,12 +367,16 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
 
   it("empties the gate home after a step, so what one gate left cannot steer the gate after the change", async () => {
     const seen: boolean[] = [];
+    const replaced: (string | null)[] = [];
     const h = run(
       [IMPLEMENT, BUILD, FIX, TEST, PUSH],
       {},
       {
         build: (_path, home) => write(home, "planted", "x\n"),
-        "test-run": (_path, home) => seen.push(existsSync(join(home, "planted"))),
+        "test-run": (_path, home, recorded) => {
+          seen.push(existsSync(join(home, "planted")));
+          replaced.push(dirReplaced(recorded));
+        },
       },
       undefined,
       undefined,
@@ -380,6 +385,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
     await h.done;
 
     expect(seen).toEqual([false]);
+    expect(replaced).toEqual([null]);
   });
 
   // The worker empties the home unconfined, and a gate command can write to the directory that holds

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isProtectedPath,
   isWorkflowPath,
+  protectedPaths,
   protectedPathsGate,
   PROTECTED_PATHS_BRIEF,
   workflowPaths,
@@ -423,5 +424,13 @@ describe("a change that moves a submodule pointer", () => {
     const result = await gate.run(context(["package.json", "vendor/thing"], [], ["vendor/thing"]));
 
     expect(result.reason).toMatch(/submodule pointer/);
+  });
+});
+
+describe("what a project's own commands run, wherever it sits", () => {
+  const commands = gateCommandsOf({ testCommand: "go test ./..." });
+
+  it.each(["tests/conftest.py", "services/api/gradlew", "Justfile", "noxfile.py", "pytest.ini", ".mvn/maven.config"])("refuses %s", (path) => {
+    expect(protectedPaths([path, "docs/x.txt"], commands)).toEqual([path]);
   });
 });

@@ -75,17 +75,46 @@ describeOnMac("the Builds gate on a project's own commands", () => {
     expect(profileOf(install)).toContain(context.gateHome.path);
   });
 
-  it("installs before the tests when the home is empty, and not when an install left something there", async () => {
-    const { run, runner } = recording();
-    const installed = commands({ installCommand: "sh i", testCommand: "sh t" });
+  describe("the install the tests need", () => {
+    const installed = commands({ installCommand: "sh i", buildCommand: "sh b", testCommand: "sh t" });
+    const ran = (run: ReturnType<typeof recording>["run"]) => run.mock.calls.map(([, args]) => lastWords(args, 1)[0]);
 
-    await testRunGate(runner, NPM, TIMEOUT_MS, installed).run(context);
-    expect(run.mock.calls.map(([, args]) => lastWords(args, 2))).toEqual([["/bin/sh", "i"], ["/bin/sh", "t"]]);
+    it("runs first when no install has run in this home, and once", async () => {
+      const { run, runner } = recording();
 
-    run.mockClear();
-    writeFileSync(join(context.gateHome.path, ".installed"), "");
-    await testRunGate(runner, NPM, TIMEOUT_MS, installed).run(context);
-    expect(run.mock.calls.map(([, args]) => lastWords(args, 2))).toEqual([["/bin/sh", "t"]]);
+      await testRunGate(runner, NPM, TIMEOUT_MS, installed).run(context);
+      await testRunGate(runner, NPM, TIMEOUT_MS, installed).run(context);
+
+      expect(ran(run)).toEqual(["i", "t", "t"]);
+    });
+
+    // A venv in the worktree leaves the home empty, and installing again recreates it over the build
+    it("does not run again after the Builds gate's, whatever the home holds", async () => {
+      const { run, runner } = recording();
+
+      await buildGate(runner, NPM, TIMEOUT_MS, installed).run(context);
+      await testRunGate(runner, NPM, TIMEOUT_MS, installed).run(context);
+
+      expect(ran(run)).toEqual(["i", "b", "t"]);
+    });
+
+    it("runs again in a home that was replaced", async () => {
+      const { run, runner } = recording();
+
+      await buildGate(runner, NPM, TIMEOUT_MS, installed).run(context);
+      await testRunGate(runner, NPM, TIMEOUT_MS, installed).run({ ...context, gateHome: recordDir(context.gateHome.path) });
+
+      expect(ran(run)).toEqual(["i", "b", "i", "t"]);
+    });
+
+    it("does not count one that failed", async () => {
+      await buildGate(recording({ ...ok, code: 3 }).runner, NPM, TIMEOUT_MS, installed).run(context);
+      const { run, runner } = recording();
+
+      await testRunGate(runner, NPM, TIMEOUT_MS, installed).run(context);
+
+      expect(ran(run)).toEqual(["i", "t"]);
+    });
   });
 
   it("gives every command the network and seals the real home, the opposite of the npm gates", async () => {
@@ -103,9 +132,9 @@ describeOnMac("the Builds gate on a project's own commands", () => {
     }
   });
 
-  it("does not reopen the home through a PATH entry that is the home itself", async () => {
+  it("does not reopen the home through a PATH entry at or above it, or a relative one", async () => {
     const home = realpathSync(userInfo().homedir);
-    vi.stubEnv("PATH", `${home}:${dirname(home)}:/usr/bin:/bin`);
+    vi.stubEnv("PATH", `${home}:${dirname(home)}:/:.:/usr/bin:/bin`);
     const { run, runner } = recording();
 
     await testRunGate(runner, NPM, TIMEOUT_MS, commands({ testCommand: "sh t" })).run(context);
@@ -113,6 +142,8 @@ describeOnMac("the Builds gate on a project's own commands", () => {
     const opened = run.mock.calls[0][1].filter((arg) => /^R\d+=/.test(arg)).map((arg) => arg.slice(arg.indexOf("=") + 1));
     expect(opened).not.toContain(home);
     expect(opened).not.toContain(dirname(home));
+    expect(opened).not.toContain("/");
+    expect(opened).not.toContain(realpathSync(process.cwd()));
   });
 
   it("stops at a failing install, saying so", async () => {
@@ -266,7 +297,7 @@ describeOnMac("the Builds gate on a project's own commands", () => {
 });
 
 describeOnMac("the Tests gate on a project's own commands", () => {
-  it("runs the test command with the home the install filled", async () => {
+  it("runs the test command in the run's own home", async () => {
     const { run, runner } = recording();
 
     const verdict = await testRunGate(runner, NPM, TIMEOUT_MS, commands({ testCommand: "sh t -v" })).run(context);
@@ -355,6 +386,17 @@ describe("gateConfigFault, read before anybody pays for a step", () => {
     expect(gateConfigFault(sequence("test-run"), commands({ installCommand: "./gone", testCommand: "sh t" }), worktree)).toMatch(/\.\/gone/);
   });
 
+  it("goes by the order of the gates, which an agent chooses", () => {
+    const orders = commands({ buildCommand: "go build ./...", testCommand: "./gone" });
+
+    expect(gateConfigFault(sequence("test-run", "build"), orders, worktree)).toMatch(/\.\/gone/);
+    expect(gateConfigFault(sequence("build", "test-run"), orders, worktree)).toBeNull();
+  });
+
+  it("takes an install alone for what the Builds gate runs", () => {
+    expect(gateConfigFault(sequence("build"), commands({ installCommand: "sh i" }), worktree)).toBeNull();
+  });
+
   it("leaves a working directory the checkout does not have yet to the gate: the task may create it", () => {
     expect(gateConfigFault(sequence("test-run"), commands({ testCommand: "./x", workingDirectory: "new" }), worktree)).toBeNull();
   });
@@ -362,6 +404,10 @@ describe("gateConfigFault, read before anybody pays for a step", () => {
 
 describe("namedByGateCommand", () => {
   const named = commands({ testCommand: "./bin/test --fast", buildCommand: "python manage.py check", workingDirectory: "svc" });
+
+  it("finds a module of -m however deep it is", () => {
+    expect(namedByGateCommand("ci/tests/run.py", commands({ testCommand: "python3 -m ci.tests.run" }))).toBe(true);
+  });
 
   it("finds a program and a script in the working directory", () => {
     expect(namedByGateCommand("svc/bin/test", named)).toBe(true);

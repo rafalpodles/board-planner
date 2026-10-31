@@ -1089,8 +1089,9 @@ would run npm and report that as the project's check.
   which also prints a "Picked up JAVA_TOOL_OPTIONS" line on stderr. Beside the worktree, under a root no
   confined process can write. Kept from install to test, replaced after any step that commits so that
   what one gate left cannot steer the gate after the change, and removed with the worktree, which a
-  failed run keeps. The Tests gate runs the install first when it finds the home empty, which is a
-  sequence with no Builds gate or a Tests gate after a later step.
+  failed run keeps. The Tests gate runs the install first when none has passed in this home, which is
+  a sequence with no Builds gate or a Tests gate after a later commit. Remembered by the worker and not
+  read off the home, which a venv in the worktree leaves empty.
   Not a shared cache: code one project's install ran could poison another's, and pip checks no lockfile
   hash the way npm does. So every run downloads again, which is why the gate's time limit here is the
   project's step timeout rather than 10 minutes, whichever is longer.
@@ -1105,12 +1106,14 @@ would run npm and report that as the project's check.
   which is how a hidden file looks, so `hiddenFromGit` takes the baseline after a passed gate as read,
   at the next gate, the next commit and delivery. A step that writes the same thing is still refused.
 - **Before anybody pays.** A program a command names that is not on this machine's `PATH` makes the
-  project unusable here, with the reason. `gateConfigFault` hands the task back before the first step,
-  attempt refunded and the pass over, for a gate with no command, or a `./path` that is missing or not
-  executable as the first command the sequence runs: only that one, since an install makes what a later
-  one names. Every task of the project would meet the same settings, and charging each would walk the
-  queue into escalation. A working directory the checkout lacks is left to the gate: the task may be
-  the one that creates it. A project on the npm
+  project unusable here, with the reason. `gateConfigFault` fails the task before the first step, for a
+  gate with no command, or a `./path` that is missing or not executable as the first command the
+  sequence runs: only that one, since an install makes what a later one names. In a run across several
+  repositories it takes all of them, because a gate runs only where something changed. Failed and not
+  released: the fault depends on the task's agent, and a refund would keep the task at the head of the
+  queue for ever with the tasks behind it waiting. The pass ends, so one wrong setting takes a task a
+  poll. A working directory the checkout lacks is left to the gate: the task may be the one that
+  creates it. A project on the npm
   gates is not claimed from without npm; the worker itself no longer needs it.
 - **Test-presence** recognises other ecosystems' test files on these projects only: on the npm gates a
   `foo_test.py` is a file `npm test` never runs. Rust tests inline in `src/` are not recognised.

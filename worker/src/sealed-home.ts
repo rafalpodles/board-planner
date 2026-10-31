@@ -2,6 +2,7 @@ import { realpathSync } from "node:fs";
 import { userInfo } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
 import { agentEnv } from "./env.js";
+import { directoryHolds } from "./sandbox.js";
 
 function real(path: string): string {
   try {
@@ -28,7 +29,7 @@ export function sealedHomesFor(readable: string[], source?: NodeJS.ProcessEnv): 
   const path = ((source ? source.PATH : agentEnv().PATH) ?? "").split(delimiter).filter((entry) => isAbsolute(entry)).map(real);
   const beside = path.filter((entry) => basename(entry) === "bin").flatMap((entry) => [join(dirname(entry), "lib"), join(dirname(entry), "libexec")]);
   const opened = [...new Set([...readable, ...path, ...beside])];
-  return { homes, readable: opened.filter((entry) => !homes.some((home) => home === entry || home.startsWith(`${entry}/`))) };
+  return { homes, readable: opened.filter((entry) => !homes.some((home) => directoryHolds(entry, home))) };
 }
 
 /** The directory a program really lives in, which a CLI's own files sit beside. */

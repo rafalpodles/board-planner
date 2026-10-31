@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiClient } from "./api.js";
@@ -213,15 +213,29 @@ describe("a run across several repositories", () => {
     expect(run.reporter.failed).not.toHaveBeenCalled();
   });
 
-  it("hands the task back unspent, before any step, on commands that cannot pass", async () => {
+  it("fails the task before any step on commands that cannot pass, and ends the pass", async () => {
     const run = build({ commands: { buildCommand: "sh b" } });
 
     const disposition = await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, TESTS, PUSH));
 
     expect(disposition).toBe("machine-fault");
     expect(run.seen).toHaveLength(0);
-    expect(run.reporter.released).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("no test command"));
-    expect(run.reporter.failed).not.toHaveBeenCalled();
+    expect(run.reporter.failed).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("no test command"));
+    expect(run.reporter.released).not.toHaveBeenCalled();
+  });
+
+  it("does not stop a run over a program one repository lacks, whose gate may not run there", async () => {
+    write(clones.api, "gradlew", "#!/bin/sh\n");
+    chmodSync(join(clones.api, "gradlew"), 0o755);
+    git(clones.api, "add", ".");
+    git(clones.api, "commit", "-qm", "gradlew");
+    git(clones.api, "push", "-q", "origin", "HEAD:main");
+    const run = build({ commands: { testCommand: "./gradlew test" }, write: (w) => write(w.api, "api.txt", "a\n") });
+
+    await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, TESTS, PUSH));
+
+    expect(run.seen).toHaveLength(1);
+    expect(pushedTo(run, "api")).toHaveLength(1);
   });
 
   it("empties the gates' home of a repository with a new commit, and only that one", async () => {
@@ -247,6 +261,26 @@ describe("a run across several repositories", () => {
 
     expect(run.gateRuns).toHaveLength(1);
     expect(homes).toEqual({ api: false, web: true });
+  });
+
+  it("takes what a passed gate left in a repository as read, on a project's own commands", async () => {
+    const run = build({
+      commands: { testCommand: "sh t" },
+      write: (w) => write(w.api, "api.py", "a\n"),
+      gates: {
+        "test-run": async (context) => {
+          mkdirSync(join(context.worktreePath, ".pytest_cache", "v"), { recursive: true });
+          write(context.worktreePath, ".pytest_cache/.gitignore", "*\n");
+          write(context.worktreePath, ".pytest_cache/v/lastfailed", "{}\n");
+          return { ok: true, reason: "" };
+        },
+      },
+    });
+
+    await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, TESTS, GATE, PUSH));
+
+    expect(run.reporter.failed).not.toHaveBeenCalled();
+    expect(pushedTo(run, "api")).toHaveLength(1);
   });
 
   it("hands the agent every worktree, the first one its working directory", async () => {

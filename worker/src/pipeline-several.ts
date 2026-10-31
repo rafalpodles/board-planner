@@ -245,10 +245,13 @@ export async function runTaskInRepositories(
     for (const leg of legs) leg.ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, leg.worktree.path);
     const anyMerged = (): boolean => legs.some((leg) => leg.state.merged);
 
-    const configFault = legs.map((leg) => gateConfigFault(task.agent.sequence, gateCommandsOf(config), leg.worktree.path)).find(Boolean);
+    // Every repository or none: a gate runs only where the agent changes something, so a `./gradlew` one
+    // of them lacks says nothing about this task
+    const configFaults = legs.map((leg) => gateConfigFault(task.agent.sequence, gateCommandsOf(config), leg.worktree.path));
+    const configFault = configFaults.every(Boolean) ? configFaults[0] : null;
     if (configFault) {
-      settle("machineFault", configFault);
-      await reporter.released(task, `this run stopped before any step: ${configFault}`);
+      settle("failed", configFault);
+      await reporter.failed(task, `this run stopped before any step: ${configFault}`);
       return "machine-fault";
     }
 
@@ -599,7 +602,7 @@ export async function runTaskInRepositories(
       report: () =>
         reporter.requeued(
           task,
-          `${entry.name} failed: ${outcome.message}${legs.some((leg) => leg.state.uncommittedWork) ? kept() : ""}`,
+          `${entry.name} failed: ${outcome.message}${legs.some((leg) => leg.state.committed || leg.state.uncommittedWork) ? kept() : ""}`,
         ),
     });
   }

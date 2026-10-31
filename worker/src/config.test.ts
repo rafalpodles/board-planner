@@ -5,6 +5,7 @@ import { join } from "path";
 import {
   DEFAULT_POLICY,
   applyPolicy,
+  isGateCommand,
   loadBootstrap,
   localSocketPath,
   modelOr,
@@ -554,5 +555,14 @@ describe("parseAssignments and a project that lists several repositories", () =>
     const parsed = parseAssignments([entry({ repositories: "x" }), { project: "p2", remote: WEB }]);
 
     expect(parsed.map((a) => a.project)).toEqual(["p2"]);
+  });
+});
+
+describe("a gate command", () => {
+  it("takes what no shell would act on and refuses what one would", () => {
+    expect(isGateCommand("pip install -e .[dev]")).toBe(true);
+    for (const word of ["go test | tee out", "go test *.go", "go test && rm x", "go test $HOME", "go test 'x'"]) {
+      expect(isGateCommand(word)).toBe(false);
+    }
   });
 });

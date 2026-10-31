@@ -398,3 +398,21 @@ describe("the operator's escape hatch", () => {
     expect("refusal" in result).toBe(true);
   });
 });
+
+describe("a shut home", () => {
+  const sealed = (homes: string[], readable: string[], writable: string[]) =>
+    confine(CLAUDE_PATH, [], { writable, platform: "darwin", realpath: identity, lstat: aDirectory, env: {}, sealedHomes: { homes, readable } });
+
+  it("refuses to leave open what holds a home, which would be all of it", () => {
+    expect(sealed(["/Users/x"], [], ["/Users/x"])).toMatchObject({ refusal: expect.stringContaining("holds that home") });
+    expect(sealed(["/Users/x"], [], ["/Users"])).toMatchObject({ refusal: expect.stringContaining("holds that home") });
+    expect(sealed(["/Users/x"], [], ["/"])).toMatchObject({ refusal: expect.stringContaining("holds that home") });
+    expect(sealed(["/Users/x"], [], ["/Users/xy"])).not.toHaveProperty("refusal");
+  });
+
+  it("lets the parents of what stays readable answer, up to the outermost home", () => {
+    const spawn = sealed(["/Users/x/inner", "/Users/x"], ["/Users/x/inner/a/b"], ["/private/tmp/w"]);
+
+    expect((spawn as { args: string[] }).args.filter((arg) => /^A\d+=/.test(arg)).map((arg) => arg.slice(arg.indexOf("=") + 1)).sort()).toEqual(["/Users/x", "/Users/x/inner", "/Users/x/inner/a"]);
+  });
+});

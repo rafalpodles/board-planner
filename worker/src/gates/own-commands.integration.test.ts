@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunner } from "../exec.js";
 import { claimedTask } from "../__fixtures__/task.js";
-import { confine, recordDir } from "../sandbox.js";
+import { recordDir } from "../sandbox.js";
 import { GateContext } from "../types.js";
 import { buildGate } from "./build.js";
 import { gateCommandsOf, GateCommands } from "./gate-commands.js";
@@ -126,8 +126,7 @@ describe.skipIf(!onMac)("a project's own gate commands against the real sandbox"
       expect(got).toContain("exit 1");
     });
 
-    // Seatbelt matches paths, so a hard link would be a second, allowed path to the same file. What
-    // stops one is that the home is not writable, and this holds that in place
+    // Seatbelt matches paths, so a hard link would be a second, allowed path to the same file
     it("refuses a hard link to a file in the real home", async () => {
       script("link.sh", `ln "${join(canary, "id_ed25519")}" linked 2> error.txt; echo "exit $?" >> error.txt`);
 
@@ -192,10 +191,90 @@ net.createServer((s) => s.end()).listen(socket, () => net.connect(socket)
       expect(JSON.parse(readFileSync(join(inHome, "saw.json"), "utf8"))).toEqual({ absent: "ENOENT", planted: "ENOENT", stat: "ENOENT", parent: "answered", socket: "reached" });
     });
 
-    it("refuses the socket launchd gives an ssh agent", () => {
-      const spawn = confine("/usr/bin/true", [], { writable: [worktree], sealedHomes: { homes: ["/Users/x"], readable: [] } });
+    it("refuses the socket launchd gives an ssh agent", async () => {
+      const directory = `/private/tmp/com.apple.launchd.bp985-${process.pid}`;
+      mkdirSync(directory);
+      try {
+        const socket = join(directory, "Listeners");
+        const server = createNetServer((peer) => peer.end()).listen(socket);
+        await new Promise((done) => server.once("listening", done));
+        const connect = `require('net').connect('${socket}').on('connect', () => { console.log('reached'); process.exit(0); }).on('error', (e) => { console.log(e.code); process.exit(0); })`;
+        script("agent.sh", `"${process.execPath}" -e "${connect}" > agent.txt 2>&1`);
 
-      expect(JSON.stringify(spawn)).toContain("com\\\\.apple\\\\.launchd");
+        await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./agent.sh" })).run(context);
+        server.close();
+
+        expect(readFileSync(join(worktree, "agent.txt"), "utf8")).toContain("EPERM");
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses the keychain's daemon", async () => {
+      script("keychain.sh", `/usr/bin/security show-keychain-info /Library/Keychains/System.keychain > keychain.txt 2>&1; echo "exit $?" >> keychain.txt`);
+
+      await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./keychain.sh" })).run(context);
+
+      expect(readFileSync(join(worktree, "keychain.txt"), "utf8")).not.toContain("exit 0");
+    });
+
+    it("shuts a HOME that is not the account's, and the account's while HOME names another", async () => {
+      const other = realpathSync(mkdtempSync(join(tmpdir(), "bp985-home-")));
+      writeFileSync(join(other, "id_ed25519"), "fake-secret-bp985\n");
+      vi.stubEnv("HOME", other);
+      script("steal.sh", `cat "${join(other, "id_ed25519")}" "${join(canary, "id_ed25519")}" > got.txt 2>&1; true`);
+
+      await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./steal.sh" })).run(context);
+      rmSync(other, { recursive: true, force: true });
+
+      expect(readFileSync(join(worktree, "got.txt"), "utf8")).not.toContain("fake-secret-bp985");
+    });
+
+    it("does not open the home for a PATH entry of /", async () => {
+      vi.stubEnv("PATH", "/:/usr/bin:/bin");
+      script("steal.sh", `cat "${join(canary, "id_ed25519")}" > got.txt 2>&1; true`);
+
+      await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./steal.sh" })).run(context);
+
+      expect(readFileSync(join(worktree, "got.txt"), "utf8")).not.toContain("fake-secret-bp985");
+    });
+
+    function underTheHome() {
+      const inHome = join(canary, "cp-worktrees", "wt");
+      mkdirSync(inHome, { recursive: true });
+      mkdirSync(`${inHome}.home`);
+      const at = { ...context, worktreePath: inHome, worktreeDir: recordDir(inHome), gateHome: recordDir(`${inHome}.home`), checkoutGitDir: join(inHome, ".git") };
+      return { inHome, at };
+    }
+
+    it("reads back what an install left when the worktree root is under the home, as on a real machine", async () => {
+      const { inHome, at } = underTheHome();
+      writeFileSync(join(inHome, "install.sh"), '#!/bin/sh\nmkdir -p "$HOME/deps" && echo fetched > "$HOME/deps/module"\n');
+      writeFileSync(join(inHome, "check.sh"), '#!/bin/sh\ntest "$(cat "$HOME/deps/module")" = fetched\n');
+      chmodSync(join(inHome, "install.sh"), 0o755);
+      chmodSync(join(inHome, "check.sh"), 0o755);
+
+      const verdict = await buildGate(runner, NOT_NPM, TIMEOUT_MS, own({ installCommand: "./install.sh", buildCommand: "./check.sh" })).run(at);
+
+      expect(verdict).toMatchObject({ ok: true });
+    });
+
+    it("runs a program on PATH that is a link into the home, and reads the lib beside a bin there", async () => {
+      mkdirSync(join(canary, "tool", "bin"), { recursive: true });
+      mkdirSync(join(canary, "tool", "lib"));
+      writeFileSync(join(canary, "tool", "lib", "module"), "code\n");
+      writeFileSync(join(canary, "tool", "bin", "tool"), `#!/bin/sh\ncat "${join(canary, "tool", "lib", "module")}"\n`);
+      chmodSync(join(canary, "tool", "bin", "tool"), 0o755);
+      writeFileSync(join(canary, "tool", "bin", "plain"), "#!/bin/sh\nexit 0\n");
+      chmodSync(join(canary, "tool", "bin", "plain"), 0o755);
+      mkdirSync(join(root, "bin"));
+      symlinkSync(join(canary, "tool", "bin", "plain"), join(root, "bin", "linked"));
+
+      vi.stubEnv("PATH", `${join(canary, "tool", "bin")}:/usr/bin:/bin`);
+      expect(await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "tool" })).run(context)).toMatchObject({ ok: true });
+
+      vi.stubEnv("PATH", `${join(root, "bin")}:/usr/bin:/bin`);
+      expect(await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "linked" })).run(context)).toMatchObject({ ok: true });
     });
 
     it("keeps git working in a linked worktree, whose clone is under the home it cannot read", async () => {

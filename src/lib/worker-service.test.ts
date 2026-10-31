@@ -418,6 +418,7 @@ describe("the owner's reach, not the reported repos", () => {
 
     it("knows a blank command names nothing", () => {
       expect(namesGateCommands(own as never)).toBe(true);
+      expect(namesGateCommands(project({ worker: { enabled: true, policy: { workingDirectory: "services/api" }, policyOverrides: ["workingDirectory"] } }) as never)).toBe(true);
       expect(namesGateCommands(cleared as never)).toBe(false);
       expect(namesGateCommands(project() as never)).toBe(false);
     });
