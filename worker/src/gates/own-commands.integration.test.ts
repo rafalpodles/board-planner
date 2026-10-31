@@ -126,6 +126,17 @@ describe.skipIf(!onMac)("a project's own gate commands against the real sandbox"
       expect(got).toContain("exit 1");
     });
 
+    // Seatbelt matches paths, so a hard link would be a second, allowed path to the same file. What
+    // stops one is that the home is not writable, and this holds that in place
+    it("refuses a hard link to a file in the real home", async () => {
+      script("link.sh", `ln "${join(canary, "id_ed25519")}" linked 2> error.txt; echo "exit $?" >> error.txt`);
+
+      await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./link.sh" })).run(context);
+
+      expect(existsSync(join(worktree, "linked"))).toBe(false);
+      expect(readFileSync(join(worktree, "error.txt"), "utf8")).toContain("Operation not permitted");
+    });
+
     it("refuses a listing of the real home", async () => {
       script("list.sh", `ls "${canary}" > listed.txt 2> error.txt; echo "exit $?" >> error.txt`);
 

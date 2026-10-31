@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { CommandResult, Runner } from "../exec.js";
 import { UNCONFINED_ESCAPE_HATCH } from "../env.js";
 import { claimedTask } from "../__fixtures__/task.js";
@@ -92,12 +92,14 @@ describeOnMac("the Builds gate on a project's own commands", () => {
 
   it("does not reopen the home through a PATH entry that is the home itself", async () => {
     const home = realpathSync(userInfo().homedir);
-    vi.stubEnv("PATH", `${home}:/usr/bin:/bin`);
+    vi.stubEnv("PATH", `${home}:${dirname(home)}:/usr/bin:/bin`);
     const { run, runner } = recording();
 
     await testRunGate(runner, NPM, TIMEOUT_MS, commands({ testCommand: "sh t" })).run(context);
 
-    expect(run.mock.calls[0][1].filter((arg) => /^R\d+=/.test(arg) && arg.endsWith(`=${home}`))).toEqual([]);
+    const opened = run.mock.calls[0][1].filter((arg) => /^R\d+=/.test(arg)).map((arg) => arg.slice(arg.indexOf("=") + 1));
+    expect(opened).not.toContain(home);
+    expect(opened).not.toContain(dirname(home));
   });
 
   it("stops at a failing install, saying so", async () => {

@@ -205,7 +205,7 @@ export async function runConfinedProgram(
   return runInGateSandbox(
     runner,
     { ...rest, env: source, writable: [home] },
-    (confinement) => confine(programPath, args, { ...confinement, sealedHomes: { homes, readable: readable.filter((path) => !homes.includes(path)) } }),
+    (confinement) => confine(programPath, args, { ...confinement, sealedHomes: { homes, readable: readable.filter((path) => !homes.some((home) => home === path || home.startsWith(`${path}/`))) } }),
     (temp) => ({
       ...(source ? agentEnv([], source) : agentEnv()),
       HOME: home.path,
