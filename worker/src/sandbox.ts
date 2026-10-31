@@ -280,23 +280,37 @@ export const PROFILE_TAIL = [...NAMED_SERVICE_DENIES, ...OWN_SANDBOX_SIGNALS_ONL
 // For a project on its own gate commands (BP-985), which the project's owner chooses and which may run
 // on somebody else's machine with the network open. The agent's steps get it too, or a steered `Read`
 // would put a key in a test file for the next gate to send; a CLI's session then stays readable through
-// `sessionReadable`. Measured on macOS 26.7: a planted file, `ls ~/.ssh` and
-// `security show-keychain-info` are refused, while the network, git, go, python3, pip3, mvn, gradle
-// and a node under ~/.nvm all run. `file-read-data` covers a directory listing too. Metadata stays
-// readable: a file's name and size can still be probed by a full path. The keychain goes through a
-// daemon, and an ssh-agent or a password manager's agent signs for whoever connects, so reading
-// nothing would not stop either; both agents' sockets are refused by where they live.
-function sealedHomeRules(homeNames: string[], readable: string[], keychain: boolean): string[] {
+// `sessionReadable`. Everything under a shut home answers ENOENT rather than EPERM: yarn opens a
+// `.yarnrc` in every parent with no `stat` first and stops on any other error, and go and cargo do the
+// same with what they find on the way up, so to all of them it is a home with nothing in it. It also
+// keeps a name and a size from being probed. Each parent of what stays readable answers its metadata,
+// or node and java could not resolve a path through it. The keychain goes through a daemon, and an
+// ssh-agent or a password manager's agent signs for whoever connects, so reading nothing would not stop
+// either; both agents' sockets are refused by where they live, which leaves a project's own socket in
+// its worktree alone.
+function sealedHomeRules(homeNames: string[], readableNames: string[], ancestorNames: string[], writableNames: string[], keychain: boolean): string[] {
   const under = (names: string[]) => names.map((name) => `(subpath (param "${name}"))`).join(" ");
-  const allowed = readable.map((_, index) => `R${index}`);
-  const homes = homeNames;
+  const sockets = (rule: string, names: string[]) => names.map((name) => `(${rule} network-outbound (remote unix-socket (subpath (param "${name}"))))`);
   return [
-    `(deny file-read-data ${under(homes)})`,
-    ...(allowed.length ? [`(allow file-read-data ${under(allowed)})`] : []),
+    `(deny file-read* file-test-existence (with errno ENOENT) ${under(homeNames)})`,
+    ...(readableNames.length ? [`(allow file-read* file-test-existence ${under(readableNames)})`] : []),
+    ...(ancestorNames.length ? [`(allow file-read-metadata file-test-existence ${ancestorNames.map((name) => `(literal (param "${name}"))`).join(" ")})`] : []),
     ...(keychain ? [] : ['(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd"))']),
-    `(deny network-outbound (remote unix-socket ${under(homes)}))`,
+    ...sockets("deny", homeNames),
+    ...sockets("allow", writableNames),
     '(deny network-outbound (remote unix-socket (path-regex #"^/private/tmp/com\\.apple\\.launchd\\.[^/]+/Listeners$")))',
   ];
+}
+
+// Every directory from a path up to the home it sits under, the home included
+function ancestorsUnder(homes: string[], paths: string[]): string[] {
+  const found = new Set<string>();
+  for (const path of paths) {
+    const home = homes.find((candidate) => path.startsWith(`${candidate}/`));
+    if (!home) continue;
+    for (let parent = dirname(path); parent.length >= home.length; parent = dirname(parent)) found.add(parent);
+  }
+  return [...found];
 }
 
 // Rules for a mode go in `modeRules`, never after the result: the tail must come last.
@@ -345,11 +359,15 @@ export function confine(command: string, args: string[], options: ConfineOptions
   }
 
   const names = resolved.map((_, index) => `W${index}`);
-  const homeNames = (options.sealedHomes?.homes ?? []).map((_, index) => `H${index}`);
+  const homes = options.sealedHomes?.homes ?? [];
+  const homeNames = homes.map((_, index) => `H${index}`);
   const readable = options.sealedHomes ? [...resolved, ...options.sealedHomes.readable] : [];
+  const readableNames = readable.map((_, index) => `R${index}`);
+  const ancestors = ancestorsUnder(homes, readable);
+  const ancestorNames = ancestors.map((_, index) => `A${index}`);
   const modeRules = [
     ...(options.network === "loopback" ? LOOPBACK_ONLY : []),
-    ...(options.sealedHomes ? sealedHomeRules(homeNames, readable, !!options.sealedHomes.keychain) : []),
+    ...(options.sealedHomes ? sealedHomeRules(homeNames, readableNames, ancestorNames, names, !!options.sealedHomes.keychain) : []),
   ];
   return {
     command: SANDBOX_COMMAND,
@@ -357,8 +375,9 @@ export function confine(command: string, args: string[], options: ConfineOptions
       "-p",
       profileWith(names, modeRules),
       ...names.flatMap((name, index) => ["-D", `${name}=${resolved[index]}`]),
-      ...(options.sealedHomes?.homes ?? []).flatMap((home, index) => ["-D", `H${index}=${home}`]),
+      ...homes.flatMap((home, index) => ["-D", `H${index}=${home}`]),
       ...readable.flatMap((path, index) => ["-D", `R${index}=${path}`]),
+      ...ancestors.flatMap((path, index) => ["-D", `A${index}=${path}`]),
       command,
       ...args,
     ],
