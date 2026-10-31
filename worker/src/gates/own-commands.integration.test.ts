@@ -20,7 +20,7 @@ const onMac = process.platform === "darwin";
 const TIMEOUT_MS = 30_000;
 const NOT_NPM = "/nonexistent/npm";
 
-describe.skipIf(!onMac)("a project's own gate commands against the real sandbox", () => {
+describe.skipIf(!onMac)("a project's own gate commands against the real sandbox", { timeout: TIMEOUT_MS }, () => {
   let root = "";
   let worktree = "";
   let outside = "";
