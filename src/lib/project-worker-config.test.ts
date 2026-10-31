@@ -254,13 +254,13 @@ describe("resetting a field to the default", () => {
 describe("the gate commands", () => {
   it("stores each command and the working directory, and pins them", () => {
     const parsed = parseProjectWorkerConfig({
-      policy: { installCommand: " pip install -r requirements.txt ", buildCommand: "go build ./...", testCommand: "./gradlew test", workingDirectory: "services/api" },
+      policy: { installCommand: " pip install -e .[dev] ", buildCommand: "go build ./...", testCommand: "./gradlew test", workingDirectory: "services/api" },
     });
 
     expect(parsed).toMatchObject({
       ok: true,
       update: {
-        "worker.policy.installCommand": "pip install -r requirements.txt",
+        "worker.policy.installCommand": "pip install -e .[dev]",
         "worker.policy.buildCommand": "go build ./...",
         "worker.policy.testCommand": "./gradlew test",
         "worker.policy.workingDirectory": "services/api",

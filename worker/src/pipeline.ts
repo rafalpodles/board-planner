@@ -679,13 +679,14 @@ export async function runTask(
     let ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, worktree.path);
 
     const onOwnCommands = usesOwnCommands(gateCommandsOf(config));
-    // Here and not at the gate: a fault in the project's settings fails every task the same way, and
-    // the gate is after the step somebody pays for
+    // Here and not at the gate, which is after the step somebody pays for. Released, attempt refunded:
+    // every task of this project meets the same settings, and charging each would walk the queue into
+    // escalation over one field somebody has only to fill in
     const configFault = gateConfigFault(task.agent.sequence, gateCommandsOf(config), worktree.path);
     if (configFault) {
-      settle("failed", configFault);
-      await reporter.failed(task, `this run stopped before any step: ${configFault}`);
-      return;
+      settle("machineFault", configFault);
+      await reporter.released(task, `this run stopped before any step: ${configFault}`);
+      return "machine-fault";
     }
 
     for (const [position, entry] of task.agent.sequence.entries()) {
@@ -722,11 +723,10 @@ export async function runTask(
           commit: async (message) => {
             const tampered = await worktree.tampering();
             if (tampered) throw new TamperedCheckoutError(tampered);
-            const sha = await commitAll(runner, deps.gitPath, worktree.path, message, worktree.commitIdentity, worktree.baseSha, onOwnCommands ? ignoredBeforeSteps : undefined);
-            // What a gate left must not reach the gate after this step: that one judges a new tree
-            if (onOwnCommands) worktree.emptyGateHome();
-            return sha;
+            return commitAll(runner, deps.gitPath, worktree.path, message, worktree.commitIdentity, worktree.baseSha, onOwnCommands ? ignoredBeforeSteps : undefined);
           },
+          // What a gate left must not reach the gate after this step: that one judges a new tree
+          treeChanged: onOwnCommands ? () => worktree.emptyGateHome() : undefined,
           tampering: () => worktree.tampering(),
           state,
           timeoutMs: budget.forEntry(config.taskTimeoutMs),

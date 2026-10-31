@@ -247,9 +247,9 @@ export async function runTaskInRepositories(
 
     const configFault = legs.map((leg) => gateConfigFault(task.agent.sequence, gateCommandsOf(config), leg.worktree.path)).find(Boolean);
     if (configFault) {
-      settle("failed", configFault);
-      await reporter.failed(task, `this run stopped before any step: ${configFault}`);
-      return;
+      settle("machineFault", configFault);
+      await reporter.released(task, `this run stopped before any step: ${configFault}`);
+      return "machine-fault";
     }
 
     for (const [position, entry] of task.agent.sequence.entries()) {
@@ -382,6 +382,7 @@ export async function runTaskInRepositories(
     if (entry.capability === "edit") {
       // Every repository is committed, or the step fails: what the agent wrote is in the trees and in
       // no history until each commit has happened
+      const changed: Leg[] = [];
       for (const leg of legs) {
         try {
           const tamperedNow = await leg.worktree.tampering();
@@ -395,10 +396,10 @@ export async function runTaskInRepositories(
             leg.worktree.baseSha,
             onOwnCommands ? leg.ignoredBeforeSteps : undefined,
           );
-          if (onOwnCommands) leg.worktree.emptyGateHome();
           if (sha) {
             leg.state.commits.push(sha);
             leg.state.checks.splice(0);
+            changed.push(leg);
           }
           leg.state.committed = leg.state.committed || sha !== "";
         } catch (error) {
@@ -407,6 +408,16 @@ export async function runTaskInRepositories(
             return { kind: "tampered", finding: error.finding, message: `${leg.label}: ${error.message}` };
           }
           return { kind: "error", message: `${leg.label}: ${String(error)}` };
+        }
+      }
+      // After every commit has happened, so that what throws here cannot read as one having failed
+      if (onOwnCommands) {
+        for (const leg of changed) {
+          try {
+            leg.worktree.emptyGateHome();
+          } catch (error) {
+            return { kind: "error", message: `${leg.label}: ${String(error)}` };
+          }
         }
       }
     }

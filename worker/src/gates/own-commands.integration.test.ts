@@ -134,7 +134,7 @@ describe.skipIf(!onMac)("a project's own gate commands against the real sandbox"
       await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./link.sh" })).run(context);
 
       expect(existsSync(join(worktree, "linked"))).toBe(false);
-      expect(readFileSync(join(worktree, "error.txt"), "utf8")).toContain("Operation not permitted");
+      expect(readFileSync(join(worktree, "error.txt"), "utf8")).toContain("No such file or directory");
     });
 
     it("refuses a listing of the real home", async () => {
@@ -143,7 +143,7 @@ describe.skipIf(!onMac)("a project's own gate commands against the real sandbox"
       await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./list.sh" })).run(context);
 
       expect(readFileSync(join(worktree, "listed.txt"), "utf8")).toBe("");
-      expect(readFileSync(join(worktree, "error.txt"), "utf8")).toContain("Operation not permitted");
+      expect(readFileSync(join(worktree, "error.txt"), "utf8")).toContain("No such file or directory");
     });
 
     it("refuses a socket in the real home, which is where a password manager's agent listens, and not one elsewhere", async () => {
@@ -157,8 +157,39 @@ describe.skipIf(!onMac)("a project's own gate commands against the real sandbox"
       await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./sockets.sh" })).run(context);
       servers.forEach((server) => server.close());
 
-      expect(readFileSync(join(worktree, "home.txt"), "utf8")).toContain("EPERM");
+      expect(readFileSync(join(worktree, "home.txt"), "utf8")).toContain("ENOENT");
       expect(readFileSync(join(worktree, "elsewhere.txt"), "utf8")).toContain("reached");
+    });
+
+    // yarn opens a `.yarnrc` in every parent with no `stat` first, and stops on anything but ENOENT
+    it("shows a tool walking up from a worktree under the home nothing there, and leaves that worktree's socket alone", async () => {
+      const inHome = join(canary, "proj", "wt");
+      mkdirSync(inHome, { recursive: true });
+      mkdirSync(`${inHome}.home`);
+      writeFileSync(join(canary, ".npmrc"), "fake-secret-bp985\n");
+      writeFileSync(join(inHome, "walk.cjs"), `
+const fs = require("fs"), net = require("net"), path = require("path");
+const answer = (look) => { try { look(); return "answered"; } catch (error) { return error.code; } };
+const above = path.dirname(path.dirname(process.cwd()));
+const socket = path.join(process.cwd(), "s.sock");
+const saw = {
+  absent: answer(() => fs.readFileSync(path.join(above, ".yarnrc"))),
+  planted: answer(() => fs.readFileSync(path.join(above, ".npmrc"))),
+  stat: answer(() => fs.statSync(path.join(above, ".npmrc"))),
+  parent: answer(() => fs.statSync(above)),
+};
+net.createServer((s) => s.end()).listen(socket, () => net.connect(socket)
+  .on("connect", () => { saw.socket = "reached"; fs.writeFileSync("saw.json", JSON.stringify(saw)); process.exit(0); })
+  .on("error", (error) => { saw.socket = error.code; fs.writeFileSync("saw.json", JSON.stringify(saw)); process.exit(0); }));
+`);
+      writeFileSync(join(inHome, "walk.sh"), `#!/bin/sh\nexec "${process.execPath}" walk.cjs\n`);
+      chmodSync(join(inHome, "walk.sh"), 0o755);
+      const underTheHome = { ...context, worktreePath: inHome, worktreeDir: recordDir(inHome), gateHome: recordDir(`${inHome}.home`), checkoutGitDir: join(inHome, ".git") };
+
+      const verdict = await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./walk.sh" })).run(underTheHome);
+
+      expect(verdict).toMatchObject({ ok: true });
+      expect(JSON.parse(readFileSync(join(inHome, "saw.json"), "utf8"))).toEqual({ absent: "ENOENT", planted: "ENOENT", stat: "ENOENT", parent: "answered", socket: "reached" });
     });
 
     it("refuses the socket launchd gives an ssh agent", () => {

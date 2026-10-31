@@ -240,6 +240,28 @@ describe("runStep — a model step", () => {
     expect(c.state.uncommittedWork).toBe(true);
   });
 
+  it("says the tree changed once a commit is recorded, and not for a step that committed nothing", async () => {
+    const treeChanged = vi.fn();
+    const landed = ctx({ treeChanged });
+    await runStep(entry({ kind: "step", capability: "edit" }), landed);
+    expect(treeChanged).toHaveBeenCalledTimes(1);
+
+    treeChanged.mockClear();
+    await runStep(entry({ kind: "step", capability: "edit" }), ctx({ treeChanged, commit: vi.fn(async () => "") }));
+    expect(treeChanged).not.toHaveBeenCalled();
+  });
+
+  it("fails the step without losing a commit when what follows the commit throws", async () => {
+    const c = ctx({ treeChanged: () => { throw new Error("disk full"); } });
+
+    const outcome = await runStep(entry({ kind: "step", capability: "edit" }), c);
+
+    expect(outcome).toMatchObject({ kind: "error", message: expect.stringContaining("disk full") });
+    expect(c.state.commits).toEqual(["sha1"]);
+    expect(c.state.committed).toBe(true);
+    expect(c.state.uncommittedWork).toBe(false);
+  });
+
   it("records that it committed, so an exit after it keeps the worktree", async () => {
     const c = ctx();
 

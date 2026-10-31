@@ -105,7 +105,7 @@ export function isModelName(value: string): boolean {
   return value.length <= MAX_VALUE_CHARS && MODEL_NAME.test(value);
 }
 
-const GATE_COMMAND_WORD = /^[A-Za-z0-9._/=+:@%,~-]+$/;
+const GATE_COMMAND_WORD = /^[A-Za-z0-9._/=+:@%,~[\]-]+$/;
 const GATE_PROGRAM = /^(?:[A-Za-z0-9_][A-Za-z0-9._+-]*|\.\/[A-Za-z0-9._+/-]+)$/;
 const WORKING_DIRECTORY = /^[A-Za-z0-9_][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/;
 const CREDENTIAL_IN_URL = /:\/\/[^/]*@/;

@@ -1,4 +1,4 @@
-import { accessSync, constants, lstatSync, statSync } from "node:fs";
+import { accessSync, constants, lstatSync, readdirSync, statSync } from "node:fs";
 import { join, posix } from "node:path";
 import { Runner } from "../exec.js";
 import { agentEnv } from "../env.js";
@@ -127,6 +127,14 @@ async function runOwnSteps(runner: Runner, steps: OwnStep[], directory: string, 
   return { ok: true, reason: "", commands: steps.map((step) => named(step.command, directory)) };
 }
 
+function isEmptyDirectory(path: string): boolean {
+  try {
+    return readdirSync(path).length === 0;
+  } catch {
+    return false;
+  }
+}
+
 const NO_BUILD_COMMAND =
   "this project names its own gate commands but neither an install nor a build command, and its agent has a Builds gate: set one in Settings → Workers, or take that gate out of the agent";
 const NO_TEST_COMMAND =
@@ -142,7 +150,10 @@ export function runOwnBuild(runner: Runner, commands: GateCommands, timeoutMs: n
 
 export function runOwnTests(runner: Runner, commands: GateCommands, timeoutMs: number, context: GateContext): Promise<GateResult> {
   if (!commands.testCommand) return Promise.resolve({ ok: false, reason: NO_TEST_COMMAND });
-  return runOwnSteps(runner, [{ label: "test", command: commands.testCommand }], commands.workingDirectory, timeoutMs, context);
+  const steps: OwnStep[] = [{ label: "test", command: commands.testCommand }];
+  // What an install put in the home is gone once a step has committed, and a sequence may have no build gate
+  if (commands.installCommand && isEmptyDirectory(context.gateHome.path)) steps.unshift({ label: "install", command: commands.installCommand });
+  return runOwnSteps(runner, steps, commands.workingDirectory, timeoutMs, context);
 }
 
 /**
@@ -158,11 +169,11 @@ export function gateConfigFault(sequence: { gateKind?: string }[], commands: Gat
 
   const place = gateDirectory(worktreePath, commands.workingDirectory);
   if ("reason" in place) return null;
-  const run = [...(hasBuild ? [commands.installCommand, commands.buildCommand] : []), ...(hasTests ? [commands.testCommand] : [])];
-  for (const program of run.filter(Boolean).map(gateProgramOf)) {
-    if (program.startsWith("./") && !resolveGateProgram(program, place.path, "")) {
-      return `${program} is named by a gate command, and this checkout has no such executable file`;
-    }
+  // The first alone: an install is what makes `./.venv/bin/pytest` exist for the command after it
+  const [first] = [...(hasBuild ? [commands.installCommand, commands.buildCommand] : []), ...(hasTests ? [commands.installCommand, commands.testCommand] : [])].filter(Boolean);
+  const program = first ? gateProgramOf(first) : "";
+  if (program.startsWith("./") && !resolveGateProgram(program, place.path, "")) {
+    return `${program} is named by a gate command, and this checkout has no such executable file`;
   }
   return null;
 }

@@ -267,13 +267,17 @@ describe("gateCapFor", () => {
 });
 
 describe("a project whose commands cannot pass, known before the step anybody pays for", () => {
-  it("stops the run before the first step, naming the setting", async () => {
+  it("hands the task back before the first step with its attempt refunded, naming the setting", async () => {
     const h = harness({ config: { ...config, buildCommand: "sh b" } });
 
-    await runTask(h.deps, running("implement", "test-run"));
+    const disposition = await runTask(h.deps, running("implement", "test-run"));
 
+    expect(disposition).toBe("machine-fault");
     expect(h.executor.execute).not.toHaveBeenCalled();
-    expect(h.reporter.failed).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("no test command"));
+    expect(h.reporter.released).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("no test command"));
+    expect(h.reporter.failed).not.toHaveBeenCalled();
+    expect(h.reporter.requeued).not.toHaveBeenCalled();
+    expect(h.deps.quarantineProject).not.toHaveBeenCalled();
   });
 
   it("runs as usual when the commands cover the agent's gates", async () => {

@@ -75,6 +75,19 @@ describeOnMac("the Builds gate on a project's own commands", () => {
     expect(profileOf(install)).toContain(context.gateHome.path);
   });
 
+  it("installs before the tests when the home is empty, and not when an install left something there", async () => {
+    const { run, runner } = recording();
+    const installed = commands({ installCommand: "sh i", testCommand: "sh t" });
+
+    await testRunGate(runner, NPM, TIMEOUT_MS, installed).run(context);
+    expect(run.mock.calls.map(([, args]) => lastWords(args, 2))).toEqual([["/bin/sh", "i"], ["/bin/sh", "t"]]);
+
+    run.mockClear();
+    writeFileSync(join(context.gateHome.path, ".installed"), "");
+    await testRunGate(runner, NPM, TIMEOUT_MS, installed).run(context);
+    expect(run.mock.calls.map(([, args]) => lastWords(args, 2))).toEqual([["/bin/sh", "t"]]);
+  });
+
   it("gives every command the network and seals the real home, the opposite of the npm gates", async () => {
     const { run, runner } = recording();
 
@@ -84,7 +97,7 @@ describeOnMac("the Builds gate on a project's own commands", () => {
     expect(run).toHaveBeenCalledTimes(3);
     for (const [, args] of run.mock.calls) {
       expect(profileOf(args)).not.toContain('(remote ip "localhost:*")');
-      expect(profileOf(args)).toContain("(deny file-read-data");
+      expect(profileOf(args)).toContain("(deny file-read* file-test-existence (with errno ENOENT)");
       expect(profileOf(args)).toContain(`H0=${realpathSync(userInfo().homedir)}`);
       expect(profileOf(args)).toContain(`=${context.checkoutGitDir}`);
     }
@@ -332,6 +345,14 @@ describe("gateConfigFault, read before anybody pays for a step", () => {
 
     expect(gateConfigFault(sequence("test-run"), commands({ testCommand: "./gone" }), worktree)).toMatch(/\.\/gone/);
     expect(gateConfigFault(sequence("test-run"), commands({ testCommand: "./plain" }), worktree)).toMatch(/\.\/plain/);
+  });
+
+  it("judges only the first program: the install makes what the next one names", () => {
+    const fromTheInstall = commands({ installCommand: "python3 -m venv .venv", testCommand: "./.venv/bin/pytest" });
+
+    expect(gateConfigFault(sequence("build", "test-run"), fromTheInstall, worktree)).toBeNull();
+    expect(gateConfigFault(sequence("test-run"), fromTheInstall, worktree)).toBeNull();
+    expect(gateConfigFault(sequence("test-run"), commands({ installCommand: "./gone", testCommand: "sh t" }), worktree)).toMatch(/\.\/gone/);
   });
 
   it("leaves a working directory the checkout does not have yet to the gate: the task may create it", () => {
