@@ -186,7 +186,10 @@ export type Network = "open" | "loopback";
 //   NSURLSession), trustd (a certificate's AIA and OCSP URLs) and WebKit's networking process each
 //   reached a listener from a process with no network at all, and a deny on the name closes each.
 //   The nsurlsessiond deny alone also stops WebKit's here, so no test fails on removing only the
-//   WebKit one. A denylist of service names: it closes these three, not the category.
+//   WebKit one. `security` reaches trustd through trustd.agent, so none fails on removing only
+//   com.apple.trustd either. trustd on macOS 15.8.2 refuses a private address by itself but still
+//   goes out to a public one, so its deny stays. A denylist of service names: it closes these
+//   three, not the category.
 const LOOPBACK_ONLY = [
   "(deny network-outbound)",
   '(allow network-outbound (remote ip "localhost:*") (remote unix-socket))',
