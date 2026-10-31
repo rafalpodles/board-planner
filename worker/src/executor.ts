@@ -1,6 +1,7 @@
 import { DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, modelOr, WorkerConfig } from "./config.js";
 import { agentEnv } from "./env.js";
-import { GateCommands, gateCommandsOf, NPM_GATES } from "./gates/gate-commands.js";
+import { GateCommands, gateCommandsOf, NPM_GATES, usesOwnCommands } from "./gates/gate-commands.js";
+import { sealedHomesFor } from "./sealed-home.js";
 import { PROTECTED_PATHS_BRIEF } from "./gates/protected-paths.js";
 import { Runner } from "./exec.js";
 import { confineTool, RecordedDir } from "./sandbox.js";
@@ -187,6 +188,8 @@ export interface ExecuteOptions {
   worktreePath: string;
   /** What the worktree was at creation; the confinement is to this and not to `worktreePath` resolved now (BP-804). */
   worktreeDir: RecordedDir;
+  /** The clones' `.git`, read under a shut home so that a CLI that runs commands can use git. */
+  checkoutGitDirs?: string[];
   brief: StepBrief;
   /**
    * Every worktree of a run that spans several repositories, the working directory's first. The
@@ -213,7 +216,7 @@ export function createExecutor(
     codex: !codex ? undefined : typeof codex === "string" ? codexAgent(codex) : codex,
   };
   return {
-    async execute({ task, worktreePath, worktreeDir, brief, repositories, signal, onEvent }) {
+    async execute({ task, worktreePath, worktreeDir, brief, repositories, checkoutGitDirs = [], signal, onEvent }) {
       const provider = brief.provider || "claude";
       const chosen = Object.hasOwn(agents, provider) ? agents[provider] : undefined;
       // Before anything is made: a machine that cannot run this step will be just as unable on the
@@ -261,6 +264,9 @@ export function createExecutor(
       const worktrees = repositories && repositories.length > 1 ? repositories.map((ref) => ref.dir) : [worktreeDir];
       const spawn = confineTool(agent.tool, agent.path, agentArgs, {
         writable: [...(agent.worktreeWritable(brief.capability) ? worktrees : []), ...run.writable],
+        ...(usesOwnCommands(gateCommandsOf(config))
+          ? { sealedHomes: { ...sealedHomesFor([...agent.sessionReadable(), ...checkoutGitDirs]), keychain: true } }
+          : {}),
       });
 
       // Before the spawn, not after: a step that cannot be confined does not run half-confined and

@@ -1,8 +1,9 @@
-import { accessSync, constants, lstatSync, realpathSync, statSync } from "node:fs";
-import { basename, delimiter, dirname, isAbsolute, join, posix } from "node:path";
+import { accessSync, constants, lstatSync, statSync } from "node:fs";
+import { join, posix } from "node:path";
 import { Runner } from "../exec.js";
 import { agentEnv } from "../env.js";
 import { firstOnPath } from "../node-engines.js";
+import { programDirectory } from "../sealed-home.js";
 import { GateContext, GateResult } from "../types.js";
 import { outputTail, refused, runConfinedProgram } from "./confined-npm.js";
 
@@ -90,23 +91,6 @@ interface OwnStep {
   command: string;
 }
 
-// What the sealed home leaves readable besides the worktree: the clone's `.git`, the worker's own
-// PATH, and the program itself. A toolchain's `bin` brings its `lib` and `libexec`, which is where an
-// nvm's npm keeps its code, and no more: `~/.cargo/bin` must not open `~/.cargo/credentials.toml`.
-function readableFor(context: GateContext, programPath: string): string[] {
-  const path = (agentEnv().PATH ?? "").split(delimiter).filter((entry) => isAbsolute(entry)).map(realDir);
-  const beside = path.filter((entry) => basename(entry) === "bin").flatMap((entry) => [join(dirname(entry), "lib"), join(dirname(entry), "libexec")]);
-  return [...new Set([context.checkoutGitDir, ...path, ...beside, realDir(dirname(realDir(programPath)))])];
-}
-
-function realDir(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
-}
-
 /**
  * The project's own commands for one gate, in order, sharing one timeout. What they execute is as
  * agent-written as `npm test`, and the owner chooses the program and its arguments. The directory is
@@ -130,7 +114,7 @@ async function runOwnSteps(runner: Runner, steps: OwnStep[], directory: string, 
       cwd: place.path,
       worktree: context.worktreeDir,
       home: context.gateHome,
-      readable: readableFor(context, path),
+      readable: [context.checkoutGitDir, programDirectory(path)],
       timeoutMs: remainingMs,
       signal: context.signal,
     });

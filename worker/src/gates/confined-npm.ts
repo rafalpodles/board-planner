@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
-import { tmpdir, userInfo } from "node:os";
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CommandResult, Runner, RunOpts } from "../exec.js";
 import { GateResult } from "../types.js";
 import { agentEnv, npmCacheOverride, tempDirOverride } from "../env.js";
 import { confine, Confinement, ConfineOptions, confineTool, Network, RecordedDir, SANDBOX_COMMAND } from "../sandbox.js";
+import { sealedHomesFor } from "../sealed-home.js";
 import { removeTree } from "../worktree-disk.js";
 
 /**
@@ -200,12 +201,11 @@ export async function runConfinedProgram(
   options: Omit<ConfinedNpmOptions, "withCache" | "network"> & { home: RecordedDir; readable: string[] }
 ): Promise<GateRun> {
   const { home, readable, env: source, ...rest } = options;
-  const homes = [...new Set([realHome(userInfo().homedir), realHome((source ? source.HOME : agentEnv().HOME) ?? "")])].filter(Boolean);
   // Quoted: the JVM splits this on whitespace, and an operator's TMPDIR may hold a space
   return runInGateSandbox(
     runner,
     { ...rest, env: source, writable: [home] },
-    (confinement) => confine(programPath, args, { ...confinement, sealedHomes: { homes, readable: readable.filter((path) => !homes.some((home) => home === path || home.startsWith(`${path}/`))) } }),
+    (confinement) => confine(programPath, args, { ...confinement, sealedHomes: sealedHomesFor(readable, source) }),
     (temp) => ({
       ...(source ? agentEnv([], source) : agentEnv()),
       HOME: home.path,
@@ -214,14 +214,6 @@ export async function runConfinedProgram(
       JAVA_TOOL_OPTIONS: `"-Djava.io.tmpdir=${temp}"`,
     })
   );
-}
-
-function realHome(path: string): string {
-  try {
-    return path ? realpathSync(path) : "";
-  } catch {
-    return "";
-  }
 }
 
 const MAX_REASON_CHARS = 2000;

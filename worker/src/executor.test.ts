@@ -206,6 +206,20 @@ describe("createExecutor", () => {
     expect(promptOf(1)).not.toContain("This project's gates run");
   });
 
+  it("shuts the home to a step on a project's own commands, keeping the CLI's session, and leaves an npm project as it was", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(workerConfig({ testCommand: "go test ./..." }), runner, CLAUDE_PATH).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
+
+    const argv = (call: number) => (run.mock.calls[call][1] as string[]).join("\n");
+    expect(argv(0)).toContain("(deny file-read-data");
+    expect(argv(0)).toContain("/.claude.json");
+    expect(argv(0)).toContain("/Library/Keychains");
+    expect(argv(0)).not.toContain("com.apple.SecurityServer");
+    expect(argv(1)).not.toContain("(deny file-read-data");
+  });
+
   // An agent told to commit and unable to would report itself blocked
   it("tells the agent the worker commits, since it no longer can", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });

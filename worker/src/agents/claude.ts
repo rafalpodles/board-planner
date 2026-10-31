@@ -1,4 +1,6 @@
+import { join } from "node:path";
 import { CommandResult } from "../exec.js";
+import { programDirectory, realHomes } from "../sealed-home.js";
 import { isRateLimitEvent, lastResultEvent, parseStream, ResultEvent, StreamEvent } from "../stream.js";
 import { RunOutcome } from "../types.js";
 import { Capability, CodingAgent, EditCall, NO_RUN, ReviewCall, Verdict } from "./agent.js";
@@ -72,6 +74,9 @@ export function claudeAgent(path: string): CodingAgent {
     path,
     worktreeWritable: () => true,
     reviewerWritesCheckout: true,
+    // Measured: without the keychains the CLI answers "Not logged in", and it reads no other part of a home
+    sessionReadable: () =>
+      realHomes().flatMap((home) => [join(home, ".claude"), join(home, ".claude.json"), join(home, "Library", "Keychains")]).concat(programDirectory(path)),
     prepare: async () => NO_RUN,
 
     editArgs(call: EditCall) {

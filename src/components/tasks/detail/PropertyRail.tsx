@@ -267,8 +267,9 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
     case "machine-needs-update":
       return (
         <>
-          This board lists several repositories and your machine has them all, but its worker is too old to
-          run more than one in a task — update the worker on that machine.
+          Your machine has this board&apos;s checkouts, but its worker is too old to run this board&apos;s
+          tasks: it lists several repositories or names its own gate commands. Update the worker on that
+          machine.
         </>
       );
     case "machine-failing":

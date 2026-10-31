@@ -523,11 +523,12 @@ export async function vetBeforeGate(
   ignoredBeforeSteps: Awaited<ReturnType<typeof ignoredFiles>>,
   gateName: string,
   noted: (note: string) => Promise<void>,
+  ignoredByGates?: IgnoredFiles,
 ): Promise<GateRefusal | null> {
   const tampered = await worktree.tampering();
   let hidden: HiddenFiles | { kind: "tampered"; detail: string } | null = tampered
     ? { kind: "tampered" as const, detail: `the checkout now has ${tampered}` }
-    : await hiddenFromGit(runner, gitPath, worktree.path, worktree.baseSha, ignoredBeforeSteps);
+    : await hiddenFromGit(runner, gitPath, worktree.path, worktree.baseSha, ignoredBeforeSteps, ignoredByGates);
   if (hidden?.kind === "written") {
     const removal = removeFromWorktree(worktree.path, hidden.paths);
     if (removal.refused.length > 0) {
@@ -677,6 +678,7 @@ export async function runTask(
     const budget = createBudget(config.runCeilingMs, now);
     let ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, worktree.path);
 
+    const onOwnCommands = usesOwnCommands(gateCommandsOf(config));
     // Here and not at the gate: a fault in the project's settings fails every task the same way, and
     // the gate is after the step somebody pays for
     const configFault = gateConfigFault(task.agent.sequence, gateCommandsOf(config), worktree.path);
@@ -712,6 +714,7 @@ export async function runTask(
         const outcome = await runStep(entry, {
           worktreePath: worktree.path,
           worktreeDir: worktree.dir,
+          checkoutGitDirs: [dirname(dirname(worktree.pin.gitDir))],
           branch,
           task,
           executor,
@@ -719,9 +722,9 @@ export async function runTask(
           commit: async (message) => {
             const tampered = await worktree.tampering();
             if (tampered) throw new TamperedCheckoutError(tampered);
-            const sha = await commitAll(runner, deps.gitPath, worktree.path, message, worktree.commitIdentity, worktree.baseSha, ignoredBeforeSteps);
+            const sha = await commitAll(runner, deps.gitPath, worktree.path, message, worktree.commitIdentity, worktree.baseSha, onOwnCommands ? ignoredBeforeSteps : undefined);
             // What a gate left must not reach the gate after this step: that one judges a new tree
-            worktree.emptyGateHome();
+            if (onOwnCommands) worktree.emptyGateHome();
             return sha;
           },
           tampering: () => worktree.tampering(),
@@ -861,6 +864,7 @@ export async function runTask(
           ignoredBeforeSteps,
           gate.name,
           (note) => reporter.noted(task, note),
+          onOwnCommands ? ignoredBeforeSteps : undefined,
         );
         if (refused) {
           keepWorktree = true;
@@ -1029,7 +1033,7 @@ export async function runTask(
       // artifact the target repo does not gitignore would fail a run that did nothing wrong.
       if (entry.kind !== "step" || entry.capability !== "edit") continue;
 
-      const leftover = await unfinishedWork(runner, deps.gitPath, worktree.path, worktree.baseSha, ignoredBeforeSteps);
+      const leftover = await unfinishedWork(runner, deps.gitPath, worktree.path, worktree.baseSha, onOwnCommands ? ignoredBeforeSteps : undefined);
       if (leftover) {
         keepWorktree = true;
         settle("failed", `${entry.name} left the worktree unclean`);
@@ -1073,8 +1077,6 @@ export async function runTask(
       `the worker hit an unexpected error: ${String(error)}${keeping ? keptWorktree(worktree.path) : ""}`,
     );
   } finally {
-    // A kept worktree is evidence. Its home is not, and it can be a whole dependency tree
-    if (keepWorktree) worktree.emptyGateHome();
     if (!keepWorktree) {
       await quietly(() => workspace.destroy(task.taskKey));
     }

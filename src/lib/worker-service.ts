@@ -319,7 +319,7 @@ export function overriddenPolicy(
   return out;
 }
 
-function namesGateCommands(project: { worker?: { policy?: unknown; policyOverrides?: string[] | null } | null }): boolean {
+export function namesGateCommands(project: { worker?: { policy?: unknown; policyOverrides?: string[] | null } | null }): boolean {
   const policy = overriddenPolicy(
     { policy: project.worker?.policy as Record<string, unknown> | null, policyOverrides: project.worker?.policyOverrides },
     PROJECT_POLICY_DEFAULTS

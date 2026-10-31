@@ -7,7 +7,7 @@ import { buildGate } from "./build.js";
 import { testRunGate } from "./test-run.js";
 import { reviewGate } from "./review.js";
 import { codexAgent } from "../agents/codex.js";
-import { GateCommands, NPM_GATES } from "./gate-commands.js";
+import { GateCommands, NPM_GATES, usesOwnCommands } from "./gate-commands.js";
 
 /**
  * What a block that names no parameter of its own falls back to: the project's own worker policy.
@@ -56,17 +56,18 @@ function reviewOn(
   runner: Runner,
   tools: GateTools,
   timeoutMs: number,
-  fallbacks: GateFallbacks
+  fallbacks: GateFallbacks,
+  sealHome: boolean
 ): Gate {
   const provider = typeof params.provider === "string" && params.provider ? params.provider : "claude";
   const model = typeof params.model === "string" ? params.model.trim() : "";
   if (provider === "claude") {
-    return reviewGate(runner, tools.git, tools.claude, timeoutMs, params.model || fallbacks.reviewModel, params.focus);
+    return reviewGate(runner, tools.git, tools.claude, timeoutMs, params.model || fallbacks.reviewModel, params.focus, sealHome);
   }
   if (provider !== "codex") return refusingReview(`this worker does not know the reviewer ${provider}`);
   if (!tools.codex) return refusingReview("this review runs on Codex, which this machine cannot run");
   if (!model) return refusingReview("this review runs on Codex and names no model", false);
-  return reviewGate(runner, tools.git, codexAgent(tools.codex), timeoutMs, model, params.focus);
+  return reviewGate(runner, tools.git, codexAgent(tools.codex), timeoutMs, model, params.focus, sealHome);
 }
 
 /**
@@ -103,7 +104,7 @@ export function gateFromEntry(
     case "test-run":
       return named(testRunGate(runner, tools.npm, timeoutMs, commands), entry.key);
     case "review":
-      return named(reviewOn(params, runner, tools, timeoutMs, fallbacks), entry.key);
+      return named(reviewOn(params, runner, tools, timeoutMs, fallbacks, usesOwnCommands(commands)), entry.key);
     default:
       return null;
   }

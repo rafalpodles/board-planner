@@ -3,6 +3,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, readdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { codexSourceHome } from "../env.js";
+import { programDirectory } from "../sealed-home.js";
 import { CommandResult } from "../exec.js";
 import { parseStream, StreamEvent } from "../stream.js";
 import { ExecutionResult, RunOutcome } from "../types.js";
@@ -260,6 +261,8 @@ export function codexAgent(path: string, options: CodexOptions = {}): CodingAgen
     path,
     worktreeWritable: (capability) => capability === "edit",
     reviewerWritesCheckout: false,
+    // Its session is the copy of auth.json in the run's own home, which the confinement already lets it reach
+    sessionReadable: () => [programDirectory(path)],
 
     async prepare(schema: object) {
       const source = join(options.sourceHome ?? codexSourceHome(), "auth.json");

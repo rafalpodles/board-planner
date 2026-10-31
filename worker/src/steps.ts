@@ -52,6 +52,7 @@ export interface RunState {
 export interface StepContext {
   worktreePath: string;
   worktreeDir: RecordedDir;
+  checkoutGitDirs?: string[];
   branch: string;
   task: ClaimedTask;
   executor: Executor;
@@ -174,6 +175,7 @@ export async function runStep(
     task: ctx.task,
     worktreePath: ctx.worktreePath,
     worktreeDir: ctx.worktreeDir,
+    checkoutGitDirs: ctx.checkoutGitDirs,
     signal: ctx.signal,
     onEvent: ctx.onEvent,
     brief: {

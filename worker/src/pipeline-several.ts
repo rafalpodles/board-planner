@@ -1,5 +1,5 @@
 import { dirname } from "path";
-import { gateCommandsOf, gateConfigFault } from "./gates/gate-commands.js";
+import { gateCommandsOf, gateConfigFault, usesOwnCommands } from "./gates/gate-commands.js";
 import { createBudget } from "./budget.js";
 import { commitAll, TamperedCheckoutError } from "./commit.js";
 import { branchFor, WORKER_BRANCH_SLUG } from "./decisions.js";
@@ -239,6 +239,7 @@ export async function runTaskInRepositories(
   };
 
   const budget = createBudget(config.runCeilingMs, now);
+  const onOwnCommands = usesOwnCommands(gateCommandsOf(config));
 
   try {
     for (const leg of legs) leg.ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, leg.worktree.path);
@@ -286,7 +287,7 @@ export async function runTaskInRepositories(
       // after it, and the agent could have written in any of them
       if (entry.kind !== "step" || entry.capability !== "edit") continue;
       for (const leg of legs) {
-        const leftover = await unfinishedWork(runner, deps.gitPath, leg.worktree.path, leg.worktree.baseSha, leg.ignoredBeforeSteps);
+        const leftover = await unfinishedWork(runner, deps.gitPath, leg.worktree.path, leg.worktree.baseSha, onOwnCommands ? leg.ignoredBeforeSteps : undefined);
         if (leftover) {
           return (
             await end({
@@ -350,6 +351,7 @@ export async function runTaskInRepositories(
       worktreePath: legs[0].worktree.path,
       worktreeDir: legs[0].worktree.dir,
       repositories,
+      checkoutGitDirs: legs.map((leg) => dirname(dirname(leg.worktree.pin.gitDir))),
       signal: deps.signal,
       onEvent,
       brief: {
@@ -391,9 +393,9 @@ export async function runTaskInRepositories(
             `${task.taskKey}: ${entry.name.toLowerCase()}`,
             leg.worktree.commitIdentity,
             leg.worktree.baseSha,
-            leg.ignoredBeforeSteps,
+            onOwnCommands ? leg.ignoredBeforeSteps : undefined,
           );
-          leg.worktree.emptyGateHome();
+          if (onOwnCommands) leg.worktree.emptyGateHome();
           if (sha) {
             leg.state.commits.push(sha);
             leg.state.checks.splice(0);
@@ -618,8 +620,14 @@ export async function runTaskInRepositories(
     // Every worktree is vetted, the ones with nothing committed too: the gate is about to run code
     // somewhere, and the agent could have written anywhere it was confined to
     for (const leg of legs) {
-      const refused = await vetBeforeGate(runner, deps.gitPath, leg.worktree, leg.ignoredBeforeSteps, gate.name, (note) =>
-        reporter.noted(task, `${leg.label}: ${note}`),
+      const refused = await vetBeforeGate(
+        runner,
+        deps.gitPath,
+        leg.worktree,
+        leg.ignoredBeforeSteps,
+        gate.name,
+        (note) => reporter.noted(task, `${leg.label}: ${note}`),
+        onOwnCommands ? leg.ignoredBeforeSteps : undefined,
       );
       if (refused) {
         return done({

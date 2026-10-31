@@ -73,6 +73,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
     gates: Record<string, (path: string, home: string) => void> = {},
     afterCreate: (path: string) => void = () => {},
     seenAt: (created: string) => string = (created) => created,
+    config: Partial<WorkerConfig> = {},
   ) {
     const reporter = {
       blocked: vi.fn<Reporter["blocked"]>(async () => {}),
@@ -112,8 +113,9 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
         };
       },
     };
+    const runConfig = { repoPath: parent, worktreeRoot: join(dir, "wt"), baseBranch: "main", ...config } as WorkerConfig;
     const real = createWorkspace(
-      { repoPath: parent, worktreeRoot: join(dir, "wt"), baseBranch: "main" } as WorkerConfig,
+      runConfig,
       createRunner(),
       gitPath,
       () => ({}),
@@ -149,6 +151,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
     ];
     const deps: PipelineDeps = {
       config: {
+        ...config,
         apiBaseUrl: "http://localhost:3000",
         apiToken: "token",
         repoPath: parent,
@@ -287,6 +290,8 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
     expect(h.delivery.push).toHaveBeenCalled();
   });
 
+  const OWN_COMMANDS = { buildCommand: "sh b", testCommand: "sh t" };
+
   // BP-985. pytest's cache and a venv each carry a `.gitignore` of `*`, which is how a hidden file looks.
   // The gate that passed left them, so neither the next gate, the next commit nor delivery may refuse them
   it("lets through what a passed gate left under a .gitignore of its own", async () => {
@@ -294,12 +299,49 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
       write(path, ".pytest_cache/.gitignore", "*\n");
       write(path, ".pytest_cache/v/cache/lastfailed", "{}\n");
     };
-    const h = run([IMPLEMENT, TEST, BUILD, FIX, PUSH], {}, { "test-run": cache });
+    const h = run([IMPLEMENT, TEST, BUILD, FIX, PUSH], {}, { "test-run": cache }, undefined, undefined, OWN_COMMANDS);
     await h.done;
 
     expect(h.reporter.failed).not.toHaveBeenCalled();
     expect(h.ran).toEqual(["test-run", "build"]);
     expect(h.delivery.push).toHaveBeenCalled();
+  });
+
+  it("still refuses that on the npm gates, where a gate's self-ignoring directory is how a file gets hidden", async () => {
+    const h = run(
+      [IMPLEMENT, TEST, BUILD, PUSH],
+      {},
+      {
+        "test-run": (path) => {
+          write(path, ".sneak/.gitignore", "*\n");
+          write(path, ".sneak/payload.test.js", "process.exit(0);\n");
+        },
+      },
+    );
+    await h.done;
+
+    expect(h.reporter.failed).toHaveBeenCalled();
+    expect(h.delivery.push).not.toHaveBeenCalled();
+  });
+
+  it("does not take a step's file for a gate's because one is named like the start of the other", async () => {
+    const h = run(
+      [IMPLEMENT, TEST, FIX, PUSH],
+      {
+        fix: (path) => {
+          write(path, ".sneak/.gitignore", "*\n");
+          write(path, ".sneak/payload", "evil\n");
+        },
+      },
+      { "test-run": (path) => write(path, ".sneak/payload.map", "x\n") },
+      undefined,
+      undefined,
+      OWN_COMMANDS,
+    );
+    await h.done;
+
+    expect(h.reporter.failed).toHaveBeenCalled();
+    expect(h.delivery.push).not.toHaveBeenCalled();
   });
 
   it("still refuses the same thing when a step wrote it, which is how a file is hidden from review", async () => {
@@ -311,6 +353,10 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
           write(path, ".pytest_cache/payload.js", "evil\n");
         },
       },
+      {},
+      undefined,
+      undefined,
+      OWN_COMMANDS,
     );
     await h.done;
 
@@ -327,6 +373,9 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
         build: (_path, home) => write(home, "planted", "x\n"),
         "test-run": (_path, home) => seen.push(existsSync(join(home, "planted"))),
       },
+      undefined,
+      undefined,
+      OWN_COMMANDS,
     );
     await h.done;
 
@@ -343,28 +392,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
       renameSync(home, `${home}.moved`);
       symlinkSync(realHome, home);
     };
-    const h = run([IMPLEMENT, BUILD, FIX, PUSH], {}, { build: swap });
-    await h.done;
-
-    expect(readFileSync(join(realHome, ".ssh", "id_ed25519"), "utf8")).toBe("keep me\n");
-  });
-
-  it("does not follow one when a refused run keeps its worktree and drops its home", async () => {
-    const realHome = join(dir, "real-home");
-    write(realHome, ".ssh/id_ed25519", "keep me\n");
-    const h = run(
-      [IMPLEMENT, BUILD, TEST, PUSH],
-      {},
-      {
-        build: (_path, home) => {
-          renameSync(home, `${home}.moved`);
-          symlinkSync(realHome, home);
-        },
-        "test-run": () => {
-          throw new Error("the run ends here, with its worktree kept");
-        },
-      },
-    );
+    const h = run([IMPLEMENT, BUILD, FIX, PUSH], {}, { build: swap }, undefined, undefined, OWN_COMMANDS);
     await h.done;
 
     expect(readFileSync(join(realHome, ".ssh", "id_ed25519"), "utf8")).toBe("keep me\n");

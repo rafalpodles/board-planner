@@ -24,6 +24,7 @@ vi.mock("@/models/grant", () => ({ Grant: { find: grantFind } }));
 
 const {
   assignmentsFor,
+  namesGateCommands,
   machineCondition,
   machineStateFor,
   machineReadinessFor,
@@ -413,6 +414,12 @@ describe("the owner's reach, not the reported repos", () => {
     it("is claimed by a worker that says it can run them, and refused to one that does not", () => {
       expect(verdictFor(worker(), own, PROTOCOL_VERSION, fresh, [], null, ["gate-commands"])).toEqual({ ok: true });
       expect(verdictFor(worker(), own, PROTOCOL_VERSION, fresh, [], null, [])).toEqual({ ok: false, reason: expect.stringContaining("update the worker") });
+    });
+
+    it("knows a blank command names nothing", () => {
+      expect(namesGateCommands(own as never)).toBe(true);
+      expect(namesGateCommands(cleared as never)).toBe(false);
+      expect(namesGateCommands(project() as never)).toBe(false);
     });
 
     it("is never offered to a worker that could not claim it", () => {
