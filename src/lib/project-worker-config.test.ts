@@ -298,13 +298,25 @@ describe("the gate commands", () => {
   ])("refuses the command %j, which no shell will read", (command) => {
     const parsed = parseProjectWorkerConfig({ policy: { buildCommand: command } });
 
-    expect(parsed).toMatchObject({ ok: false, error: expect.stringContaining("buildCommand must be one command with no shell syntax") });
+    expect(parsed).toMatchObject({ ok: false, error: expect.stringContaining("Build command must be a program name or ./path") });
   });
 
-  it.each(["../outside", "a/../../outside", "/etc", ".git", "a/.hidden", "a//b", "a/", "a b"])("refuses the working directory %j", (workingDirectory) => {
+  it("takes a working directory with a trailing slash, the way people type it", () => {
+    expect(parseProjectWorkerConfig({ policy: { workingDirectory: "services/api/" } })).toMatchObject({
+      ok: true,
+      update: { "worker.policy.workingDirectory": "services/api" },
+    });
+  });
+
+  it("refuses a password in a URL, which would reach the prompt, the pull request and the audit log", () => {
+    expect(parseProjectWorkerConfig({ policy: { installCommand: "pip3 install --index-url=https://user:token@example.test/simple x" } })).toMatchObject({ ok: false });
+    expect(parseProjectWorkerConfig({ policy: { installCommand: "pip3 install --index-url=https://example.test/simple x" } })).toMatchObject({ ok: true });
+  });
+
+  it.each(["../outside", "a/../../outside", "/etc", ".git", "a/.hidden", "a//b", "a b"])("refuses the working directory %j", (workingDirectory) => {
     expect(parseProjectWorkerConfig({ policy: { workingDirectory } })).toMatchObject({
       ok: false,
-      error: expect.stringContaining("workingDirectory must be a path relative to the repository"),
+      error: expect.stringContaining("Working directory must be a path inside the repository"),
     });
   });
 

@@ -10,6 +10,7 @@ import { SettingsCard } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import {
   GATE_COMMAND_FIELDS,
+  gateFieldProblem,
   POLICY_FIELD_LABELS,
   PROJECT_POLICY_DEFAULTS,
   PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS,
@@ -46,6 +47,15 @@ const MOVED_TO_BLOCKS = new Set([
 
 const FIELDS = Object.keys(PROJECT_POLICY_DEFAULTS).filter((f) => !MOVED_TO_BLOCKS.has(f));
 const isCommand = (field: string) => (GATE_COMMAND_FIELDS as readonly string[]).includes(field);
+const isGateField = (field: string) => isCommand(field) || field === "workingDirectory";
+
+// Once the project has left npm a blank command is no command, which is fine for one of Install and
+// Build and fails the run for the other cases, so the row says which
+function blankMeans(field: string, draft: Draft): string {
+  if (field === "testCommand") return "needed by the Tests pass gate";
+  const partner = field === "installCommand" ? "buildCommand" : "installCommand";
+  return String(draft[partner]).trim() ? "none" : "needed by the Builds gate";
+}
 const PLACEHOLDERS: Record<string, string> = {
   installCommand: "npm ci",
   buildCommand: "npm run build",
@@ -72,6 +82,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
   const defaultAgentId = useId();
   // One useId for the whole policy list; the field name makes each row's id unique
   const policyFieldId = useId();
+  const gateHintId = useId();
   const store = useStore();
   const agentApi = useApi();
   const defaultAgent = useDraft({ agentId: String(project.worker?.agent ?? "") });
@@ -137,6 +148,12 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
   }, [isAdmin]);
 
   async function save(): Promise<void> {
+    // The row already says what is wrong, and the toast goes away
+    const problem = FIELDS.map((field) => (isGateField(field) ? gateFieldProblem(field, String(draft.value[field])) : null)).find(Boolean);
+    if (problem) {
+      toast(problem, "error");
+      return;
+    }
     const policy: Record<string, PolicyValue> = {};
     for (const field of draft.dirtyKeys) {
       const name = String(field);
@@ -334,10 +351,10 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
             // What the row will mean once saved, not what is stored right now
             const inherits = unpinned.has(field) || (!pinned.has(field) && !draft.isDirty(field));
             return (
-              <div key={field} className="flex items-center gap-3">
+              <div key={field} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
                 {/* A boolean carries its own label, so the shared one would say it twice */}
                 {typeof value !== "boolean" && (
-                  <label htmlFor={fieldId} className="w-52 text-sm">
+                  <label htmlFor={fieldId} className="text-sm sm:w-52 sm:shrink-0">
                     {label}
                   </label>
                 )}
@@ -354,8 +371,14 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                     // or a discard, under a label that has already changed
                     id={fieldId}
                     value={String(value)}
-                    placeholder={leftNpm && isCommand(field) ? "none" : PLACEHOLDERS[field]}
-                    className="flex-1"
+                    placeholder={leftNpm && isCommand(field) ? blankMeans(field, draft.value) : PLACEHOLDERS[field]}
+                    className={isGateField(field) ? "font-mono text-sm" : undefined}
+                    error={isGateField(field) ? (gateFieldProblem(field, String(value)) ?? undefined) : undefined}
+                    aria-describedby={isGateField(field) ? gateHintId : undefined}
+                    maxLength={isCommand(field) ? 500 : field === "workingDirectory" ? 255 : undefined}
+                    autoCapitalize={isGateField(field) ? "none" : undefined}
+                    autoCorrect={isGateField(field) ? "off" : undefined}
+                    spellCheck={isGateField(field) ? false : undefined}
                     disabled={!canEdit}
                     onChange={(e) =>
                       editField(
@@ -366,13 +389,15 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                   />
                 )}
                 {inherits ? (
-                  <span className="text-xs text-text-muted w-24">default</span>
+                  <span className="text-xs text-text-muted sm:w-24">
+                    {leftNpm && isCommand(field) && !String(value).trim() ? "not set" : "default"}
+                  </span>
                 ) : (
                   <button
                     type="button"
                     disabled={!canEdit}
                     onClick={() => resetField(field)}
-                    className="text-xs text-primary hover:underline w-24 text-left disabled:text-text-muted disabled:no-underline"
+                    className="text-xs text-primary hover:underline sm:w-24 text-left disabled:text-text-muted disabled:no-underline"
                     // One per pinned field, and "set · reset" is the same on every one of them.
                     // `title` is a tooltip, not a name — the aria-label below is what wins, and it
                     // keeps the visible text at the FRONT: WCAG 2.5.3 asks that what a
@@ -388,10 +413,11 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
             );
           })}
         </div>
-        <p className="mt-3 text-xs text-text-muted" data-testid="gate-commands-hint">
-          One command each, run without a shell. Set any command and the Builds and Tests gates stop
-          using npm. A machine gives a custom install the network only if its owner set{" "}
-          <code>CP_ALLOW_INSTALL_NETWORK=1</code>.
+        <p id={gateHintId} className="mt-3 text-xs text-text-muted" data-testid="gate-commands-hint">
+          Leave all three commands blank to use npm. Set any one and npm stops: the Builds gate then
+          needs an install or build command, and Tests pass a test command. One command each, with no
+          quotes, && or |: for more, run a script such as ./ci/test.sh. They run in the working
+          directory with the network on, and cannot read the home folder of the machine they run on.
         </p>
       </SettingsCard>
 

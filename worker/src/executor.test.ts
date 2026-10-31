@@ -202,8 +202,8 @@ describe("createExecutor", () => {
       const args = run.mock.calls[call][1] as string[];
       return args[args.indexOf("--append-system-prompt") + 1];
     };
-    expect(promptOf(0)).toContain("This project's own commands are `go build ./...`, `./bin/test` in svc.");
-    expect(promptOf(1)).not.toContain("This project's own commands");
+    expect(promptOf(0)).toContain("This project's gates run `go build ./...`, `./bin/test` in svc.");
+    expect(promptOf(1)).not.toContain("This project's gates run");
   });
 
   // An agent told to commit and unable to would report itself blocked

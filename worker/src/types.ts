@@ -131,6 +131,8 @@ export interface GateContext {
   worktreeDir: RecordedDir;
   /** The `HOME` a project's own commands share across the run, beside the worktree and removed with it (BP-985). */
   gateHome: RecordedDir;
+  /** The clone's `.git`, which a project's own commands may read so that git works in a linked worktree. */
+  checkoutGitDir: string;
   task: ClaimedTask;
   result: ExecutionResult;
   diff: DiffStats;

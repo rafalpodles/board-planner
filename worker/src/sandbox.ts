@@ -133,6 +133,8 @@ export interface ConfineOptions {
   env?: NodeJS.ProcessEnv;
   /** Defaults to "open"; "loopback" refuses every outbound connection except to this machine. */
   network?: Network;
+  /** Refuses reads under these homes, but for the writable directories and `readable`. See SEALED_HOME. */
+  sealedHomes?: { homes: string[]; readable: string[] };
 }
 
 /**
@@ -272,6 +274,27 @@ export const OWN_SANDBOX_SIGNALS_ONLY = ["(deny signal)", "(allow signal (target
 
 export const PROFILE_TAIL = [...NAMED_SERVICE_DENIES, ...OWN_SANDBOX_SIGNALS_ONLY];
 
+// For a project's own gate commands (BP-985), which are chosen by the project's owner and may run on
+// somebody else's machine with the network open. Reads are otherwise open because the CLI's session
+// needs them, and no CLI runs here. Measured on macOS 26.7: a planted file, `ls ~/.ssh` and
+// `security show-keychain-info` are refused, while the network, git, go, python3, pip3, mvn, gradle
+// and a node under ~/.nvm all run. `file-read-data` covers a directory listing too. Metadata stays
+// readable: a file's name and size can still be probed by a full path. The keychain goes through a
+// daemon, and an ssh-agent or a password manager's agent signs for whoever connects, so reading
+// nothing would not stop either; both agents' sockets are refused by where they live.
+function sealedHomeRules(homeNames: string[], readable: string[]): string[] {
+  const under = (names: string[]) => names.map((name) => `(subpath (param "${name}"))`).join(" ");
+  const allowed = readable.map((_, index) => `R${index}`);
+  const homes = homeNames;
+  return [
+    `(deny file-read-data ${under(homes)})`,
+    ...(allowed.length ? [`(allow file-read-data ${under(allowed)})`] : []),
+    '(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd"))',
+    `(deny network-outbound (remote unix-socket ${under(homes)}))`,
+    '(deny network-outbound (remote unix-socket (path-regex #"^/private/tmp/com\\.apple\\.launchd\\.[^/]+/Listeners$")))',
+  ];
+}
+
 // Rules for a mode go in `modeRules`, never after the result: the tail must come last.
 export function profileWith(names: string[], modeRules: string[] = []): string {
   return [profileFor(names), ...modeRules, ...PROFILE_TAIL].join("\n");
@@ -318,12 +341,20 @@ export function confine(command: string, args: string[], options: ConfineOptions
   }
 
   const names = resolved.map((_, index) => `W${index}`);
+  const homeNames = (options.sealedHomes?.homes ?? []).map((_, index) => `H${index}`);
+  const readable = options.sealedHomes ? [...resolved, ...options.sealedHomes.readable] : [];
+  const modeRules = [
+    ...(options.network === "loopback" ? LOOPBACK_ONLY : []),
+    ...(options.sealedHomes ? sealedHomeRules(homeNames, readable) : []),
+  ];
   return {
     command: SANDBOX_COMMAND,
     args: [
       "-p",
-      profileWith(names, options.network === "loopback" ? LOOPBACK_ONLY : []),
+      profileWith(names, modeRules),
       ...names.flatMap((name, index) => ["-D", `${name}=${resolved[index]}`]),
+      ...(options.sealedHomes?.homes ?? []).flatMap((home, index) => ["-D", `H${index}=${home}`]),
+      ...readable.flatMap((path, index) => ["-D", `R${index}=${path}`]),
       command,
       ...args,
     ],

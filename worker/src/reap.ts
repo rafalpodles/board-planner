@@ -226,12 +226,12 @@ export function markConfinedSpawn(
   return { args: ["-p", [args[1], ...rules].join("\n"), ...params, ...args.slice(2)], marker };
 }
 
-/** The absolute paths a sandbox-exec argument list makes writable: its own `-D`s, never the program's arguments. */
+/** The absolute paths a sandbox-exec argument list makes writable: its own `W` parameters, never the program's arguments. */
 export function writableIn(args: string[]): string[] {
   const paths: string[] = [];
   for (let index = args[0] === "-p" ? 2 : 0; args[index] === "-D" && index + 1 < args.length; index += 2) {
-    const value = args[index + 1].slice(args[index + 1].indexOf("=") + 1);
-    if (value.startsWith("/")) paths.push(value);
+    const [, value] = /^W\d+=(\/.*)$/.exec(args[index + 1]) ?? [];
+    if (value) paths.push(value);
   }
   return paths;
 }

@@ -152,12 +152,12 @@ describe("a run across several repositories", () => {
       }),
     };
 
-    const gateRuns: { gate: string; path: string }[] = [];
+    const gateRuns: { gate: string; path: string; home: string }[] = [];
     const gateTimeouts: number[] = [];
     const gateFor: PipelineDeps["gateFor"] = (entry, _runner, timeoutMs) => (gateTimeouts.push(timeoutMs), {
       name: entry.name,
       run: async (context) => {
-        gateRuns.push({ gate: entry.key, path: context.worktreePath });
+        gateRuns.push({ gate: entry.key, path: context.worktreePath, home: context.gateHome.path });
         return over.gates?.[entry.key]?.(context) ?? { ok: true, reason: "" };
       },
     });
@@ -286,6 +286,7 @@ describe("a run across several repositories", () => {
 
     expect(run.gateRuns.map((g) => g.gate)).toEqual(["diff-size", "diff-size"]);
     expect(new Set(run.gateRuns.map((g) => g.path)).size).toBe(2);
+    for (const gate of run.gateRuns) expect(gate.home).toBe(`${gate.path}.home`);
   });
 
   describe("the run's ceiling across the repositories of one gate", () => {

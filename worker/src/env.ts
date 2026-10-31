@@ -29,27 +29,9 @@ export const ALLOWED = [
  */
 export const UNCONFINED_ESCAPE_HATCH = "CP_ALLOW_UNCONFINED_AGENT";
 
-function saidYes(value: string | undefined): boolean {
-  const answer = value?.trim().toLowerCase();
-  return answer === "1" || answer === "true" || answer === "yes";
-}
-
 export function unconfinedAgentAllowed(source: NodeJS.ProcessEnv = process.env): boolean {
-  return saidYes(source[UNCONFINED_ESCAPE_HATCH]);
-}
-
-/**
- * Whether a project's own install command may reach the network on this machine (BP-985).
- *
- * `npm ci` keeps the network because nothing of the repository's runs during it. `pip install .`,
- * `build.rs` and a Maven plugin do run it, and reads are open, so with the network that code can
- * send off whatever this user can read. An environment variable for the reason the one above is:
- * nothing the server or the agent can reach may widen a sandbox.
- */
-export const INSTALL_NETWORK_OPT_IN = "CP_ALLOW_INSTALL_NETWORK";
-
-export function installNetworkAllowed(source: NodeJS.ProcessEnv = process.env): boolean {
-  return saidYes(source[INSTALL_NETWORK_OPT_IN]);
+  const value = source[UNCONFINED_ESCAPE_HATCH]?.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
 }
 
 export function childEnv(

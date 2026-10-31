@@ -9,6 +9,9 @@ export const CAPABILITIES_HEADER = "x-cp-capabilities";
 /** One run holds a worktree per repository of the project, so a project may list several */
 export const MULTI_REPOSITORY = "multi-repository";
 
+/** Runs a project's own gate commands. One without it would run npm and report that as the project's check */
+export const GATE_COMMANDS = "gate-commands";
+
 const MAX_CAPABILITIES = 16;
 const CAPABILITY = /^[a-z][a-z0-9-]{0,63}$/;
 

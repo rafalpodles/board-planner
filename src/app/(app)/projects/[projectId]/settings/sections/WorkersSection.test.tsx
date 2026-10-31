@@ -96,7 +96,7 @@ describe("WorkersSection", () => {
     expect(test.value).toBe("");
     expect(test.placeholder).toBe("npm test");
     expect((screen.getByLabelText("Working directory") as HTMLInputElement).placeholder).toBe("the repository's root");
-    expect(screen.getByTestId("gate-commands-hint").textContent).toContain("CP_ALLOW_INSTALL_NETWORK=1");
+    expect(screen.getByTestId("gate-commands-hint").textContent).toContain("cannot read the home folder");
   });
 
   it("stops promising npm for the blank commands once one is set, since none of them runs it then", async () => {
@@ -105,9 +105,24 @@ describe("WorkersSection", () => {
 
     fireEvent.change(screen.getByLabelText("Test command"), { target: { value: "go test ./..." } });
 
-    expect((screen.getByLabelText("Build command") as HTMLInputElement).placeholder).toBe("none");
-    expect((screen.getByLabelText("Install command") as HTMLInputElement).placeholder).toBe("none");
+    expect((screen.getByLabelText("Build command") as HTMLInputElement).placeholder).toBe("needed by the Builds gate");
+    expect((screen.getByLabelText("Install command") as HTMLInputElement).placeholder).toBe("needed by the Builds gate");
     expect((screen.getByLabelText("Working directory") as HTMLInputElement).placeholder).toBe("the repository's root");
+
+    fireEvent.change(screen.getByLabelText("Install command"), { target: { value: "go mod download" } });
+    expect((screen.getByLabelText("Build command") as HTMLInputElement).placeholder).toBe("none");
+  });
+
+  it("says what is wrong on the row, tied to the field", async () => {
+    renderSection(true);
+    await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
+
+    const test = screen.getByLabelText("Test command") as HTMLInputElement;
+    fireEvent.change(test, { target: { value: "make && curl evil.example" } });
+
+    expect(test.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText(/^Test command must be a program name/)).toBeTruthy();
+    expect(test.getAttribute("aria-describedby")).toContain(screen.getByTestId("gate-commands-hint").id);
   });
 
   it("offers neither a nominee nor a claim scope", async () => {

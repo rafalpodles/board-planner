@@ -14,7 +14,7 @@ import { BaseUnavailableError, PoisonedCheckoutError, Workspace } from "./worksp
 import { UNREADABLE_CONFIG } from "./repos.js";
 import { scopedConfigListZ } from "./config-list.fixtures.js";
 import { ClaimedTask, DiffStats, ExecutionResult, Gate, SnapshotEntry } from "./types.js";
-import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
+import { GATE_CAP_MS, gateCapFor, PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
 
 // Exactly today's pipeline, expressed as an agent — the composition every existing project is
 // backfilled with, so a task claimed here means what it has always meant.
@@ -117,7 +117,7 @@ const IDENTITY = { name: "The Operator", email: "operator@example.com" };
 const PIN = { workTree: "/wt", gitDir: "/repo/.git/worktrees/wt", pointer: "gitdir: /repo/.git/worktrees/wt\n", flagged: [] };
 
 function worktreeAt(baseSha: string, tampering: () => Promise<string | null> = async () => null) {
-  return { path: "/wt", baseSha, commitIdentity: IDENTITY, pin: PIN, dir: { path: "/wt", dev: 0, ino: 0 }, gateHome: { path: "/wt.home", dev: 0, ino: 1 }, tampering };
+  return { path: "/wt", baseSha, commitIdentity: IDENTITY, pin: PIN, dir: { path: "/wt", dev: 0, ino: 0 }, gateHome: { path: "/wt.home", dev: 0, ino: 1 }, emptyGateHome: vi.fn(), tampering };
 }
 
 // A worktree that starts dirty, the way the implement step actually leaves one, and goes clean the
@@ -254,6 +254,36 @@ function composedGateRejectedComment(call: unknown[]): string {
   const where = branch ? `\n\nThe work is pushed to \`${branch}\` for inspection.` : "";
   return `The execution worker blocked the merge at the **${gate}** gate.\n\n${reason}${where}`;
 }
+
+describe("gateCapFor", () => {
+  it("is the ten minutes the npm gates always had", () => {
+    expect(gateCapFor({ ...config, taskTimeoutMs: 3_600_000 })).toBe(GATE_CAP_MS);
+  });
+
+  it("follows the project's step timeout on its own commands, whose every run starts cold", () => {
+    expect(gateCapFor({ ...config, buildCommand: "mvn package", taskTimeoutMs: 3_600_000 })).toBe(3_600_000);
+    expect(gateCapFor({ ...config, buildCommand: "mvn package", taskTimeoutMs: 60_000 })).toBe(GATE_CAP_MS);
+  });
+});
+
+describe("a project whose commands cannot pass, known before the step anybody pays for", () => {
+  it("stops the run before the first step, naming the setting", async () => {
+    const h = harness({ config: { ...config, buildCommand: "sh b" } });
+
+    await runTask(h.deps, running("implement", "test-run"));
+
+    expect(h.executor.execute).not.toHaveBeenCalled();
+    expect(h.reporter.failed).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("no test command"));
+  });
+
+  it("runs as usual when the commands cover the agent's gates", async () => {
+    const h = harness({ config: { ...config, testCommand: "sh t" } });
+
+    await runTask(h.deps, running("implement", "test-run"));
+
+    expect(h.executor.execute).toHaveBeenCalled();
+  });
+});
 
 describe("resolveStatusIds", () => {
   it("returns the ids when every role maps to a column the board carries", async () => {
@@ -1238,6 +1268,7 @@ describe("runTask", () => {
       worktreePath: "/wt",
       worktreeDir: { path: "/wt", dev: 0, ino: 0 },
       gateHome: { path: "/wt.home", dev: 0, ino: 1 },
+      checkoutGitDir: "/repo/.git",
       task: merging,
       result: completed,
       diff,

@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { CommandResult, Runner } from "../exec.js";
-import { INSTALL_NETWORK_OPT_IN, UNCONFINED_ESCAPE_HATCH } from "../env.js";
+import { UNCONFINED_ESCAPE_HATCH } from "../env.js";
 import { claimedTask } from "../__fixtures__/task.js";
 import { recordDir, SANDBOX_COMMAND } from "../sandbox.js";
 import { GateContext } from "../types.js";
 import { buildGate } from "./build.js";
-import { gateCommandsOf, GateCommands, gateDirectory, namedByGateCommand, resolveGateProgram, usesOwnCommands } from "./gate-commands.js";
+import { gateCommandsOf, GateCommands, gateConfigFault, gateDirectory, namedByGateCommand, resolveGateProgram, usesOwnCommands } from "./gate-commands.js";
 import { testRunGate } from "./test-run.js";
 
 const TIMEOUT_MS = 5000;
@@ -40,12 +40,12 @@ beforeEach(() => {
     worktreePath: worktree,
     worktreeDir: recordDir(worktree),
     gateHome: recordDir(join(root, "wt.home")),
+    checkoutGitDir: join(root, "clone", ".git"),
     task: claimedTask({ title: "t", description: "d" }),
     result: { status: "completed", summary: "", filesChanged: [], testsAdded: [], blockedReason: "" },
     diff: { changedLines: 1, changedFiles: ["a.py"], patch: "", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c", symlinks: [], suppressedDiffs: [], gitlinks: [] },
   };
   vi.stubEnv(UNCONFINED_ESCAPE_HATCH, "");
-  vi.stubEnv(INSTALL_NETWORK_OPT_IN, "");
 });
 
 afterEach(() => {
@@ -75,29 +75,29 @@ describeOnMac("the Builds gate on a project's own commands", () => {
     expect(profileOf(install)).toContain(context.gateHome.path);
   });
 
-  it("gives the install no network unless this machine's operator said so, and the build none either way", async () => {
+  it("gives every command the network and seals the real home, the opposite of the npm gates", async () => {
     const { run, runner } = recording();
-    const gate = buildGate(runner, NPM, TIMEOUT_MS, commands({ installCommand: "sh i", buildCommand: "sh b" }));
 
-    await gate.run(context);
-    expect(profileOf(run.mock.calls[0][1])).toContain("(deny network-outbound)");
-    expect(profileOf(run.mock.calls[1][1])).toContain("(deny network-outbound)");
+    await buildGate(runner, NPM, TIMEOUT_MS, commands({ installCommand: "sh i", buildCommand: "sh b" })).run(context);
+    await testRunGate(runner, NPM, TIMEOUT_MS, commands({ testCommand: "sh t" })).run(context);
 
-    run.mockClear();
-    vi.stubEnv(INSTALL_NETWORK_OPT_IN, "1");
-    await gate.run(context);
-    expect(profileOf(run.mock.calls[0][1])).not.toContain("(deny network-outbound)\n");
-    expect(profileOf(run.mock.calls[1][1])).toContain("(deny network-outbound)");
+    expect(run).toHaveBeenCalledTimes(3);
+    for (const [, args] of run.mock.calls) {
+      expect(profileOf(args)).not.toContain('(remote ip "localhost:*")');
+      expect(profileOf(args)).toContain("(deny file-read-data");
+      expect(profileOf(args)).toContain(`H0=${realpathSync(userInfo().homedir)}`);
+      expect(profileOf(args)).toContain(`=${context.checkoutGitDir}`);
+    }
   });
 
-  it("says what to set when an install fails with no network, and does not blame a build for it", async () => {
-    const { runner } = recording({ ...ok, code: 1, stderr: "connect EPERM" });
+  it("does not reopen the home through a PATH entry that is the home itself", async () => {
+    const home = realpathSync(userInfo().homedir);
+    vi.stubEnv("PATH", `${home}:/usr/bin:/bin`);
+    const { run, runner } = recording();
 
-    const install = await buildGate(runner, NPM, TIMEOUT_MS, commands({ installCommand: "sh i" })).run(context);
-    const build = await buildGate(runner, NPM, TIMEOUT_MS, commands({ buildCommand: "sh b" })).run(context);
+    await testRunGate(runner, NPM, TIMEOUT_MS, commands({ testCommand: "sh t" })).run(context);
 
-    expect(install.reason).toContain(`${INSTALL_NETWORK_OPT_IN}=1`);
-    expect(build.reason).not.toContain(INSTALL_NETWORK_OPT_IN);
+    expect(run.mock.calls[0][1].filter((arg) => /^R\d+=/.test(arg) && arg.endsWith(`=${home}`))).toEqual([]);
   });
 
   it("stops at a failing install, saying so", async () => {
@@ -141,6 +141,35 @@ describeOnMac("the Builds gate on a project's own commands", () => {
     const spent = await buildGate({ run }, NPM, TIMEOUT_MS, steps).run(context);
     expect(spent).toMatchObject({ ok: false, reason: `the ${TIMEOUT_MS}ms budget ran out before the build command started` });
     now.mockRestore();
+  });
+
+  it("fails a command killed by a signal, which is no exit code to read as success", async () => {
+    const { runner } = recording({ ...ok, code: -1 });
+
+    const verdict = await buildGate(runner, NPM, TIMEOUT_MS, commands({ buildCommand: "sh b" })).run(context);
+
+    expect(verdict.ok).toBe(false);
+  });
+
+  it("hands the run's abort signal to the command, so a stopped run does not wait out its timeout", async () => {
+    const { run, runner } = recording();
+    const controller = new AbortController();
+
+    await buildGate(runner, NPM, TIMEOUT_MS, commands({ buildCommand: "sh b" })).run({ ...context, signal: controller.signal });
+
+    expect(run.mock.calls[0][2]?.signal).toBe(controller.signal);
+  });
+
+  it("finds a ./ program in the working directory, not at the root of the checkout", async () => {
+    mkdirSync(join(worktree, "svc", "bin"), { recursive: true });
+    writeFileSync(join(worktree, "svc", "bin", "test"), "#!/bin/sh\n");
+    chmodSync(join(worktree, "svc", "bin", "test"), 0o755);
+    const { run, runner } = recording();
+
+    const verdict = await testRunGate(runner, NPM, TIMEOUT_MS, commands({ testCommand: "./bin/test", workingDirectory: "svc" })).run(context);
+
+    expect(verdict.ok).toBe(true);
+    expect(run.mock.calls[0][1]).toContain(join(worktree, "svc", "bin", "test"));
   });
 
   it("says a command timed out, rather than that it failed", async () => {
@@ -222,13 +251,12 @@ describeOnMac("the Builds gate on a project's own commands", () => {
 });
 
 describeOnMac("the Tests gate on a project's own commands", () => {
-  it("runs the test command with no network, and the home the install filled", async () => {
+  it("runs the test command with the home the install filled", async () => {
     const { run, runner } = recording();
 
     const verdict = await testRunGate(runner, NPM, TIMEOUT_MS, commands({ testCommand: "sh t -v" })).run(context);
 
     expect(verdict).toEqual({ ok: true, reason: "", commands: ["sh t -v"] });
-    expect(profileOf(run.mock.calls[0][1])).toContain("(deny network-outbound)");
     expect(run.mock.calls[0][2]?.env?.HOME).toBe(context.gateHome.path);
   });
 
@@ -281,6 +309,34 @@ describeOnMac("npm in a working directory that is a symlink", () => {
   });
 });
 
+describe("gateConfigFault, read before anybody pays for a step", () => {
+  const sequence = (...gateKinds: string[]) => gateKinds.map((gateKind) => ({ gateKind }));
+
+  it("says nothing of a project on the npm gates", () => {
+    expect(gateConfigFault(sequence("build", "test-run"), commands({}), worktree)).toBeNull();
+  });
+
+  it("names a gate the commands leave with nothing to run", () => {
+    expect(gateConfigFault(sequence("build", "test-run"), commands({ testCommand: "sh t" }), worktree)).toMatch(/neither an install nor a build command/);
+    expect(gateConfigFault(sequence("build", "test-run"), commands({ buildCommand: "sh b" }), worktree)).toMatch(/no test command/);
+  });
+
+  it("does not mind a gate the agent does not have", () => {
+    expect(gateConfigFault(sequence("test-run"), commands({ testCommand: "sh t" }), worktree)).toBeNull();
+  });
+
+  it("names a ./ program the checkout does not have, or cannot run", () => {
+    writeFileSync(join(worktree, "plain"), "");
+
+    expect(gateConfigFault(sequence("test-run"), commands({ testCommand: "./gone" }), worktree)).toMatch(/\.\/gone/);
+    expect(gateConfigFault(sequence("test-run"), commands({ testCommand: "./plain" }), worktree)).toMatch(/\.\/plain/);
+  });
+
+  it("leaves a working directory the checkout does not have yet to the gate: the task may create it", () => {
+    expect(gateConfigFault(sequence("test-run"), commands({ testCommand: "./x", workingDirectory: "new" }), worktree)).toBeNull();
+  });
+});
+
 describe("namedByGateCommand", () => {
   const named = commands({ testCommand: "./bin/test --fast", buildCommand: "python manage.py check", workingDirectory: "svc" });
 
@@ -289,11 +345,18 @@ describe("namedByGateCommand", () => {
     expect(namedByGateCommand("svc/manage.py", named)).toBe(true);
   });
 
-  it("finds a path after an equals sign", () => {
-    const options = commands({ testCommand: "make --file=ci/test.mk", buildCommand: "env RUN=ci/run.sh make" });
+  it("finds a path after an equals sign or a short option, and the module of -m", () => {
+    const options = commands({ testCommand: "make --file=ci/test.mk", buildCommand: "env RUN=ci/run.sh make -fother.mk", installCommand: "python3 -m ci.tests" });
 
     expect(namedByGateCommand("ci/test.mk", options)).toBe(true);
     expect(namedByGateCommand("ci/run.sh", options)).toBe(true);
+    expect(namedByGateCommand("other.mk", options)).toBe(true);
+    expect(namedByGateCommand("ci/tests.py", options)).toBe(true);
+  });
+
+  it("ignores case, because macOS will run bin/test for ./bin/Test", () => {
+    expect(namedByGateCommand("bin/test", commands({ testCommand: "./bin/Test" }))).toBe(true);
+    expect(namedByGateCommand("SVC/Check.sh", commands({ testCommand: "sh check.sh", workingDirectory: "svc" }))).toBe(true);
   });
 
   it("takes a word for a path only where it is one", () => {
@@ -344,7 +407,7 @@ describe("resolveGateProgram", () => {
     chmodSync(join(worktree, "gradlew"), 0o755);
 
     expect(resolveGateProgram("./gradlew", worktree, "")).toBe(join(worktree, "gradlew"));
-    expect(resolveGateProgram("./missing", worktree, "/bin")).toBeNull();
+    expect(resolveGateProgram("./sh", worktree, "/bin")).toBeNull();
   });
 
   it("does not take a file that cannot be executed, or a directory", () => {

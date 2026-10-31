@@ -218,6 +218,7 @@ describe("every real env-building call site stays inside the allowlist, across a
         worktreePath: worktree.path,
         worktreeDir: worktree.dir,
         gateHome: worktree.gateHome,
+        checkoutGitDir: worktree.pin.gitDir,
         task,
         result: {
           status: "completed",

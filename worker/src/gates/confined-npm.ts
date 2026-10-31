@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { CommandResult, Runner, RunOpts } from "../exec.js";
 import { GateResult } from "../types.js";
 import { agentEnv, npmCacheOverride, tempDirOverride } from "../env.js";
 import { confine, Confinement, ConfineOptions, confineTool, Network, RecordedDir, SANDBOX_COMMAND } from "../sandbox.js";
+import { removeTree } from "../worktree-disk.js";
 
 /**
  * The npm gates, run where the agent's own tools already are.
@@ -151,7 +152,9 @@ async function runInGateSandbox(
     const result = await runner.run(spawn.command, spawn.args, { ...runOptions, env: envFor(temp) });
     return result.machineFault ? { refusal: result.machineFault } : { ...result, loopbackOnly };
   } finally {
-    rmSync(temp, { recursive: true, force: true });
+    // In a `finally`, so a removal that threw would replace the verdict: a confined command can make
+    // its temp directory undeletable
+    removeTree(temp);
   }
 }
 
@@ -182,34 +185,43 @@ export async function runConfinedNpm(runner: Runner, npmPath: string, args: stri
 }
 
 /**
- * One of a project's own commands (BP-985). It gets the run's `gateHome` as its home: go, pip and
- * cargo keep their downloads under `HOME`, and the real one is not writable. The JVM ignores `HOME`
- * on macOS and asks the system, which answers `CFFIXED_USER_HOME` (measured under this sandbox: with
- * only `HOME` moved Gradle dies on "Could not initialize native services" and Maven uses the
- * operator's `~/.m2`). Not the per-account cache npm gets: that is bounded by npm checking the
- * lockfile's hashes, and pip's cache is not, so code run by one project's install could poison another's.
+ * One of a project's own commands (BP-985). The project's owner chooses it and the machine may be
+ * somebody else's, so it runs with the network open and with the real home unreadable, where the npm
+ * gates are the other way round. It gets the run's `gateHome` as its home: go, pip and cargo keep
+ * their downloads under `HOME`, and the JVM reads `CFFIXED_USER_HOME` on macOS (with only `HOME`
+ * moved Gradle dies on "Could not initialize native services") and takes its temp directory from
+ * `java.io.tmpdir`, not `TMPDIR`. Not the per-account cache npm gets: that is bounded by npm checking
+ * the lockfile's hashes, and pip's cache is not.
  */
 export async function runConfinedProgram(
   runner: Runner,
   programPath: string,
   args: string[],
-  options: Omit<ConfinedNpmOptions, "withCache"> & { home: RecordedDir }
+  options: Omit<ConfinedNpmOptions, "withCache" | "network"> & { home: RecordedDir; readable: string[] }
 ): Promise<GateRun> {
-  const { home, env: source, ...rest } = options;
+  const { home, readable, env: source, ...rest } = options;
+  const homes = [...new Set([realHome(userInfo().homedir), realHome((source ? source.HOME : agentEnv().HOME) ?? "")])].filter(Boolean);
+  // Quoted: the JVM splits this on whitespace, and an operator's TMPDIR may hold a space
   return runInGateSandbox(
     runner,
     { ...rest, env: source, writable: [home] },
-    (confinement) => confine(programPath, args, confinement),
-    // The JVM ignores TMPDIR on macOS too, and its own default is not writable here
+    (confinement) => confine(programPath, args, { ...confinement, sealedHomes: { homes, readable: readable.filter((path) => !homes.includes(path)) } }),
     (temp) => ({
       ...(source ? agentEnv([], source) : agentEnv()),
       HOME: home.path,
       CFFIXED_USER_HOME: home.path,
       TMPDIR: temp,
-      // Quoted: the JVM splits this on whitespace, and an operator's TMPDIR may hold a space
       JAVA_TOOL_OPTIONS: `"-Djava.io.tmpdir=${temp}"`,
     })
   );
+}
+
+function realHome(path: string): string {
+  try {
+    return path ? realpathSync(path) : "";
+  } catch {
+    return "";
+  }
 }
 
 const MAX_REASON_CHARS = 2000;

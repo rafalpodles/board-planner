@@ -108,6 +108,7 @@ export function isModelName(value: string): boolean {
 const GATE_COMMAND_WORD = /^[A-Za-z0-9._/=+:@%,~-]+$/;
 const GATE_PROGRAM = /^(?:[A-Za-z0-9_][A-Za-z0-9._+-]*|\.\/[A-Za-z0-9._+/-]+)$/;
 const WORKING_DIRECTORY = /^[A-Za-z0-9_][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/;
+const CREDENTIAL_IN_URL = /:\/\/[^/]*@/;
 const MAX_COMMAND_CHARS = 500;
 
 export function isGateCommand(value: string): boolean {
@@ -116,10 +117,25 @@ export function isGateCommand(value: string): boolean {
     value.length <= MAX_COMMAND_CHARS &&
     GATE_PROGRAM.test(program) &&
     !program.split("/").includes("..") &&
-    args.every((word) => GATE_COMMAND_WORD.test(word))
+    args.every((word) => GATE_COMMAND_WORD.test(word) && !CREDENTIAL_IN_URL.test(word))
   );
 }
 
 export function isWorkingDirectory(value: string): boolean {
   return value.length <= MAX_VALUE_CHARS && WORKING_DIRECTORY.test(value);
+}
+
+export const normaliseGateField = (field: string, value: string): string =>
+  field === "workingDirectory" ? value.trim().replace(/\/+$/, "") : value.trim();
+
+/** Why a gate command or working directory cannot be saved, in the words the person who typed it reads. Both consoles use it. */
+export function gateFieldProblem(field: string, value: string): string | null {
+  const text = normaliseGateField(field, value);
+  if (!text) return null;
+  if (field === "workingDirectory") {
+    return isWorkingDirectory(text) ? null : "Working directory must be a path inside the repository, such as services/api, with no spaces and no part starting with a dot.";
+  }
+  const command = GATE_COMMAND_FIELDS.find((name) => name === field);
+  if (!command || isGateCommand(text)) return null;
+  return `${POLICY_FIELD_LABELS[command]} must be a program name or ./path, then its arguments. No quotes, &&, |, $ or *, and no password in a URL: for more, run a script.`;
 }

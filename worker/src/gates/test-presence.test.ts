@@ -2,12 +2,16 @@ import { describe, it, expect } from "vitest";
 import { testPresenceGate } from "./test-presence.js";
 import { DiffStats, GateContext } from "../types.js";
 import { claimedTask } from "../__fixtures__/task.js";
+import { gateCommandsOf } from "./gate-commands.js";
+
+const OWN = gateCommandsOf({ testCommand: "go test ./..." });
 
 function context(diff: Partial<DiffStats>): GateContext {
   return {
     worktreePath: "/wt",
     worktreeDir: { path: "/wt", dev: 0, ino: 0 },
     gateHome: { path: "/wt.home", dev: 0, ino: 1 },
+    checkoutGitDir: "/repo/.git",
     task: claimedTask({ taskKey: "CP-1", taskNumber: 1, title: "t", description: "d" }),
     result: {
       status: "completed",
@@ -78,13 +82,26 @@ describe("testPresenceGate", () => {
     "app/src/androidTest/java/JWTTest.kt",
     "src/main/java/LoginIT.java",
   ])("takes %s for a test, so a repository on its own gate commands can pass", async (path) => {
-    const verdict = await testPresenceGate().run(context({ changedFiles: ["src/login.x", path], patch: [`+++ b/${path}`, "+assert ok"].join("\n") }));
+    const verdict = await testPresenceGate(OWN).run(context({ changedFiles: ["src/login.x", path], patch: [`+++ b/${path}`, "+assert ok"].join("\n") }));
 
     expect(verdict).toMatchObject({ ok: true });
   });
 
+  it("takes none of those for a test on the npm gates, where `npm test` never runs them", async () => {
+    const verdict = await testPresenceGate().run(context({ changedFiles: ["src/billing.ts", "tools/foo_test.py"], patch: ["+++ b/tools/foo_test.py", "+assert ok"].join("\n") }));
+
+    expect(verdict).toMatchObject({ ok: false, reason: "no test file was added or changed" });
+  });
+
+  it("wants a test for a task-runner file on a project's own commands, which runs in its gates", async () => {
+    const taskfile = { changedFiles: ["Taskfile.yml"], patch: "+++ b/Taskfile.yml\n+x" };
+
+    expect((await testPresenceGate(OWN).run(context(taskfile))).ok).toBe(false);
+    expect((await testPresenceGate().run(context(taskfile))).ok).toBe(true);
+  });
+
   it.each(["login.py", "pkg/login.go", "src/login.rs", "contest_results.py", "Latest.java", "AUDIT.java", "GIT.kt"])("does not take %s for a test", async (path) => {
-    const verdict = await testPresenceGate().run(context({ changedFiles: [path], patch: [`+++ b/${path}`, "+x"].join("\n") }));
+    const verdict = await testPresenceGate(OWN).run(context({ changedFiles: [path], patch: [`+++ b/${path}`, "+x"].join("\n") }));
 
     expect(verdict).toMatchObject({ ok: false, reason: "no test file was added or changed" });
   });

@@ -1,13 +1,12 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createServer, Server } from "node:http";
-import { AddressInfo } from "node:net";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createServer as createNetServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunner } from "../exec.js";
-import { INSTALL_NETWORK_OPT_IN } from "../env.js";
 import { claimedTask } from "../__fixtures__/task.js";
-import { recordDir } from "../sandbox.js";
+import { confine, recordDir } from "../sandbox.js";
 import { GateContext } from "../types.js";
 import { buildGate } from "./build.js";
 import { gateCommandsOf, GateCommands } from "./gate-commands.js";
@@ -26,8 +25,6 @@ describe.skipIf(!onMac)("a project's own gate commands against the real sandbox"
   let worktree = "";
   let outside = "";
   let context: GateContext;
-  let listener: Server;
-  let port = 0;
   const runner = createRunner();
 
   function script(name: string, body: string) {
@@ -37,16 +34,6 @@ describe.skipIf(!onMac)("a project's own gate commands against the real sandbox"
 
   const own = (commands: Partial<GateCommands>) => gateCommandsOf(commands);
 
-  beforeAll(async () => {
-    listener = createServer((_request, response) => response.end("ok"));
-    await new Promise<void>((done) => listener.listen(0, "127.0.0.1", done));
-    port = (listener.address() as AddressInfo).port;
-  });
-
-  afterAll(() => {
-    listener.close();
-  });
-
   beforeEach(() => {
     root = realpathSync(mkdtempSync(join(tmpdir(), "bp985-int-")));
     worktree = join(root, "wt");
@@ -54,11 +41,11 @@ describe.skipIf(!onMac)("a project's own gate commands against the real sandbox"
     mkdirSync(worktree);
     mkdirSync(outside);
     mkdirSync(join(root, "wt.home"));
-    vi.stubEnv(INSTALL_NETWORK_OPT_IN, "");
     context = {
       worktreePath: worktree,
       worktreeDir: recordDir(worktree),
       gateHome: recordDir(join(root, "wt.home")),
+      checkoutGitDir: join(root, "wt", ".git"),
       task: claimedTask({ title: "t", description: "d" }),
       result: { status: "completed", summary: "", filesChanged: [], testsAdded: [], blockedReason: "" },
       diff: { changedLines: 1, changedFiles: ["a.py"], patch: "", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c", symlinks: [], suppressedDiffs: [], gitlinks: [] },
@@ -103,45 +90,100 @@ describe.skipIf(!onMac)("a project's own gate commands against the real sandbox"
     expect(readFileSync(join(worktree, "seen.txt"), "utf8")).not.toContain("secret-bp985");
   });
 
-  describe("the network", () => {
+  describe("the real home, with the network open", () => {
     // TEST-NET-1: never routed, so an open network times out where a closed one answers EPERM at once
-    const SEND_OFF_MACHINE = `require('net').connect({ host: '192.0.2.1', port: 443, timeout: 2000 }).on('connect', () => process.exit(0)).on('timeout', () => { console.error('open'); process.exit(0); }).on('error', (e) => { console.error(e.code); process.exit(1); })`;
-    const fetchOut = (name: string) => script(name, `exec "${process.execPath}" -e "${SEND_OFF_MACHINE}"`);
+    const OFF_THE_MACHINE = `require('net').connect({ host: '192.0.2.1', port: 443, timeout: 1000 }).on('connect', () => process.exit(0)).on('timeout', () => process.exit(0)).on('error', (e) => { console.error(e.code); process.exit(e.code === 'EPERM' ? 1 : 0); })`;
+    let canary = "";
 
-    it("is refused to a custom install by default, and the reason says who can open it", async () => {
-      fetchOut("install.sh");
-
-      const verdict = await buildGate(runner, NOT_NPM, TIMEOUT_MS, own({ installCommand: "./install.sh" })).run(context);
-
-      expect(verdict.ok).toBe(false);
-      expect(verdict.reason).toContain("EPERM");
-      expect(verdict.reason).toContain(`${INSTALL_NETWORK_OPT_IN}=1`);
+    beforeEach(() => {
+      canary = realpathSync(mkdtempSync(join(homedir(), ".bp985-canary-")));
+      writeFileSync(join(canary, "id_ed25519"), "fake-secret-bp985\n");
     });
 
-    it("is open to a custom install once this machine's operator said so", async () => {
-      vi.stubEnv(INSTALL_NETWORK_OPT_IN, "1");
-      fetchOut("install.sh");
+    afterEach(() => {
+      rmSync(canary, { recursive: true, force: true });
+    });
 
-      const verdict = await buildGate(runner, NOT_NPM, TIMEOUT_MS, own({ installCommand: "./install.sh" })).run(context);
+    it.each(["installCommand", "buildCommand", "testCommand"] as const)("lets %s reach off the machine", async (field) => {
+      script("out.sh", `exec "${process.execPath}" -e "${OFF_THE_MACHINE}"`);
+      const gate = field === "testCommand" ? testRunGate : buildGate;
+
+      const verdict = await gate(runner, NOT_NPM, TIMEOUT_MS, own({ [field]: "./out.sh" })).run(context);
 
       expect(verdict).toMatchObject({ ok: true });
     });
 
-    it("stays refused to a build and a test on a machine that opened it for the install", async () => {
-      vi.stubEnv(INSTALL_NETWORK_OPT_IN, "1");
-      fetchOut("step.sh");
+    it.each(["installCommand", "buildCommand", "testCommand"] as const)("refuses %s a file in the real home, while the same file elsewhere reads", async (field) => {
+      writeFileSync(join(worktree, "control"), "readable\n");
+      script("steal.sh", `cat control > got.txt\ncat "${join(canary, "id_ed25519")}" >> got.txt 2>&1\necho "exit $?" >> got.txt`);
+      const gate = field === "testCommand" ? testRunGate : buildGate;
 
-      const built = await buildGate(runner, NOT_NPM, TIMEOUT_MS, own({ buildCommand: "./step.sh" })).run(context);
-      const tested = await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./step.sh" })).run(context);
+      await gate(runner, NOT_NPM, TIMEOUT_MS, own({ [field]: "./steal.sh" })).run(context);
 
-      expect(built.reason).toContain("EPERM");
-      expect(tested.reason).toContain("EPERM");
+      const got = readFileSync(join(worktree, "got.txt"), "utf8");
+      expect(got).toContain("readable");
+      expect(got).not.toContain("fake-secret-bp985");
+      expect(got).toContain("exit 1");
     });
 
-    it("still reaches this machine, which a suite's own server needs", async () => {
-      script("local.sh", `exec "${process.execPath}" -e "require('net').connect(${port}, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))"`);
+    it("refuses a listing of the real home", async () => {
+      script("list.sh", `ls "${canary}" > listed.txt 2> error.txt; echo "exit $?" >> error.txt`);
 
-      const verdict = await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./local.sh" })).run(context);
+      await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./list.sh" })).run(context);
+
+      expect(readFileSync(join(worktree, "listed.txt"), "utf8")).toBe("");
+      expect(readFileSync(join(worktree, "error.txt"), "utf8")).toContain("Operation not permitted");
+    });
+
+    it("refuses a socket in the real home, which is where a password manager's agent listens, and not one elsewhere", async () => {
+      const inHome = join(canary, "agent.sock");
+      const elsewhere = join(root, "s.sock");
+      const servers = [inHome, elsewhere].map((path) => createNetServer((socket) => socket.end()).listen(path));
+      await Promise.all(servers.map((server) => new Promise((done) => server.once("listening", done))));
+      const connect = (path: string) => `require('net').connect('${path}').on('connect', () => { console.log('reached'); process.exit(0); }).on('error', (e) => { console.log(e.code); process.exit(0); })`;
+      script("sockets.sh", `"${process.execPath}" -e "${connect(inHome)}" > home.txt\n"${process.execPath}" -e "${connect(elsewhere)}" > elsewhere.txt`);
+
+      await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./sockets.sh" })).run(context);
+      servers.forEach((server) => server.close());
+
+      expect(readFileSync(join(worktree, "home.txt"), "utf8")).toContain("EPERM");
+      expect(readFileSync(join(worktree, "elsewhere.txt"), "utf8")).toContain("reached");
+    });
+
+    it("refuses the socket launchd gives an ssh agent", () => {
+      const spawn = confine("/usr/bin/true", [], { writable: [worktree], sealedHomes: { homes: ["/Users/x"], readable: [] } });
+
+      expect(JSON.stringify(spawn)).toContain("com\\\\.apple\\\\.launchd");
+    });
+
+    it("keeps git working in a linked worktree, whose clone is under the home it cannot read", async () => {
+      const clone = realpathSync(mkdtempSync(join(homedir(), ".bp985-clone-")));
+      try {
+        const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=x", "-c", "user.email=x@x", ...args], { cwd: clone, stdio: "pipe" });
+        git("init", "-q", "-b", "main");
+        git("commit", "-q", "--allow-empty", "-m", "first");
+        const linked = join(clone, "linked");
+        git("worktree", "add", "-q", linked);
+        writeFileSync(join(linked, "gitcheck.sh"), `git rev-parse HEAD > head.txt\n`);
+
+        const verdict = await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "sh gitcheck.sh" })).run({
+          ...context,
+          worktreePath: linked,
+          worktreeDir: recordDir(linked),
+          checkoutGitDir: join(clone, ".git"),
+        });
+
+        expect(verdict).toMatchObject({ ok: true });
+        expect(readFileSync(join(linked, "head.txt"), "utf8")).toMatch(/^[0-9a-f]{40}/);
+      } finally {
+        rmSync(clone, { recursive: true, force: true });
+      }
+    });
+
+    it("keeps a verdict when the command leaves its temp directory undeletable", async () => {
+      script("locked.sh", `mkdir "$TMPDIR/locked" && touch "$TMPDIR/locked/file" && /usr/bin/chflags uchg "$TMPDIR/locked/file"`);
+
+      const verdict = await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./locked.sh" })).run(context);
 
       expect(verdict).toMatchObject({ ok: true });
     });

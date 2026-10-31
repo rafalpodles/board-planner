@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CommandResult, createRunner, Runner } from "./exec.js";
 import { SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
-import { INSTALL_NETWORK_OPT_IN, UNCONFINED_ESCAPE_HATCH } from "./env.js";
+import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
 import { answerSandboxProbe, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
-import { checkGateCommands, checkRepo, INSTALL_NETWORK_CHECK, npmCacheCheck, pathWithTools, runPreflight, SANDBOX_CHECK } from "./preflight.js";
+import { checkGateCommands, checkRepo, npmCacheCheck, pathWithTools, runPreflight, SANDBOX_CHECK } from "./preflight.js";
 
 const LOGGED_IN = JSON.stringify({
   loggedIn: true,
@@ -218,15 +218,6 @@ describe("runPreflight", () => {
     expect(check(report, "npm")).toMatchObject({ ok: true, warn: true });
     expect(check(report, "npm").detail).toMatch(/npm gates is not claimed from/);
     expect(report.paths.npm).toBeUndefined();
-  });
-
-  it("shows the cost of an operator's install network in amber, and nothing when it is not set", async () => {
-    const accepted = await runPreflight(depsFor(machine(), { env: { ...env, [INSTALL_NETWORK_OPT_IN]: "1" } }));
-    const plain = await runPreflight(depsFor(machine()));
-
-    expect(check(accepted, INSTALL_NETWORK_CHECK)).toMatchObject({ ok: true, warn: true });
-    expect(check(accepted, INSTALL_NETWORK_CHECK).detail).toContain(INSTALL_NETWORK_OPT_IN);
-    expect(plain.checks.map((row) => row.name)).not.toContain(INSTALL_NETWORK_CHECK);
   });
 
   it("fails when a resolved binary will not run", async () => {

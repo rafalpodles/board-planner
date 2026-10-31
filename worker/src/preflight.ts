@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
-import { childEnv, INSTALL_NETWORK_OPT_IN, installNetworkAllowed, unconfinedAgentAllowed } from "./env.js";
+import { childEnv, unconfinedAgentAllowed } from "./env.js";
 import { confine, recordDir, SANDBOX_COMMAND, UNCONFINED_ACCEPTED_DETAIL } from "./sandbox.js";
 import { npmCacheDir } from "./gates/confined-npm.js";
 import { GateCommands, gateProgramOf, resolveGateProgram } from "./gates/gate-commands.js";
@@ -138,20 +138,6 @@ export function checkGateCommands(commands: GateCommands, path: string): Preflig
         detail: found ?? `${program} is not on this worker's PATH, and this project's gate commands run it`,
       };
     });
-}
-
-export const INSTALL_NETWORK_CHECK = "install network";
-
-function installNetworkCheck(env: NodeJS.ProcessEnv): PreflightCheck[] {
-  if (!installNetworkAllowed(env)) return [];
-  return [
-    {
-      name: INSTALL_NETWORK_CHECK,
-      ok: true,
-      warn: true,
-      detail: `${INSTALL_NETWORK_OPT_IN} is set — a project's own install command runs code from the repository with the network open, and can send off anything this user can read`,
-    },
-  ];
 }
 
 async function runs(
@@ -672,7 +658,6 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
   );
   checks.push(await sandboxCheck(deps, env));
   checks.push(npmCacheCheck(deps.env));
-  checks.push(...installNetworkCheck(deps.env));
 
   return {
     ok: checks.every((c) => c.ok),

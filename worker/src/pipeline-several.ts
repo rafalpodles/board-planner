@@ -1,3 +1,5 @@
+import { dirname } from "path";
+import { gateCommandsOf, gateConfigFault } from "./gates/gate-commands.js";
 import { createBudget } from "./budget.js";
 import { commitAll, TamperedCheckoutError } from "./commit.js";
 import { branchFor, WORKER_BRANCH_SLUG } from "./decisions.js";
@@ -9,7 +11,7 @@ import { ignoredFiles } from "./hidden-files.js";
 import {
   EMPTY_RESULT,
   fitDetail,
-  GATE_CAP_MS,
+  gateCapFor,
   hitUsageLimit,
   keptWorktree,
   MIN_ENTRY_MS,
@@ -242,6 +244,13 @@ export async function runTaskInRepositories(
     for (const leg of legs) leg.ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, leg.worktree.path);
     const anyMerged = (): boolean => legs.some((leg) => leg.state.merged);
 
+    const configFault = legs.map((leg) => gateConfigFault(task.agent.sequence, gateCommandsOf(config), leg.worktree.path)).find(Boolean);
+    if (configFault) {
+      settle("failed", configFault);
+      await reporter.failed(task, `this run stopped before any step: ${configFault}`);
+      return;
+    }
+
     for (const [position, entry] of task.agent.sequence.entries()) {
       if (await releaseIfAborted(deps, reporter, task, landed())) return;
 
@@ -277,7 +286,7 @@ export async function runTaskInRepositories(
       // after it, and the agent could have written in any of them
       if (entry.kind !== "step" || entry.capability !== "edit") continue;
       for (const leg of legs) {
-        const leftover = await unfinishedWork(runner, deps.gitPath, leg.worktree.path, leg.worktree.baseSha);
+        const leftover = await unfinishedWork(runner, deps.gitPath, leg.worktree.path, leg.worktree.baseSha, leg.ignoredBeforeSteps);
         if (leftover) {
           return (
             await end({
@@ -382,7 +391,9 @@ export async function runTaskInRepositories(
             `${task.taskKey}: ${entry.name.toLowerCase()}`,
             leg.worktree.commitIdentity,
             leg.worktree.baseSha,
+            leg.ignoredBeforeSteps,
           );
+          leg.worktree.emptyGateHome();
           if (sha) {
             leg.state.commits.push(sha);
             leg.state.checks.splice(0);
@@ -590,7 +601,7 @@ export async function runTaskInRepositories(
       maxDiffFiles: config.maxDiffFiles,
       reviewModel: config.reviewModel ?? "",
     };
-    const gate = deps.gateFor(entry, runner, budget.forEntry(GATE_CAP_MS), gateOptions);
+    const gate = deps.gateFor(entry, runner, budget.forEntry(gateCapFor(config)), gateOptions);
     if (!gate) {
       return done({
         outcome: "failed",
@@ -656,13 +667,14 @@ export async function runTaskInRepositories(
             ),
         });
       }
-      const legGate = index === 0 ? gate : (deps.gateFor(entry, runner, budget.forEntry(GATE_CAP_MS), gateOptions) ?? gate);
+      const legGate = index === 0 ? gate : (deps.gateFor(entry, runner, budget.forEntry(gateCapFor(config)), gateOptions) ?? gate);
       const diff = await deps.collectDiff(runner, leg.worktree.path, leg.worktree.baseSha);
       const startedGate = now();
       const verdict = await legGate.run({
         worktreePath: leg.worktree.path,
         worktreeDir: leg.worktree.dir,
         gateHome: leg.worktree.gateHome,
+        checkoutGitDir: dirname(dirname(leg.worktree.pin.gitDir)),
         task,
         result: leg.state.lastResult,
         diff,

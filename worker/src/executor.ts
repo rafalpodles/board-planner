@@ -50,7 +50,7 @@ function gateCommandsNote(commands: GateCommands): string {
   const named = [commands.installCommand, commands.buildCommand, commands.testCommand].filter(Boolean);
   if (named.length === 0) return "";
   const where = commands.workingDirectory ? ` in ${commands.workingDirectory}` : "";
-  return ` This project's own commands are ${named.map((command) => `\`${command}\``).join(", ")}${where}.`;
+  return ` This project's gates run ${named.map((command) => `\`${command}\``).join(", ")}${where}. The rule above also covers any file those commands name, and gradlew, mvnw, justfile, Taskfile.yml, noxfile.py, pytest.ini, conftest.py, build.rs, GNUmakefile, go.work, .cargo/, .mvn/ and gradle/wrapper/.`;
 }
 
 function systemPromptFor(brief: StepBrief, repositories: readonly WorktreeRef[] = [], commands: GateCommands = NPM_GATES): string {

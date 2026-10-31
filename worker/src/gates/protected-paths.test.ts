@@ -268,6 +268,30 @@ describe("what a project's own gate commands run", () => {
     expect(verdict.reason).not.toContain("svc/app.py");
   });
 
+  it.each([
+    "gradlew",
+    "mvnw",
+    ".justfile",
+    "Taskfile.yml",
+    "conftest.py",
+    "GNUmakefile",
+    "go.work",
+    "build.rs",
+    "ci/test.mk",
+    "buildSrc/x.kt",
+    ".cargo/config.toml",
+    "gradle/wrapper/gradle-wrapper.properties",
+  ])("refuses %s on a project's own commands, and leaves it alone on the npm gates, where no gate runs it", async (path) => {
+    expect((await protectedPathsGate(commands).run(context([path]))).ok).toBe(false);
+    expect((await protectedPathsGate().run(context([path]))).ok).toBe(true);
+  });
+
+  it("refuses a change to what an install command runs, the same as a test command", async () => {
+    const installs = gateCommandsOf({ installCommand: "./fetch.sh", testCommand: "go test ./..." });
+
+    expect((await protectedPathsGate(installs).run(context(["fetch.sh"]))).ok).toBe(false);
+  });
+
   it("leaves everything else alone, and means nothing to a project on the npm gates", async () => {
     expect((await protectedPathsGate(commands).run(context(["svc/app.py"]))).ok).toBe(true);
     expect((await protectedPathsGate().run(context(["svc/bin/test"]))).ok).toBe(true);
@@ -292,18 +316,6 @@ describe("what the agent is told matches what the gate refuses", () => {
     ".gitattributes",
     ".gitmodules",
     ".github/actions/setup/action.yml",
-    "gradlew",
-    "mvnw",
-    "justfile",
-    ".justfile",
-    "Taskfile.yml",
-    "noxfile.py",
-    "pytest.ini",
-    "conftest.py",
-    "build.rs",
-    ".cargo/config.toml",
-    ".mvn/wrapper/maven-wrapper.properties",
-    "gradle/wrapper/gradle-wrapper.properties",
   ];
 
   it("warns about every family the gate actually refuses", async () => {

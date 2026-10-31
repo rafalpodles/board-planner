@@ -97,7 +97,7 @@ export function gateFromEntry(
     case "protected-paths":
       return named(protectedPathsGate(commands), entry.key);
     case "test-presence":
-      return named(testPresenceGate(), entry.key);
+      return named(testPresenceGate(commands), entry.key);
     case "build":
       return named(buildGate(runner, tools.npm, timeoutMs, commands), entry.key);
     case "test-run":

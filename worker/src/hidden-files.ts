@@ -167,6 +167,8 @@ export async function hiddenFromGit(
   worktreePath: string,
   baseSha: string,
   since?: IgnoredFiles,
+  // Apart from `since`, which also asks what was written after it: a commit asks only what is hidden
+  ignoredByGates: IgnoredFiles | undefined = since,
 ): Promise<HiddenFiles | null> {
   const git = gitIn(runner, gitPath, worktreePath);
 
@@ -188,7 +190,11 @@ export async function hiddenFromGit(
         parentsOfListed.add(path.slice(0, slash + 1));
       }
     }
-    const offenders = ignored.filter((path) => !ignoredAtBase.has(path) && !parentsOfListed.has(path));
+    // What a passed gate left is in `since`, and it is the gate's own: pytest's cache and a venv each
+    // carry a `.gitignore` of `*`, which is how they look to this check
+    const leftByAGate = (path: string) =>
+      ignoredByGates?.kind === "listed" && [...ignoredByGates.files.keys()].some((file) => file === path || file.startsWith(path));
+    const offenders = ignored.filter((path) => !ignoredAtBase.has(path) && !parentsOfListed.has(path) && !leftByAGate(path));
     if (offenders.length > 0) {
       return {
         kind: "hidden",

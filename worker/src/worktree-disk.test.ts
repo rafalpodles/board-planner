@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { unlock } from "./worktree-disk.js";
+import { nodeWorktreeDisk, removeTree, unlock } from "./worktree-disk.js";
 
 const modeOf = (path: string) => statSync(path).mode & 0o777;
 
@@ -29,5 +29,47 @@ describe("unlock", () => {
     expect(modeOf(join(dir, "worktree"))).toBe(0o700);
     expect(modeOf(join(dir, "target"))).toBe(0o500);
     expect(lstatSync(join(dir, "link")).isSymbolicLink()).toBe(true);
+  });
+});
+
+// BP-985: the home of a project's own commands
+describe("a gate home on disk", () => {
+  let dir = "";
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("is private, and is never an existing directory taken over", () => {
+    dir = mkdtempSync(join(tmpdir(), "bp985-disk-"));
+
+    nodeWorktreeDisk.makeDir(join(dir, "home"));
+
+    expect(modeOf(join(dir, "home"))).toBe(0o700);
+    expect(() => nodeWorktreeDisk.makeDir(join(dir, "home"))).toThrow(/EEXIST/);
+  });
+
+  it("empties with the directory itself kept, read-only trees included, and following no symlink", () => {
+    dir = mkdtempSync(join(tmpdir(), "bp985-disk-"));
+    const home = join(dir, "home");
+    const outside = join(dir, "outside");
+    mkdirSync(join(home, "go", "pkg"), { recursive: true });
+    mkdirSync(outside);
+    writeFileSync(join(outside, "kept"), "x");
+    writeFileSync(join(home, "go", "pkg", "mod"), "x");
+    chmodSync(join(home, "go", "pkg"), 0o500);
+    symlinkSync(outside, join(home, "link"));
+    const before = statSync(home).ino;
+
+    nodeWorktreeDisk.empty(home);
+
+    expect(readdirSync(home)).toEqual([]);
+    expect(statSync(home).ino).toBe(before);
+    expect(existsSync(join(outside, "kept"))).toBe(true);
+  });
+
+  it("removes a tree without ever throwing, even one it cannot find", () => {
+    dir = mkdtempSync(join(tmpdir(), "bp985-disk-"));
+
+    expect(() => removeTree(join(dir, "gone"))).not.toThrow();
   });
 });

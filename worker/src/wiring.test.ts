@@ -2025,7 +2025,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       });
 
       expect(seen.length).toBeGreaterThan(0);
-      expect(seen.every((headers) => headers["X-CP-Capabilities"] === "multi-repository,agent-claude")).toBe(true);
+      expect(seen.every((headers) => headers["X-CP-Capabilities"] === "gate-commands,multi-repository,agent-claude")).toBe(true);
     });
 
     // BP-688. The third site of the same class: a server this worker cannot reach at all (as

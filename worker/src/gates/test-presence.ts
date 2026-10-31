@@ -1,9 +1,12 @@
 import { Gate } from "../types.js";
-import { isProtectedPath } from "./protected-paths.js";
+import { GateCommands, NPM_GATES, usesOwnCommands } from "./gate-commands.js";
+import { protectedPaths } from "./protected-paths.js";
 
-const TEST_FILE = new RegExp(
+const NPM_TEST_FILE = /\.(test|spec)\.[jt]sx?$/;
+// Only on a project's own commands: on the npm gates a `foo_test.py` is a file `npm test` never runs
+const OWN_COMMANDS_TEST_FILE = new RegExp(
   [
-    /\.(test|spec)\.[jt]sx?$/,
+    NPM_TEST_FILE,
     /(^|\/)test_[^/]+\.py$/,
     /_test\.(py|go|rb|exs|dart|cc|cpp)$/,
     /_spec\.rb$/,
@@ -35,17 +38,17 @@ const LOCKFILE =
 // This gate cannot rely on protected-paths having refused first. Since BP-331 a gate sequence is
 // composed per agent, so an agent may carry test-presence without it — each gate holds its own
 // ground.
-function exemptFromTests(file: string): boolean {
+function exemptFromTests(file: string, commands: GateCommands): boolean {
   if (!NO_TEST_EXPECTED.test(file)) return false;
   if (LOCKFILE.test(file)) return true;
-  return !isProtectedPath(file);
+  return protectedPaths([file], commands).length === 0;
 }
 
-function addsTestLines(patch: string): boolean {
+function addsTestLines(patch: string, testFile: RegExp): boolean {
   let inTestFile = false;
   for (const line of patch.split("\n")) {
     if (line.startsWith("+++ ")) {
-      inTestFile = TEST_FILE.test(line.slice(4));
+      inTestFile = testFile.test(line.slice(4));
       continue;
     }
     if (inTestFile && line.startsWith("+")) return true;
@@ -53,22 +56,23 @@ function addsTestLines(patch: string): boolean {
   return false;
 }
 
-export function testPresenceGate(): Gate {
+export function testPresenceGate(commands: GateCommands = NPM_GATES): Gate {
+  const testFile = usesOwnCommands(commands) ? OWN_COMMANDS_TEST_FILE : NPM_TEST_FILE;
   return {
     name: "test-presence",
     async run({ diff }) {
       if (diff.changedFiles.length === 0) {
         return { ok: false, reason: "the branch has no committed changes" };
       }
-      if (diff.changedFiles.every(exemptFromTests)) {
+      if (diff.changedFiles.every((file) => exemptFromTests(file, commands))) {
         return { ok: true, reason: "" };
       }
 
-      const testFiles = diff.changedFiles.filter((file) => TEST_FILE.test(file));
+      const testFiles = diff.changedFiles.filter((file) => testFile.test(file));
       if (testFiles.length === 0) {
         return { ok: false, reason: "no test file was added or changed" };
       }
-      if (!diff.truncated && !addsTestLines(diff.patch)) {
+      if (!diff.truncated && !addsTestLines(diff.patch, testFile)) {
         return {
           ok: false,
           reason: `no test lines were added — ${testFiles.join(", ")} only lost lines`,

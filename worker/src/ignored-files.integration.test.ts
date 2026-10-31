@@ -70,7 +70,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
   function run(
     sequence: SnapshotEntry[],
     steps: Record<string, (path: string) => void>,
-    gates: Record<string, (path: string) => void> = {},
+    gates: Record<string, (path: string, home: string) => void> = {},
     afterCreate: (path: string) => void = () => {},
     seenAt: (created: string) => string = (created) => created,
   ) {
@@ -94,9 +94,9 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
     const ran: string[] = [];
     const gateFor = (entry: SnapshotEntry): Gate => ({
       name: entry.name,
-      run: async ({ worktreePath }) => {
+      run: async ({ worktreePath, gateHome }) => {
         ran.push(entry.key);
-        gates[entry.key]?.(worktreePath);
+        gates[entry.key]?.(worktreePath, gateHome.path);
         return { ok: true, reason: "" };
       },
     });
@@ -285,6 +285,67 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
     expect(h.reporter.noted).not.toHaveBeenCalled();
     expect(h.ran).toEqual(["build", "test-run"]);
     expect(h.delivery.push).toHaveBeenCalled();
+  });
+
+  // BP-985. pytest's cache and a venv each carry a `.gitignore` of `*`, which is how a hidden file looks.
+  // The gate that passed left them, so neither the next gate, the next commit nor delivery may refuse them
+  it("lets through what a passed gate left under a .gitignore of its own", async () => {
+    const cache = (path: string) => {
+      write(path, ".pytest_cache/.gitignore", "*\n");
+      write(path, ".pytest_cache/v/cache/lastfailed", "{}\n");
+    };
+    const h = run([IMPLEMENT, TEST, BUILD, FIX, PUSH], {}, { "test-run": cache });
+    await h.done;
+
+    expect(h.reporter.failed).not.toHaveBeenCalled();
+    expect(h.ran).toEqual(["test-run", "build"]);
+    expect(h.delivery.push).toHaveBeenCalled();
+  });
+
+  it("still refuses the same thing when a step wrote it, which is how a file is hidden from review", async () => {
+    const h = run(
+      [IMPLEMENT, TEST, PUSH],
+      {
+        implement: (path) => {
+          write(path, ".pytest_cache/.gitignore", "*\n");
+          write(path, ".pytest_cache/payload.js", "evil\n");
+        },
+      },
+    );
+    await h.done;
+
+    expect(h.reporter.failed).toHaveBeenCalled();
+    expect(h.delivery.push).not.toHaveBeenCalled();
+  });
+
+  it("empties the gate home after a step, so what one gate left cannot steer the gate after the change", async () => {
+    const seen: boolean[] = [];
+    const h = run(
+      [IMPLEMENT, BUILD, FIX, TEST, PUSH],
+      {},
+      {
+        build: (_path, home) => write(home, "planted", "x\n"),
+        "test-run": (_path, home) => seen.push(existsSync(join(home, "planted"))),
+      },
+    );
+    await h.done;
+
+    expect(seen).toEqual([false]);
+  });
+
+  it("keeps what the install left for the test when no step comes between them", async () => {
+    const seen: boolean[] = [];
+    const h = run(
+      [IMPLEMENT, BUILD, TEST, PUSH],
+      {},
+      {
+        build: (_path, home) => write(home, "deps", "x\n"),
+        "test-run": (_path, home) => seen.push(existsSync(join(home, "deps"))),
+      },
+    );
+    await h.done;
+
+    expect(seen).toEqual([true]);
   });
 
   it("leaves an ignored file that was there before the step ran", async () => {

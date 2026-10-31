@@ -1,11 +1,11 @@
 import {
   GATE_COMMAND_FIELDS,
   PROJECT_POLICY_DEFAULTS,
-  isGateCommand,
+  gateFieldProblem,
   isGitRefName,
   isModelName,
   isProjectPolicyField,
-  isWorkingDirectory,
+  normaliseGateField,
 } from "@/lib/worker-policy";
 
 const BOOLEAN_FIELDS: ReadonlySet<string> = new Set<string>();
@@ -13,34 +13,14 @@ const BOOLEAN_FIELDS: ReadonlySet<string> = new Set<string>();
 // Each string field with the shape its value has to have, because none of them stays data: they
 // reach a worker in the assignment policy and are spent as arguments to git and to the CLI. A
 // non-empty string was the only check, which let an option through — see worker-policy.ts.
-const STRING_FIELDS: ReadonlyMap<
-  string,
-  { valid: (value: string) => boolean; expected: string; mayBeEmpty?: boolean }
-> = new Map([
-  ["baseBranch", { valid: isGitRefName, expected: "a git branch name" }],
-  ["model", { valid: isModelName, expected: "a model name" }],
-  ["fallbackModel", { valid: isModelName, expected: "a model name" }],
-  ["reviewModel", { valid: isModelName, expected: "a model name" }],
-  ...GATE_COMMAND_FIELDS.map(
-    (field) =>
-      [
-        field,
-        {
-          valid: isGateCommand,
-          expected: "one command with no shell syntax: a program and its arguments, separated by spaces",
-          mayBeEmpty: true,
-        },
-      ] as const
-  ),
-  [
-    "workingDirectory",
-    {
-      valid: isWorkingDirectory,
-      expected: "a path relative to the repository, with no leading dot in any part of it",
-      mayBeEmpty: true,
-    },
-  ],
-]);
+const STRING_FIELDS: ReadonlyMap<string, { valid: (value: string) => boolean; expected: string }> =
+  new Map([
+    ["baseBranch", { valid: isGitRefName, expected: "a git branch name" }],
+    ["model", { valid: isModelName, expected: "a model name" }],
+    ["fallbackModel", { valid: isModelName, expected: "a model name" }],
+    ["reviewModel", { valid: isModelName, expected: "a model name" }],
+  ]);
+const GATE_FIELDS: ReadonlySet<string> = new Set([...GATE_COMMAND_FIELDS, "workingDirectory"]);
 
 export type WorkerConfigPatch =
   | { ok: true; update: Record<string, unknown> }
@@ -107,12 +87,16 @@ export function parseProjectWorkerConfig(
         if (typeof value !== "boolean") {
           return { ok: false, error: `${field} must be a boolean` };
         }
+      } else if (GATE_FIELDS.has(field)) {
+        if (typeof value !== "string") return { ok: false, error: `${field} must be a string` };
+        const problem = gateFieldProblem(field, value);
+        if (problem) return { ok: false, error: problem };
       } else if (STRING_FIELDS.has(field)) {
         const shape = STRING_FIELDS.get(field)!;
-        if (typeof value !== "string" || (!value.trim() && !shape.mayBeEmpty)) {
+        if (typeof value !== "string" || !value.trim()) {
           return { ok: false, error: `${field} must be a non-empty string` };
         }
-        if (value.trim() && !shape.valid(value.trim())) {
+        if (!shape.valid(value.trim())) {
           return { ok: false, error: `${field} must be ${shape.expected}` };
         }
       } else if (!isPositiveInt(value)) {
@@ -122,7 +106,7 @@ export function parseProjectWorkerConfig(
         return { ok: false, error: `${field} cannot be set and reset in the same request` };
       }
       update[`worker.policy.${field}`] =
-        typeof value === "string" ? value.trim() : value;
+        typeof value === "string" ? normaliseGateField(field, value) : value;
       touched.add(field);
     }
   }

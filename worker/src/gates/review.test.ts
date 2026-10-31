@@ -30,6 +30,7 @@ function context(diff: Partial<DiffStats> = {}, task: Partial<ClaimedTask> = {})
     worktreePath: "/wt",
     worktreeDir: { path: "/wt", dev: 0, ino: 0 },
     gateHome: { path: "/wt.home", dev: 0, ino: 1 },
+    checkoutGitDir: "/repo/.git",
     task: claimedTask(task),
     result: {
       status: "completed",

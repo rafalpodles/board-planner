@@ -620,6 +620,12 @@ describe("the gh that carries the token", () => {
 
 // BP-780
 describe("the checks listed on a pull request", () => {
+  it("scrubs a command, which a project's owner typed and a token can sit in", () => {
+    const token = `ghp_${"a".repeat(36)}`;
+
+    expect(prBody("done", [{ name: "build", commands: [`tool --token=${token}`], durationMs: 1000 }])).not.toContain(token);
+  });
+
   it("puts the gates the run passed under the summary, with their commands and durations", async () => {
     const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
 

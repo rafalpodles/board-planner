@@ -405,6 +405,27 @@ describe("registerWorker", () => {
 describe("the owner's reach, not the reported repos", () => {
   const reported = [{ remote: REMOTE, path: "/repo" }];
 
+  // BP-985: an older worker would run npm and report that as the project's check
+  describe("a project that names its own gate commands", () => {
+    const own = project({ worker: { enabled: true, policy: { testCommand: "go test ./..." }, policyOverrides: ["testCommand"] } });
+    const cleared = project({ worker: { enabled: true, policy: { testCommand: "" }, policyOverrides: ["testCommand"] } });
+
+    it("is claimed by a worker that says it can run them, and refused to one that does not", () => {
+      expect(verdictFor(worker(), own, PROTOCOL_VERSION, fresh, [], null, ["gate-commands"])).toEqual({ ok: true });
+      expect(verdictFor(worker(), own, PROTOCOL_VERSION, fresh, [], null, [])).toEqual({ ok: false, reason: expect.stringContaining("update the worker") });
+    });
+
+    it("is never offered to a worker that could not claim it", () => {
+      expect(assignmentsFor(reported, [own], [PROJECT_ID], ["gate-commands"])).toHaveLength(1);
+      expect(assignmentsFor(reported, [own], [PROJECT_ID], [])).toEqual([]);
+    });
+
+    it("asks nothing of a worker once the commands are blank, or of a project with none", () => {
+      expect(assignmentsFor(reported, [cleared], [PROJECT_ID], [])).toHaveLength(1);
+      expect(verdictFor(worker(), project(), PROTOCOL_VERSION, fresh, [], null, [])).toEqual({ ok: true });
+    });
+  });
+
   it("refuses a project this machine's owner cannot reach", () => {
     const verdict = verdictFor(worker(), project(), PROTOCOL_VERSION, fresh, [], ["someone-else"]);
 

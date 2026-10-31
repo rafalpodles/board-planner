@@ -1,11 +1,10 @@
-import { accessSync, constants, lstatSync, statSync } from "node:fs";
-import { join, posix } from "node:path";
+import { accessSync, constants, lstatSync, realpathSync, statSync } from "node:fs";
+import { delimiter, dirname, isAbsolute, join, posix } from "node:path";
 import { Runner } from "../exec.js";
-import { agentEnv, INSTALL_NETWORK_OPT_IN, installNetworkAllowed } from "../env.js";
+import { agentEnv } from "../env.js";
 import { firstOnPath } from "../node-engines.js";
-import { Network } from "../sandbox.js";
 import { GateContext, GateResult } from "../types.js";
-import { LOOPBACK_ONLY_NOTE, outputTail, refused, runConfinedProgram } from "./confined-npm.js";
+import { outputTail, refused, runConfinedProgram } from "./confined-npm.js";
 
 export interface GateCommands {
   installCommand: string;
@@ -34,10 +33,19 @@ export function gateProgramOf(command: string): string {
   return command.split(/ +/)[0];
 }
 
-/** Whether a changed file is one a command names as a word, or after `=`: `./bin/test`, `manage.py`, `--file=ci/test.mk`. */
+/**
+ * Whether a changed file is one a command names: as a word, after `=` or a short option, or as the
+ * module of `-m`. Compared in lower case, because macOS will run `bin/test` for `./bin/Test`.
+ */
 export function namedByGateCommand(file: string, commands: GateCommands): boolean {
   const words = [commands.installCommand, commands.buildCommand, commands.testCommand].flatMap((command) => (command ? command.split(/ +/) : []));
-  return words.flatMap((word) => [word, word.slice(word.indexOf("=") + 1)]).some((word) => posix.join(commands.workingDirectory, word) === file);
+  const named = words.flatMap((word, index) => [
+    word,
+    word.slice(word.indexOf("=") + 1),
+    ...(/^-[A-Za-z]./.test(word) ? [word.slice(2)] : []),
+    ...(words[index - 1] === "-m" ? [`${word.replaceAll(".", "/")}.py`] : []),
+  ]);
+  return named.some((word) => posix.join(commands.workingDirectory, word).toLowerCase() === file.toLowerCase());
 }
 
 /** Where the gate's commands run: the checkout, or a directory in it reached through no symlink. */
@@ -77,25 +85,36 @@ export function resolveGateProgram(program: string, directory: string, path: str
 
 const named = (command: string, directory: string) => (directory ? `${command} (in ${directory})` : command);
 
-const INSTALL_NETWORK_NOTE = `outbound network is loopback-only for a project's own install unless this machine sets ${INSTALL_NETWORK_OPT_IN}=1`;
-
 interface OwnStep {
   label: string;
   command: string;
-  network: Network;
-  note: string;
+}
+
+// What the sealed home leaves readable besides the worktree: the clone's `.git`, the worker's own
+// PATH, and the program itself. Exact directories: `~/.cargo/bin` must not open `~/.cargo/credentials.toml`.
+function readableFor(context: GateContext, programPath: string): string[] {
+  const path = (agentEnv().PATH ?? "").split(delimiter).filter((entry) => isAbsolute(entry));
+  return [...new Set([context.checkoutGitDir, ...path.map(realDir), realDir(dirname(realDir(programPath)))])];
+}
+
+function realDir(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 /**
  * The project's own commands for one gate, in order, sharing one timeout. What they execute is as
- * agent-written as `npm test`; what is the owner's is only which program to start. The directory is
+ * agent-written as `npm test`, and the owner chooses the program and its arguments. The directory is
  * judged again before each: the install has just run code from the checkout, and that code can have
  * replaced it.
  */
 async function runOwnSteps(runner: Runner, steps: OwnStep[], directory: string, timeoutMs: number, context: GateContext): Promise<GateResult> {
   const deadline = Date.now() + timeoutMs;
 
-  for (const { label, command, network, note } of steps) {
+  for (const { label, command } of steps) {
     const place = gateDirectory(context.worktreePath, directory);
     if ("reason" in place) return { ok: false, reason: place.reason };
     const [program, ...args] = command.split(/ +/);
@@ -109,49 +128,55 @@ async function runOwnSteps(runner: Runner, steps: OwnStep[], directory: string, 
       cwd: place.path,
       worktree: context.worktreeDir,
       home: context.gateHome,
+      readable: readableFor(context, path),
       timeoutMs: remainingMs,
       signal: context.signal,
-      network,
     });
     if ("refusal" in result) return refused(result);
     if (result.timedOut) return { ok: false, reason: `the ${label} command timed out after ${remainingMs}ms` };
     if (result.code !== 0) {
-      const loopback = result.loopbackOnly ? `; ${note}` : "";
-      return { ok: false, reason: `the ${label} command failed (exit ${result.code}${loopback}):\n${outputTail(result)}` };
+      return { ok: false, reason: `the ${label} command failed (exit ${result.code}):\n${outputTail(result)}` };
     }
   }
   return { ok: true, reason: "", commands: steps.map((step) => named(step.command, directory)) };
 }
 
+const NO_BUILD_COMMAND =
+  "this project names its own gate commands but neither an install nor a build command, and its agent has a Builds gate: set one in Settings → Workers, or take that gate out of the agent";
+const NO_TEST_COMMAND =
+  "this project names its own gate commands but no test command, and its agent has a Tests pass gate: set one in Settings → Workers, or take that gate out of the agent";
+
 export function runOwnBuild(runner: Runner, commands: GateCommands, timeoutMs: number, context: GateContext): Promise<GateResult> {
   const steps: OwnStep[] = [];
-  if (commands.installCommand) {
-    steps.push({
-      label: "install",
-      command: commands.installCommand,
-      network: installNetworkAllowed() ? "open" : "loopback",
-      note: INSTALL_NETWORK_NOTE,
-    });
-  }
-  if (commands.buildCommand) {
-    steps.push({ label: "build", command: commands.buildCommand, network: "loopback", note: LOOPBACK_ONLY_NOTE });
-  }
-  if (!steps.length) {
-    return Promise.resolve({
-      ok: false,
-      reason: "this project names its own gate commands but neither an install nor a build command: set one in Settings → Workers, or take the Builds gate out of the agent",
-    });
-  }
+  if (commands.installCommand) steps.push({ label: "install", command: commands.installCommand });
+  if (commands.buildCommand) steps.push({ label: "build", command: commands.buildCommand });
+  if (!steps.length) return Promise.resolve({ ok: false, reason: NO_BUILD_COMMAND });
   return runOwnSteps(runner, steps, commands.workingDirectory, timeoutMs, context);
 }
 
 export function runOwnTests(runner: Runner, commands: GateCommands, timeoutMs: number, context: GateContext): Promise<GateResult> {
-  if (!commands.testCommand) {
-    return Promise.resolve({
-      ok: false,
-      reason: "this project names its own gate commands but no test command: set one in Settings → Workers, or take the Tests gate out of the agent",
-    });
+  if (!commands.testCommand) return Promise.resolve({ ok: false, reason: NO_TEST_COMMAND });
+  return runOwnSteps(runner, [{ label: "test", command: commands.testCommand }], commands.workingDirectory, timeoutMs, context);
+}
+
+/**
+ * What can be told about a project's commands before anybody pays for a step. A missing working
+ * directory is not here: the task may be the one that creates it.
+ */
+export function gateConfigFault(sequence: { gateKind?: string }[], commands: GateCommands, worktreePath: string): string | null {
+  if (!usesOwnCommands(commands)) return null;
+  const hasBuild = sequence.some((entry) => entry.gateKind === "build");
+  const hasTests = sequence.some((entry) => entry.gateKind === "test-run");
+  if (hasBuild && !commands.installCommand && !commands.buildCommand) return NO_BUILD_COMMAND;
+  if (hasTests && !commands.testCommand) return NO_TEST_COMMAND;
+
+  const place = gateDirectory(worktreePath, commands.workingDirectory);
+  if ("reason" in place) return null;
+  const run = [...(hasBuild ? [commands.installCommand, commands.buildCommand] : []), ...(hasTests ? [commands.testCommand] : [])];
+  for (const program of run.filter(Boolean).map(gateProgramOf)) {
+    if (program.startsWith("./") && !resolveGateProgram(program, place.path, "")) {
+      return `${program} is named by a gate command, and this checkout has no such executable file`;
+    }
   }
-  const step = { label: "test", command: commands.testCommand, network: "loopback" as const, note: LOOPBACK_ONLY_NOTE };
-  return runOwnSteps(runner, [step], commands.workingDirectory, timeoutMs, context);
+  return null;
 }
