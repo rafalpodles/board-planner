@@ -31,6 +31,7 @@ const COMPLETED = { status: "completed" as const, summary: "Changed it.", filesC
 const READ: SnapshotEntry = { key: "read", kind: "step", name: "Read", prompt: "look", capability: "read-only" };
 const IMPLEMENT: SnapshotEntry = { key: "implement", kind: "step", name: "Implement", prompt: "make the change", capability: "edit" };
 const GATE: SnapshotEntry = { key: "diff-size", kind: "gate", name: "Size", gateKind: "diff-size" };
+const TESTS: SnapshotEntry = { key: "test-run", kind: "gate", name: "Tests", gateKind: "test-run" };
 const PUSH: SnapshotEntry = { key: "push", kind: "step", name: "Push", deterministic: true };
 const PR: SnapshotEntry = { key: "pull-request", kind: "step", name: "Pull request", deterministic: true };
 const MERGE: SnapshotEntry = { key: "merge", kind: "step", name: "Merge", deterministic: true };
@@ -85,6 +86,7 @@ describe("a run across several repositories", () => {
     signal?: AbortSignal;
     now?: () => number;
     ceilingMs?: number;
+    commands?: { buildCommand?: string; testCommand?: string };
   } = {}) {
     const reporter = {
       blocked: vi.fn<Reporter["blocked"]>(async () => {}),
@@ -163,7 +165,7 @@ describe("a run across several repositories", () => {
     });
 
     const deps: SeveralRepositoriesDeps = {
-      config: workerConfig({ worktreeRoot: join(dir, "api-wt"), repoPath: clones.api, ...(over.ceilingMs ? { runCeilingMs: over.ceilingMs } : {}) }),
+      config: workerConfig({ worktreeRoot: join(dir, "api-wt"), repoPath: clones.api, ...(over.ceilingMs ? { runCeilingMs: over.ceilingMs } : {}), ...over.commands }),
       now: over.now,
       api,
       boardColumns: async () => [
@@ -209,6 +211,42 @@ describe("a run across several repositories", () => {
     expect(vi.mocked(run.deliveries.web.linkRelated)).toHaveBeenCalledWith(expect.any(String), "https://github.com/acme/web/pull/9", ["https://github.com/acme/api/pull/3"]);
     expect(run.reporter.requeued).not.toHaveBeenCalled();
     expect(run.reporter.failed).not.toHaveBeenCalled();
+  });
+
+  it("hands the task back unspent, before any step, on commands that cannot pass", async () => {
+    const run = build({ commands: { buildCommand: "sh b" } });
+
+    const disposition = await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, TESTS, PUSH));
+
+    expect(disposition).toBe("machine-fault");
+    expect(run.seen).toHaveLength(0);
+    expect(run.reporter.released).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("no test command"));
+    expect(run.reporter.failed).not.toHaveBeenCalled();
+  });
+
+  it("empties the gates' home of a repository with a new commit, and only that one", async () => {
+    const homes: Record<string, boolean> = {};
+    let webHome = "";
+    const run = build({
+      commands: { testCommand: "sh t" },
+      write: (w) => {
+        write(w.api, "api.txt", "a\n");
+        for (const path of [w.api, w.web]) writeFileSync(`${path}.home/left`, "x");
+        webHome = `${w.web}.home`;
+      },
+      gates: {
+        "test-run": async (context) => {
+          homes.api = existsSync(`${context.gateHome.path}/left`);
+          homes.web = existsSync(`${webHome}/left`);
+          return { ok: true, reason: "" };
+        },
+      },
+    });
+
+    await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, TESTS));
+
+    expect(run.gateRuns).toHaveLength(1);
+    expect(homes).toEqual({ api: false, web: true });
   });
 
   it("hands the agent every worktree, the first one its working directory", async () => {
