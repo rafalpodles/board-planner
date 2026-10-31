@@ -1062,9 +1062,16 @@ would run npm and report that as the project's check.
   `~/.cargo/credentials.toml`. It also denies the login keychain's daemon, sockets under the home, and
   launchd's ssh-agent socket. Measured on macOS 26.7: a planted file, `ls ~/.ssh` and
   `security show-keychain-info` refused, while the network, git, go, python3, pip3, mvn, gradle and a
-  node under `~/.nvm` run. What it leaves open: files outside the home, a file's name and size by its
-  full path, and services on this machine. With the network on, what it can read it can send, so the
-  clone's git config is exposed. `CP_ALLOW_UNCONFINED_AGENT` drops all of it.
+  node under `~/.nvm` run. What it leaves open: files outside the home, such as `/tmp` and the per-user
+  temp directory, a file's name and size by its full path, the clipboard, other processes' command
+  lines, and services on this machine. With the network on, what it can read it can send, so every
+  branch in the clone and its git config are exposed. `CP_ALLOW_UNCONFINED_AGENT` drops all of it.
+- **The agent and the reviewer get the same seal on such a project**, because otherwise a steered
+  `Read` puts a key in a test file for the next gate to send. Each CLI's adapter says what its session
+  needs (`sessionReadable`). Measured with the real CLIs: Claude Code answers "Not logged in" without
+  `~/Library/Keychains`, and reads and edits with `~/.claude`, `~/.claude.json` and the keychain open;
+  Codex needs only its run's own home. It keeps the keychain's daemon, which a gate command does not.
+  A project on the npm gates is unchanged: its agent reads as it always has.
 - **No shell.** A command is words split on spaces. Anything a shell would act on is refused where it
   is saved and again in `applyPolicy`, and so is a password in a URL, since a command reaches the
   agent's prompt, the pull request and the audit log. The program is a bare name found on the worker's
