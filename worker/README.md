@@ -1056,15 +1056,19 @@ would run npm and report that as the project's check.
 
 - **The opposite trade from the npm gates.** Those keep reads open and shut the network. These are
   chosen by a person who may not own the machine, and development needs the network, so they keep the
-  network and shut the home: `sealedHomes` in `sandbox.ts` refuses `file-read-data` under the real
-  home, but for the worktree, the run's home, the clone's `.git`, the worker's `PATH` directories and
-  the program's own directory. Exact directories: `~/.cargo/bin` must not open
-  `~/.cargo/credentials.toml`. It also denies the login keychain's daemon, sockets under the home, and
-  launchd's ssh-agent socket. Measured on macOS 26.7: a planted file, `ls ~/.ssh` and
-  `security show-keychain-info` refused, while the network, git, go, python3, pip3, mvn, gradle and a
-  node under `~/.nvm` run. What it leaves open: files outside the home, such as `/tmp` and the per-user
-  temp directory, a file's name and size by its full path, the clipboard, other processes' command
-  lines, and services on this machine. With the network on, what it can read it can send, so every
+  network and shut the home: `sealedHomes` in `sandbox.ts` makes everything under the real home answer
+  ENOENT, but for the worktree, the run's home, the clone's `.git`, the worker's `PATH` directories and
+  the program's own directory, whose parents answer their metadata and nothing else. ENOENT and not a
+  refusal, because `cp-worktrees` usually sits under the home and a tool walks up from it: yarn opens a
+  `.yarnrc` in every parent with no `stat` first and stops on anything but ENOENT. Exact directories:
+  `~/.cargo/bin` must not open `~/.cargo/credentials.toml`. It also denies the login keychain's daemon,
+  sockets under the home but for the writable directories' own, and launchd's ssh-agent socket. Measured
+  on macOS 26.7: a planted file, `stat` of it, `ls ~/.ssh` and `security show-keychain-info` get nothing,
+  while the network, git, go, python3, pip3, uv, yarn, mvn, gradle, ruby and a node under `~/.nvm` run.
+  `(with errno …)` is not documented, so a macOS that dropped it would fail to compile the profile and
+  refuse the step, which is the safe way to find out. What it leaves open: files outside the home, such
+  as `/tmp` and the per-user temp directory, the clipboard, other processes' command lines, and services
+  on this machine. With the network on, what it can read it can send, so every
   branch in the clone and its git config are exposed. `CP_ALLOW_UNCONFINED_AGENT` drops all of it.
 - **The agent and the reviewer get the same seal on such a project**, because otherwise a steered
   `Read` puts a key in a test file for the next gate to send. Each CLI's adapter says what its session
@@ -1072,8 +1076,9 @@ would run npm and report that as the project's check.
   `~/Library/Keychains`, and reads and edits with `~/.claude`, `~/.claude.json` and the keychain open;
   Codex needs only its run's own home. It keeps the keychain's daemon, which a gate command does not.
   A project on the npm gates is unchanged: its agent reads as it always has.
-- **No shell.** A command is words split on spaces. Anything a shell would act on is refused where it
-  is saved and again in `applyPolicy`, and so is a password in a URL, since a command reaches the
+- **No shell.** A command is words split on spaces. Anything a shell would act on, `*` and `?` among
+  them but not the `[` and `]` of `pip install -e .[dev]`, which nothing expands, is refused where it is
+  saved and again in `applyPolicy`, and so is a password in a URL, since a command reaches the
   agent's prompt, the pull request and the audit log. The program is a bare name found on the worker's
   own `PATH`, or `./path` from the working directory. A pipeline belongs in a script.
 - **Any command set means the project has left npm.** An empty install is then no install. A working
@@ -1082,8 +1087,10 @@ would run npm and report that as the project's check.
 - **A home of the run's own**, `<worktree>.home`: `HOME`, with `CFFIXED_USER_HOME` and
   `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=…` because the JVM reads neither `HOME` nor `TMPDIR` on macOS,
   which also prints a "Picked up JAVA_TOOL_OPTIONS" line on stderr. Beside the worktree, under a root no
-  confined process can write. Kept from install to test, emptied after any step that changes the code
-  so that what one gate left cannot steer the gate after the change, and removed with the worktree.
+  confined process can write. Kept from install to test, replaced after any step that commits so that
+  what one gate left cannot steer the gate after the change, and removed with the worktree, which a
+  failed run keeps. The Tests gate runs the install first when it finds the home empty, which is a
+  sequence with no Builds gate or a Tests gate after a later step.
   Not a shared cache: code one project's install ran could poison another's, and pip checks no lockfile
   hash the way npm does. So every run downloads again, which is why the gate's time limit here is the
   project's step timeout rather than 10 minutes, whichever is longer.
@@ -1098,9 +1105,12 @@ would run npm and report that as the project's check.
   which is how a hidden file looks, so `hiddenFromGit` takes the baseline after a passed gate as read,
   at the next gate, the next commit and delivery. A step that writes the same thing is still refused.
 - **Before anybody pays.** A program a command names that is not on this machine's `PATH` makes the
-  project unusable here, with the reason. `gateConfigFault` stops the run before the first step for a
-  gate with no command, or a `./path` that is missing or not executable. A working directory the
-  checkout lacks is left to the gate: the task may be the one that creates it. A project on the npm
+  project unusable here, with the reason. `gateConfigFault` hands the task back before the first step,
+  attempt refunded and the pass over, for a gate with no command, or a `./path` that is missing or not
+  executable as the first command the sequence runs: only that one, since an install makes what a later
+  one names. Every task of the project would meet the same settings, and charging each would walk the
+  queue into escalation. A working directory the checkout lacks is left to the gate: the task may be
+  the one that creates it. A project on the npm
   gates is not claimed from without npm; the worker itself no longer needs it.
 - **Test-presence** recognises other ecosystems' test files on these projects only: on the npm gates a
   `foo_test.py` is a file `npm test` never runs. Rust tests inline in `src/` are not recognised.
