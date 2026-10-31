@@ -1,5 +1,5 @@
 import { accessSync, constants, lstatSync, realpathSync, statSync } from "node:fs";
-import { delimiter, dirname, isAbsolute, join, posix } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, posix } from "node:path";
 import { Runner } from "../exec.js";
 import { agentEnv } from "../env.js";
 import { firstOnPath } from "../node-engines.js";
@@ -91,10 +91,12 @@ interface OwnStep {
 }
 
 // What the sealed home leaves readable besides the worktree: the clone's `.git`, the worker's own
-// PATH, and the program itself. Exact directories: `~/.cargo/bin` must not open `~/.cargo/credentials.toml`.
+// PATH, and the program itself. A toolchain's `bin` brings its `lib` and `libexec`, which is where an
+// nvm's npm keeps its code, and no more: `~/.cargo/bin` must not open `~/.cargo/credentials.toml`.
 function readableFor(context: GateContext, programPath: string): string[] {
-  const path = (agentEnv().PATH ?? "").split(delimiter).filter((entry) => isAbsolute(entry));
-  return [...new Set([context.checkoutGitDir, ...path.map(realDir), realDir(dirname(realDir(programPath)))])];
+  const path = (agentEnv().PATH ?? "").split(delimiter).filter((entry) => isAbsolute(entry)).map(realDir);
+  const beside = path.filter((entry) => basename(entry) === "bin").flatMap((entry) => [join(dirname(entry), "lib"), join(dirname(entry), "libexec")]);
+  return [...new Set([context.checkoutGitDir, ...path, ...beside, realDir(dirname(realDir(programPath)))])];
 }
 
 function realDir(path: string): string {

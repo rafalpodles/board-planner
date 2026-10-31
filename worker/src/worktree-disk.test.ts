@@ -48,25 +48,6 @@ describe("a gate home on disk", () => {
     expect(() => nodeWorktreeDisk.makeDir(join(dir, "home"))).toThrow(/EEXIST/);
   });
 
-  it("empties with the directory itself kept, read-only trees included, and following no symlink", () => {
-    dir = mkdtempSync(join(tmpdir(), "bp985-disk-"));
-    const home = join(dir, "home");
-    const outside = join(dir, "outside");
-    mkdirSync(join(home, "go", "pkg"), { recursive: true });
-    mkdirSync(outside);
-    writeFileSync(join(outside, "kept"), "x");
-    writeFileSync(join(home, "go", "pkg", "mod"), "x");
-    chmodSync(join(home, "go", "pkg"), 0o500);
-    symlinkSync(outside, join(home, "link"));
-    const before = statSync(home).ino;
-
-    nodeWorktreeDisk.empty(home);
-
-    expect(readdirSync(home)).toEqual([]);
-    expect(statSync(home).ino).toBe(before);
-    expect(existsSync(join(outside, "kept"))).toBe(true);
-  });
-
   it("removes a tree without ever throwing, even one it cannot find", () => {
     dir = mkdtempSync(join(tmpdir(), "bp985-disk-"));
 

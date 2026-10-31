@@ -110,7 +110,11 @@ export interface Worktree {
    * name keeps the task key, which is how `clear` removes it with the worktree.
    */
   gateHome: RecordedDir;
-  /** Empties it, after a step that could write: the next gate judges a new tree and must start clean. */
+  /**
+   * Replaces it with an empty one, after a step that could write: the next gate judges a new tree and
+   * must start clean. Never by emptying: a gate command can swap the directory for a link to the real
+   * home, and this runs unconfined. `discard` moves whatever is there aside and follows nothing.
+   */
   emptyGateHome(): void;
   /** What a step or gate has done to the directory, `.git` or the index flags since creation, or null. */
   tampering(): Promise<string | null>;
@@ -502,7 +506,11 @@ export function createWorkspace(
         pin,
         dir,
         gateHome,
-        emptyGateHome: () => disk.empty(gateHome.path),
+        emptyGateHome(this: Worktree) {
+          disk.discard(dirname(gateHomePath), gateHomePath);
+          disk.makeDir(gateHomePath);
+          this.gateHome = recordDir(gateHomePath, files.realpath, files.lstat);
+        },
         tampering: async () => {
           const replaced = dirReplaced(dir, files.lstat);
           return replaced ? `its directory ${replaced}` : pinTampering(runner, gitPath, pin, files);

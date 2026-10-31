@@ -218,9 +218,9 @@ async function seedBoard() {
 const NETWORK_OPEN = `require("net").connect({ host: "192.0.2.1", port: 443, timeout: 2000 }).on("error", (e) => process.exit(e.code === "EPERM" ? 1 : 0)).on("connect", () => process.exit(0)).on("timeout", () => process.exit(0))`;
 
 function writeGateScripts(dir: string) {
-  write(join(dir, "fetch.sh"), `node -e '${NETWORK_OPEN}'\nif cat '${join(HOME, ".profile")}'; then exit 1; fi\necho fetched > "$HOME/fetched"\n`);
-  write(join(dir, "build.sh"), `test "$(cat "$HOME/fetched")" = fetched\ntop=$(git rev-parse --show-toplevel)\nfor f in "$top"/src/*.js; do node --check "$f"; done\n`);
-  write(join(dir, "check.sh"), `test "$(cat "$HOME/fetched")" = fetched\ntop=$(git rev-parse --show-toplevel)\nnode --test "$top"/test/*.test.js\n`);
+  write(join(dir, "fetch.sh"), `set -e\nnode -e '${NETWORK_OPEN}'\nif cat '${join(HOME, ".profile")}'; then exit 1; fi\necho fetched > "$HOME/fetched"\n`);
+  write(join(dir, "build.sh"), `set -e\ntest "$(cat "$HOME/fetched")" = fetched\ntop=$(git rev-parse --show-toplevel)\nfor f in "$top"/src/*.js; do node --check "$f"; done\n`);
+  write(join(dir, "check.sh"), `set -e\ntest "$(cat "$HOME/fetched")" = fetched\ntop=$(git rev-parse --show-toplevel)\nnode --test "$top"/test/*.test.js\n`);
 }
 
 function layDownRepository(repo: string = REPO, gateScriptsIn?: string): string {

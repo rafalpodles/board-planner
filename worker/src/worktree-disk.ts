@@ -19,7 +19,6 @@ const CHMOD = "/bin/chmod";
 export interface WorktreeDisk {
   names(root: string): string[];
   makeDir(path: string): void;
-  empty(path: string): void;
   discard(root: string, path: string): void;
   /** Removes each admin dir under `adminRoot` whose `gitdir` names a worktree `owns` accepts. */
   forget(adminRoot: string, owns: (workTree: string) => boolean): void;
@@ -39,9 +38,6 @@ export const nodeWorktreeDisk: WorktreeDisk = {
   },
   makeDir(path) {
     mkdirSync(path, { mode: 0o700 });
-  },
-  empty(path) {
-    for (const name of this.names(path)) removeTree(join(path, name));
   },
   discard(root, path) {
     // Beside it rather than into a directory of its own: moving a directory to another parent needs

@@ -67,7 +67,6 @@ function fakeDisk(names: string[] = []) {
   return {
     names: vi.fn(() => names),
     makeDir: vi.fn<WorktreeDisk["makeDir"]>(),
-    empty: vi.fn<WorktreeDisk["empty"]>(),
     discard: vi.fn<WorktreeDisk["discard"]>(),
     forget: vi.fn<WorktreeDisk["forget"]>(),
     nonce: () => "a1",

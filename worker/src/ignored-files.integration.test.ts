@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiClient } from "./api.js";
@@ -331,6 +331,43 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
     await h.done;
 
     expect(seen).toEqual([false]);
+  });
+
+  // The worker empties the home unconfined, and a gate command can write to the directory that holds
+  // nothing but its own home's name: swapped for a link to the real home, an empty followed it and
+  // deleted that home. Found by a second review, in a line written the day before
+  it("never follows a home a gate swapped for a link, whatever is behind it", async () => {
+    const realHome = join(dir, "real-home");
+    write(realHome, ".ssh/id_ed25519", "keep me\n");
+    const swap = (_path: string, home: string) => {
+      renameSync(home, `${home}.moved`);
+      symlinkSync(realHome, home);
+    };
+    const h = run([IMPLEMENT, BUILD, FIX, PUSH], {}, { build: swap });
+    await h.done;
+
+    expect(readFileSync(join(realHome, ".ssh", "id_ed25519"), "utf8")).toBe("keep me\n");
+  });
+
+  it("does not follow one when a refused run keeps its worktree and drops its home", async () => {
+    const realHome = join(dir, "real-home");
+    write(realHome, ".ssh/id_ed25519", "keep me\n");
+    const h = run(
+      [IMPLEMENT, BUILD, TEST, PUSH],
+      {},
+      {
+        build: (_path, home) => {
+          renameSync(home, `${home}.moved`);
+          symlinkSync(realHome, home);
+        },
+        "test-run": () => {
+          throw new Error("the run ends here, with its worktree kept");
+        },
+      },
+    );
+    await h.done;
+
+    expect(readFileSync(join(realHome, ".ssh", "id_ed25519"), "utf8")).toBe("keep me\n");
   });
 
   it("keeps what the install left for the test when no step comes between them", async () => {
