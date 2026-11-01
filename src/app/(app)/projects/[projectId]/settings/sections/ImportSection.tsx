@@ -184,7 +184,7 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
       setChecked(dryRun && !answer.error && current);
       if (dryRun && current && table && remembered.current) rememberCsvMapping(projectId, table.rows.headers, remembered.current);
     } catch (e) {
-      if (mine === seq.current) setError(e instanceof Error ? e.message : "The import could not run");
+      if (mine === seq.current) setError((e instanceof Error && e.message) || "The import could not run");
     } finally {
       if (mine === seq.current) setBusy(null);
     }
