@@ -1,11 +1,15 @@
 import { test, expect, type Page } from "@playwright/test";
-import { ADMIN_AUTH } from "./api";
+import mongoose from "mongoose";
+import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
 import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
+  E2E_MONGODB_URI,
   MEMBER_PASSWORD,
   MEMBER_USERNAME,
   OUTSIDER_FULL_NAME,
+  OUTSIDER_ID,
+  OUTSIDER_TASK_ID,
   OUTSIDER_TASK_NUMBER,
   OUTSIDER_USERNAME,
   PROJECT_KEY,
@@ -36,6 +40,17 @@ test.beforeEach(async () => {
   await seed();
   await seedAssignmentOutsider();
 });
+
+test.afterAll(async () => {
+  if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
+});
+
+async function deactivateOutsider() {
+  if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
+  await mongoose.connection.db!
+    .collection("users")
+    .updateOne({ _id: OUTSIDER_ID }, { $set: { deactivatedAt: new Date() } });
+}
 
 const taskUrl = (taskNumber: number) => `/projects/${PROJECT_KEY}/tasks/${taskNumber}`;
 
@@ -122,6 +137,49 @@ test.describe("what the server accepts", () => {
 
     expect(refused.status()).toBe(400);
     expect(await refused.text()).toContain(OUTSIDER_USERNAME);
+  });
+
+  /**
+   * BP-513. A member of any one board asks all three of these about any name, so anything that
+   * tells these accounts apart answers "does this account exist".
+   */
+  test("says the same of a stranger, an outsider and a deactivated account", async ({ request }) => {
+    const tasks = `/api/projects/${PROJECT_KEY}/tasks`;
+    const ask = async (name: string) =>
+      Promise.all(
+        [
+          await request.post(tasks, { headers: MEMBER_AUTH, data: { title: "Probe", assignee: name } }),
+          await request.put(`${tasks}/${SIBLING_TASK_ID}`, { headers: MEMBER_AUTH, data: { assignee: name } }),
+          await request.get(`${tasks}?assignee=${name}`, { headers: MEMBER_AUTH }),
+        ].map(async (res) => [res.status(), (await res.text()).replaceAll(name, "NAME")])
+      );
+
+    const held = await request.put(`${tasks}/${OUTSIDER_TASK_ID}`, {
+      headers: ADMIN_AUTH,
+      data: { assignee: null },
+    });
+    expect(held.status(), await held.text()).toBe(200);
+
+    const stranger = await ask("nobody-here");
+    expect(stranger.map(([status]) => status)).toEqual([400, 400, 400]);
+    expect(String(stranger[0][1])).toContain("@NAME has no access to this board");
+
+    expect(await ask(OUTSIDER_USERNAME)).toEqual(stranger);
+
+    await deactivateOutsider();
+    expect(await ask(OUTSIDER_USERNAME)).toEqual(stranger);
+
+    const statuses = (await ask(MEMBER_USERNAME)).map(([status]) => status);
+    expect(statuses, "the control: somebody the board takes").toEqual([201, 200, 200]);
+  });
+
+  test("still finds a task assigned to somebody before they lost access", async ({ request }) => {
+    const res = await request.get(`/api/projects/${PROJECT_KEY}/tasks?assignee=${OUTSIDER_USERNAME}`, {
+      headers: MEMBER_AUTH,
+    });
+
+    expect(res.status(), await res.text()).toBe(200);
+    expect((await res.json()).map((t: { taskNumber: number }) => t.taskNumber)).toEqual([OUTSIDER_TASK_NUMBER]);
   });
 
   test("accepts one to somebody who can", async ({ request }) => {

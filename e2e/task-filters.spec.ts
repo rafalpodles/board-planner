@@ -70,7 +70,7 @@ test("the assignee filter takes a username, which is what it is documented to ta
     const res = await list(request, "?assignee=nobody-here");
 
     expect(res.status()).toBe(400);
-    expect((await res.json()).error).toMatch(/No account named "@nobody-here"/);
+    expect((await res.json()).error).toMatch(/@nobody-here has no access to this board/);
   });
 });
 

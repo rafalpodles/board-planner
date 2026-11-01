@@ -1653,6 +1653,7 @@ export const OUTSIDER_ID = id("e2e00000000000000000a006");
 // 14, not 10: the search fixture already seeds taskNumber 10 on this project and
 // {project, taskNumber} is a unique index, so both fixtures in one test would collide
 export const OUTSIDER_TASK_NUMBER = 14;
+export const OUTSIDER_TASK_ID = id("e2e00000000000000000d010");
 export const OUTSIDER_TASK_KEY = `${PROJECT_KEY}-${OUTSIDER_TASK_NUMBER}`;
 export const OUTSIDER_TASK_TITLE = "Assigned before they lost access";
 
@@ -1679,7 +1680,7 @@ export async function seedAssignmentOutsider() {
 
   await addTask(
     {
-      _id: id("e2e00000000000000000d010"),
+      _id: OUTSIDER_TASK_ID,
       title: OUTSIDER_TASK_TITLE,
       status: "todo",
       assignee: OUTSIDER_ID,
