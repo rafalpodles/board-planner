@@ -5,7 +5,6 @@ import { EXTERNAL_ID_MAX_LENGTH, IMPORT_NOTE_MAX_LENGTH } from "./limits";
 type Json = Record<string, unknown>;
 
 const NAMES_LISTED = 5;
-const FINISHED_STATUS = "Done";
 
 const isRecord = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v);
 const records = (v: unknown): Json[] => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -143,10 +142,7 @@ export function trelloToTable(board: Json): CsvTable {
     const people = onCard.flatMap((m) => members.get(text(m)) || []);
     const itsChecklists = (checklists.get(id) ?? []).filter((c) => itemsOf(c).length > 0);
     const said = comments.get(id) ?? [];
-    const list = text(lists.get(text(card.idList))?.name);
-    const finished = card.dueComplete === true;
 
-    if (finished && list && list.trim().toLowerCase() !== FINISHED_STATUS.toLowerCase()) noteOn(card, `its list “${list}”: a finished card goes under ${FINISHED_STATUS}`);
     if (uploads.length) noteOn(card, `${plural(uploads.length, "uploaded file")}: ${namedUpTo(uploads.map((u) => readable(text(u.name))))}`);
     if (unlinked.length) noteOn(card, `${plural(unlinked.length, "attachment")} with no web address: ${namedUpTo(unlinked.map((a) => readable(text(a.name))))}`);
     if (onCard.length > people.length) noteOn(card, `${plural(onCard.length - people.length, "member")} the export does not name`);
@@ -158,7 +154,7 @@ export function trelloToTable(board: Json): CsvTable {
       cells: [
         text(card.shortLink) || id,
         text(card.name),
-        finished ? FINISHED_STATUS : list,
+        text(lists.get(text(card.idList))?.name),
         people.join(", "),
         text(card.due),
         madeAt(id),
@@ -168,6 +164,7 @@ export function trelloToTable(board: Json): CsvTable {
       labels: records(card.labels).flatMap((l) => text(l.name) || text(l.color) || []),
       said,
       criteria: criteriaOf(itsChecklists),
+      finished: card.dueComplete === true,
     };
   });
 
@@ -177,6 +174,7 @@ export function trelloToTable(board: Json): CsvTable {
     rows: rows.map((r) => [...r.cells, ...r.labels, ...Array(labelColumns - r.labels.length).fill("")]),
     comments: rows.map((r) => r.said),
     checklists: rows.map((r) => r.criteria),
+    finished: rows.map((r) => r.finished),
     notes,
     ordered: true,
   };

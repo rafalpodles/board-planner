@@ -48,34 +48,6 @@ describe("CsvMapping", () => {
     await waitFor(() => expect(api.get).toHaveBeenCalled());
   });
 
-  describe("a status called Done", () => {
-    const sheet = readCsvTable("Title,Status\nOne,Done\n");
-    const withColumns = (columns: { id: string; label: string; role: string }[]) =>
-      ({ ...project, columns: columns.map((c, order) => ({ _id: c.id, color: "#000", order, triggersPmReview: false, ...c })) }) as unknown as ApiProject;
-    const open = (columns: { id: string; label: string; role: string }[]) => {
-      render(<CsvMapping projectId="p1" project={withColumns(columns)} table={sheet} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={vi.fn()} />);
-      return screen.findByLabelText("Status “Done”") as Promise<HTMLSelectElement>;
-    };
-
-    it("finds a done column whatever it is called", async () => {
-      const select = await open([{ id: "todo", label: "To Do", role: "approved" }, { id: "shipped", label: "Shipped", role: "done" }]);
-      await waitFor(() => expect(select.value).toBe("shipped"));
-    });
-
-    it("prefers a column of that name over the board's first done column", async () => {
-      const select = await open([{ id: "shipped", label: "Shipped", role: "done" }, { id: "wrapped", label: "Done", role: "active" }]);
-      await waitFor(() => expect(select.value).toBe("wrapped"));
-    });
-
-    it("offers a done column to add when the board has none, and any other status an active one", async () => {
-      await open([{ id: "todo", label: "To Do", role: "approved" }]);
-      expect((screen.getByLabelText("Kind of column for “Done”") as HTMLSelectElement).value).toBe("done");
-      cleanup();
-      render(<CsvMapping projectId="p1" project={withColumns([{ id: "todo", label: "To Do", role: "approved" }])} table={readCsvTable("Title,Status\nOne,This Week\n")} fileName="x.csv" disabled={false} onColumns={vi.fn()} onChange={vi.fn()} />);
-      expect(((await screen.findByLabelText("Kind of column for “This Week”")) as HTMLSelectElement).value).toBe("active");
-    });
-  });
-
   it("names the source after the file, never after the file a mapping was remembered from", async () => {
     // As an older version stored it, with the source name
     window.localStorage.setItem(

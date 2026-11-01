@@ -34,6 +34,7 @@ export interface ImportTask {
   comments?: ImportComment[];
   checklist?: ImportChecklistItem[];
   order?: number;
+  finished?: boolean;
   parent?: string;
   blockedBy?: string[];
 }
@@ -126,6 +127,9 @@ export function parseBundle(raw: unknown): Parsed<ImportBundle> {
     }
     if (task.order !== undefined && task.order !== null && (!Number.isSafeInteger(task.order) || (task.order as number) < 0)) {
       return { ok: false, error: `${at}.order must be a whole number, 0 or more` };
+    }
+    if (task.finished !== undefined && task.finished !== null && typeof task.finished !== "boolean") {
+      return { ok: false, error: `${at}.finished must be true or false` };
     }
     if (task.checklist !== undefined) {
       if (!Array.isArray(task.checklist)) return { ok: false, error: `${at}.checklist must be a list` };

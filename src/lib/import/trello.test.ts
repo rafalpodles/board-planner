@@ -152,47 +152,36 @@ describe("trelloToTable", () => {
 
   describe("a card marked complete", () => {
     const finish = (board: ReturnType<typeof copy>, name: string, fields: Record<string, unknown>) => Object.assign(board.cards.find((c) => c.name === name)!, fields);
-    const finished = { dueComplete: true, dateCompleted: "2026-11-01T17:41:47.543Z", due: null };
 
-    it("goes under Done, keeps its time, and the report names the list it left", () => {
+    it("stays in its list and is marked finished, with its time", () => {
       const board = copy();
-      finish(board, "Search by label", finished);
-      const { bundle } = bundleOf(board);
-      const task = named(bundle.tasks, "Search by label");
-      expect(task.status).toBe("Done");
-      expect(task.completedAt).toBe("2026-11-01T17:41:47.543Z");
-      expect(bundle.notes).toContainEqual({ id: "Search by label", what: "its list “Doing”: a finished card goes under Done" });
+      finish(board, "Search by label", { dueComplete: true, dateCompleted: "2026-11-01T17:41:47.543Z", due: null });
+      const task = named(bundleOf(board).bundle.tasks, "Search by label");
+      expect(task).toMatchObject({ status: "Doing", finished: true, completedAt: "2026-11-01T17:41:47.543Z" });
     });
 
-    it("goes under Done with no time when the export gives none, as an older card's does", () => {
+    it("is finished with no time when the export gives none", () => {
       const board = copy();
       finish(board, "Search by label", { dueComplete: true });
       const task = named(bundleOf(board).bundle.tasks, "Search by label");
-      expect(task.status).toBe("Done");
+      expect(task.finished).toBe(true);
       expect(task.completedAt).toBeUndefined();
     });
 
-    it("says nothing when it was in a Done list already, whatever the case of its name", () => {
-      const board = copy();
-      board.lists.find((l) => l.name === "Done")!.name = " done ";
-      finish(board, "Backup restore", finished);
-      expect(bundleOf(board).bundle.notes!.filter((n) => n.id === "Backup restore" && n.what.startsWith("its list"))).toEqual([]);
-    });
-
-    it("names no list for a card whose list the export does not hold", () => {
-      const board = copy();
-      finish(board, "Search by label", { ...finished, idList: "000000000000000000000000" });
-      expect(bundleOf(board).bundle.notes!.filter((n) => n.what.startsWith("its list"))).toEqual([]);
-      expect(named(bundleOf(board).bundle.tasks, "Search by label").status).toBe("Done");
-    });
-
-    it("stays in its list when only a date is set, or the flag is not true", () => {
+    it("is not finished by a date alone, or by a flag that is not true", () => {
       const board = copy();
       finish(board, "Search by label", { dueComplete: false, dateCompleted: "2026-11-01T17:41:47.543Z" });
       finish(board, "Offline drafts", { dueComplete: "true" });
       const { bundle } = bundleOf(board);
-      expect(named(bundle.tasks, "Search by label").status).toBe("Doing");
-      expect(named(bundle.tasks, "Offline drafts").status).toBe("Backlog");
+      expect(named(bundle.tasks, "Search by label").finished).toBeUndefined();
+      expect(named(bundle.tasks, "Offline drafts").finished).toBeUndefined();
+    });
+
+    it("lines the flag up with its own card, whatever the file's order", () => {
+      const board = copy();
+      board.cards.reverse();
+      finish(board, "Search by label", { dueComplete: true });
+      expect(bundleOf(board).bundle.tasks.filter((t) => t.finished).map((t) => t.title)).toEqual(["Search by label"]);
     });
   });
 
@@ -202,6 +191,13 @@ describe("trelloToTable", () => {
     card.attachments[0].name = "2%20Email,%20Slack.jpg";
     card.attachments[1].name = "100%.png";
     expect(bundleOf(board).bundle.notes).toContainEqual({ id: "Audit log filter", what: "2 uploaded files: 2 Email, Slack.jpg, 100%.png" });
+  });
+
+  it("reads the name of an attachment with no web address the same way", () => {
+    const board = copy();
+    const card = board.cards.find((c) => c.name === "Audit log filter")!;
+    Object.assign(card.attachments[0], { isUpload: false, url: "", name: "no%20address.pdf" });
+    expect(bundleOf(board).bundle.notes).toContainEqual({ id: "Audit log filter", what: "1 attachment with no web address: no address.pdf" });
   });
 
   it("leaves a task with no creation time when the id is not Trello's", () => {

@@ -214,6 +214,7 @@ function resolveTask(
     return null;
   }
   const columnIds = board.columns.map((c) => c.id);
+  const finishesIn = task.finished === true ? board.columns.find((c) => c.role === "done") : undefined;
   let status = board.defaultStatus;
   let statusGiven = false;
   if (task.status) {
@@ -223,7 +224,11 @@ function resolveTask(
       byName(columnIds, task.status) ??
       board.columns.find((c) => c.label.trim().toLowerCase() === task.status!.trim().toLowerCase())?.id;
     if (found) [status, statusGiven] = [found, true];
-    else noteUnmapped(report.unmapped.statuses, task.status);
+    else if (!finishesIn) noteUnmapped(report.unmapped.statuses, task.status);
+  }
+  if (finishesIn && board.columns.find((c) => c.id === status)?.role !== "done") {
+    if (task.status) report.notImported.push({ id: title, what: `its status “${shown(task.status)}”: it is finished, so it goes to ${finishesIn.label}` });
+    [status, statusGiven] = [finishesIn.id, true];
   }
 
   let category = board.defaultCategory;

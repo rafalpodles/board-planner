@@ -172,6 +172,7 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
     const mine = ++seq.current;
     const asked = key;
     setBusy(dryRun ? "checking" : "importing");
+    if (dryRun) setCheckedBefore(true);
     setChecked(false);
     setError("");
     try {
@@ -181,7 +182,6 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
       if (mine !== seq.current || (dryRun && !current)) return;
       setReport(answer);
       setChecked(dryRun && !answer.error && current);
-      if (dryRun) setCheckedBefore(true);
       if (dryRun && current && table && remembered.current) rememberCsvMapping(projectId, table.rows.headers, remembered.current);
     } catch (e) {
       if (mine === seq.current) setError(e instanceof Error ? e.message : "The import could not run");
@@ -197,7 +197,10 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
     setPayload({ payload: next, key: now });
     setChecked(false);
     setReport(null);
+    setError("");
   }, []);
+
+  const imported = report && !report.dryRun && !report.error;
 
   const columnsAdded = useCallback((columns: ApiProjectColumn[]) => patchProject({ columns }), [patchProject]);
 
@@ -234,8 +237,8 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
             {busy === "importing" ? "Importing…" : "Import"}
           </Button>
         </div>
-        {payload && !checked && !report && !error && busy === null && (
-          <p className="text-sm text-text-muted">{checkedBefore ? "The mapping changed. Check again to import." : "Check first. Import opens once the check has passed."}</p>
+        {payload && !checked && !imported && busy === null && (
+          <p className="text-sm text-text-muted">{checkedBefore ? "Check again to import." : "Check first. Import opens once the check has passed."}</p>
         )}
         {error && (
           <p role="alert" className="text-sm text-danger">
