@@ -54,7 +54,7 @@ describe("matchMRsToTasks", () => {
       [mr({ iid: 1, branch: "bp-250/history" }), mr({ iid: 2, title: "BP-9 fix", branch: "x" })],
       "BP"
     );
-    expect(matched.map((m) => [m.number, m.matchedTaskNumber])).toEqual([
+    expect(matched.map((m) => [m.number, ...m.matchedTaskNumbers])).toEqual([
       [1, 250],
       [2, 9],
     ]);
@@ -62,7 +62,7 @@ describe("matchMRsToTasks", () => {
 
   it("still matches merge requests opened under a key the project has since left", () => {
     const matched = matchMRsToTasks([mr({ branch: "cp-250/field-activity-history" })], "BP", ["CP"]);
-    expect(matched.map((m) => m.matchedTaskNumber)).toEqual([250]);
+    expect(matched.flatMap((m) => m.matchedTaskNumbers)).toEqual([250]);
   });
 
   it("loses that history when the former key is not carried — the bug this ticket is about", () => {
@@ -75,7 +75,7 @@ describe("matchMRsToTasks", () => {
       "BP",
       ["CP", "OLD"]
     );
-    expect(matched.map((m) => m.matchedTaskNumber)).toEqual([1, 2, 3]);
+    expect(matched.flatMap((m) => m.matchedTaskNumbers)).toEqual([1, 2, 3]);
   });
 
   it("ignores a merge request that names no key at all", () => {
@@ -126,19 +126,24 @@ describe("matchMRsToTasks", () => {
     expect(states).toEqual(["open", "closed", "merged", "closed"]);
   });
 
-  it("prefers the branch over the title when the two name different tasks", () => {
+  it("takes the branch's key and every key in the list closing the title, each once (BP-635)", () => {
+    const [matched] = matchMRsToTasks([mr({ branch: "bp-11/a", title: "x (BP-11, BP-22 and old-33)" })], "BP", ["OLD"]);
+    expect(matched.matchedTaskNumbers).toEqual([11, 22, 33]);
+  });
+
+  it("takes only the branch's key from a title that names another in passing (BP-635)", () => {
     const [matched] = matchMRsToTasks([mr({ branch: "bp-11/a", title: "BP-22 b" })], "BP");
-    expect(matched.matchedTaskNumber).toBe(11);
+    expect(matched.matchedTaskNumbers).toEqual([11]);
   });
 
   // BP-611, the GitLab half. The same regex was built twice; the hole was in both copies, and
-  // both now come from `projectKeyPattern`.
+  // both now come from `taskNumbersIn`.
   it("does not find the key inside a longer word", () => {
     const matched = matchMRsToTasks(
       [mr({ branch: "feat/websubp-99", title: "BP-5 real work" })],
       "BP"
     );
-    expect(matched.map((m) => m.matchedTaskNumber)).toEqual([5]);
+    expect(matched.flatMap((m) => m.matchedTaskNumbers)).toEqual([5]);
   });
 
   it("still matches the key after a separator", () => {
@@ -161,7 +166,7 @@ describe("parseGitlabRepo", () => {
 
 /**
  * BP-611's other half. The lookbehind went into `taskKeyPattern` here at the same time as the
- * shared `projectKeyPattern`, and this side shipped with no test of any kind — the branch list a
+ * shared pattern behind `taskNumbersIn`, and this side shipped with no test of any kind — the branch list a
  * task shows is filtered locally, so the defect the ticket describes (`websucp-5` listed among
  * CP-5's branches) lives in this function as much as in the matcher (found in review).
  */

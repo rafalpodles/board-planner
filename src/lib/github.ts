@@ -83,15 +83,38 @@ export { escapeRegex };
  * was in both.
  *
  * The lookbehind is the hole: without it the key is found inside a longer word, so a branch named
- * `feat/websubp-99` contains `bp-99` and was read as task 99 — beating the `BP-5` the title
- * actually said, because the branch is tried first. A two-letter key makes that easy, and this
- * board's key is two letters. Since a sync now removes a link the round contradicts, a matcher
+ * `feat/websubp-99` contains `bp-99` and was read as task 99. A two-letter key makes that easy,
+ * and this board's key is two letters. Since a sync now removes a link the round contradicts, a matcher
  * false negative deletes a correct link rather than merely adding a wrong one (BP-611).
  *
- * A lookbehind rather than a consumed character, so the digits stay group 1 for both callers.
+ * A lookbehind rather than a consumed character, so the digits stay group 1.
  */
-export function projectKeyPattern(keys: string[]): RegExp {
+function projectKeyPattern(keys: string[]): RegExp {
   return new RegExp(`(?<![A-Za-z0-9])(?:${keys.map(escapeRegex).join("|")})[- ](\\d+)`, "i");
+}
+
+/** `fix: a sync round (BP-628, BP-631)`: two or more keys in round brackets closing a title, and nothing else in them. */
+function closingKeyList(keys: string[]): RegExp {
+  const key = `(?:${keys.map(escapeRegex).join("|")})-\\d+`;
+  return new RegExp(`\\((${key}(?:(?:\\s*[,&]\\s*(?:and\\s+)?|\\s+(?:and\\s+)?)${key})+)\\)\\s*$`, "i");
+}
+
+/**
+ * The tasks a branch and a title name: the first key in the branch, else the first in the title,
+ * and every key in a list closing the title (BP-635).
+ *
+ * A branch is written once, by whoever started the work, while a title is edited freely afterwards
+ * (BP-611). So once a branch names a task, a title adds another only through that list:
+ * `follow-up to BP-12`, a version, and a task title the worker copies that ends in `(BP-293)` all
+ * carry keys nobody meant as a link, and a link cannot be taken off by hand.
+ */
+export function taskNumbersIn(keys: string[], branch: string, title: string): number[] {
+  const pattern = projectKeyPattern(keys);
+  const first = branch.match(pattern) ?? title.match(pattern);
+  if (!first) return [];
+  const list = title.match(closingKeyList(keys))?.[1] ?? "";
+  const listed = [...list.matchAll(new RegExp(pattern, "gi"))];
+  return [...new Set([first, ...listed].map((match) => parseInt(match[1], 10)))];
 }
 
 export interface ParsedPR {
@@ -101,7 +124,7 @@ export interface ParsedPR {
   url: string;
   mergedAt: Date | null;
   updatedAt: Date;
-  matchedTaskNumber: number;
+  matchedTaskNumbers: number[];
   /** The head commit, which is what checks are attached to. Absent on a pull request GitHub answered without one. */
   headSha: string | null;
 }
@@ -338,7 +361,7 @@ function rateLimit(res: Response): string | null {
 /**
  * Match PRs to task numbers by scanning branch name and PR title.
  * Pattern: project key (case-insensitive) followed by - and number.
- * E.g. "cp-5/some-slug" or "CP-5 add feature" → task number 5.
+ * E.g. "cp-5/some-slug" or "CP-5 add feature" → task number 5. See `taskNumbersIn`.
  */
 export function matchPRsToTasks(
   prs: GitHubPR[],
@@ -349,22 +372,13 @@ export function matchPRsToTasks(
   // renames every task at once — while the branches and PR titles already on GitHub keep
   // the prefix they were created with, and would otherwise all stop matching.
   const keys = [projectKey, ...formerKeys].filter(Boolean);
-  const pattern = projectKeyPattern(keys);
 
   const results: ParsedPR[] = [];
 
   for (const pr of prs) {
-    // Branch first, then title: a branch is written once, by whoever started the work, while a
-    // title is edited freely afterwards. Kept deliberately (BP-611) — the case that made the
-    // order look wrong was the missing boundary, not the order.
-    // Try branch name first, then title
-    const branchMatch = pr.head.ref.match(pattern);
-    const titleMatch = pr.title.match(pattern);
-    const match = branchMatch || titleMatch;
+    const matchedTaskNumbers = taskNumbersIn(keys, pr.head.ref, pr.title);
+    if (matchedTaskNumbers.length === 0) continue;
 
-    if (!match) continue;
-
-    const taskNumber = parseInt(match[1], 10);
     results.push({
       number: pr.number,
       title: pr.title,
@@ -372,7 +386,7 @@ export function matchPRsToTasks(
       url: pr.html_url,
       mergedAt: pr.merged_at ? new Date(pr.merged_at) : null,
       updatedAt: new Date(pr.updated_at),
-      matchedTaskNumber: taskNumber,
+      matchedTaskNumbers,
       headSha: pr.head.sha ?? null,
     });
   }
@@ -597,7 +611,7 @@ export async function withChecks(
     alwaysAsk === undefined
       ? []
       : open
-          .filter((pr) => pr.matchedTaskNumber === alwaysAsk)
+          .filter((pr) => pr.matchedTaskNumbers.includes(alwaysAsk))
           .slice(0, MAX_CHECKED_PULL_REQUESTS);
   const askable = [
     ...insisted,

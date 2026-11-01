@@ -2572,7 +2572,7 @@ export async function seedCrew(count = 14) {
 }
 
 /**
- * BP-695. A board whose repository is on GitLab — the stub at `host` — with one task for the stub
+ * BP-695. A board whose repository is on GitLab — the stub at `host` — with two tasks for the stub
  * to report branches, commits and merge requests about. Its own project, so no spec counting the
  * seeded boards sees it unless it asks for it.
  */
@@ -2584,6 +2584,9 @@ export const GITLAB_TASK_ID = id("e2e00000000000000000d901");
 export const GITLAB_TASK_NUMBER = 3;
 export const GITLAB_TASK_KEY = `${GITLAB_PROJECT_KEY}-${GITLAB_TASK_NUMBER}`;
 export const GITLAB_TASK_TITLE = "Mirror the fix on GitLab";
+export const GITLAB_SIBLING_TASK_ID = id("e2e00000000000000000d902");
+export const GITLAB_SIBLING_TASK_NUMBER = 4;
+export const GITLAB_SIBLING_TASK_TITLE = "Mirror the second fix on GitLab";
 
 // Imported lazily and under the server's key: encryption.ts checks the variable when it loads, and
 // the runner's own environment has none, or whatever the developer's shell exported.
@@ -2622,7 +2625,7 @@ export async function seedGitlabProject(host: string) {
     gitlabRepo: GITLAB_REPO,
     gitlabHost: host,
     gitlabToken: await sealedWithTheServersKey(GITLAB_TOKEN),
-    taskCounter: GITLAB_TASK_NUMBER,
+    taskCounter: GITLAB_SIBLING_TASK_NUMBER,
     sortOrder: 2,
     createdBy: ADMIN_ID,
     createdAt: now,
@@ -2635,6 +2638,15 @@ export async function seedGitlabProject(host: string) {
       project: GITLAB_PROJECT_ID,
       taskNumber: GITLAB_TASK_NUMBER,
       title: GITLAB_TASK_TITLE,
+      status: "in_progress",
+    })
+  );
+  await db.collection("tasks").insertOne(
+    taskFactory(now)({
+      _id: GITLAB_SIBLING_TASK_ID,
+      project: GITLAB_PROJECT_ID,
+      taskNumber: GITLAB_SIBLING_TASK_NUMBER,
+      title: GITLAB_SIBLING_TASK_TITLE,
       status: "in_progress",
     })
   );

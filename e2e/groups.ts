@@ -145,6 +145,7 @@ export const GROUPS = {
     "outbound-delivery.spec.ts",
     "pr-link-replacement.spec.ts",
     "pr-link-pruning.spec.ts",
+    "pr-link-several-tasks.spec.ts",
     "mcp-oauth.spec.ts",
     "credential-rotation.spec.ts",
     "mcp-tools.spec.ts",

@@ -12,6 +12,7 @@ import {
   addedLinks,
   recordLinkChanges,
   removedLinks,
+  requestsByTask,
   seenUrls,
   unseenLinks,
   writeProviderLinks,
@@ -378,16 +379,11 @@ async function syncGithubRepository(
     transitionOnly
   );
 
-  const prsByTask = new Map<number, typeof matchedPRs>();
-  for (const pr of matchedPRs) {
-    const existing = prsByTask.get(pr.matchedTaskNumber) || [];
-    existing.push(pr);
-    prsByTask.set(pr.matchedTaskNumber, existing);
-  }
+  const prsByTask = requestsByTask(matchedPRs);
 
   // Every pull request this round saw, matched or not — the round's whole field of view. A stored
   // link whose url is in here and which this round did not give to that task has been seen and
-  // reassigned, which is a fact; one that is absent is merely out of the window (BP-610, BP-617).
+  // contradicted, which is a fact; one that is absent is merely out of the window (BP-610, BP-617).
   // By url rather than by number, so a repointed repository's numbers do not contradict the old
   // repository's links (BP-631).
   const seenList = seenUrls(
@@ -397,7 +393,8 @@ async function syncGithubRepository(
   );
   const seen = new Set(seenList);
 
-  let linked = 0;
+  const linked = new Set<string>();
+  const tasksLinked = new Set<number>();
   let written = 0;
   let unlinked = 0;
   let unlinkedTasks = 0;
@@ -444,7 +441,8 @@ async function syncGithubRepository(
       if (removed.length > 0) unlinkedTasks++;
       written++;
     }
-    linked += prs.length;
+    for (const pr of prs) linked.add(pr.url);
+    tasksLinked.add(taskNumber);
 
     // Auto-transition: merged PR + task in_review → ready_to_test.
     // Keyed to the seeded column ids; projects that removed either column opt out.
@@ -514,9 +512,9 @@ async function syncGithubRepository(
   return {
     ok: true,
     prsFound: matchedPRs.length,
-    tasksLinked: prsByTask.size,
-    taskNumbers: [...prsByTask.keys()],
-    prsLinked: linked,
+    tasksLinked: tasksLinked.size,
+    taskNumbers: [...tasksLinked],
+    prsLinked: linked.size,
     tasksWritten: written,
     prsUnlinked: unlinked,
     tasksUnlinked: unlinkedTasks,

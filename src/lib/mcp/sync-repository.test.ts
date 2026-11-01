@@ -66,7 +66,7 @@ describe("syncSummary", () => {
 
   it("says what else happened: stale links removed, tasks moved on", () => {
     expect(syncSummary("github", { prsFound: 2, tasksLinked: 2, prsLinked: 2, prsUnlinked: 1, autoTransitioned: 1 }).summary).toBe(
-      "Refreshed 2 pull requests on 2 tasks; 1 stale link removed; 1 task moved to the next review column because its pull request merged."
+      "Refreshed 2 pull requests on 2 tasks; 1 stale link removed; 1 task moved to the next review column because a pull request merged."
     );
   });
 

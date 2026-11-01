@@ -63,7 +63,7 @@ export function syncSummary(provider: "github" | "gitlab", answer: Answer) {
       : [
           `Refreshed ${plural(linked, noun)} on ${plural(tasks, "task")}`,
           ...(unlinked > 0 ? [`${plural(unlinked, "stale link")} removed`] : []),
-          ...(moved > 0 ? [`${plural(moved, "task")} moved to the next review column because its ${noun} merged`] : []),
+          ...(moved > 0 ? [`${plural(moved, "task")} moved to the next review column because a ${noun} merged`] : []),
         ].join("; ") + ".") + unreadableNote;
 
   return {

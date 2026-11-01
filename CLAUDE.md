@@ -109,7 +109,7 @@ src/
   `BOARD_FEED_FANOUT_LIMIT`. It is the one row the legacy fallback leaves off, so adding it
   subscribed nobody
 - **Recurrence**: When task → done with recurrence config, auto-creates next task
-- **GitHub PR linking**: Matches PRs by branch/title pattern `BP-5`, and by any key the project used to have (case-insensitive)
+- **GitHub PR linking**: The first key in the branch, else the first in the title, plus every key in a list of two or more in round brackets closing the title, `fix: … (BP-5, BP-6)` (`taskNumbersIn`, BP-635). Any key the project used to have counts, case-insensitively. Once the branch names a task, a key mentioned elsewhere in the title links nothing: a link cannot be taken off by hand, and a person's sync moves a task when its PR has merged. One PR on several tasks stays one row until the sync groups it, so its checks are asked for once
 - **Autonomous workers**: Opt-in per project (Settings → Workers, the project owner; an instance
   admin can lock it off, and the lock wins — `projectRunsWorkers` in `src/lib/worker-gate.ts`). Enrolling a
   machine is self-service and needs no admin approval: whoever connects it owns it, and a machine

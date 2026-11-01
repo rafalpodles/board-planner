@@ -11,6 +11,7 @@ import {
   addedLinks,
   recordLinkChanges,
   removedLinks,
+  requestsByTask,
   seenUrls,
   writeProviderLinks,
 } from "@/lib/pr-links";
@@ -108,12 +109,7 @@ async function syncGitlabRepository(db: ScopedDb, project: GitlabSyncProject, re
   }
   const matchedMRs = matchMRsToTasks(rawMRs, project.key, project.formerKeys || []);
 
-  const mrsByTask = new Map<number, typeof matchedMRs>();
-  for (const mr of matchedMRs) {
-    const existing = mrsByTask.get(mr.matchedTaskNumber) || [];
-    existing.push(mr);
-    mrsByTask.set(mr.matchedTaskNumber, existing);
-  }
+  const mrsByTask = requestsByTask(matchedMRs);
 
   // Every merge request this round saw, matched or not. The fetch is a window — a hundred by
   // `updated_at`, no paging — so a link the round did not see is unknown rather than gone, while
@@ -126,7 +122,8 @@ async function syncGitlabRepository(db: ScopedDb, project: GitlabSyncProject, re
   );
   const seen = new Set(seenList);
 
-  let linked = 0;
+  const linked = new Set<string>();
+  const tasksLinked = new Set<number>();
   let unlinked = 0;
   let autoTransitioned = 0;
 
@@ -158,7 +155,8 @@ async function syncGitlabRepository(db: ScopedDb, project: GitlabSyncProject, re
     // The trace a link change leaves on the task, since nothing else does any more (BP-628)
     await recordLinkChanges(db, project._id, task._id, actor, added, removed);
     unlinked += removed.length;
-    linked += mrs.length;
+    for (const mr of mrs) linked.add(mr.url);
+    tasksLinked.add(taskNumber);
 
     const hasMerged = mrs.some((mr) => mr.state === "merged");
     const destination = hasMerged ? mergedReviewDestination(project as never, task.status) : undefined;
@@ -199,9 +197,9 @@ async function syncGitlabRepository(db: ScopedDb, project: GitlabSyncProject, re
   return {
     ok: true,
     prsFound: matchedMRs.length,
-    tasksLinked: mrsByTask.size,
-    taskNumbers: [...mrsByTask.keys()],
-    prsLinked: linked,
+    tasksLinked: tasksLinked.size,
+    taskNumbers: [...tasksLinked],
+    prsLinked: linked.size,
     prsUnlinked: unlinked,
     autoTransitioned,
   };

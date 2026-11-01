@@ -1,4 +1,4 @@
-import { allowLoopbackIn, escapeRegex, ParsedPR, projectKeyPattern, type TokenCheck } from "./github";
+import { allowLoopbackIn, escapeRegex, ParsedPR, taskNumbersIn, type TokenCheck } from "./github";
 import { safeFetch, logUpstreamFailure, readBoundedJson, MAX_RESPONSE_BYTES } from "./safe-fetch";
 
 export const GITLAB_DESTINATION = { allowLoopback: allowLoopbackIn() };
@@ -119,12 +119,11 @@ export function matchMRsToTasks(
   formerKeys: string[] = []
 ): ParsedPR[] {
   const keys = [projectKey, ...formerKeys].filter(Boolean);
-  const pattern = projectKeyPattern(keys);
   const results: ParsedPR[] = [];
 
   for (const mr of mrs) {
-    const match = mr.source_branch.match(pattern) || mr.title.match(pattern);
-    if (!match) continue;
+    const matchedTaskNumbers = taskNumbersIn(keys, mr.source_branch, mr.title);
+    if (matchedTaskNumbers.length === 0) continue;
 
     results.push({
       number: mr.iid,
@@ -133,7 +132,7 @@ export function matchMRsToTasks(
       url: mr.web_url,
       mergedAt: mr.merged_at ? new Date(mr.merged_at) : null,
       updatedAt: new Date(mr.updated_at),
-      matchedTaskNumber: parseInt(match[1], 10),
+      matchedTaskNumbers,
       // GitLab pipelines are not read here, so no commit to attach checks to
       headSha: null,
     });
