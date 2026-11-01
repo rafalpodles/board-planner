@@ -190,7 +190,8 @@ test("the keyboard opens and expands a board, and only the handle picks a row up
   await page.keyboard.press("Space");
   await expect(sidebar.getByRole("button", { name: `Collapse ${PROJECT_NAME}`, exact: true })).toBeVisible();
 
-  await sidebar.locator(`a[href="/projects/${PROJECT_KEY}"]`).focus();
+  // first(): the board's own row, ahead of the Board entry the expansion just opened
+  await sidebar.locator(`a[href="/projects/${PROJECT_KEY}"]`).first().focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(`/projects/${PROJECT_KEY}`);
 });

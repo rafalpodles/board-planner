@@ -451,7 +451,8 @@ test("the dark pass reports unreadable text, so a clean result means something",
   await page.getByRole("main").evaluate((main) => {
     const unreadable = document.createElement("p");
     unreadable.textContent = "Nearly the colour of the page";
-    unreadable.style.color = getComputedStyle(document.body).backgroundColor;
+    // Not the page's own colour: axe calls an exact 1:1 undecided rather than a violation
+    unreadable.style.color = "#3f3f46";
     main.prepend(unreadable);
   });
   expect((await contrast(page)).map((v) => v.split(":")[0])).toEqual(["color-contrast"]);
