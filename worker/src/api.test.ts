@@ -299,6 +299,29 @@ describe("createApiClient", () => {
     expect(init.body).toBe(JSON.stringify({ runId: "run-1" }));
   });
 
+  it("adds the agents a settings fault holds, and says nothing of an empty list", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+    const heldAgents = [{ agentId: "a1", gates: ["build"] }];
+
+    await api.claim("CP", "run-1", heldAgents);
+    await api.claim("CP", "run-2", []);
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ runId: "run-1", heldAgents });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ runId: "run-2" });
+  });
+
+  it("asks for a refund on the status write only when told to", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await api.setStatus("CP", "t1", "review", { refundAttempt: true });
+    await api.setStatus("CP", "t1", "review");
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ status: "review", refundAttempt: true });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ status: "review" });
+  });
+
   it("refuses to claim, without a network call, when no identity is stored", async () => {
     const fetchMock = vi.fn();
     const api = createApiClient(config, fetchMock as never, { read: () => "" });

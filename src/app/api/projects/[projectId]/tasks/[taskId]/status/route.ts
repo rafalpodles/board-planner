@@ -14,7 +14,7 @@ export const PATCH = withProjectAccessOrWorker(async (request, { params, user, w
   // Opt-in per request rather than a setting: the refusal is only useful if it is the default.
   const read = await readAuthenticatedJsonBody(request);
   if (!read.ok) return read.response;
-  const { status, force } = read.value;
+  const { status, force, refundAttempt } = read.value;
 
   // Never for a machine credential. CLAUDE.md already records that the PM agent gets no force
   // because "an unattended agent must not take work off a machine"; a worker is exactly such an
@@ -24,9 +24,15 @@ export const PATCH = withProjectAccessOrWorker(async (request, { params, user, w
     return NextResponse.json({ error: MACHINE_FORCE_REFUSAL }, { status: 403 });
   }
 
+  // A machine's report on its own run: a person or a token moving a task has no attempt to give back
+  if (refundAttempt === true && !workerId) {
+    return NextResponse.json({ error: "Only the worker running a task can refund its attempt" }, { status: 403 });
+  }
+
   const result = await changeStatus(db, projectId, taskId, status, String(user._id), {
     force: force === true,
     workerId,
+    refundAttempt: refundAttempt === true,
   });
   if (!result.ok) {
     return NextResponse.json(

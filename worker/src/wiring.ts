@@ -74,6 +74,7 @@ import {
   SANDBOX_CHECK,
 } from "./preflight.js";
 import { createReporter, ReleaseMemory } from "./reporter.js";
+import { createSettingsHolds } from "./settings-hold.js";
 import { abortableSleep } from "./sleep.js";
 import { HeartbeatDeps, loadIdentity, PROTOCOL_VERSION, startHeartbeat } from "./registration.js";
 import { bindRepository, createAllowlistReader, repoInventory } from "./repos.js";
@@ -217,6 +218,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // once-per-binding log below: a machine parked next to a repository it cannot resolve a base in
   // would otherwise write the same board comment, and fire the same notification, every poll.
   const releaseComments: ReleaseMemory = new Map();
+  // Outlives the run for the same reason. In memory, because a restart costing one more failed task
+  // and no attempt is also the way out for a fix that lands in the repository.
+  const settingsHolds = createSettingsHolds(deps.logError);
   const readAllowlist = createAllowlistReader(bootstrap.stateDir);
 
   // Everything below is worker-wide policy and the assignment list, both server-controlled and
@@ -892,6 +896,19 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
   }
 
+  function gateSettingsOf(projectId: string) {
+    const config = configFor(projectId);
+    return config && { ...config, remotes: bound.get(projectId)?.repositories.map((repository) => repository.remote) ?? [] };
+  }
+
+  async function executeHolding(task: ClaimedTask): Promise<RunDisposition> {
+    // Before the run, so that the hold is on the settings the run read
+    const settings = gateSettingsOf(task.projectId);
+    const disposition = await execute(task);
+    if (disposition === "settings-fault" && settings) settingsHolds.hold(task, settings);
+    return disposition;
+  }
+
   /**
    * Everything a decision needs that only exists relative to a bound checkout. Null when the
    * project is no longer bound here, which is what a lost assignment looks like from this side.
@@ -978,7 +995,11 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         (projectId) => !unusable.has(projectId) && !quarantineReasonFor(projectId)
       ),
     api,
-    execute,
+    execute: executeHolding,
+    heldAgents: (projectId) => {
+      const settings = gateSettingsOf(projectId);
+      return settings ? settingsHolds.heldAgents(projectId, settings) : [];
+    },
     sleep: deps.sleep,
     drain,
     claimBlocked,

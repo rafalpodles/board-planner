@@ -594,6 +594,37 @@ describe("claiming a task whose agent runs on a coding CLI", () => {
     expect(claimNextTask.mock.calls[0][6]).toEqual(["agent-on-codex"]);
   });
 
+  // BP-1117
+  describe("with agents a settings fault holds", () => {
+    const AGENT = "69a52e3b399b27d3cbb2c5c9";
+    const claimHolding = (heldAgents: unknown) =>
+      POST(request(authed, { runId: "run-1", heldAgents }), { params: Promise.resolve({ projectId: "CP" }) });
+
+    it("steps over a held agent as well as those the machine cannot run", async () => {
+      agentsBeyond.mockResolvedValue(["agent-on-codex"]);
+      snapshotFor.mockResolvedValue({ agentId: AGENT, name: "Held", sequence: [{ key: "build", kind: "gate", name: "Builds", gateKind: "build" }] });
+
+      await claimHolding([{ agentId: AGENT, gates: ["build"] }]);
+
+      expect(claimNextTask.mock.calls[0][6]).toEqual(["agent-on-codex", AGENT]);
+    });
+
+    it("offers it again when the agent's gates are not what the machine held", async () => {
+      snapshotFor.mockResolvedValue({ agentId: AGENT, name: "Edited", sequence: [] });
+
+      await claimHolding([{ agentId: AGENT, gates: ["build"] }]);
+
+      expect(claimNextTask.mock.calls[0][6]).toEqual([]);
+    });
+
+    it("refuses a list it cannot read, and claims nothing", async () => {
+      const response = await claimHolding([{ agentId: { $ne: null }, gates: [] }]);
+
+      expect(response.status).toBe(400);
+      expect(claimNextTask).not.toHaveBeenCalled();
+    });
+  });
+
   it("hands back, refunded, a task whose agent was edited onto a CLI this machine does not report", async () => {
     snapshotFor.mockResolvedValue({ agentId: "a1", name: "Edited", sequence: [codexStep] });
 

@@ -7,7 +7,7 @@ import { RunRecord } from "./run-record.js";
 // fail — so it has to survive the process, not just the request.
 export type OutboxOp =
   | { kind: "comment"; projectId: string; taskId: string; body: string }
-  | { kind: "status"; projectId: string; taskId: string; status: string }
+  | { kind: "status"; projectId: string; taskId: string; status: string; refundAttempt?: boolean }
   | { kind: "release"; projectId: string; taskId: string; refund: boolean }
   // A record posted after a merge hits the same redeploy the comment does, and it is the only
   // trace the run leaves — losing it makes a finished run indistinguishable from one that never ran.
@@ -121,7 +121,11 @@ function taskOf(op: OutboxOp): string | undefined {
 
 async function deliver(api: ApiClient, op: OutboxOp): Promise<void> {
   if (op.kind === "comment") return api.comment(op.projectId, op.taskId, op.body);
-  if (op.kind === "status") return api.setStatus(op.projectId, op.taskId, op.status);
+  if (op.kind === "status") {
+    return op.refundAttempt
+      ? api.setStatus(op.projectId, op.taskId, op.status, { refundAttempt: true })
+      : api.setStatus(op.projectId, op.taskId, op.status);
+  }
   if (op.kind === "run") return api.postRun(op.projectId, op.record);
   return op.refund
     ? api.release(op.projectId, op.taskId)

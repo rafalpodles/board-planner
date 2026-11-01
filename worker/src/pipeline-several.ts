@@ -251,7 +251,7 @@ export async function runTaskInRepositories(
     const configFault = configFaults.every(Boolean) ? configFaults[0] : null;
     if (configFault) {
       settle("failed", configFault);
-      await reporter.failed(task, `this run stopped before any step: ${configFault}`);
+      await reporter.settingsFault(task, configFault);
       return "settings-fault";
     }
 

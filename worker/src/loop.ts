@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { ApiClient, ClaimRefused } from "./api.js";
+import { ApiClient, ClaimRefused, HeldAgent } from "./api.js";
 import type { RunDisposition } from "./pipeline.js";
 import { ClaimedTask } from "./types.js";
 
@@ -14,6 +14,9 @@ export interface LoopDeps {
   // approved queue through a failure none of those tasks caused, so the pass ends and the worker
   // waits out its poll interval instead. "settings-fault" is the same for a project's own commands.
   execute: (task: ClaimedTask) => Promise<RunDisposition>;
+  // What a project's own commands stopped this machine running, read before each claim so that a
+  // corrected setting is claimable on the next poll
+  heldAgents?: (projectId: string) => HeldAgent[];
   // The signal is aborted by stop(); a sleep that ignores it delays every shutdown by up to a full
   // poll interval, which at the default 30 s outlasts launchd's 20 s exit timeout
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -107,13 +110,12 @@ export function createLoop(deps: LoopDeps): Loop {
           // Every assignment gets its own attempt and its own try/catch: a project that cannot be
           // claimed from, or a task that blows up, must not cost a sibling project its turn in this
           // pass — that would starve whichever assignment comes last in the list. A fault is the
-          // one thing that does end the pass: a broken machine fails every claim after it, and the
-          // poll interval is all that paces a queue through a project's broken settings. passOrder
+          // one thing that does end the pass: a broken machine fails every claim after it. passOrder
           // is what keeps that from starving a sibling across passes.
           for (const projectId of passOrder(deps.assignments())) {
             if (!running) return;
             try {
-              const task = await deps.api.claim(projectId, randomUUID());
+              const task = await deps.api.claim(projectId, randomUUID(), deps.heldAgents?.(projectId));
               if (refused.delete(projectId)) log(`project ${projectId} can be claimed from again`);
               if (task) {
                 const disposition = await deps.execute(task);

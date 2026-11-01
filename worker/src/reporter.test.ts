@@ -12,9 +12,7 @@ const statuses: StatusIds = { approved: "ready", review: "checking", done: "ship
 function apiSpy() {
   return {
     claim: vi.fn(),
-    setStatus: vi
-      .fn<(projectId: string, taskId: string, status: string) => Promise<void>>()
-      .mockResolvedValue(undefined),
+    setStatus: vi.fn<ApiClient["setStatus"]>().mockResolvedValue(undefined),
     comment: vi
       .fn<(projectId: string, taskId: string, body: string) => Promise<void>>()
       .mockResolvedValue(undefined),
@@ -295,6 +293,63 @@ describe("createReporter", () => {
     await reporter.released(task, "usage limit reached");
 
     expect(api.comment).toHaveBeenCalledTimes(3);
+  });
+
+  describe("a settings fault", () => {
+    const fault = "./bin/tst is named by a gate command, and this checkout has no such executable file";
+
+    it("moves the task in the one write that gives the attempt back", async () => {
+      const api = apiSpy();
+      await createReporter(api, statuses).settingsFault(task, fault);
+
+      expect(api.setStatus).toHaveBeenCalledTimes(1);
+      expect(api.setStatus).toHaveBeenCalledWith("CP", "t1", "checking", { refundAttempt: true });
+      expect(api.release).not.toHaveBeenCalled();
+    });
+
+    it("says why, that the others are held, and what lifts it", async () => {
+      const api = apiSpy();
+      await createReporter(api, statuses).settingsFault(task, fault);
+
+      const body = api.comment.mock.calls[0][2];
+      expect(body).toContain(fault);
+      expect(body).toMatch(/did not spend an attempt/);
+      expect(body).toMatch(/other tasks on this agent in their column/);
+      expect(body).toMatch(/commands, repositories or base branch change, or the agent's gates do/);
+      expect(body).toMatch(/within a day, or at once if the worker is restarted/);
+      expect(body).not.toMatch(/on attempt/);
+    });
+
+    it("says so on the task before it moves it", async () => {
+      const api = apiSpy();
+      await createReporter(api, statuses).settingsFault(task, fault);
+
+      expect(api.comment.mock.invocationCallOrder[0]).toBeLessThan(api.setStatus.mock.invocationCallOrder[0]);
+    });
+
+    it("forgets the release comment the task last had, as every other ending does", async () => {
+      const api = apiSpy();
+      const memory: ReleaseMemory = new Map([["t1", "an earlier reason"]]);
+      await createReporter(api, statuses, vi.fn(), undefined, memory).settingsFault(task, fault);
+
+      expect(memory.has("t1")).toBe(false);
+    });
+
+    it("keeps the refund when the status has to wait in the outbox", async () => {
+      const api = apiSpy();
+      api.setStatus.mockRejectedValueOnce(new Error("503"));
+      const outbox = { add: vi.fn(), flush: vi.fn(), pending: vi.fn() };
+      await createReporter(api, statuses, vi.fn(), outbox).settingsFault(task, fault);
+
+      expect(outbox.add).toHaveBeenCalledWith({ kind: "status", projectId: "CP", taskId: "t1", status: "checking", refundAttempt: true });
+    });
+
+    it("scrubs what it quotes", async () => {
+      const api = apiSpy();
+      await createReporter(api, statuses).settingsFault(task, "ghp_0123456789abcdefghijABCDEFGHIJ012345 is not a program");
+
+      expect(api.comment.mock.calls[0][2]).not.toContain("ghp_0123456789");
+    });
   });
 
   it("names the attempt it gave up on without mangling the grammar", async () => {

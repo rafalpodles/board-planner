@@ -264,6 +264,7 @@ export const GROUPS = {
     "claim-returns-a-document.spec.ts",
     "multi-repository-claim.spec.ts",
     "agent-provider.spec.ts",
+    "settings-fault-hold.spec.ts",
     "in-app-notifications.spec.ts",
     "board-feed-notifications.spec.ts",
     "notification-grid-delivery.spec.ts",

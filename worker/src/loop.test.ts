@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ApiClient, ClaimRefused } from "./api.js";
+import { ApiClient, ClaimRefused, HeldAgent } from "./api.js";
 import { createLoop, Loop } from "./loop.js";
 import type { RunDisposition } from "./pipeline.js";
 import { ClaimedTask } from "./types.js";
@@ -39,6 +39,7 @@ function loopOver(
     sleep?: (ms: number) => Promise<void>;
     claimBlocked?: () => string;
     drain?: () => Promise<void>;
+    heldAgents?: (projectId: string) => HeldAgent[];
   } = {}
 ): {
   loop: Loop;
@@ -58,6 +59,7 @@ function loopOver(
     sleep,
     claimBlocked: overrides.claimBlocked,
     drain: overrides.drain,
+    heldAgents: overrides.heldAgents,
     log,
   });
   return { loop, execute, sleep, log };
@@ -603,6 +605,25 @@ describe("a machine that must not take work", () => {
     expect(execute).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledWith(expect.stringContaining("settings fault on CP-158"));
     expect(log).not.toHaveBeenCalledWith(expect.stringContaining("machine fault"));
+  });
+
+  it("hands each project's claim what is held on that project", async () => {
+    const api = apiStub(queue());
+    const asked: string[] = [];
+    const held = (projectId: string) => [{ agentId: `held-on-${projectId}`, gates: [] }];
+    const { loop } = loopOver(api, {
+      assignments: ["P1", "P2"],
+      heldAgents: (projectId) => {
+        asked.push(projectId);
+        return held(projectId);
+      },
+    });
+
+    await loop.start();
+
+    expect(asked).toEqual(["P1", "P2"]);
+    expect(api.claim).toHaveBeenCalledWith("P1", expect.any(String), held("P1"));
+    expect(api.claim).toHaveBeenCalledWith("P2", expect.any(String), held("P2"));
   });
 
   it("claims normally when nothing blocks it", async () => {

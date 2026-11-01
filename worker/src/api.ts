@@ -25,9 +25,16 @@ export interface PhaseEvent {
   phase: string;
 }
 
+// An agent this machine will not claim for, with the gates it had when a project's own commands
+// stopped it. The server judges those, since this machine sees an agent only by claiming a task.
+export interface HeldAgent {
+  agentId: string;
+  gates: string[];
+}
+
 export interface ApiClient {
-  claim(projectId: string, runId: string): Promise<ClaimedTask | null>;
-  setStatus(projectId: string, taskId: string, status: string): Promise<void>;
+  claim(projectId: string, runId: string, heldAgents?: HeldAgent[]): Promise<ClaimedTask | null>;
+  setStatus(projectId: string, taskId: string, status: string, options?: { refundAttempt?: boolean }): Promise<void>;
   comment(projectId: string, taskId: string, body: string): Promise<void>;
   release(projectId: string, taskId: string, options?: { refund?: boolean }): Promise<void>;
   statusIds(projectId: string): Promise<StatusIds>;
@@ -356,10 +363,10 @@ export function createApiClient(
   }
 
   return {
-    async claim(projectId, runId) {
+    async claim(projectId, runId, heldAgents) {
       let response: Response;
       try {
-        response = await send(projectId, "/tasks/claim", "POST", { runId });
+        response = await send(projectId, "/tasks/claim", "POST", heldAgents?.length ? { runId, heldAgents } : { runId });
       } catch (error) {
         // 409 is the server saying the BOARD cannot claim — no column to take from or move into —
         // which is neither an empty queue nor this machine failing (BP-512)
@@ -434,8 +441,8 @@ export function createApiClient(
       });
     },
 
-    async setStatus(projectId, taskId, status) {
-      await send(projectId, `/tasks/${taskId}/status`, "PATCH", { status });
+    async setStatus(projectId, taskId, status, options) {
+      await send(projectId, `/tasks/${taskId}/status`, "PATCH", options?.refundAttempt ? { status, refundAttempt: true } : { status });
     },
 
     async comment(projectId, taskId, body) {
