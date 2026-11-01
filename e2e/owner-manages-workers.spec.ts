@@ -70,12 +70,13 @@ async function saveWorkers(page: Page) {
 const putWorker = (request: APIRequestContext, worker: Record<string, unknown>) =>
   request.put(`/api/projects/${PROJECT_KEY}`, { headers: SAME_ORIGIN, data: { worker } });
 
-async function assignments(request: APIRequestContext): Promise<{ project: string; policy: Record<string, unknown> }[]> {
+async function assignments(request: APIRequestContext, capabilities = "gate-commands"): Promise<{ project: string; policy: Record<string, unknown> }[]> {
   const response = await request.post(`/api/workers/${WORKER_ID}/heartbeat`, {
     headers: {
       Authorization: `Bearer ${WORKER_CREDENTIAL}`,
       "x-worker-id": String(WORKER_ID),
       "x-cp-protocol": "1",
+      "x-cp-capabilities": capabilities,
     },
     data: { repos: [{ remote: REPOSITORY, path: "/checkouts/owner-managed" }] },
   });
@@ -136,6 +137,7 @@ test("an owner names the gate commands, shell syntax is refused, and a machine i
   await page.getByLabel("Working directory", { exact: true }).fill("services/api/");
   await saveWorkers(page);
 
+  expect(await assignments(request, "")).toEqual([]);
   expect(await policyHandedToMachine(request)).toMatchObject({
     installCommand: "pip install -r requirements.txt",
     testCommand: "python -m pytest",
