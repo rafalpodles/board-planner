@@ -511,7 +511,7 @@ test("a panel left open learns the machine pushed, from its own poll", async ({ 
     async (response) =>
       response.url().includes(`/tasks/${HELD_TASK_ID}/decision`) &&
       response.request().method() === "GET" &&
-      (await response.json()).decision?.state === "delivered",
+      (await response.json().catch(() => null))?.decision?.state === "delivered",
     { timeout: 25_000 }
   );
   const settled = await request.patch(`/api/workers/${WORKER_ID}/decisions`, {

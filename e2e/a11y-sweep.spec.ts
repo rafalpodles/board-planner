@@ -223,6 +223,8 @@ const SCREENS: Screen[] = [
       await nextProviderSignIn();
       await page.goto(`/invite?token=${await plantInvitation(PROVIDER_ADDRESS)}`);
       await button(page, `Accept with ${OIDC_STUB_LABEL}`).click();
+      // The plain invitation has the same button, so the form alone would not prove the provider answered
+      await page.waitForURL("**/invite/sso");
     },
     ready: accountForm,
   },
