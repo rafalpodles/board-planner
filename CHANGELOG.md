@@ -1,5 +1,45 @@
 # Changelog
 
+## [1.10.0](https://github.com/rafalpodles/board-planner/compare/v1.9.0...v1.10.0) (2026-11-01)
+
+
+### Features
+
+* a GitLab token is checked before it is stored, and a board's owners are told a week before a token expires (BP-1109) ([#743](https://github.com/rafalpodles/board-planner/issues/743)) ([e1b8c4a](https://github.com/rafalpodles/board-planner/commit/e1b8c4a9e6298419ef8aa9339cf96bdd0d87c3e5))
+* a mention is a pill naming the person, and the PM chat offers @ people and task keys (BP-1105, BP-1106) ([#739](https://github.com/rafalpodles/board-planner/issues/739)) ([268e121](https://github.com/rafalpodles/board-planner/commit/268e1216afc89fd1e0abccb19381bb0b175d1e92))
+* a mention pill names the person, and the reader's own mentions stand out (BP-1112) ([#744](https://github.com/rafalpodles/board-planner/issues/744)) ([027345a](https://github.com/rafalpodles/board-planner/commit/027345adf773138c791c01c278be5d65976dcbfc))
+* a project names its own install, build and test commands for the worker's gates (BP-985) ([#750](https://github.com/rafalpodles/board-planner/issues/750)) ([d8a1dc0](https://github.com/rafalpodles/board-planner/commit/d8a1dc0122b20e1bebee01551f226906fc62661c))
+* a project that lists several repositories is claimed only by a machine holding all of them (BP-1070) ([#720](https://github.com/rafalpodles/board-planner/issues/720)) ([070e725](https://github.com/rafalpodles/board-planner/commit/070e725cc21859970bcfcc0971e3a5538e3069b9))
+* a rejected GitHub token stops the sync quietly and says so in settings and on the board (BP-1108) ([#741](https://github.com/rafalpodles/board-planner/issues/741)) ([add4f08](https://github.com/rafalpodles/board-planner/commit/add4f08489db79c2045ecc863053f9aaee215b9f))
+* a step and the review gate choose the coding CLI they run on, and the claim respects what a machine can run (BP-987) ([#734](https://github.com/rafalpodles/board-planner/issues/734)) ([b7832b6](https://github.com/rafalpodles/board-planner/commit/b7832b6713bbc5c3f1a2c3491ff7a46a39582352))
+* a task names the repository it changes, and a machine takes only its own repository's tasks (BP-1066) ([#719](https://github.com/rafalpodles/board-planner/issues/719)) ([ce9eeda](https://github.com/rafalpodles/board-planner/commit/ce9eeda9e2b56c71523c65f02afc02c87e892ef1))
+* an HTML file can be attached to a task, served only as a download (BP-1062) ([#713](https://github.com/rafalpodles/board-planner/issues/713)) ([8781507](https://github.com/rafalpodles/board-planner/commit/878150743bd9b7590bbc8695d9a2bebe89d22cbe))
+* initials avatars take a colour from the person's username (BP-1063) ([#715](https://github.com/rafalpodles/board-planner/issues/715)) ([067570c](https://github.com/rafalpodles/board-planner/commit/067570cca6f5a61ff97a92d1e376e0799f9831c0))
+* login.board-planner.com/?start is the sign-up, straight to creating an organisation (BP-1079) ([#733](https://github.com/rafalpodles/board-planner/issues/733)) ([eb4066e](https://github.com/rafalpodles/board-planner/commit/eb4066e9f8cea8ad790864e2694e17b3a0026967))
+* **menubar:** a branded panel, status icon, Connect flow and Preferences (BP-1096) ([#736](https://github.com/rafalpodles/board-planner/issues/736)) ([dff1302](https://github.com/rafalpodles/board-planner/commit/dff1302fa77d275fe0ca605e60968c7ab7beb263))
+* PM agent answers stream to the chat while the model is writing them (BP-1037) ([#718](https://github.com/rafalpodles/board-planner/issues/718)) ([91e56cb](https://github.com/rafalpodles/board-planner/commit/91e56cbf6a2553c74d86f61296473a2ed6960ec8))
+* Settings → Integrations lists, adds, renames and removes a project's additional repositories (BP-1069) ([#725](https://github.com/rafalpodles/board-planner/issues/725)) ([7329626](https://github.com/rafalpodles/board-planner/commit/7329626b59c666b785922f38e6dd7d5137da92c7))
+* the bell, mail, History and PM chips name people, and copying a mention keeps it a mention (BP-1113) ([#745](https://github.com/rafalpodles/board-planner/issues/745)) ([4c4a4a2](https://github.com/rafalpodles/board-planner/commit/4c4a4a2c82ad4c374f074c24683e0dc9234000fa))
+* the GitHub and GitLab syncs read every repository of a project that lists several (BP-1068) ([#727](https://github.com/rafalpodles/board-planner/issues/727)) ([f546f7e](https://github.com/rafalpodles/board-planner/commit/f546f7e67d1864595102507ac42bbadba7074122))
+* the platform's organisation list names each organisation's last use (BP-1115) ([#748](https://github.com/rafalpodles/board-planner/issues/748)) ([d8e2126](https://github.com/rafalpodles/board-planner/commit/d8e212680a6641de52aa23ea781ad5b22bcb47ce))
+* the worker binds every repository of a project and reports a binding state per checkout (BP-1067) ([#721](https://github.com/rafalpodles/board-planner/issues/721)) ([b3b31ab](https://github.com/rafalpodles/board-planner/commit/b3b31ab01c74d2134c05729163fc14ca7134ff5b))
+* the worker can run a step and the review gate on the Codex CLI (BP-987) ([#731](https://github.com/rafalpodles/board-planner/issues/731)) ([a8c88b5](https://github.com/rafalpodles/board-planner/commit/a8c88b532e698d2b1657baf1dba3d7b3668f29e5))
+* the worker runs a task in one worktree per repository of its project (BP-1072) ([#722](https://github.com/rafalpodles/board-planner/issues/722)) ([6beeeb1](https://github.com/rafalpodles/board-planner/commit/6beeeb1af4548955b1c78d6d1e8ab3f4063fbe57))
+* the worker says it can run several repositories, and a pull request carries the agent's summary only when no private prose could be in it (BP-1073) ([#724](https://github.com/rafalpodles/board-planner/issues/724)) ([dba48b0](https://github.com/rafalpodles/board-planner/commit/dba48b0fc6917237864c20f314b21a25a847fad9))
+* **worker:** a checkout that needs a newer Node than its gates would have is not claimed from (BP-1101) ([#738](https://github.com/rafalpodles/board-planner/issues/738)) ([9ee3d15](https://github.com/rafalpodles/board-planner/commit/9ee3d15107e063b9c7a8d10d2f1f7aed56d895d7))
+
+
+### Bug Fixes
+
+* a body too costly to parse is shown as text instead of taking the task page down (BP-1107) ([#740](https://github.com/rafalpodles/board-planner/issues/740)) ([afac289](https://github.com/rafalpodles/board-planner/commit/afac289717c6f13ed3af72509cda1ed98a59835b))
+* a dismissed triage suggestion stays dismissed when an earlier read of the task lands after it (BP-1074) ([#729](https://github.com/rafalpodles/board-planner/issues/729)) ([3cb5cb6](https://github.com/rafalpodles/board-planner/commit/3cb5cb6a1c3a440f961a77988027b24fe6cafcd6))
+* **deps:** next 16.4.3, undici, body-parser and zod 4 for the October advisories (BP-1110) ([#742](https://github.com/rafalpodles/board-planner/issues/742)) ([630e545](https://github.com/rafalpodles/board-planner/commit/630e545575f257f94a00d2d1d81f10a2192bb7a1))
+* inline code is a badge without backticks, and the markdown editor's label names its field (BP-1064, BP-1060) ([#726](https://github.com/rafalpodles/board-planner/issues/726)) ([d46953e](https://github.com/rafalpodles/board-planner/commit/d46953efe60dff152ac6597be59ac4cac261bee6))
+* MCP Apps views render when the host does not forward the result's _meta (BP-1114) ([#747](https://github.com/rafalpodles/board-planner/issues/747)) ([83264b1](https://github.com/rafalpodles/board-planner/commit/83264b14e3bcd2e9a90f92cbabf3a67c3648b41f))
+* **menubar:** the menu bar window follows its content and the panel is opaque (BP-1096) ([#737](https://github.com/rafalpodles/board-planner/issues/737)) ([7af5678](https://github.com/rafalpodles/board-planner/commit/7af56789277d6207500f5c9e33c8d7435ceffa93))
+* **menubar:** the push probe targets a new branch so a checkout behind origin is not refused (BP-1076) ([#730](https://github.com/rafalpodles/board-planner/issues/730)) ([2db0342](https://github.com/rafalpodles/board-planner/commit/2db0342ba32aac6997e37facade9b49478a7d63a))
+* only the board's owner may delete a sprint (BP-247) ([#732](https://github.com/rafalpodles/board-planner/issues/732)) ([15bc5c0](https://github.com/rafalpodles/board-planner/commit/15bc5c08b4aedf713c1bec8ed86adb839af43890))
+
 ## [1.9.0](https://github.com/rafalpodles/board-planner/compare/v1.8.0...v1.9.0) (2026-10-16)
 
 
