@@ -1,6 +1,11 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { createHash, randomBytes } from "crypto";
 import mongoose from "mongoose";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
+import { OIDC_STUB_LABEL, OIDC_STUB_URL } from "../playwright.config";
+import { SAME_ORIGIN } from "./api";
+import { boardWithHistory } from "./insights-board";
 import {
   ADMIN_ID,
   E2E_MONGODB_URI,
@@ -15,6 +20,7 @@ import {
   WORKER_NAME,
   seed,
   seedMyTasks,
+  seedRepository,
   seedSprintPlanning,
 } from "./seed";
 import { signIn } from "./session";
@@ -62,6 +68,68 @@ async function seedCatalog() {
   await withDb(() => seedAgents(scopedToDefaultOrganisation()));
 }
 
+const INSIGHTS_KEY = "AXE";
+
+async function seedInsights(request: APIRequestContext) {
+  await withDb((db) =>
+    db
+      .collection("organisations")
+      .updateOne(
+        { _id: DEFAULT_ORGANISATION_ID },
+        { $set: { "entitlements.plan": "pro", "entitlements.features": [] } },
+        { upsert: true }
+      )
+  );
+  await boardWithHistory(request, INSIGHTS_KEY);
+}
+
+async function plantInvitation(email: string) {
+  const token = `cpi_${randomBytes(32).toString("hex")}`;
+  await withDb((db) =>
+    db.collection("invitations").insertOne({
+      email,
+      role: "member",
+      boards: [{ project: PROJECT_ID, relation: "member", addedBy: ADMIN_ID }],
+      invitedBy: ADMIN_ID,
+      tokenHash: createHash("sha256").update(token).digest("hex"),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      status: "pending",
+      acceptedBy: null,
+      acceptedAt: null,
+      deliveredAs: "email",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+  );
+  return token;
+}
+
+const PROVIDER_ADDRESS = "newcomer@sweep.example.com";
+
+async function nextProviderSignIn() {
+  const answer = await fetch(`${OIDC_STUB_URL}/control`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sub: `sweep-${randomBytes(4).toString("hex")}`,
+      email: PROVIDER_ADDRESS,
+      email_verified: true,
+      name: "Sweep Newcomer",
+    }),
+  });
+  expect(answer.ok, "the OIDC stub refused its script").toBe(true);
+}
+
+async function machineAsksToEnrol(page: Page) {
+  const asked = await page.request.post("/api/workers/enrolment/device", {
+    headers: { ...SAME_ORIGIN, "x-cp-protocol": "1" },
+    data: { name: "sweep-laptop", host: "sweep-laptop.local" },
+  });
+  expect(asked.status(), await asked.text()).toBe(201);
+  const { verificationUrl } = (await asked.json()) as { verificationUrl: string };
+  await page.goto(new URL(verificationUrl).pathname);
+}
+
 const NOTIFICATION_TITLE = `${PROJECT_KEY}-${SIBLING_TASK_NUMBER} assigned to you`;
 
 async function seedNotification() {
@@ -97,7 +165,7 @@ async function onTheBoard(page: Page) {
 interface Screen {
   name: string;
   signedOut?: boolean;
-  prepare?: () => Promise<unknown>;
+  prepare?: (request: APIRequestContext) => Promise<unknown>;
   open: (page: Page) => Promise<unknown>;
   ready: (page: Page) => Locator;
 }
@@ -111,6 +179,56 @@ const SCREENS: Screen[] = [
     signedOut: true,
     open: at("/forgot"),
     ready: (page) => heading(page, "Forgot your password?"),
+  },
+  {
+    name: "new password",
+    signedOut: true,
+    open: at("/reset?token=cpr_read-only-when-the-form-is-sent"),
+    ready: (page) => heading(page, "Choose a new password"),
+  },
+  {
+    name: "confirm an address",
+    signedOut: true,
+    open: at("/confirm-email#token=cpe_read-only-when-the-button-is-pressed"),
+    ready: (page) => button(page, "Confirm this address"),
+  },
+  {
+    name: "invitation",
+    signedOut: true,
+    open: async (page) => page.goto(`/invite?token=${await plantInvitation("invited@sweep.example.com")}`),
+    ready: (page) => page.getByRole("heading", { name: /^Join / }),
+  },
+  {
+    name: "invitation through a provider",
+    signedOut: true,
+    open: async (page) => {
+      await nextProviderSignIn();
+      await page.goto(`/invite?token=${await plantInvitation(PROVIDER_ADDRESS)}`);
+      await button(page, `Accept with ${OIDC_STUB_LABEL}`).click();
+    },
+    ready: (page) => page.getByText(`${OIDC_STUB_LABEL} confirmed ${PROVIDER_ADDRESS}`),
+  },
+  {
+    name: "sign-up through a provider",
+    signedOut: true,
+    prepare: () =>
+      withDb((db) =>
+        db
+          .collection("settings")
+          .updateOne({}, { $set: { signUpDomains: [PROVIDER_ADDRESS.split("@")[1]] } }, { upsert: true })
+      ),
+    open: async (page) => {
+      await nextProviderSignIn();
+      await page.goto("/login");
+      await button(page, `Continue with ${OIDC_STUB_LABEL}`).click();
+    },
+    ready: (page) => page.getByText(`${OIDC_STUB_LABEL} confirmed ${PROVIDER_ADDRESS}`),
+  },
+  {
+    name: "connecting a machine",
+    prepare: () => seedRepository({ repositoryUrl: "https://github.com/owner/repo" }),
+    open: machineAsksToEnrol,
+    ready: (page) => page.getByRole("radio"),
   },
   { name: "projects", open: at("/projects"), ready: (page) => page.getByRole("link", { name: PROJECT_NAME }).first() },
   { name: "new project", open: at("/projects/new"), ready: (page) => heading(page, "New project") },
@@ -192,7 +310,13 @@ const SCREENS: Screen[] = [
     ready: (page) => page.getByRole("main").getByText(SIBLING_TASK_TITLE).first(),
   },
   { name: "dashboard", open: at(`${BOARD}/dashboard`), ready: (page) => heading(page, "Status Breakdown") },
-  { name: "insights", open: at(`${BOARD}/insights`), ready: (page) => page.getByTestId("insights-upsell") },
+  { name: "insights on Free", open: at(`${BOARD}/insights`), ready: (page) => page.getByTestId("insights-upsell") },
+  {
+    name: "insights with data",
+    prepare: seedInsights,
+    open: at(`/projects/${INSIGHTS_KEY}/insights`),
+    ready: (page) => page.getByTestId("insights-tiles"),
+  },
   ...(
     [
       ["general", "General"],
@@ -272,8 +396,8 @@ const SCREENS: Screen[] = [
 test.beforeEach(seed);
 
 for (const screen of SCREENS) {
-  test(`${screen.name} has no WCAG A or AA violations`, async ({ page }) => {
-    await screen.prepare?.();
+  test(`${screen.name} has no WCAG A or AA violations`, async ({ page, request }) => {
+    await screen.prepare?.(request);
     if (!screen.signedOut) await signIn(page);
     await screen.open(page);
     // Turbopack compiles a route on its first visit, and a click is not covered by navigationTimeout

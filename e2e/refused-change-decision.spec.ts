@@ -484,6 +484,46 @@ test("the machine settles a refusal with an error, over its own PATCH, and the p
 });
 
 /**
+ * The task screen does not poll; the panel's own read of the decision is the only thing that tells
+ * somebody looking at "waiting for the machine to push it" that the machine has. Nothing here
+ * reloads, which is what the panel is for: a reload would prove only that the record moved.
+ */
+test("a panel left open learns the machine pushed, from its own poll", async ({ page, request }) => {
+  await request.post(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: record(),
+  });
+
+  await signIn(page, "owner");
+  await openTheTask(page);
+
+  await page.getByRole("button", { name: "Accept and push" }).click();
+  const answered = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/tasks/${HELD_TASK_ID}/decision`) && response.request().method() === "POST"
+  );
+  await page.getByRole("dialog").getByRole("button", { name: "Accept and push" }).click();
+  expect((await answered).status()).toBe(200);
+  await expect(page.getByTestId("decision-headline")).toContainText("waiting for the machine to push it");
+
+  const polled: number[] = [];
+  page.on("response", (response) => {
+    if (response.url().includes(`/tasks/${HELD_TASK_ID}/decision`) && response.request().method() === "GET") {
+      polled.push(response.status());
+    }
+  });
+  const settled = await request.patch(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: { taskId: String(HELD_TASK_ID), state: "delivered", prUrl: "https://github.com/owner/repo/pull/42" },
+  });
+  expect(settled.status(), await settled.text()).toBe(200);
+
+  await expect(page.getByTestId("decision-headline")).toContainText("pull request is open", { timeout: 25_000 });
+  expect(polled.length).toBeGreaterThan(0);
+  expect(new Set(polled)).toEqual(new Set([200]));
+});
+
+/**
  * A worker document has no `lastSeenAt` at all until its first heartbeat, and that reached the
  * panel as `new Date(null)` — "has not been heard from since 01/01/1970" — on the one paragraph
  * whose subject is whether anybody is coming back.

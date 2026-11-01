@@ -180,6 +180,15 @@ test.describe("the administration screens", () => {
   });
 });
 
+test("the bare settings address opens on the profile", async ({ page }) => {
+  await signIn(page, "member");
+
+  await page.goto("/settings");
+
+  await expect(page).toHaveURL("/settings/profile");
+  await expect(page.getByRole("heading", { name: "Profile", exact: true })).toBeVisible();
+});
+
 // BP-920: the licence moved onto Settings → Organisation, which a member may read but not its licence
 test.describe("Settings → Organisation", () => {
   test("a member reads the organisation there, and is never handed its licence", async ({ page }) => {
