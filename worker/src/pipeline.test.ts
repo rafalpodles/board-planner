@@ -274,7 +274,7 @@ describe("a project whose commands cannot pass, known before the step anybody pa
 
     const disposition = await runTask(h.deps, running("implement", "test-run"));
 
-    expect(disposition).toBe("machine-fault");
+    expect(disposition).toBe("settings-fault");
     expect(h.executor.execute).not.toHaveBeenCalled();
     expect(h.reporter.failed).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("no test command"));
     expect(h.reporter.released).not.toHaveBeenCalled();

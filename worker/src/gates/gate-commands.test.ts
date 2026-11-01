@@ -126,7 +126,7 @@ describeOnMac("the Builds gate on a project's own commands", () => {
     expect(run).toHaveBeenCalledTimes(3);
     for (const [, args] of run.mock.calls) {
       expect(profileOf(args)).not.toContain('(remote ip "localhost:*")');
-      expect(profileOf(args)).toContain("(deny file-read* file-test-existence (with errno ENOENT)");
+      expect(profileOf(args)).toContain("(deny file-read* (with errno ENOENT)");
       expect(profileOf(args)).toContain(`H0=${realpathSync(userInfo().homedir)}`);
       expect(profileOf(args)).toContain(`=${context.checkoutGitDir}`);
     }

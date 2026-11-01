@@ -136,6 +136,28 @@ describe.skipIf(!onMac)("a project's own gate commands against the real sandbox"
       expect(readFileSync(join(worktree, "error.txt"), "utf8")).toContain("No such file or directory");
     });
 
+    it("answers node's recursive mkdir in the real home, which an ENOENT there would send round for ever", async () => {
+      const made = [canary, join(canary, "new"), join(canary, "new", "deep")].map((dir) => `try { fs.mkdirSync(${JSON.stringify(dir)}, { recursive: true }); console.log('made') } catch (e) { console.log(e.code) }`);
+      writeFileSync(join(worktree, "mkdirs.js"), `const fs = require("fs");\n${made.join("\n")}\n`);
+      script("mkdirs.sh", `"${process.execPath}" mkdirs.js > made.txt`);
+
+      const verdict = await testRunGate(runner, NOT_NPM, 5_000, own({ testCommand: "./mkdirs.sh" })).run(context);
+
+      expect(verdict).toMatchObject({ ok: true });
+      expect(readFileSync(join(worktree, "made.txt"), "utf8")).toBe("ENOENT\nEPERM\nEPERM\n");
+      expect(existsSync(join(canary, "new"))).toBe(false);
+    });
+
+    it("confirms a guessed name in the real home and says nothing else about it", async () => {
+      const key = join(canary, "id_ed25519");
+      writeFileSync(join(worktree, "probe.js"), `const fs = require("fs");\nconsole.log(fs.existsSync(${JSON.stringify(key)}));\ntry { fs.statSync(${JSON.stringify(key)}) } catch (e) { console.log(e.code) }\n`);
+      script("probe.sh", `"${process.execPath}" probe.js > found.txt`);
+
+      await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./probe.sh" })).run(context);
+
+      expect(readFileSync(join(worktree, "found.txt"), "utf8")).toBe("true\nENOENT\n");
+    });
+
     it("refuses a listing of the real home", async () => {
       script("list.sh", `ls "${canary}" > listed.txt 2> error.txt; echo "exit $?" >> error.txt`);
 
@@ -156,7 +178,7 @@ describe.skipIf(!onMac)("a project's own gate commands against the real sandbox"
       await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./sockets.sh" })).run(context);
       servers.forEach((server) => server.close());
 
-      expect(readFileSync(join(worktree, "home.txt"), "utf8")).toContain("ENOENT");
+      expect(readFileSync(join(worktree, "home.txt"), "utf8")).toContain("EPERM");
       expect(readFileSync(join(worktree, "elsewhere.txt"), "utf8")).toContain("reached");
     });
 

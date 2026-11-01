@@ -327,8 +327,8 @@ describe("reviewGate", () => {
     await reviewGate(sealed.runner, gitPath, CLAUDE_PATH, TIMEOUT_MS, undefined, undefined, true).run(context());
     await reviewGate(open.runner, gitPath, CLAUDE_PATH, TIMEOUT_MS).run(context());
 
-    expect(spawnCall(sealed.run)[1].join("\n")).toContain("(deny file-read* file-test-existence (with errno ENOENT)");
-    expect(spawnCall(open.run)[1].join("\n")).not.toContain("(deny file-read* file-test-existence (with errno ENOENT)");
+    expect(spawnCall(sealed.run)[1].join("\n")).toContain("(deny file-read* (with errno ENOENT)");
+    expect(spawnCall(open.run)[1].join("\n")).not.toContain("(deny file-read* (with errno ENOENT)");
   });
 
   it("spawns the reviewer through the sandbox", async () => {

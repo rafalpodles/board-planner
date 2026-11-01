@@ -283,18 +283,20 @@ export const PROFILE_TAIL = [...NAMED_SERVICE_DENIES, ...OWN_SANDBOX_SIGNALS_ONL
 // `sessionReadable`. Everything under a shut home answers ENOENT rather than EPERM: yarn opens a
 // `.yarnrc` in every parent with no `stat` first and stops on any other error, and go and cargo do the
 // same with what they find on the way up, so to all of them it is a home with nothing in it. It also
-// keeps a name and a size from being probed. Each parent of what stays readable answers its metadata,
-// or node and java could not resolve a path through it. The keychain goes through a daemon, and an
-// ssh-agent or a password manager's agent signs for whoever connects, so reading nothing would not stop
-// either; both agents' sockets are refused by where they live, which leaves a project's own socket in
-// its worktree alone.
+// keeps a size from being probed. `file-test-existence` stays open, so `access` and mkdir can confirm a
+// guessed name: denied, mkdir answers ENOENT under a parent that exists and node's recursive mkdir goes
+// round for ever, which held the agent on an operator's hook until the run timed out. Each parent of
+// what stays readable answers its metadata, or node and java could not resolve a path through it. The
+// keychain goes through a daemon, and an ssh-agent or a password manager's agent signs for whoever
+// connects, so reading nothing would not stop either; both agents' sockets are refused by where they
+// live, which leaves a project's own socket in its worktree alone.
 function sealedHomeRules(homeNames: string[], readableNames: string[], ancestorNames: string[], writableNames: string[], keychain: boolean): string[] {
   const under = (names: string[]) => names.map((name) => `(subpath (param "${name}"))`).join(" ");
   const sockets = (rule: string, names: string[]) => names.map((name) => `(${rule} network-outbound (remote unix-socket (subpath (param "${name}"))))`);
   return [
-    `(deny file-read* file-test-existence (with errno ENOENT) ${under(homeNames)})`,
-    ...(readableNames.length ? [`(allow file-read* file-test-existence ${under(readableNames)})`] : []),
-    ...(ancestorNames.length ? [`(allow file-read-metadata file-test-existence ${ancestorNames.map((name) => `(literal (param "${name}"))`).join(" ")})`] : []),
+    `(deny file-read* (with errno ENOENT) ${under(homeNames)})`,
+    ...(readableNames.length ? [`(allow file-read* ${under(readableNames)})`] : []),
+    ...(ancestorNames.length ? [`(allow file-read-metadata ${ancestorNames.map((name) => `(literal (param "${name}"))`).join(" ")})`] : []),
     ...(keychain ? [] : ['(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd"))']),
     ...sockets("deny", homeNames),
     ...sockets("allow", writableNames),

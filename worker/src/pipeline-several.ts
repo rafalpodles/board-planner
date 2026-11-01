@@ -252,7 +252,7 @@ export async function runTaskInRepositories(
     if (configFault) {
       settle("failed", configFault);
       await reporter.failed(task, `this run stopped before any step: ${configFault}`);
-      return "machine-fault";
+      return "settings-fault";
     }
 
     for (const [position, entry] of task.agent.sequence.entries()) {

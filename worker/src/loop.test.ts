@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { ApiClient, ClaimRefused } from "./api.js";
 import { createLoop, Loop } from "./loop.js";
+import type { RunDisposition } from "./pipeline.js";
 import { ClaimedTask } from "./types.js";
 
 const task = { taskId: "t1", taskKey: "CP-158", projectId: "P1" } as ClaimedTask;
@@ -34,7 +35,7 @@ function loopOver(
   api: ReturnType<typeof apiStub>,
   overrides: {
     assignments?: string[];
-    execute?: (task: ClaimedTask) => Promise<void | "machine-fault">;
+    execute?: (task: ClaimedTask) => Promise<RunDisposition>;
     sleep?: (ms: number) => Promise<void>;
     claimBlocked?: () => string;
     drain?: () => Promise<void>;
@@ -591,6 +592,17 @@ describe("a machine that must not take work", () => {
     await loop.start();
 
     expect(log).toHaveBeenCalledWith(expect.stringContaining("machine fault on CP-158"));
+  });
+
+  it("ends the pass on a settings fault too, and does not call it the machine's", async () => {
+    const api = apiStub(queue(task, task));
+    const { loop, log, execute } = loopOver(api, { execute: async () => "settings-fault" as const });
+
+    await loop.start();
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("settings fault on CP-158"));
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining("machine fault"));
   });
 
   it("claims normally when nothing blocks it", async () => {

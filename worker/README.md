@@ -1060,7 +1060,9 @@ would run npm and report that as the project's check.
   ENOENT, but for the worktree, the run's home, the clone's `.git`, the worker's `PATH` directories and
   the program's own directory, whose parents answer their metadata and nothing else. ENOENT and not a
   refusal, because `cp-worktrees` usually sits under the home and a tool walks up from it: yarn opens a
-  `.yarnrc` in every parent with no `stat` first and stops on anything but ENOENT. Exact directories:
+  `.yarnrc` in every parent with no `stat` first and stops on anything but ENOENT. `access` and `mkdir`
+  still confirm a guessed name, with no content, size or listing: closed too, `mkdir` answers ENOENT under
+  a parent that exists and node's recursive `mkdir` loops for ever. Exact directories:
   `~/.cargo/bin` must not open `~/.cargo/credentials.toml`. It also denies the login keychain's daemon,
   sockets under the home but for the writable directories' own, and launchd's ssh-agent socket. Measured
   on macOS 26.7: a planted file, `stat` of it, `ls ~/.ssh` and `security show-keychain-info` get nothing,
@@ -1112,7 +1114,8 @@ would run npm and report that as the project's check.
   repositories it takes all of them, because a gate runs only where something changed. Failed and not
   released: the fault depends on the task's agent, and a refund would keep the task at the head of the
   queue for ever with the tasks behind it waiting. The pass ends, so one wrong setting takes a task a
-  poll. A working directory the checkout lacks is left to the gate: the task may be the one that
+  poll, each with its comment and its move to review, until a person corrects it: at the default 30 s,
+  120 tasks an hour per machine. A working directory the checkout lacks is left to the gate: the task may be the one that
   creates it. A project on the npm
   gates is not claimed from without npm; the worker itself no longer needs it.
 - **Test-presence** recognises other ecosystems' test files on these projects only: on the npm gates a

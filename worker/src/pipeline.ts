@@ -376,8 +376,12 @@ export async function releaseIfAborted(
  * is still handed back with `reporter.released`, attempt refunded — what changed in BP-609 is only
  * what the run is recorded as, because a plain `released` reads the same as a usage limit and it is
  * the machine, not the task, that an operator has to be told about.
+ *
+ * "settings-fault" ends the pass the same way for a project's own commands that cannot run here, and the
+ * task is failed rather than handed back: nothing on this machine changes until a person edits them, so
+ * a task handed back would be claimed again on every poll.
  */
-export type RunDisposition = void | "machine-fault";
+export type RunDisposition = void | "machine-fault" | "settings-fault";
 
 /**
  * What a run owes the board and the machine when it could not make its worktree. Shared by the run in
@@ -686,7 +690,7 @@ export async function runTask(
     if (configFault) {
       settle("failed", configFault);
       await reporter.failed(task, `this run stopped before any step: ${configFault}`);
-      return "machine-fault";
+      return "settings-fault";
     }
 
     for (const [position, entry] of task.agent.sequence.entries()) {

@@ -218,7 +218,7 @@ describe("a run across several repositories", () => {
 
     const disposition = await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, TESTS, PUSH));
 
-    expect(disposition).toBe("machine-fault");
+    expect(disposition).toBe("settings-fault");
     expect(run.seen).toHaveLength(0);
     expect(run.reporter.failed).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("no test command"));
     expect(run.reporter.released).not.toHaveBeenCalled();

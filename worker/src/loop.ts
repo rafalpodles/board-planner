@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { ApiClient, ClaimRefused } from "./api.js";
+import type { RunDisposition } from "./pipeline.js";
 import { ClaimedTask } from "./types.js";
 
 export interface LoopDeps {
@@ -11,8 +12,8 @@ export interface LoopDeps {
   // "machine-fault" says the run failed for a reason that has nothing to do with the task and will
   // repeat on the next one — an unreachable remote, say. Claiming onward would walk the whole
   // approved queue through a failure none of those tasks caused, so the pass ends and the worker
-  // waits out its poll interval instead.
-  execute: (task: ClaimedTask) => Promise<void | "machine-fault">;
+  // waits out its poll interval instead. "settings-fault" is the same for a project's own commands.
+  execute: (task: ClaimedTask) => Promise<RunDisposition>;
   // The signal is aborted by stop(); a sleep that ignores it delays every shutdown by up to a full
   // poll interval, which at the default 30 s outlasts launchd's 20 s exit timeout
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -114,12 +115,13 @@ export function createLoop(deps: LoopDeps): Loop {
               const task = await deps.api.claim(projectId, randomUUID());
               if (refused.delete(projectId)) log(`project ${projectId} can be claimed from again`);
               if (task) {
-                if ((await deps.execute(task)) === "machine-fault") {
+                const disposition = await deps.execute(task);
+                if (disposition) {
                   // The board gets a comment on the task; the operator watching this log got
                   // nothing at all, which is the wrong way round for a fault that is the machine's
                   // (BP-349 review). The reason itself is on the board — a run's fault is not a
                   // string this loop holds — so this says which task carried it.
-                  log(`machine fault on ${task.taskKey}; not claiming again this pass`);
+                  log(`${disposition === "machine-fault" ? "machine" : "settings"} fault on ${task.taskKey}; not claiming again this pass`);
                   machineFault = true;
                   faultedLast = projectId;
                   break;

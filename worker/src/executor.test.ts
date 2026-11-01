@@ -213,11 +213,11 @@ describe("createExecutor", () => {
     await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     const argv = (call: number) => (run.mock.calls[call][1] as string[]).join("\n");
-    expect(argv(0)).toContain("(deny file-read* file-test-existence (with errno ENOENT)");
+    expect(argv(0)).toContain("(deny file-read* (with errno ENOENT)");
     expect(argv(0)).toContain("/.claude.json");
     expect(argv(0)).toContain("/Library/Keychains");
     expect(argv(0)).not.toContain("com.apple.SecurityServer");
-    expect(argv(1)).not.toContain("(deny file-read* file-test-existence (with errno ENOENT)");
+    expect(argv(1)).not.toContain("(deny file-read* (with errno ENOENT)");
   });
 
   // An agent told to commit and unable to would report itself blocked
