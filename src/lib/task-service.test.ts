@@ -3697,7 +3697,7 @@ describe("assigning somebody who cannot reach the board", () => {
     expect(canBeAssignedMock).not.toHaveBeenCalled();
   });
 
-  it("lets the stored assignee be echoed back even once they are deactivated", async () => {
+  it("lets the stored assignee be echoed back even once they are deactivated, and writes no assignee", async () => {
     canBeAssignedMock.mockResolvedValue(false);
     userFindOne.mockResolvedValue({ _id: "u1", username: "owner", deactivatedAt: new Date() });
 
@@ -3705,6 +3705,18 @@ describe("assigning somebody who cannot reach the board", () => {
 
     expect(result.ok).toBe(true);
     expect(canBeAssignedMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(findOneAndUpdate.mock.calls[0][1])).toContain("renamed");
+    expect(JSON.stringify(findOneAndUpdate.mock.calls[0][1])).not.toContain('"assignee"');
+  });
+
+  it("never calls an active person deactivated, whatever they hold on this board", async () => {
+    canBeAssignedMock.mockResolvedValue(false);
+    taskExists.mockResolvedValueOnce({ _id: "t9" });
+
+    const result = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(result).toMatchObject({ ok: false, status: 400, error: noAccessToAssign("kuba") });
+    taskExists.mockReset();
   });
 
   describe("and the same answer on the way in", () => {
@@ -3729,6 +3741,17 @@ describe("assigning somebody who cannot reach the board", () => {
 
       expect(result.ok).toBe(false);
       expect(result).toMatchObject({ status: 400 });
+      expect(taskCreate).not.toHaveBeenCalled();
+    });
+
+    it("says why when a task on this board already names a deactivated account", async () => {
+      canBeAssignedMock.mockResolvedValue(false);
+      userFindOne.mockReturnValue({ _id: "u2", username: "kuba", deactivatedAt: new Date() });
+      taskExists.mockResolvedValueOnce({ _id: "t9" });
+
+      const result = await createTask(db, "p1", "actor", { title: "x", assignee: "kuba" });
+
+      expect(result).toMatchObject({ ok: false, status: 400, error: "kuba is deactivated" });
       expect(taskCreate).not.toHaveBeenCalled();
     });
 

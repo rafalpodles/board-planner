@@ -157,7 +157,7 @@ async function resolveAssignee(db: ScopedDb, value: unknown): Promise<ResolvedAs
   return { user: user as unknown as ResolvedAssignee["user"] };
 }
 
-// A task on this board already names them, so only there is the reason no news.
+// A task on this board already names them, so only there does the reason not say they exist.
 async function assigneeRefusal(
   db: ScopedDb,
   user: ResolvedAssignee["user"],
@@ -1186,6 +1186,8 @@ export async function updateTask(
   ) {
     return assigneeRefusal(db, incoming, projectId);
   }
+  // Only an echo gets here. Written back, it would undo an unassignment made since `oldTask` was read
+  if (incoming?.deactivatedAt) delete updates.assignee;
   if (updates.assignee !== undefined) {
     const moved = storedAssignee !== String(updates.assignee ?? "");
     // Or when nothing is recorded yet, which is every task stored before BP-358. Without that
