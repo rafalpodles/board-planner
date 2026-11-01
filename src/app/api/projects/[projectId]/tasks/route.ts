@@ -5,6 +5,8 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { DEFAULT_PRIORITY, PRIORITIES } from "@/types";
 import { createTask, taskPopulateFields } from "@/lib/task-service";
+import { canBeAssigned } from "@/lib/grants";
+import { noBoardAccess } from "@/lib/assignee-refusal";
 import { withApiExecutions } from "@/lib/task-execution-view";
 import { parentsOf } from "@/lib/task-parents";
 import { epicClauses, epicProgressFor } from "@/lib/epics";
@@ -92,25 +94,24 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
      * such a name would otherwise be looked up as an id and answered with the silent empty list
      * this whole change exists to remove.
      *
-     * Resolved, never access-checked: a task assigned to somebody before they lost access is still
-     * a task, and refusing to *look* for it would hide work rather than protect anything. The cost
-     * is that this now distinguishes "no such account" from "no tasks" for any authenticated
-     * caller — see the ticket raised alongside this change.
+     * A name answers when it can be assigned here or already holds a task here. The second clause
+     * keeps a task assigned to somebody before they lost access findable, and tells the caller
+     * nothing: that task names its assignee. Any other name is refused as a stranger is, so this
+     * filter cannot be asked whether an account exists (BP-513).
      */
-    const user = await db.User.findOne({ username: assignee.toLowerCase() }, "_id").lean();
-    if (user) {
+    const user = await db.User.findOne({ username: assignee.trim().toLowerCase() }, "_id").lean();
+    if (
+      user &&
+      ((await canBeAssigned(db, String(user._id), projectId)) ||
+        (await db.Task.exists({ project: projectId, assignee: user._id })))
+    ) {
       filter.assignee = user._id;
     } else if (isValidObjectId(assignee)) {
       filter.assignee = assignee;
     } else {
       // Refused rather than answered with an empty list, so a typo is distinguishable from
       // "nothing is assigned to them" — the two look identical to a reader otherwise.
-      // Sliced: this string reaches a model as a tool result, so it is not a place to echo an
-      // unbounded parameter back.
-      return NextResponse.json(
-        { error: `No account named "@${assignee.slice(0, 64)}" — this filter takes a username.` },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `${noBoardAccess(assignee)} — this filter takes a username.` }, { status: 400 });
     }
   }
 

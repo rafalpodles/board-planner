@@ -13,7 +13,8 @@ const workerFind = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
-vi.mock("@/lib/grants", () => ({ check }));
+const canBeAssigned = vi.fn(async () => true);
+vi.mock("@/lib/grants", () => ({ check, canBeAssigned }));
 vi.mock("@/models/task", () => ({
   Task: { find: taskFind, exists: taskExists, findOne: taskFindOne, countDocuments: taskCount },
 }));
@@ -574,8 +575,56 @@ describe("GET /api/projects/:projectId/tasks — assignee filter", () => {
     const res = await GET(request("?assignee=nobody"), ctx());
 
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/No account named "@nobody"/);
+    expect((await res.json()).error).toMatch(/@nobody has no access to this board/);
     expect(taskFind).not.toHaveBeenCalled();
+  });
+
+  // BP-513. Saying 200 here and 400 above would say whether the account exists
+  it("answers an account with no access and no task here as it answers a stranger", async () => {
+    const stranger = await (await GET(request("?assignee=KuBa"), ctx())).json();
+
+    userFindOne.mockReturnValue({ lean: async () => ({ _id: "u7" }) });
+    canBeAssigned.mockResolvedValueOnce(false);
+    taskExists.mockResolvedValueOnce(null);
+    const res = await GET(request("?assignee=kuba"), ctx());
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual(stranger);
+    expect(canBeAssigned).toHaveBeenCalledWith(expect.anything(), "u7", PROJECT_ID);
+    expect(taskExists).toHaveBeenCalledWith(expect.objectContaining({ project: PROJECT_ID, assignee: "u7" }));
+    expect(taskFind).not.toHaveBeenCalled();
+  });
+
+  // USERNAME_PATTERN allows 24 hex characters, and a stranger's such name is read as an id
+  it("reads a barred account's 24-hex name as an id, as it reads a stranger's", async () => {
+    const name = "507f1f77bcf86cd799439099";
+    userFindOne.mockReturnValue({ lean: async () => ({ _id: "u7" }) });
+    canBeAssigned.mockResolvedValueOnce(false);
+
+    const res = await GET(request(`?assignee=${name}`), ctx());
+
+    expect(res.status).toBe(200);
+    expect(taskFind.mock.calls[0][0]).toMatchObject({ assignee: name });
+  });
+
+  it("looks the name up as the writers do, with stray spaces gone", async () => {
+    userFindOne.mockReturnValue({ lean: async () => ({ _id: "u7" }) });
+
+    await GET(request("?assignee=%20OwNeR%20"), ctx());
+
+    expect(userFindOne).toHaveBeenCalledWith({ username: "owner", organisation: DEFAULT_ORGANISATION_ID }, "_id");
+  });
+
+  // What BP-502 chose on purpose, and the board already shows this assignee on the task itself
+  it("still finds a task assigned to somebody before they lost access", async () => {
+    userFindOne.mockReturnValue({ lean: async () => ({ _id: "u7" }) });
+    canBeAssigned.mockResolvedValueOnce(false);
+    taskExists.mockResolvedValueOnce({ _id: "t1" });
+
+    const res = await GET(request("?assignee=kuba"), ctx());
+
+    expect(res.status).toBe(200);
+    expect(taskFind.mock.calls[0][0]).toMatchObject({ assignee: "u7" });
   });
 
   // It always worked, and this route is public REST — but only after no account claims the value

@@ -93,7 +93,7 @@ describe("the PM's assign_task and a username the writer refuses", () => {
   it("hands the writer's refusal to the model", async () => {
     assignTaskMock.mockResolvedValue({
       ok: false,
-      error: 'No account named "@rafa" — the assignee is a username.',
+      error: "@rafa has no access to this board, so the task cannot be assigned to them.",
       status: 400,
     });
 

@@ -44,15 +44,12 @@ test("a username nobody holds is refused, and the assignee it would have cleared
   const handed = await put(request, { assignee: ADMIN_USERNAME });
   expect(handed.status(), await handed.text()).toBe(200);
 
-  await test.step("the refusal names the name, rather than the Members settings", async () => {
+  await test.step("the refusal names the name, in the words an account with no access gets", async () => {
     const refused = await put(request, { assignee: "rafa" });
 
     expect(refused.status(), await refused.text()).toBe(400);
     const { error } = await refused.json();
-    expect(error).toContain("rafa");
-    // The other refusal's wording sends a reader to a project setting, and there is none to make
-    // for a name nobody holds
-    expect(error).not.toMatch(/no access to this board/i);
+    expect(error).toContain("@rafa has no access to this board");
   });
 
   await test.step("and the task still belongs to the person it belonged to", async () => {

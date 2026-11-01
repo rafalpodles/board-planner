@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // by a hand-rolled reading of them
 import sift from "sift";
 import { Types } from "mongoose";
+import { noAccessToAssign } from "@/lib/assignee-refusal";
 import {
   COMMENT_BODY_MAX_LENGTH,
   CRITERION_TEXT_MAX_LENGTH,
@@ -3030,9 +3031,8 @@ describe("createTask and a foreign sprint", () => {
 /**
  * BP-515. Sibling of BP-511's `assignee` fix, raised by that ticket's independent review:
  * `createTask` and `updateTask` interpolated `category`/`status` into their refusal with no
- * bound, and reached a model as a tool result the same way `noSuchAccount` does — the comment on
- * that function says why it is sliced. The GET route's four refusals already slice to 64; these
- * did not.
+ * bound, and reached a model as a tool result the same way `noAccessToAssign` does. The GET route's
+ * four refusals already slice to 64; these did not.
  *
  * Widened twice past what the ticket named, both times because the same interpolation exists a
  * second place: `updateTask` carries an identical category/status pair the ticket did not quote,
@@ -3447,12 +3447,25 @@ describe("a task records who assigned it", () => {
   });
 
   // BP-832. Nobody can hand work to an account that signs in by no path
-  it("refuses a deactivated assignee, naming why", async () => {
+  it("refuses a deactivated assignee, in the words a stranger gets", async () => {
     userFindOne.mockResolvedValue({ _id: "u2", username: "kuba", deactivatedAt: new Date() });
+    canBeAssignedMock.mockResolvedValueOnce(false);
+
+    const result = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(result).toMatchObject({ ok: false, status: 400, error: noAccessToAssign("kuba") });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("says why when a task on this board already names them", async () => {
+    userFindOne.mockResolvedValue({ _id: "u2", username: "kuba", deactivatedAt: new Date() });
+    canBeAssignedMock.mockResolvedValueOnce(false);
+    taskExists.mockResolvedValueOnce({ _id: "t9" });
 
     const result = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
 
     expect(result).toMatchObject({ ok: false, status: 400, error: "kuba is deactivated" });
+    expect(taskExists).toHaveBeenCalledWith(expect.objectContaining({ project: "p1", assignee: "u2" }));
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
@@ -3612,14 +3625,6 @@ describe("assigning somebody who cannot reach the board", () => {
       populate: () => ({ lean: () => Promise.resolve(task) }),
     });
     userFindOne.mockResolvedValue({ _id: "u2", username: "kuba" });
-    userFindById.mockReturnValue({ lean: async () => ({ username: "kuba", fullName: "Kuba" }) });
-  });
-
-  // Restores the module-level implementation, which answers "actor" — mockReturnValue above would
-  // otherwise stand for the rest of the file, and every later test asserting who assigned a task
-  // would read this block's fixture instead of its own.
-  afterEach(() => {
-    userFindById.mockReset();
   });
 
   it("refuses the move, with a 400 rather than a silent success", async () => {
@@ -3631,8 +3636,6 @@ describe("assigning somebody who cannot reach the board", () => {
     expect(result).toMatchObject({ status: 400 });
   });
 
-  // The message is the only thing separating "no such account" from "that account cannot reach
-  // this board", and an agent reading it has no other way to tell which repair to attempt.
   it("names the person it refused", async () => {
     canBeAssignedMock.mockResolvedValue(false);
 
@@ -3694,6 +3697,28 @@ describe("assigning somebody who cannot reach the board", () => {
     expect(canBeAssignedMock).not.toHaveBeenCalled();
   });
 
+  it("lets the stored assignee be echoed back even once they are deactivated, and writes no assignee", async () => {
+    canBeAssignedMock.mockResolvedValue(false);
+    userFindOne.mockResolvedValue({ _id: "u1", username: "owner", deactivatedAt: new Date() });
+
+    const result = await updateTask(db, "p1", "t1", { assignee: "owner", title: "renamed" }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(canBeAssignedMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(findOneAndUpdate.mock.calls[0][1])).toContain("renamed");
+    expect(JSON.stringify(findOneAndUpdate.mock.calls[0][1])).not.toContain('"assignee"');
+  });
+
+  it("never calls an active person deactivated, whatever they hold on this board", async () => {
+    canBeAssignedMock.mockResolvedValue(false);
+    taskExists.mockResolvedValueOnce({ _id: "t9" });
+
+    const result = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(result).toMatchObject({ ok: false, status: 400, error: noAccessToAssign("kuba") });
+    taskExists.mockReset();
+  });
+
   describe("and the same answer on the way in", () => {
     beforeEach(() => {
       taskCreate.mockClear();
@@ -3719,6 +3744,34 @@ describe("assigning somebody who cannot reach the board", () => {
       expect(taskCreate).not.toHaveBeenCalled();
     });
 
+    it("says why when a task on this board already names a deactivated account", async () => {
+      canBeAssignedMock.mockResolvedValue(false);
+      userFindOne.mockReturnValue({ _id: "u2", username: "kuba", deactivatedAt: new Date() });
+      taskExists.mockResolvedValueOnce({ _id: "t9" });
+
+      const result = await createTask(db, "p1", "actor", { title: "x", assignee: "kuba" });
+
+      expect(result).toMatchObject({ ok: false, status: 400, error: "kuba is deactivated" });
+      expect(taskCreate).not.toHaveBeenCalled();
+    });
+
+    // BP-513, and the same words updateTask uses
+    it("answers a stranger, a barred account and a deactivated one identically", async () => {
+      canBeAssignedMock.mockResolvedValue(false);
+      const barred = await createTask(db, "p1", "actor", { title: "x", assignee: "kuba" });
+
+      userFindOne.mockReturnValue(null);
+      const stranger = await createTask(db, "p1", "actor", { title: "x", assignee: "KuBa " });
+
+      userFindOne.mockReturnValue({ _id: "u2", username: "kuba", deactivatedAt: new Date() });
+      const deactivated = await createTask(db, "p1", "actor", { title: "x", assignee: "kuba" });
+
+      expect(barred).toEqual({ ok: false, status: 400, error: noAccessToAssign("kuba") });
+      expect(stranger).toEqual(barred);
+      expect(deactivated).toEqual(barred);
+      expect(taskCreate).not.toHaveBeenCalled();
+    });
+
     it("creates it for somebody the rule accepts", async () => {
       canBeAssignedMock.mockResolvedValue(true);
 
@@ -3740,10 +3793,6 @@ describe("assigning somebody who cannot reach the board", () => {
  * BP-511. The read side refuses a username nobody holds (BP-502); both writers did the opposite,
  * and one of them destroyed data — an unknown name resolved to `null`, so `updateTask` cleared
  * whoever held the task and answered 200, and `createTask` answered 201 with the task unassigned.
- *
- * Deliberately not folded into the block above. The two refusals must not share a message: "no
- * access to this board" sends a reader to the project's Members settings, which is the wrong
- * repair — and the only repair — for a name that is simply misspelt.
  */
 describe("an assignee username nobody holds", () => {
   const board = { categories: [{ name: "bug" }], ...customBoard };
@@ -3791,20 +3840,21 @@ describe("an assignee username nobody holds", () => {
     expect(findOneAndUpdate, "an unknown username still reached the write").not.toHaveBeenCalled();
   });
 
-  /**
-   * The two refusals are told apart by their words and by nothing else. An agent reading "no
-   * access to this board" goes looking for a Members setting; for a misspelt name there is none
-   * to find, and it has no other way to know that.
-   */
-  it("does not borrow the no-access wording, which names a different repair", async () => {
-    const missing = await updateTask(db, "p1", "t1", { assignee: "rafa" }, "actor");
+  // BP-513. The name is the only thing that differs, so the writer cannot say whether "@kuba" exists
+  it("answers a stranger, a barred account and a deactivated one identically", async () => {
+    canBeAssignedMock.mockResolvedValue(false);
+    userFindOne.mockResolvedValue(null);
+    const stranger = await updateTask(db, "p1", "t1", { assignee: "KuBa" }, "actor");
 
     held("kuba");
-    canBeAssignedMock.mockResolvedValue(false);
-    const barred = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
+    const barred = await updateTask(db, "p1", "t1", { assignee: "kuba " }, "actor");
 
-    expect(missing).toMatchObject({ error: expect.not.stringMatching(/no access to this board/i) });
-    expect(barred).toMatchObject({ error: expect.stringMatching(/no access to this board/i) });
+    userFindOne.mockResolvedValue({ _id: "u2", username: "kuba", deactivatedAt: new Date() });
+    const deactivated = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(stranger).toEqual({ ok: false, status: 400, error: noAccessToAssign("kuba") });
+    expect(barred).toEqual(stranger);
+    expect(deactivated).toEqual(stranger);
   });
 
   // The control. Every assertion above would hold for a writer that refused every assignment.
@@ -3873,7 +3923,7 @@ describe("an assignee username nobody holds", () => {
   });
 
   // The message reaches a model as a tool result, so it is not a place to echo an unbounded
-  // parameter back — the comment on `noSuchAccount` says so, and nothing held it to that
+  // parameter back
   it("does not echo an unbounded username back into the refusal", async () => {
     const result = await updateTask(db, "p1", "t1", { assignee: "x".repeat(5000) }, "actor");
 

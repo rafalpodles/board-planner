@@ -209,7 +209,7 @@ describe("resolving an assignee through the board's own roster", () => {
       .mockResolvedValue([{ _id: "u1", username: "kuba" }]);
     const create = vi.spyOn(PlannerClient.prototype, "createTask").mockResolvedValue({});
 
-    await callCreate({ assignee: "KUBA" });
+    await callCreate({ assignee: " KUBA " });
 
     expect(listUsers).toHaveBeenCalledWith("p1");
     expect(create).toHaveBeenCalledWith("p1", expect.objectContaining({ assignee: "kuba" }));
@@ -222,7 +222,7 @@ describe("resolving an assignee through the board's own roster", () => {
     const create = vi.spyOn(PlannerClient.prototype, "createTask").mockResolvedValue({});
 
     await expect(callCreate({ assignee: "outsider" })).rejects.toThrow(
-      /not someone this board can be assigned to/
+      /@outsider has no access to this board/
     );
     expect(create).not.toHaveBeenCalled();
   });
@@ -233,7 +233,7 @@ describe("resolving an assignee through the board's own roster", () => {
       .mockResolvedValue([{ _id: "u1", username: "kuba" }]);
     const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
 
-    await callUpdate({ assignee: "kuba" });
+    await callUpdate({ assignee: "kuba " });
 
     expect(listUsers).toHaveBeenCalledWith("p1");
     expect(update).toHaveBeenCalledWith("p1", "t1", expect.objectContaining({ assignee: "kuba" }));
@@ -244,7 +244,7 @@ describe("resolving an assignee through the board's own roster", () => {
     const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
 
     await expect(callUpdate({ assignee: "outsider" })).rejects.toThrow(
-      /not someone this board can be assigned to/
+      /@outsider has no access to this board/
     );
     expect(update).not.toHaveBeenCalled();
   });

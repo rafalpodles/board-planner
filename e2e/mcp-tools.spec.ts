@@ -217,7 +217,7 @@ test("create_task refuses what the board does not have, and mints no number doin
     assignee: "nobody",
   });
   refused(nobody);
-  expect(nobody.text).toContain('"nobody" is not someone this board can be assigned to');
+  expect(nobody.text).toContain("@nobody has no access to this board");
 
   const tooLong = await session.callTool("create_task", {
     project: PROJECT_KEY,
@@ -442,7 +442,7 @@ test("update_task hands a task over by name: the assignee from the roster, the a
 
   const nobody = await session.callTool("update_task", { taskKey: SIBLING_TASK_KEY, assignee: "nobody" });
   refused(nobody);
-  expect(nobody.text).toContain('"nobody" is not someone this board can be assigned to');
+  expect(nobody.text).toContain("@nobody has no access to this board");
   // BP-511: refused, not resolved to nobody — and not to anybody else either
   expect(String((await storedTask(SIBLING_TASK_NUMBER)).assignee)).toBe(String(MEMBER_ID));
 
@@ -703,7 +703,7 @@ test("a refusal quotes the caller back, but only so much of it", async ({ reques
     assignee: huge,
   });
   refused(assignee);
-  expect(assignee.text).toContain(`"${"z".repeat(64)}…" is not someone this board`);
+  expect(assignee.text).toContain(`@${"z".repeat(64)}… has no access to this board`);
   expect(assignee.text.length).toBeLessThan(400);
 
   const agent = await session.callTool("update_task", { taskKey: SIBLING_TASK_KEY, agent: huge });
@@ -725,7 +725,7 @@ test("a refusal quotes the caller back, but only so much of it", async ({ reques
     assignee: "nobody",
   });
   refused(short);
-  expect(short.text).toContain('"nobody" is not someone this board');
+  expect(short.text).toContain("@nobody has no access to this board");
 });
 
 /**
