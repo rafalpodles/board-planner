@@ -35,12 +35,16 @@ import { signIn } from "./session";
  *
  * Each screen waits for something only its loaded state can show, because a spinner has nothing
  * on it to violate.
+ *
+ * Every screen is swept again in dark for contrast alone (BP-1090): the other rules read the
+ * markup, which the theme does not touch. `dark-theme.spec.ts` keeps the assertions axe cannot
+ * make, such as a surface that should be dark and a colour that is project data.
  */
 
 const WCAG_A_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
-async function violations(page: Page): Promise<string[]> {
-  const { violations } = await new AxeBuilder({ page }).withTags(WCAG_A_AA).analyze();
+async function violations(page: Page, axe = new AxeBuilder({ page }).withTags(WCAG_A_AA)): Promise<string[]> {
+  const { violations } = await axe.analyze();
   return violations.map(
     (v) =>
       `${v.id}: ${v.help}\n${v.nodes
@@ -395,18 +399,33 @@ const SCREENS: Screen[] = [
 
 test.beforeEach(seed);
 
+async function arrive(page: Page, request: APIRequestContext, screen: Screen) {
+  await screen.prepare?.(request);
+  if (!screen.signedOut) await signIn(page);
+  await screen.open(page);
+  // Turbopack compiles a route on its first visit, and a click is not covered by navigationTimeout
+  await expect(screen.ready(page)).toBeVisible({ timeout: 90_000 });
+  // A heading can stand while what it heads is still a spinner or a "Loading…" line
+  const main = page.getByRole("main");
+  await expect(main.getByText(/^Loading…?$/).filter({ visible: true })).toHaveCount(0, { timeout: 30_000 });
+  await expect(main.locator(".animate-spin").filter({ visible: true })).toHaveCount(0, { timeout: 30_000 });
+}
+
+const inDark = (page: Page) => page.addInitScript(() => localStorage.setItem("theme", "dark"));
+
+const contrast = (page: Page) => violations(page, new AxeBuilder({ page }).withRules(["color-contrast"]));
+
 for (const screen of SCREENS) {
   test(`${screen.name} has no WCAG A or AA violations`, async ({ page, request }) => {
-    await screen.prepare?.(request);
-    if (!screen.signedOut) await signIn(page);
-    await screen.open(page);
-    // Turbopack compiles a route on its first visit, and a click is not covered by navigationTimeout
-    await expect(screen.ready(page)).toBeVisible({ timeout: 90_000 });
-    // A heading can stand while what it heads is still a spinner or a "Loading…" line
-    const main = page.getByRole("main");
-    await expect(main.getByText(/^Loading…?$/).filter({ visible: true })).toHaveCount(0, { timeout: 30_000 });
-    await expect(main.locator(".animate-spin").filter({ visible: true })).toHaveCount(0, { timeout: 30_000 });
+    await arrive(page, request, screen);
     expect(await violations(page)).toEqual([]);
+  });
+
+  test(`${screen.name} reads at AA in dark`, async ({ page, request }) => {
+    await inDark(page);
+    await arrive(page, request, screen);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    expect(await contrast(page)).toEqual([]);
   });
 }
 
@@ -421,4 +440,19 @@ test("the sweep reports an unlabelled button, so a clean result means something"
     main.prepend(unlabelled);
   });
   expect((await violations(page)).map((v) => v.split(":")[0])).toEqual(["button-name"]);
+});
+
+test("the dark pass reports unreadable text, so a clean result means something", async ({ page }) => {
+  await inDark(page);
+  await signIn(page);
+  await onTheBoard(page);
+  expect(await contrast(page)).toEqual([]);
+
+  await page.getByRole("main").evaluate((main) => {
+    const unreadable = document.createElement("p");
+    unreadable.textContent = "Nearly the colour of the page";
+    unreadable.style.color = getComputedStyle(document.body).backgroundColor;
+    main.prepend(unreadable);
+  });
+  expect((await contrast(page)).map((v) => v.split(":")[0])).toEqual(["color-contrast"]);
 });
