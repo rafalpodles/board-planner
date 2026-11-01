@@ -323,8 +323,7 @@ test("a disabled Import says what to do, and says nothing once the import is don
   await expect(first).toHaveCount(0);
   await expect(again).toHaveCount(0);
 
-  // A proxy's 502 has no body, and over HTTP/2 no status text to make a message of
-  await page.route("**/import", (route) => route.fulfill({ status: 502, body: "", headers: { "content-type": "text/plain" } }), { times: 1 });
+  await page.route("**/import", (route) => route.abort(), { times: 1 });
   await card(page).getByRole("button", { name: "Check", exact: true }).click();
   await expect(card(page).getByRole("alert")).toBeVisible();
   await expect(again).toBeVisible();
