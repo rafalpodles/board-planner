@@ -200,7 +200,7 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
     setError("");
   }, []);
 
-  const imported = report && !report.dryRun && !report.error;
+  const imported = report && !report.dryRun && !report.error && !error;
 
   const columnsAdded = useCallback((columns: ApiProjectColumn[]) => patchProject({ columns }), [patchProject]);
 

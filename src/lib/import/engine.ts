@@ -79,6 +79,7 @@ interface Resolved {
   comments: { ref: string; body: string; author: Types.ObjectId; createdAt: Date | null }[];
   checklist: { text: string; done: boolean }[];
   order: number;
+  finishNote?: ImportReport["notImported"][number];
 }
 
 const shown = (value: unknown) => {
@@ -214,7 +215,8 @@ function resolveTask(
     return null;
   }
   const columnIds = board.columns.map((c) => c.id);
-  const finishesIn = task.finished === true ? board.columns.find((c) => c.role === "done") : undefined;
+  const finishesIn = task.finished === true && task.status ? board.columns.find((c) => c.role === "done") : undefined;
+  let finishNote: ImportReport["notImported"][number] | undefined;
   let status = board.defaultStatus;
   let statusGiven = false;
   if (task.status) {
@@ -227,7 +229,8 @@ function resolveTask(
     else if (!finishesIn) noteUnmapped(report.unmapped.statuses, task.status);
   }
   if (finishesIn && board.columns.find((c) => c.id === status)?.role !== "done") {
-    if (task.status) report.notImported.push({ id: title, what: `its status “${shown(task.status)}”: it is finished, so it goes to ${finishesIn.label}` });
+    finishNote = { id: title, what: `its status “${shown(task.status!)}”: it is finished, so it goes to ${finishesIn.label}` };
+    report.notImported.push(finishNote);
     [status, statusGiven] = [finishesIn.id, true];
   }
 
@@ -287,6 +290,7 @@ function resolveTask(
     comments: (task.comments ?? []).flatMap((comment) => resolveComment(report, task.id, comment, users, importer)),
     checklist: resolveChecklist(report, task),
     order: task.order ?? 0,
+    finishNote,
   };
 }
 
@@ -374,7 +378,9 @@ function mergedChecklist(report: ImportReport, t: Resolved, held: IChecklistItem
 
 // A run's task refuses to leave its column through every writer, an import included
 function noteHeld(report: ImportReport, t: Resolved, stored: Stored) {
-  if (t.given.status && stored.held && stored.status !== t.status) report.notImported.push({ id: t.ref, what: "its column: a machine is running it" });
+  if (!t.given.status || !stored.held || stored.status === t.status) return;
+  report.notImported = report.notImported.filter((n) => n !== t.finishNote);
+  report.notImported.push({ id: t.ref, what: "its column: a machine is running it" });
 }
 
 async function storedComments(db: ScopedDb, source: string, taskIds: Types.ObjectId[]): Promise<Set<string>> {

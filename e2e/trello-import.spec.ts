@@ -30,6 +30,23 @@ async function press(page: Page, name: string) {
   expect((await answered).status()).toBe(200);
 }
 
+const STOPPED = {
+  source: "Trello",
+  dryRun: false,
+  total: 9,
+  processed: 3,
+  created: 3,
+  updated: 0,
+  links: 0,
+  comments: { created: 0, updated: 0 },
+  skipped: [],
+  dropped: [],
+  truncated: [],
+  notImported: [],
+  unmapped: { statuses: [], users: [], types: [] },
+  error: "the database went away",
+};
+
 const upload = (page: Page, json: string, name = "sample-board.json") =>
   page.getByLabel(FILE_LABEL).setInputFiles({ name, mimeType: "application/json", buffer: Buffer.from(json) });
 
@@ -281,12 +298,29 @@ test("a disabled Import says what to do, and says nothing once the import is don
   await expect(again).toHaveCount(0);
 
   await press(page, "Check");
+  await page.route("**/import", (route) => route.abort(), { times: 1 });
+  await importButton.click();
+  await expect(card(page).getByRole("alert")).toBeVisible();
+  await expect(again).toBeVisible();
+
+  await press(page, "Check");
+  await page.route("**/import", (route) => route.fulfill({ json: STOPPED }), { times: 1 });
+  await importButton.click();
+  await expect(page.getByTestId("import-report")).toContainText("The import stopped after 3 tasks");
+  await expect(again).toBeVisible();
+
+  await press(page, "Check");
   await press(page, "Import");
   await expect(page.getByTestId("import-report")).toContainText("Created 9 and updated 0 of 9 tasks from Trello");
   await expect(importButton).toHaveText("Import");
   await expect(card(page).getByRole("button", { name: "Check", exact: true })).toBeEnabled();
   await expect(first).toHaveCount(0);
   await expect(again).toHaveCount(0);
+
+  await page.route("**/import", (route) => route.abort(), { times: 1 });
+  await card(page).getByRole("button", { name: "Check", exact: true }).click();
+  await expect(card(page).getByRole("alert")).toBeVisible();
+  await expect(again).toBeVisible();
 });
 
 test("a report longer than a page can be read to its last line", async ({ page }) => {

@@ -453,11 +453,26 @@ describe("runImport", () => {
       expect(writes.updates[0].update.$set.status).toBe("done");
     });
 
-    it("goes to done with nothing to report when it named no status", async () => {
-      const { db, writes } = fakeDb();
+    it("stays out of it when the status was left out of the import, so a task moved by hand stays where it is", async () => {
+      const { db, writes } = fakeDb({ existing: [{ id: "1", status: "doing" }] });
       const report = await run(db, [FINISHED]);
-      expect(writes.tasks[0].status).toBe("done");
+      expect(writes.updates[0].update.$set.status).toBeUndefined();
       expect(report.notImported).toEqual([]);
+    });
+
+    it("moves on a later import from a status no column matches", async () => {
+      const { db, writes } = fakeDb({ existing: [{ id: "1", status: "doing" }] });
+      await run(db, [{ ...FINISHED, status: "Nowhere" }]);
+      expect(writes.updates[0].update.$set.status).toBe("done");
+    });
+
+    it("stays with the machine running it, and only that is reported", async () => {
+      for (const dryRun of [false, true]) {
+        const { db, writes } = fakeDb({ existing: [{ id: "1", status: "doing", held: true }] });
+        const report = await run(db, [{ ...FINISHED, status: "This Week" }], { statuses: { "This Week": "doing" } }, dryRun);
+        if (!dryRun) expect(writes.updates[0].update.$set.status).toBeUndefined();
+        expect(report.notImported).toEqual([{ id: "1", what: "its column: a machine is running it" }]);
+      }
     });
 
     it("changes nothing for a task that is not finished", async () => {

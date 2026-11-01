@@ -42,6 +42,7 @@ describe("parseBundle", () => {
 
   it("reads an order of null as none, as it reads the other optional fields", () => {
     expect(parseBundle({ source: "x", tasks: [task({ order: null })] }).ok).toBe(true);
+    expect(parseBundle({ source: "x", tasks: [task({ finished: null })] }).ok).toBe(true);
   });
 
   it("refuses more notes than one import takes", () => {
