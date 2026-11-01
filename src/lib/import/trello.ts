@@ -32,6 +32,14 @@ function namedUpTo(names: string[]): string {
   return names.length > NAMES_LISTED ? `${shown} and ${names.length - NAMES_LISTED} more` : shown;
 }
 
+function readable(fileName: string): string {
+  try {
+    return decodeURIComponent(fileName);
+  } catch {
+    return fileName;
+  }
+}
+
 function linkLine(attachment: Json): string {
   const url = text(attachment.url).replace(/\s/g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29");
   const name = text(attachment.name).replace(/[[\]\r\n]/g, " ").trim();
@@ -135,8 +143,8 @@ export function trelloToTable(board: Json): CsvTable {
     const itsChecklists = (checklists.get(id) ?? []).filter((c) => itemsOf(c).length > 0);
     const said = comments.get(id) ?? [];
 
-    if (uploads.length) noteOn(card, `${plural(uploads.length, "uploaded file")}: ${namedUpTo(uploads.map((u) => text(u.name)))}`);
-    if (unlinked.length) noteOn(card, `${plural(unlinked.length, "attachment")} with no web address: ${namedUpTo(unlinked.map((a) => text(a.name)))}`);
+    if (uploads.length) noteOn(card, `${plural(uploads.length, "uploaded file")}: ${namedUpTo(uploads.map((u) => readable(text(u.name))))}`);
+    if (unlinked.length) noteOn(card, `${plural(unlinked.length, "attachment")} with no web address: ${namedUpTo(unlinked.map((a) => readable(text(a.name))))}`);
     if (onCard.length > people.length) noteOn(card, `${plural(onCard.length - people.length, "member")} the export does not name`);
     if (people.length > 1) noteOn(card, `its other members, as a task has one assignee: ${namedUpTo(people.slice(1))}`);
     if (itsChecklists.length > 1) noteOn(card, `the split into ${itsChecklists.length} checklists: each criterion starts with its checklist's name`);
@@ -156,6 +164,7 @@ export function trelloToTable(board: Json): CsvTable {
       labels: records(card.labels).flatMap((l) => text(l.name) || text(l.color) || []),
       said,
       criteria: criteriaOf(itsChecklists),
+      finished: card.dueComplete === true,
     };
   });
 
@@ -165,6 +174,7 @@ export function trelloToTable(board: Json): CsvTable {
     rows: rows.map((r) => [...r.cells, ...r.labels, ...Array(labelColumns - r.labels.length).fill("")]),
     comments: rows.map((r) => r.said),
     checklists: rows.map((r) => r.criteria),
+    finished: rows.map((r) => r.finished),
     notes,
     ordered: true,
   };

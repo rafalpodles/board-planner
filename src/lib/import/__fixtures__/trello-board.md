@@ -21,7 +21,7 @@ What the real file showed, against what its ticket assumed:
 - `actions` holds the board's newest 1,000 actions and no more: the board counted 7,155 comments in
   `badges.comments` and 3 of them were in the file
 - a card has no creation date; the first eight hex digits of `id` are its Unix time
-- `dateCompleted` is null on every card, including those in a Done list and those with `dueComplete`, so no real value of it has been seen
+- `dateCompleted` is null on every card, including those in a Done list and those with `dueComplete`; a card finished on a new board in November 2026 had `dueComplete: true` and `dateCompleted: "2026-11-01T17:41:47.543Z"`, with no `due`
 - members carry a `username` and no e-mail
 - an uploaded attachment has `isUpload: true` and a URL behind Trello's sign-in, a link has `isUpload: false`
 - an archived list keeps its cards, and most of them do not have `closed` set themselves

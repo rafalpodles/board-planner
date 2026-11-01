@@ -394,6 +394,94 @@ describe("runImport", () => {
     expect(Date.now() - at.getTime()).toBeLessThan(5_000);
   });
 
+  describe("a finished task", () => {
+    const FINISHED = { id: "1", title: "a", finished: true, createdAt: "2025-01-01T00:00:00Z", completedAt: "2025-02-01T00:00:00Z" };
+    const withColumns = async (columns: typeof project.columns, act: () => Promise<void>) => {
+      const held = project.columns;
+      project.columns = columns;
+      try {
+        await act();
+      } finally {
+        project.columns = held;
+      }
+    };
+
+    it("goes to the done column from one that is not, keeps its time, and the report says so", async () => {
+      const { db, writes } = fakeDb();
+      const report = await run(db, [{ ...FINISHED, status: "This Week" }], { statuses: { "This Week": "doing" } });
+      expect(writes.tasks[0]).toMatchObject({ status: "done", updatedAt: new Date(FINISHED.completedAt) });
+      expect(report.dropped).toEqual([]);
+      expect(report.notImported).toEqual([{ id: "a", what: "its status “This Week”: it is finished, so it goes to Done" }]);
+    });
+
+    it("says the same on a check as on the import", async () => {
+      const { db } = fakeDb();
+      const report = await run(db, [{ ...FINISHED, status: "This Week" }], { statuses: { "This Week": "doing" } }, true);
+      expect(report.notImported).toEqual([{ id: "a", what: "its status “This Week”: it is finished, so it goes to Done" }]);
+    });
+
+    it("does not call a status it never used unmapped", async () => {
+      const { db, writes } = fakeDb();
+      const report = await run(db, [{ ...FINISHED, status: "Nowhere" }, { id: "2", title: "b", status: "Nowhere 2" }]);
+      expect(writes.tasks[0].status).toBe("done");
+      expect(report.unmapped.statuses).toEqual(["Nowhere 2"]);
+    });
+
+    it("stays in a done column of the file's choosing, so lists mapped apart stay apart", async () => {
+      const second = { id: "wontdo", label: "Won't do", role: "done", order: 3 };
+      await withColumns([...project.columns, second], async () => {
+        const { db, writes } = fakeDb();
+        const report = await run(db, [{ ...FINISHED, status: "Dropped" }], { statuses: { Dropped: "wontdo" } });
+        expect(writes.tasks[0].status).toBe("wontdo");
+        expect(report.notImported).toEqual([]);
+      });
+    });
+
+    it("stays where it would have gone on a board with no done column, and its time is refused", async () => {
+      await withColumns(project.columns.filter((c) => c.role !== "done"), async () => {
+        const { db, writes } = fakeDb();
+        const report = await run(db, [{ ...FINISHED, status: "This Week" }], { statuses: { "This Week": "doing" } });
+        expect(writes.tasks[0].status).toBe("doing");
+        expect(report.dropped).toEqual([expect.objectContaining({ field: "completedAt", reason: "the task is not in a done column" })]);
+        expect(report.notImported).toEqual([]);
+      });
+    });
+
+    it("moves on a later import, as any other change of column does", async () => {
+      const { db, writes } = fakeDb({ existing: [{ id: "1", status: "doing" }] });
+      await run(db, [{ ...FINISHED, status: "This Week" }], { statuses: { "This Week": "doing" } });
+      expect(writes.updates[0].update.$set.status).toBe("done");
+    });
+
+    it("stays out of it when the status was left out of the import, so a task moved by hand stays where it is", async () => {
+      const { db, writes } = fakeDb({ existing: [{ id: "1", status: "doing" }] });
+      const report = await run(db, [FINISHED]);
+      expect(writes.updates[0].update.$set.status).toBeUndefined();
+      expect(report.notImported).toEqual([]);
+    });
+
+    it("moves on a later import from a status no column matches", async () => {
+      const { db, writes } = fakeDb({ existing: [{ id: "1", status: "doing" }] });
+      await run(db, [{ ...FINISHED, status: "Nowhere" }]);
+      expect(writes.updates[0].update.$set.status).toBe("done");
+    });
+
+    it("stays with the machine running it, and only that is reported", async () => {
+      for (const dryRun of [false, true]) {
+        const { db, writes } = fakeDb({ existing: [{ id: "1", status: "doing", held: true }] });
+        const report = await run(db, [{ ...FINISHED, status: "This Week" }], { statuses: { "This Week": "doing" } }, dryRun);
+        if (!dryRun) expect(writes.updates[0].update.$set.status).toBeUndefined();
+        expect(report.notImported).toEqual([{ id: "1", what: "its column: a machine is running it" }]);
+      }
+    });
+
+    it("changes nothing for a task that is not finished", async () => {
+      const { db, writes } = fakeDb();
+      await run(db, [{ id: "1", title: "a", finished: false, status: "This Week" }], { statuses: { "This Week": "doing" } });
+      expect(writes.tasks[0].status).toBe("doing");
+    });
+  });
+
   it("leaves a task a machine is running in its column, and says so", async () => {
     const { db, writes } = fakeDb({ existing: [{ id: "1", status: "doing", held: true }] });
     const report = await run(db, [{ id: "1", title: "a", status: "done" }]);

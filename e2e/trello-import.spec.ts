@@ -30,6 +30,23 @@ async function press(page: Page, name: string) {
   expect((await answered).status()).toBe(200);
 }
 
+const STOPPED = {
+  source: "Trello",
+  dryRun: false,
+  total: 9,
+  processed: 3,
+  created: 3,
+  updated: 0,
+  links: 0,
+  comments: { created: 0, updated: 0 },
+  skipped: [],
+  dropped: [],
+  truncated: [],
+  notImported: [],
+  unmapped: { statuses: [], users: [], types: [] },
+  error: "the database went away",
+};
+
 const upload = (page: Page, json: string, name = "sample-board.json") =>
   page.getByLabel(FILE_LABEL).setInputFiles({ name, mimeType: "application/json", buffer: Buffer.from(json) });
 
@@ -190,6 +207,126 @@ test("a Trello export imports through the mapping step, reports what it left beh
   expect((await saved).status()).toBe(200);
   const done = await (await db()).collection("tasks").findOne({ _id: invoice._id });
   expect(done!.checklist[3]).toMatchObject({ text: "Definition of done: Step 4", done: true });
+});
+
+test("a finished card reaches a done column with its time, and its list stays on the page", async ({ page }) => {
+  await signIn(page, "owner");
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
+
+  const FINISHED_AT = "2026-11-01T17:41:47.543Z";
+  const board = JSON.parse(BOARD);
+  Object.assign(board.cards.find((c: { name: string }) => c.name === "Search by label"), { dueComplete: true, dateCompleted: FINISHED_AT, due: null });
+  board.cards.find((c: { name: string }) => c.name === "Audit log filter").attachments[0].name = "first%20shot.png";
+  await upload(page, JSON.stringify(board));
+
+  const mapping = page.getByTestId("csv-mapping");
+  await mapping.getByLabel("Status “Doing”").selectOption("in_progress");
+  await press(page, "Check");
+
+  const report = page.getByTestId("import-report");
+  const left = report.locator("details", { hasText: "Not imported" });
+  await expect(left).toContainText("Search by label: its status “Doing”: it is finished, so it goes to Done");
+  await expect(left).toContainText("Audit log filter: 2 uploaded files: first shot.png, screenshot-3-1.png");
+  await expect(report).not.toContainText("completedAt");
+
+  await press(page, "Import");
+  await expect(report).toContainText("Created 9 and updated 0 of 9 tasks from Trello");
+  const task = (await imported()).find((t) => t.title === "Search by label")!;
+  expect(task.status).toBe("done");
+  expect(task.updatedAt).toEqual(new Date(FINISHED_AT));
+  const moved = await (await db()).collection("activitylogs").findOne({ task: task._id, action: "status_changed" });
+  expect(moved).toMatchObject({ newValue: "done", createdAt: new Date(FINISHED_AT) });
+});
+
+test("a card finished after its first import moves to done on the next one", async ({ page }) => {
+  await signIn(page, "owner");
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
+  await upload(page, BOARD);
+  await page.getByTestId("csv-mapping").getByLabel("Status “Doing”").selectOption("in_progress");
+  await press(page, "Check");
+  await press(page, "Import");
+  const before = (await imported()).find((t) => t.title === "Search by label")!;
+  expect(before.status).toBe("in_progress");
+
+  const later = JSON.parse(BOARD);
+  Object.assign(later.cards.find((c: { name: string }) => c.name === "Search by label"), { dueComplete: true, dateCompleted: "2026-11-01T17:41:47.543Z" });
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
+  await upload(page, JSON.stringify(later), "sample-board (1).json");
+  await page.getByTestId("csv-mapping").getByLabel("Status “Doing”").selectOption("in_progress");
+  await press(page, "Check");
+  await press(page, "Import");
+
+  const after = (await imported()).find((t) => t.title === "Search by label")!;
+  expect(String(after._id)).toBe(String(before._id));
+  expect(after.status).toBe("done");
+});
+
+test("a disabled Import says what to do, and says nothing once the import is done", async ({ page }) => {
+  await signIn(page, "owner");
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
+  await upload(page, BOARD);
+
+  const mapping = page.getByTestId("csv-mapping");
+  const importButton = card(page).getByRole("button", { name: "Import", exact: true });
+  const first = card(page).getByText("Check first. Import opens once the check has passed.");
+  const again = card(page).getByText("Check again to import.");
+  await expect(importButton).toBeDisabled();
+  await expect(first).toBeVisible();
+
+  await page.route("**/import", (route) => route.abort(), { times: 1 });
+  await card(page).getByRole("button", { name: "Check", exact: true }).click();
+  await expect(card(page).getByRole("alert")).toBeVisible();
+  await expect(again).toBeVisible();
+  await expect(importButton).toBeDisabled();
+
+  await mapping.getByLabel("Status “Backlog”").selectOption("todo");
+  await expect(card(page).getByRole("alert")).toHaveCount(0);
+  await expect(again).toBeVisible();
+
+  let answer = () => {};
+  const held = new Promise<void>((resolve) => (answer = resolve));
+  await page.route("**/import", async (route) => { await held; await route.continue(); }, { times: 1 });
+  await card(page).getByRole("button", { name: "Check", exact: true }).click();
+  await expect(card(page).getByRole("button", { name: "Checking…" })).toBeVisible();
+  await expect(again).toHaveCount(0);
+  answer();
+  await expect(importButton).toBeEnabled();
+  await expect(again).toHaveCount(0);
+  await expect(first).toHaveCount(0);
+
+  await mapping.getByLabel("Status “Backlog”").selectOption("in_progress");
+  await expect(importButton).toBeDisabled();
+  await expect(again).toBeVisible();
+  await expect(page.getByTestId("import-report")).toHaveCount(0);
+
+  await upload(page, BOARD, "another-board.json");
+  await expect(first).toBeVisible();
+  await expect(again).toHaveCount(0);
+
+  await press(page, "Check");
+  await page.route("**/import", (route) => route.abort(), { times: 1 });
+  await importButton.click();
+  await expect(card(page).getByRole("alert")).toBeVisible();
+  await expect(again).toBeVisible();
+
+  await press(page, "Check");
+  await page.route("**/import", (route) => route.fulfill({ json: STOPPED }), { times: 1 });
+  await importButton.click();
+  await expect(page.getByTestId("import-report")).toContainText("The import stopped after 3 tasks");
+  await expect(again).toBeVisible();
+
+  await press(page, "Check");
+  await press(page, "Import");
+  await expect(page.getByTestId("import-report")).toContainText("Created 9 and updated 0 of 9 tasks from Trello");
+  await expect(importButton).toHaveText("Import");
+  await expect(card(page).getByRole("button", { name: "Check", exact: true })).toBeEnabled();
+  await expect(first).toHaveCount(0);
+  await expect(again).toHaveCount(0);
+
+  await page.route("**/import", (route) => route.abort(), { times: 1 });
+  await card(page).getByRole("button", { name: "Check", exact: true }).click();
+  await expect(card(page).getByRole("alert")).toBeVisible();
+  await expect(again).toBeVisible();
 });
 
 test("a report longer than a page can be read to its last line", async ({ page }) => {

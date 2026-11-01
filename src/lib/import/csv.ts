@@ -34,6 +34,7 @@ export interface CsvTable {
   // Comments read from a format that keeps them apart from the columns, one list per row
   comments?: ImportComment[][];
   checklists?: ImportChecklistItem[][];
+  finished?: boolean[];
   // What the format's reader left behind, for the report
   notes?: ImportNote[];
   // The rows are in the order the source shows them, which the board should keep
@@ -369,6 +370,7 @@ export function csvToBundle(table: CsvTable, targets: CsvTarget[], source: strin
     const structured = table.comments?.[index] ?? [];
     if (structured.length || comments.length) task.comments = [...structured, ...comments];
     if (table.checklists?.[index]?.length) task.checklist = table.checklists[index];
+    if (table.finished?.[index]) task.finished = true;
     if (table.ordered) task.order = index;
     return Object.fromEntries(Object.entries(task).filter(([, v]) => v !== undefined)) as unknown as ImportTask;
   });
