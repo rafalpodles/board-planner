@@ -146,15 +146,25 @@ async function assigneeStillActive(db: ScopedDb, assignee: unknown): Promise<boo
   return !!(await db.User.exists({ _id: String(id), deactivatedAt: null }));
 }
 
-type ResolvedAssignee = { user: { _id: Types.ObjectId; username: string } };
+type ResolvedAssignee = { user: { _id: Types.ObjectId; username: string; deactivatedAt?: Date | null } };
 
 async function resolveAssignee(db: ScopedDb, value: unknown): Promise<ResolvedAssignee | TaskServiceResult> {
   if (typeof value !== "string") {
     return { ok: false, error: "The assignee must be a username", status: 400 };
   }
   const user = await db.User.findOne({ username: value.trim().toLowerCase() });
-  if (!user || user.deactivatedAt) return { ok: false, error: noAccessToAssign(value), status: 400 };
+  if (!user) return { ok: false, error: noAccessToAssign(value), status: 400 };
   return { user: user as unknown as ResolvedAssignee["user"] };
+}
+
+// A task on this board already names them, so only there is the reason no news.
+async function assigneeRefusal(
+  db: ScopedDb,
+  user: ResolvedAssignee["user"],
+  projectId: string
+): Promise<TaskServiceResult> {
+  const named = user.deactivatedAt && (await db.Task.exists({ project: projectId, assignee: user._id }));
+  return { ok: false, error: named ? `${user.username} is deactivated` : noAccessToAssign(user.username), status: 400 };
 }
 
 // The one list, used by task-service's own writes and by both task routes. It was three copies
@@ -615,7 +625,7 @@ export async function createTask(
     const resolved = await resolveAssignee(db, body.assignee);
     if (!("user" in resolved)) return resolved;
     if (!(await canBeAssigned(db, String(resolved.user._id), projectId))) {
-      return { ok: false, error: noAccessToAssign(resolved.user.username), status: 400 };
+      return assigneeRefusal(db, resolved.user, projectId);
     }
     assigneeId = resolved.user._id;
   }
@@ -1147,12 +1157,12 @@ export async function updateTask(
   // A name nobody holds is refused, never resolved to null: that wrote `assignee: null` over
   // whoever held the task and answered 200, so `update_task(assignee: "rafa")` unassigned them and
   // said nothing (BP-511).
-  let assigneeName = "";
+  let incoming: ResolvedAssignee["user"] | null = null;
   if (updates.assignee !== undefined && updates.assignee !== null) {
     const resolved = await resolveAssignee(db, updates.assignee);
     if (!("user" in resolved)) return resolved;
     updates.assignee = resolved.user._id;
-    assigneeName = resolved.user.username;
+    incoming = resolved.user;
   }
 
   // Stamped only when the assignee actually moves, and after it has been resolved to an id so the
@@ -1170,11 +1180,11 @@ export async function updateTask(
   // unrelated edit anyone made to it afterwards. Unassigning is never refused: taking work away
   // from somebody who cannot reach the board is the repair, not the mistake.
   if (
-    updates.assignee != null &&
-    String(updates.assignee) !== storedAssignee &&
-    !(await canBeAssigned(db, String(updates.assignee), projectId))
+    incoming &&
+    String(incoming._id) !== storedAssignee &&
+    !(await canBeAssigned(db, String(incoming._id), projectId))
   ) {
-    return { ok: false, error: noAccessToAssign(assigneeName), status: 400 };
+    return assigneeRefusal(db, incoming, projectId);
   }
   if (updates.assignee !== undefined) {
     const moved = storedAssignee !== String(updates.assignee ?? "");

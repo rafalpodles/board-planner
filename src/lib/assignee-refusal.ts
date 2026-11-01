@@ -1,7 +1,7 @@
 import { echo } from "@/lib/echo";
 
-// One sentence for a name nobody holds, an account with no access and a deactivated one, on every
-// surface: telling them apart says "@x exists" to anyone who can reach any board (BP-513).
+// One sentence for a name nobody holds and an account this board cannot take, on every surface:
+// telling them apart says "@x exists" to anyone who can reach any board (BP-513).
 export function noBoardAccess(name: string): string {
   return `@${echo(name.trim().toLowerCase())} has no access to this board`;
 }

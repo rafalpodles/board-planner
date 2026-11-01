@@ -595,6 +595,26 @@ describe("GET /api/projects/:projectId/tasks — assignee filter", () => {
     expect(taskFind).not.toHaveBeenCalled();
   });
 
+  // USERNAME_PATTERN allows 24 hex characters, and a stranger's such name is read as an id
+  it("reads a barred account's 24-hex name as an id, as it reads a stranger's", async () => {
+    const name = "507f1f77bcf86cd799439099";
+    userFindOne.mockReturnValue({ lean: async () => ({ _id: "u7" }) });
+    canBeAssigned.mockResolvedValueOnce(false);
+
+    const res = await GET(request(`?assignee=${name}`), ctx());
+
+    expect(res.status).toBe(200);
+    expect(taskFind.mock.calls[0][0]).toMatchObject({ assignee: name });
+  });
+
+  it("looks the name up as the writers do, with stray spaces gone", async () => {
+    userFindOne.mockReturnValue({ lean: async () => ({ _id: "u7" }) });
+
+    await GET(request("?assignee=%20OwNeR%20"), ctx());
+
+    expect(userFindOne).toHaveBeenCalledWith({ username: "owner", organisation: DEFAULT_ORGANISATION_ID }, "_id");
+  });
+
   // What BP-502 chose on purpose, and the board already shows this assignee on the task itself
   it("still finds a task assigned to somebody before they lost access", async () => {
     userFindOne.mockReturnValue({ lean: async () => ({ _id: "u7" }) });

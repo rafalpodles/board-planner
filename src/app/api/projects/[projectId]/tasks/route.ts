@@ -99,7 +99,7 @@ export const GET = withProjectAccess(async (request, { params, db }) => {
      * nothing: that task names its assignee. Any other name is refused as a stranger is, so this
      * filter cannot be asked whether an account exists (BP-513).
      */
-    const user = await db.User.findOne({ username: assignee.toLowerCase() }, "_id").lean();
+    const user = await db.User.findOne({ username: assignee.trim().toLowerCase() }, "_id").lean();
     if (
       user &&
       ((await canBeAssigned(db, String(user._id), projectId)) ||

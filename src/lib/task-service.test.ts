@@ -3449,10 +3449,23 @@ describe("a task records who assigned it", () => {
   // BP-832. Nobody can hand work to an account that signs in by no path
   it("refuses a deactivated assignee, in the words a stranger gets", async () => {
     userFindOne.mockResolvedValue({ _id: "u2", username: "kuba", deactivatedAt: new Date() });
+    canBeAssignedMock.mockResolvedValueOnce(false);
 
     const result = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
 
     expect(result).toMatchObject({ ok: false, status: 400, error: noAccessToAssign("kuba") });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("says why when a task on this board already names them", async () => {
+    userFindOne.mockResolvedValue({ _id: "u2", username: "kuba", deactivatedAt: new Date() });
+    canBeAssignedMock.mockResolvedValueOnce(false);
+    taskExists.mockResolvedValueOnce({ _id: "t9" });
+
+    const result = await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(result).toMatchObject({ ok: false, status: 400, error: "kuba is deactivated" });
+    expect(taskExists).toHaveBeenCalledWith(expect.objectContaining({ project: "p1", assignee: "u2" }));
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
@@ -3684,6 +3697,16 @@ describe("assigning somebody who cannot reach the board", () => {
     expect(canBeAssignedMock).not.toHaveBeenCalled();
   });
 
+  it("lets the stored assignee be echoed back even once they are deactivated", async () => {
+    canBeAssignedMock.mockResolvedValue(false);
+    userFindOne.mockResolvedValue({ _id: "u1", username: "owner", deactivatedAt: new Date() });
+
+    const result = await updateTask(db, "p1", "t1", { assignee: "owner", title: "renamed" }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(canBeAssignedMock).not.toHaveBeenCalled();
+  });
+
   describe("and the same answer on the way in", () => {
     beforeEach(() => {
       taskCreate.mockClear();
@@ -3747,10 +3770,6 @@ describe("assigning somebody who cannot reach the board", () => {
  * BP-511. The read side refuses a username nobody holds (BP-502); both writers did the opposite,
  * and one of them destroyed data — an unknown name resolved to `null`, so `updateTask` cleared
  * whoever held the task and answered 200, and `createTask` answered 201 with the task unassigned.
- *
- * Deliberately not folded into the block above. The two refusals must not share a message: "no
- * access to this board" sends a reader to the project's Members settings, which is the wrong
- * repair — and the only repair — for a name that is simply misspelt.
  */
 describe("an assignee username nobody holds", () => {
   const board = { categories: [{ name: "bug" }], ...customBoard };

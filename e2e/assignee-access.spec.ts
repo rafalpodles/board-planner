@@ -182,6 +182,18 @@ test.describe("what the server accepts", () => {
     expect((await res.json()).map((t: { taskNumber: number }) => t.taskNumber)).toEqual([OUTSIDER_TASK_NUMBER]);
   });
 
+  test("takes back the name a deactivated assignee already holds", async ({ request }) => {
+    await deactivateOutsider();
+
+    const echoed = await request.put(`/api/projects/${PROJECT_KEY}/tasks/${OUTSIDER_TASK_ID}`, {
+      headers: MEMBER_AUTH,
+      data: { assignee: OUTSIDER_USERNAME, title: "Renamed, the assignee sent back as it was" },
+    });
+
+    expect(echoed.status(), await echoed.text()).toBe(200);
+    expect((await echoed.json()).assignee.username).toBe(OUTSIDER_USERNAME);
+  });
+
   test("accepts one to somebody who can", async ({ request }) => {
     const accepted = await request.put(
       `/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`,
