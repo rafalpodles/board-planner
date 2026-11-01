@@ -8,6 +8,7 @@ import { COLUMN_ROLES, CUSTOM_FIELD_TYPES, DEPENDENCY_TYPES, OPTION_FIELD_TYPES,
 import { MAX_OPTIONS } from "@/lib/custom-fields";
 import { APP_NAME } from "@/lib/brand";
 import { echo } from "@/lib/echo";
+import { noAccessToAssign } from "@/lib/assignee-refusal";
 import {
   strictInput,
   NOTHING_TO_CHANGE,
@@ -593,11 +594,7 @@ export function registerPlannerTools(server: McpServer): void {
         // BP-400 removed.
         const users = (await client.listAssignableUsers(proj._id)) as { username: string }[];
         const user = users.find((u) => u.username === assignee.toLowerCase());
-        if (!user) {
-          throw new Error(
-            `"${echo(assignee)}" is not someone this board can be assigned to — only people with access to it are.`
-          );
-        }
+        if (!user) throw new Error(noAccessToAssign(assignee));
         data.assignee = user.username;
       }
 
@@ -707,11 +704,7 @@ export function registerPlannerTools(server: McpServer): void {
           // See create_task: the roster is the board's, and a miss is not split into typo vs no-access.
           const users = (await client.listAssignableUsers(projectId)) as { username: string }[];
           const user = users.find((u) => u.username === assignee.toLowerCase());
-          if (!user) {
-            throw new Error(
-              `"${echo(assignee)}" is not someone this board can be assigned to — only people with access to it are.`
-            );
-          }
+          if (!user) throw new Error(noAccessToAssign(assignee));
           data.assignee = user.username;
         } else {
           data.assignee = null;

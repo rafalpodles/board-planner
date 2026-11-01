@@ -49,6 +49,7 @@ import { normaliseRecurrence, nextOccurrence, keptAnchor } from "@/lib/recurrenc
 import type { NormalisedRecurrence } from "@/lib/recurrence";
 import { onTaskStatusChanged } from "@/lib/pm/triggers";
 import { canBeAssigned, onBoard } from "@/lib/grants";
+import { noAccessToAssign } from "@/lib/assignee-refusal";
 import { workerUsername } from "@/lib/worker-user";
 import { EXECUTION_LEASE_MS } from "@/lib/execution-lease";
 import { pmUserId } from "@/lib/pm/pm-user";
@@ -133,29 +134,6 @@ const ATTEMPT_REFUND = { "execution.attempts": { $add: ["$execution.attempts", -
 
 export { EXECUTION_LEASE_MS };
 
-// Named rather than inlined so the board, both forms, MCP and the PM agent all refuse in the same
-// words — the message is the only thing telling an agent that the account exists and the access
-// does not, which is a different repair from a misspelt username.
-function noAccessToAssign(username?: string | null): string {
-  const who = username ? `@${username}` : "That account";
-  return `${who} has no access to this board, so the task cannot be assigned to them. A board owner can add them in the project's Members settings.`;
-}
-
-// Its neighbour, and deliberately not its wording: the message is the only thing telling a caller
-// which repair to attempt, and "add them in Members" is not one for a name nobody holds. It names
-// where the right names live, because the caller most likely to read it is a model — the PM agent
-// has no roster tool at all. Sliced because this string reaches one as a tool result.
-//
-// Telling this apart from the refusal above says "@x exists" to anyone who can write to any board,
-// which is the account-existence oracle BP-502 opened on the read side. Left open on purpose and
-// deferred to its own ticket: closing it means scoping resolution to `canBeAssigned`, giving up the
-// property BP-502 chose — a task assigned to somebody before they lost access stays findable. What
-// this change adds is that both refusals now come BEFORE the write, so probing costs nothing and
-// leaves no activity row behind.
-function noSuchAccount(username: unknown): string {
-  return `No account named "@${String(username).slice(0, 64)}" — the assignee is a username, and the project's Members settings list the ones this board takes.`;
-}
-
 /**
  * The one resolution both writers use, because they disagreed about everything that was not a
  * plain username. `createTask` coerced with `String()`, so a populated assignee — the shape a GET
@@ -175,8 +153,7 @@ async function resolveAssignee(db: ScopedDb, value: unknown): Promise<ResolvedAs
     return { ok: false, error: "The assignee must be a username", status: 400 };
   }
   const user = await db.User.findOne({ username: value.trim().toLowerCase() });
-  if (!user) return { ok: false, error: noSuchAccount(value), status: 400 };
-  if (user.deactivatedAt) return { ok: false, error: `${user.username} is deactivated`, status: 400 };
+  if (!user || user.deactivatedAt) return { ok: false, error: noAccessToAssign(value), status: 400 };
   return { user: user as unknown as ResolvedAssignee["user"] };
 }
 
@@ -526,7 +503,7 @@ function castsToDate(value: unknown): boolean {
  * Only the keys actually present are judged: an update writes what it names and nothing else.
  */
 function schemaValuesOrRefusal(values: Body): TaskServiceResult | null {
-  // Both refusals below are sliced: they reach a model as a tool result, same as noSuchAccount.
+  // Both refusals below are sliced: they reach a model as a tool result, same as noAccessToAssign.
   if ("priority" in values && !PRIORITIES.includes(values.priority)) {
     return {
       ok: false,
@@ -612,7 +589,7 @@ export async function createTask(
   const category =
     body.category ??
     (categoryNames.includes("user-story") ? "user-story" : categoryNames[0] ?? "user-story");
-  // Both refusals below are sliced: they reach a model as a tool result, same as noSuchAccount.
+  // Both refusals below are sliced: they reach a model as a tool result, same as noAccessToAssign.
   if (categoryNames.length > 0 && !categoryNames.includes(category)) {
     return {
       ok: false,
@@ -1083,7 +1060,7 @@ export async function updateTask(
   // until the assignee this update leaves behind is known.
   if (updates.agent === "") updates.agent = null;
 
-  // Both refusals below are sliced: they reach a model as a tool result, same as noSuchAccount.
+  // Both refusals below are sliced: they reach a model as a tool result, same as noAccessToAssign.
   if (updates.category !== undefined || updates.status !== undefined) {
     const proj = await db.Project.findById(projectId, "categories columns").lean();
     if (updates.category !== undefined) {
@@ -1170,10 +1147,12 @@ export async function updateTask(
   // A name nobody holds is refused, never resolved to null: that wrote `assignee: null` over
   // whoever held the task and answered 200, so `update_task(assignee: "rafa")` unassigned them and
   // said nothing (BP-511).
+  let assigneeName = "";
   if (updates.assignee !== undefined && updates.assignee !== null) {
     const resolved = await resolveAssignee(db, updates.assignee);
     if (!("user" in resolved)) return resolved;
     updates.assignee = resolved.user._id;
+    assigneeName = resolved.user.username;
   }
 
   // Stamped only when the assignee actually moves, and after it has been resolved to an id so the
@@ -1195,12 +1174,7 @@ export async function updateTask(
     String(updates.assignee) !== storedAssignee &&
     !(await canBeAssigned(db, String(updates.assignee), projectId))
   ) {
-    const who = await db.User.findById(updates.assignee, "username deactivatedAt").lean();
-    return {
-      ok: false,
-      error: who?.deactivatedAt ? `${who.username} is deactivated` : noAccessToAssign(who?.username),
-      status: 400,
-    };
+    return { ok: false, error: noAccessToAssign(assigneeName), status: 400 };
   }
   if (updates.assignee !== undefined) {
     const moved = storedAssignee !== String(updates.assignee ?? "");

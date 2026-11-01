@@ -222,7 +222,7 @@ describe("resolving an assignee through the board's own roster", () => {
     const create = vi.spyOn(PlannerClient.prototype, "createTask").mockResolvedValue({});
 
     await expect(callCreate({ assignee: "outsider" })).rejects.toThrow(
-      /not someone this board can be assigned to/
+      /@outsider has no access to this board/
     );
     expect(create).not.toHaveBeenCalled();
   });
@@ -244,7 +244,7 @@ describe("resolving an assignee through the board's own roster", () => {
     const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
 
     await expect(callUpdate({ assignee: "outsider" })).rejects.toThrow(
-      /not someone this board can be assigned to/
+      /@outsider has no access to this board/
     );
     expect(update).not.toHaveBeenCalled();
   });
