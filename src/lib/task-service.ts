@@ -875,7 +875,7 @@ export async function changeStatus(
     return refuseHeldRun(db, conflict, key);
   }
 
-  const refund = refundAttempt && byItsHolder && leavesColumn ? ATTEMPT_REFUND : {};
+  const refund = refundAttempt && byItsHolder ? ATTEMPT_REFUND : {};
 
   const task = await Task.findOneAndUpdate(
     // Guarded on the status just read, whenever the write means to leave it: two overlapping

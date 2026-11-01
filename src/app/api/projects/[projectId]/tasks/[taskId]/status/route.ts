@@ -24,8 +24,7 @@ export const PATCH = withProjectAccessOrWorker(async (request, { params, user, w
     return NextResponse.json({ error: MACHINE_FORCE_REFUSAL }, { status: 403 });
   }
 
-  // A machine's own report on its own run. A person or a token moving a task has no attempt to give
-  // back, and a free refund would let them run a task past its limit.
+  // A machine's report on its own run: a person or a token moving a task has no attempt to give back
   if (refundAttempt === true && !workerId) {
     return NextResponse.json({ error: "Only the worker running a task can refund its attempt" }, { status: 403 });
   }
