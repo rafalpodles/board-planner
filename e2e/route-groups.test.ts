@@ -181,6 +181,13 @@ describe("e2e/route-groups.json", () => {
       expect(computeAffectedGroups([file]), file).toEqual(expect.arrayContaining(groups));
     }
   });
+
+  it("runs automation for the claim route, whose directory says tasks, and people for admin sign-up", () => {
+    expect(computeAffectedGroups(["src/app/api/projects/[projectId]/tasks/claim/route.ts"])).toEqual(
+      expect.arrayContaining(["tasks", "automation"])
+    );
+    expect(computeAffectedGroups(["src/app/api/admin/sign-up/route.ts"])).toEqual(expect.arrayContaining(["people"]));
+  });
 });
 
 describe("RequestLogReporter", () => {

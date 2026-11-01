@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { GROUP_NAMES } from "./groups.ts";
 import { computeAffectedGroups } from "./affected-groups.ts";
+
+// These pin the hand-kept table; route-groups.test.ts pins what the measured map adds to it
+vi.mock("./route-groups.json", () => ({ default: {} }));
 
 describe("computeAffectedGroups", () => {
   it("returns nothing for an empty diff", () => {
@@ -130,14 +133,6 @@ describe("computeAffectedGroups", () => {
 
   it("sends the hand-over readiness route to the tasks group, whose task-screen specs read it", () => {
     expect(computeAffectedGroups(["src/app/api/projects/[projectId]/handover/route.ts"])).toEqual(["tasks"]);
-  });
-
-  // BP-1081: every spec that drives the claim route is in automation, and the directory says tasks
-  it("runs the groups whose specs call a route directly, as e2e/route-groups.json measured them", () => {
-    expect(computeAffectedGroups(["src/app/api/projects/[projectId]/tasks/claim/route.ts"])).toEqual(
-      expect.arrayContaining(["tasks", "automation"])
-    );
-    expect(computeAffectedGroups(["src/app/api/admin/sign-up/route.ts"])).toEqual(expect.arrayContaining(["people"]));
   });
 
   it("falls back to every group for a non-spec e2e helper file", () => {
