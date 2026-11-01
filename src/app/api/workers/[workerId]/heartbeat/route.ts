@@ -77,7 +77,7 @@ function reportedPreflight(value: unknown): WorkerPreflight | null {
   for (const entry of checks) {
     if (cleaned.length >= MAX_PREFLIGHT_CHECKS) break;
     if (typeof entry !== "object" || entry === null) continue;
-    const { name, ok: checkOk, warn, detail } = entry as Record<string, unknown>;
+    const { name, ok: checkOk, warn, stopsClaims, detail } = entry as Record<string, unknown>;
     if (typeof name !== "string" || !name.trim() || name.trim().length > 200 || typeof checkOk !== "boolean") continue;
     const text = typeof detail === "string" ? detail.trim().slice(0, 500) : "";
     cleaned.push({
@@ -86,6 +86,7 @@ function reportedPreflight(value: unknown): WorkerPreflight | null {
       // Only on a check that passed: "failed, and also a warning" is not a state, and a worker
       // sending one would otherwise paint a red row amber (BP-606).
       warn: passedAtACost(name.trim(), checkOk, warn, text),
+      ...(!checkOk && stopsClaims === true ? { stopsClaims: true } : {}),
       detail: text,
     });
   }

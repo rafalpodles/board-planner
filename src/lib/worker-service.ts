@@ -223,10 +223,10 @@ function haltOf(
   };
 }
 
-// Only the sandbox check stops the claim outright. Other failed checks may belong to another
-// project's checkout, which the report does not attribute, so they say nothing about this board.
-function sandboxFailed(worker: ServingMachine): boolean {
-  return (worker.preflight?.checks ?? []).some((c) => c.name === SANDBOX_CHECK && !c.ok);
+// The sandbox check and any check the worker says stops the claim. Other failed checks may belong to
+// another project's checkout, which the report does not attribute, so they say nothing about this board.
+function failsAClaimCheck(worker: ServingMachine): boolean {
+  return (worker.preflight?.checks ?? []).some((c) => !c.ok && (c.name === SANDBOX_CHECK || c.stopsClaims === true));
 }
 
 const MACHINE_RANK: Record<MachineState, number> = {
@@ -262,12 +262,12 @@ export function machineCondition(worker: ServingMachine, now = new Date(), heldB
   if (heldByPlan) return { state: "held", haltedBy: null };
   const halt = haltOf(worker, now);
   if (halt) return { state: halt.state, haltedBy: halt.by };
-  return { state: sandboxFailed(worker) ? "failing" : "live", haltedBy: null };
+  return { state: failsAClaimCheck(worker) ? "failing" : "live", haltedBy: null };
 }
 
 /**
  * The best of these machines, for this project's repository. A machine that reports in but will
- * not take work — paused, stopped, failing its sandbox check, or refusing its checkout of this very
+ * not take work — paused, stopped, failing a check it cannot claim without, or refusing its checkout of this very
  * project — is not `live`, and says why.
  */
 export function machineReadinessFor(

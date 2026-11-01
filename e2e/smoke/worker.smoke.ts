@@ -26,7 +26,6 @@ import { dirname, join, resolve } from "node:path";
 import mongoose from "mongoose";
 import { BASE_URL } from "../../playwright.config";
 import { SAME_ORIGIN } from "../api";
-import { signIn } from "../session";
 import { ADMIN_ID, ADMIN_SESSION_TOKEN, E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed, taskFactory } from "../seed";
 
 test.skip(process.platform !== "darwin", "the worker confines its agent with seatbelt, which is macOS only");
@@ -67,7 +66,7 @@ case "$1" in
     echo '{"loggedIn":true,"authMethod":"claude.ai","email":"smoke@example.test","subscriptionType":"max"}'; exit 0 ;;
 esac
 if [ -f '${SIGNED_OUT}' ]; then
-  echo '{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}'
+  echo '{"type":"result","subtype":"success","is_error":true,"total_cost_usd":0,"result":"Not logged in · Please run /login"}'
   exit 1
 fi
 prompt=""
@@ -444,7 +443,7 @@ test("the real worker claims, runs, delivers and reports a task, and releases th
 
 // BP-1077. Every run of a signed-out CLI fails in a second with the attempt refunded, so a worker that went
 // on claiming would take the same task on every poll for as long as nobody signed in.
-test("the real worker hands a task back unspent when claude signs out, shows why, and takes it again once signed in", async ({ page, request }) => {
+test("the real worker hands a task back unspent when claude signs out, shows why, and takes it again once signed in", async ({ request }) => {
   layDownRepository();
   const port = await freePort();
   daemon = await startDaemon(port);
@@ -467,11 +466,11 @@ test("the real worker hands a task back unspent when claude signs out, shows why
   expect(refused?.execution?.runId).toBeUndefined();
   expect(refused?.execution?.attempts).toBe(0);
 
-  await signIn(page);
-  await expect(async () => {
-    await page.goto("/settings/workers");
-    await expect(page.getByTestId("preflight-failure")).toContainText(`claude — ${signedOut}`, { timeout: 2_000 });
-  }).toPass({ timeout: 90_000, intervals: [5_000] });
+  const stateOfMachine = async () => {
+    const machines = await (await request.get("/api/users/me/machines", { headers: SESSION })).json();
+    return machines.find((machine: { name: string }) => machine.name === WORKER_NAME)?.state;
+  };
+  await expect.poll(stateOfMachine, { timeout: 90_000, intervals: [2_000] }).toBe("failing");
 
   rmSync(SIGNED_OUT);
 
@@ -489,6 +488,7 @@ test("the real worker hands a task back unspent when claude signs out, shows why
   const log = readFileSync(WORKER_LOG, "utf8");
   expect(log).toContain("claude is signed in again");
   expect(log.match(/machine fault on /g)).toHaveLength(1);
+  await expect.poll(stateOfMachine, { timeout: 90_000, intervals: [2_000] }).toBe("live");
 });
 
 // BP-1073. One task, one project that lists two repositories: the worker takes it only with a checkout of

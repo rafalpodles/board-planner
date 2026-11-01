@@ -74,6 +74,16 @@ describe("the claude adapter reading a finished step", () => {
 
   describe("when the CLI has no login", () => {
     const SENTENCE = "Not logged in · Please run /login";
+    const ended = (text: string, over: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: true,
+        stop_reason: "stop_sequence",
+        total_cost_usd: 0,
+        result: text,
+        ...over,
+      });
     // Cut down from a real run of 2.1.314 with an empty HOME: --output-format stream-json, exit 1, stderr empty
     const STREAM = [
       JSON.stringify({ type: "system", subtype: "init" }),
@@ -82,7 +92,7 @@ describe("the claude adapter reading a finished step", () => {
         error: "authentication_failed",
         message: { model: "<synthetic>", content: [{ type: "text", text: SENTENCE }] },
       }),
-      JSON.stringify({ type: "result", subtype: "success", is_error: true, stop_reason: "stop_sequence", result: SENTENCE }),
+      ended(SENTENCE),
     ].join("\n");
 
     it("reads it as the machine's fault, which refunds the attempt", () => {
@@ -93,9 +103,16 @@ describe("the claude adapter reading a finished step", () => {
     });
 
     it("says so of a review too, whose output is one result object", () => {
-      const stdout = JSON.stringify({ type: "result", subtype: "success", is_error: true, result: SENTENCE });
+      expect(agent.sessionFault(run({ stdout: ended(SENTENCE), code: 1 }))).toBe(CLAUDE_SIGNED_OUT);
+    });
 
-      expect(agent.sessionFault(run({ stdout, code: 1 }))).toBe(CLAUDE_SIGNED_OUT);
+    it.each([
+      "Login expired · Please run /login",
+      "OAuth token revoked · Please run /login",
+      "Invalid API key · Please run /login",
+      "API Error: 401 Invalid API key · Please run /login",
+    ])("reads %s the same way", (sentence) => {
+      expect(agent.sessionFault(run({ stdout: ended(sentence), code: 1 }))).toBe(CLAUDE_SIGNED_OUT);
     });
 
     it("does not take the agent's own words for it", () => {
@@ -108,9 +125,15 @@ describe("the claude adapter reading a finished step", () => {
     });
 
     it("leaves every other failed run alone", () => {
-      const refused = JSON.stringify({ type: "result", subtype: "success", is_error: true, result: "API Error: 500" });
+      expect(agent.sessionFault(run({ stdout: ended("API Error: 500"), code: 1 }))).toBeNull();
+    });
 
-      expect(agent.sessionFault(run({ stdout: refused, code: 1 }))).toBeNull();
+    it("does not take a refusal the model ended on the sentence for it", () => {
+      const quoted = ended(`I will not do that. ${SENTENCE}`, { stop_reason: "refusal" });
+      const paid = ended(SENTENCE, { stop_reason: "refusal", total_cost_usd: 0.42 });
+
+      expect(agent.sessionFault(run({ stdout: quoted, code: 1 }))).toBeNull();
+      expect(agent.sessionFault(run({ stdout: paid, code: 1 }))).toBeNull();
     });
   });
 

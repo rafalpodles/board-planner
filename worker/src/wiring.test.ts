@@ -957,11 +957,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       });
 
       expect(claims).toBe(0);
-      expect(row(heartbeatDeps?.preflight?.())).toEqual({ name: "claude", ok: false, detail: CLAUDE_SIGNED_OUT });
+      expect(row(heartbeatDeps?.preflight?.())).toEqual({ name: "claude", ok: false, stopsClaims: true, detail: CLAUDE_SIGNED_OUT });
     });
 
     it("hands the task back unspent and stops claiming when a run finds the session gone", async () => {
-      const stdout = JSON.stringify({ type: "result", is_error: true, result: "Not logged in · Please run /login" });
+      const stdout = JSON.stringify({ type: "result", is_error: true, total_cost_usd: 0, result: "Not logged in · Please run /login" });
       const { api, claims, logError, heartbeatDeps } = await runOneTask(undefined, undefined, {
         // Green at startup; signed out by the time the run has failed
         claudeAuth: (nth) => (nth === 0 ? SIGNED_IN : SIGNED_OUT),
@@ -980,6 +980,30 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       );
       expect(logError).toHaveBeenCalledWith(`not claiming any work: ${CLAUDE_SIGNED_OUT}`);
       expect(row(heartbeatDeps?.preflight?.())).toMatchObject({ ok: false });
+    });
+
+    describe("a login that `auth status` still calls good", () => {
+      const REFUSED = {
+        code: 1,
+        stdout: JSON.stringify({ type: "result", is_error: true, total_cost_usd: 0, result: "Login expired · Please run /login" }),
+        stderr: "",
+        timedOut: false,
+      };
+      const twoTasks = { claudeAuth: () => SIGNED_IN, agentResult: REFUSED, tasks: [CLAIMED, CLAIMED], passes: 4 };
+
+      it("holds claims though claude says it is signed in, and says why", async () => {
+        const { api, heartbeatDeps, logError } = await runOneTask(undefined, undefined, twoTasks);
+
+        expect(api.release).toHaveBeenCalledTimes(1);
+        expect(logError).toHaveBeenCalledWith(`not claiming any work: ${CLAUDE_SIGNED_OUT}`);
+        expect(row(heartbeatDeps?.preflight?.())).toMatchObject({ ok: false, stopsClaims: true });
+      });
+
+      it("lets one run through per hold, so a new login is found without a restart", async () => {
+        const { api } = await runOneTask(undefined, undefined, { ...twoTasks, clockJumpOnSleepMs: 16 * 60_000 });
+
+        expect(api.release).toHaveBeenCalledTimes(2);
+      });
     });
 
     it("goes on claiming after a machine fault that was not the session", async () => {

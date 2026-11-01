@@ -13,6 +13,7 @@ import {
   npmCacheCheck,
   pathWithTools,
   PreflightReport,
+  markClaudeSignedOut,
   refreshClaudeSession,
   runPreflight,
   SANDBOX_CHECK,
@@ -247,7 +248,7 @@ describe("runPreflight", () => {
 
     expect(report.ok).toBe(false);
     expect(report.agents).not.toContain("claude");
-    expect(check(report, "claude").ok).toBe(false);
+    expect(check(report, "claude")).toMatchObject({ ok: false, stopsClaims: true });
     expect(check(report, "claude").detail).toMatch(/claude auth login/);
   });
 
@@ -270,7 +271,7 @@ describe("runPreflight", () => {
       ok: false,
       agents: ["codex"],
       account: "",
-      checks: [{ name: "claude", ok: false, detail: CLAUDE_SIGNED_OUT }, REPORT.checks[1]],
+      checks: [{ name: "claude", ok: false, stopsClaims: true, detail: CLAUDE_SIGNED_OUT }, REPORT.checks[1]],
     };
     const answering = (result: CommandResult) => {
       const run = vi.fn<Runner["run"]>().mockResolvedValue(result);
@@ -281,6 +282,10 @@ describe("runPreflight", () => {
       const { deps } = answering({ ...fail(), stdout: JSON.stringify({ loggedIn: false }) });
 
       expect(await refreshClaudeSession(deps, REPORT)).toEqual(SIGNED_OUT);
+    });
+
+    it("reads the same when a run is what found out", () => {
+      expect(markClaudeSignedOut(REPORT)).toEqual(SIGNED_OUT);
     });
 
     it("puts it back once it is signed in", async () => {

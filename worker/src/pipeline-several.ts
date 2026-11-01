@@ -12,6 +12,7 @@ import {
   EMPTY_RESULT,
   fitDetail,
   gateCapFor,
+  faultOf,
   hitUsageLimit,
   keptWorktree,
   MIN_ENTRY_MS,
@@ -569,7 +570,7 @@ export async function runTaskInRepositories(
       return done({
         outcome: "machineFault",
         detail: outcome.message,
-        disposition: "machine-fault",
+        disposition: faultOf(outcome.message),
         report: () => reporter.released(task, `${outcome.message}${unpushed()}`),
       });
     }
@@ -722,7 +723,7 @@ export async function runTaskInRepositories(
           outcome: "machineFault",
           detail: `the ${gate.name} gate could not run: ${verdict.reason}`,
           keep: true,
-          disposition: "machine-fault",
+          disposition: faultOf(verdict.reason),
           report: () => reporter.released(task, `the ${gate.name} gate could not run in ${leg.label}: ${verdict.reason}${unpushed()}`),
         });
       }

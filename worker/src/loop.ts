@@ -34,8 +34,9 @@ export interface LoopDeps {
    * on the board and a run record behind it.
    *
    * **The invariant this rests on:** every machine-wide reason a step can be refused is also one
-   * preflight can see at boot. This reads a boot-time answer, and a fault raised during a run never
-   * feeds back into it — so a refusal that is machine-wide *and* only discoverable at run time
+   * preflight can see at boot, and a fault raised during a run does not feed back into it, the one
+   * exception being a claude with no login (below) — so a refusal that is machine-wide *and* only
+   * discoverable at run time
    * would leave the per-pass `break` below as the only brake, which is the exact behaviour this
    * exists to prevent. Add such a refusal and preflight has to learn it in the same change.
    *
@@ -49,7 +50,9 @@ export interface LoopDeps {
    * it include transients — an unreachable remote, git under load — and latching one would turn a
    * network blip into an outage nothing on the machine can lift, which is the reasoning pipeline.ts
    * already carries for an unreadable git config. The per-pass `break` is the brake for those; this
-   * gate is for what a machine is, not for what one run met.
+   * gate is for what a machine is, not for what one run met. A run that found claude with no login is
+   * the exception (BP-1077): it is no transient, a login can end at any time, and `auth status` cannot
+   * always see it. That hold lifts by itself, so nothing here is an outage nobody can end.
    */
   claimBlocked?: () => string;
   log?: (message: string) => void;
@@ -124,7 +127,7 @@ export function createLoop(deps: LoopDeps): Loop {
                   // nothing at all, which is the wrong way round for a fault that is not the task's
                   // (BP-349 review). The reason itself is on the board — a run's fault is not a
                   // string this loop holds — so this says which task carried it.
-                  log(`${disposition === "machine-fault" ? "machine" : "settings"} fault on ${task.taskKey}; not claiming again this pass`);
+                  log(`${disposition === "settings-fault" ? "settings" : "machine"} fault on ${task.taskKey}; not claiming again this pass`);
                   faulted = true;
                   faultedLast = projectId;
                   break;

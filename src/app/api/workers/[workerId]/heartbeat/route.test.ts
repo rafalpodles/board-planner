@@ -451,6 +451,26 @@ describe("the preflight report a worker sends", () => {
     expect(preflightPatch()?.checks[0]).toMatchObject({ ok: false, warn: false });
   });
 
+  it("keeps a failed check's word that it stops the machine's claims, and only on a failed check", async () => {
+    const { req, ctx } = request({
+      preflight: {
+        ok: false,
+        checks: [
+          { name: "claude", ok: false, stopsClaims: true, detail: "not signed in" },
+          { name: "git", ok: true, stopsClaims: true, detail: "" },
+          { name: "gh", ok: false, stopsClaims: "yes", detail: "" },
+        ],
+      },
+    });
+
+    await POST(req, ctx);
+
+    const [claude, git, gh] = preflightPatch()?.checks ?? [];
+    expect(claude.stopsClaims).toBe(true);
+    expect(git).not.toHaveProperty("stopsClaims");
+    expect(gh).not.toHaveProperty("stopsClaims");
+  });
+
   it("caps what a worker can write into the console", async () => {
     const { req, ctx } = request({
       preflight: {

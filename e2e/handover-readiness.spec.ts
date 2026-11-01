@@ -281,7 +281,7 @@ test.describe("a member's own task, as the board changes under it", () => {
     await openAs(page, "member");
 
     await expect(notice(page)).toHaveAttribute("data-reason", "machine-failing");
-    await expect(notice(page)).toContainText("its sandbox check failed");
+    await expect(notice(page)).toContainText("a check it needs is failing");
   });
 
   // No advice about the board could make it run, so none is listed beside it

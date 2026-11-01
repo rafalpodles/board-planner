@@ -1247,7 +1247,7 @@ describe("the hand-over notice, with the board judged too", () => {
 
     expect(notice().dataset.reason).toBe("machine-failing");
     expect(notice().textContent).toContain(
-      "Your machine is connected but not taking work: its sandbox check failed."
+      "Your machine is connected but not taking work: a check it needs is failing."
     );
   });
 

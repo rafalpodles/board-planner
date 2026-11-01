@@ -71,6 +71,7 @@ import {
   PreflightCheck,
   PreflightDeps,
   PreflightReport,
+  markClaudeSignedOut,
   refreshClaudeSession,
   runPreflight,
   SANDBOX_CHECK,
@@ -98,6 +99,9 @@ import { createWorkspace, reapOrphans } from "./workspace.js";
 import { entryDirectory, workerVersion } from "./version.js";
 
 const MIN_REFRESH_INTERVAL_MS = 30_000;
+// How long a run refused a login holds claims when `auth status` still calls that login good. A run
+// this finds nothing costs a second and no tokens, so four an hour is the price of noticing a new login.
+const SESSION_HOLD_MS = 15 * 60_000;
 
 // Every ambient thing the wiring used to reach for directly. main.ts is the one place that supplies
 // none of them; a test supplies whichever it needs to watch. The point of the split is that the
@@ -265,6 +269,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   let preflightError = "";
   let leftovers = "";
   let probedSandboxRow: PreflightCheck | undefined;
+  let sessionHeldUntil = 0;
 
   function showLeftovers(): void {
     if (!preflight) return;
@@ -457,7 +462,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     return preflight?.checks.some((check) => check.name === "claude" && check.detail === CLAUDE_SIGNED_OUT) ?? false;
   }
 
-  // Once per poll while claude is signed out, and after a run's machine fault, which is how a session
+  // Once per poll while claude is signed out, and after a run found it so, which is how a session
   // that ended under a running worker first shows: `claude auth login` needs no restart to clear it
   async function askClaudeAgain(): Promise<void> {
     if (!preflight) return;
@@ -470,6 +475,16 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
     reportRunnableAgents(preflight);
     if (wasSignedOut && !claudeSignedOut()) deps.log("claude is signed in again");
+  }
+
+  // `auth status` reads the stored token and never asks the server, so an expired or revoked one reads
+  // as signed in while every run is refused. Only a run can tell, so one is let through per hold.
+  async function holdClaimsForSession(): Promise<void> {
+    await askClaudeAgain();
+    if (!preflight || claudeSignedOut()) return;
+    preflight = markClaudeSignedOut(preflight);
+    reportRunnableAgents(preflight);
+    sessionHeldUntil = Date.now() + SESSION_HOLD_MS;
   }
 
   // Once per poll while preflight could not run, like retryLeftovers: the machine claims nothing
@@ -931,7 +946,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const settings = gateSettingsOf(task.projectId);
     const disposition = await execute(task);
     if (disposition === "settings-fault" && settings) settingsHolds.hold(task, settings);
-    if (disposition === "machine-fault") await askClaudeAgain();
+    if (disposition === "session-fault") await holdClaimsForSession();
     return disposition;
   }
 
@@ -960,7 +975,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   async function drain(): Promise<void> {
     await retryLeftovers().catch((error) => deps.logError(`reaping what an earlier run left failed: ${String(error)}`));
     await retryPreflight();
-    if (claudeSignedOut()) await askClaudeAgain();
+    if (claudeSignedOut() && Date.now() >= sessionHeldUntil) await askClaudeAgain();
     await refreshServerState();
     // Before the flush, so a settlement this pass produces goes out with it rather than waiting a
     // whole poll interval. Drained here rather than in the claim loop because `drain` runs even

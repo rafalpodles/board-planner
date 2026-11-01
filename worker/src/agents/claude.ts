@@ -30,14 +30,17 @@ const USAGE_LIMIT_SENTINEL = /^Claude(?: AI)? usage limit reached\|\d+$/;
 export const CLAUDE_SIGNED_OUT =
   "claude is not signed in on this machine: run `claude auth login` as the user the worker runs as";
 
-// Measured on 2.1.314, in both output formats: exit 1, stderr empty, this sentence in `result`. The
-// exit and `is_error` are the CLI's own, so an agent ending on the sentence does not read as this.
-const LOGIN_SENTINEL = /· Please run \/login$/;
+// The sentences 2.1.314 ends a run on when it has no login it can use. Whole sentences, because on a
+// refusal `result` is model text; "Not logged in" measured in both output formats, the rest from the
+// binary.
+const LOGIN_SENTINEL = /^(?:Not logged in|Login expired|OAuth token revoked|(?:API Error: 401 )?Invalid API key) · Please run \/login$/;
 
 function signedOut(result: CommandResult, final: ResultEvent | undefined): boolean {
   return (
     result.code !== 0 &&
     final?.is_error === true &&
+    // Nothing reached a model, which is also what rules out a model having written the sentence
+    final.total_cost_usd === 0 &&
     typeof final.result === "string" &&
     LOGIN_SENTINEL.test(final.result.trim())
   );

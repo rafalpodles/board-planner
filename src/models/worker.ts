@@ -60,6 +60,7 @@ const workerSchema = new Schema<IWorker>(
                   // Passed, at a cost somebody chose. Absent on every check that has none, so an
                   // older worker's report stays exactly what it was (BP-606).
                   warn: { type: Boolean, default: false },
+                  stopsClaims: { type: Boolean },
                   detail: { type: String, default: "", trim: true, maxlength: 2000 },
                 },
                 { _id: false }

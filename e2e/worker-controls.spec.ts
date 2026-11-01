@@ -1278,6 +1278,30 @@ test("the fleet screen says whether a machine confines the agent it runs", async
  * earlier boot and the fleet screen said `ready` about a machine taking no work. It now sends a
  * failing sandbox row naming the reason, exactly as worker/src/wiring.ts composes it.
  */
+// BP-1077. The worker takes no work with claude signed out, so a screen that reads it as running leaves
+// its owner nothing to go on: a handed-over task simply sits there, with no comment and no notice.
+test("a machine that says a failed check stops its claims is not taken for running, and another failed check is", async ({
+  page,
+  request,
+}) => {
+  const SIGNED_OUT = "claude is not signed in on this machine: run `claude auth login` as the user the worker runs as";
+  const failing = (over: Record<string, unknown>) => ({
+    ok: false,
+    account: "",
+    checks: [{ name: "sandbox", ok: true, detail: "confined" }, { name: "claude", ok: false, detail: SIGNED_OUT, ...over }],
+  });
+
+  await heartbeat(request, { preflight: failing({}) });
+  await signIn(page);
+  await page.goto("/settings/machines");
+  const state = page.getByTestId("my-machine").filter({ hasText: WORKER_NAME }).getByTestId("my-machine-state");
+  await expect(state).toHaveText(/^Running/);
+
+  await heartbeat(request, { preflight: failing({ stopsClaims: true }) });
+  await page.reload();
+  await expect(state).toHaveText(/^Not taking work: a check is failing/);
+});
+
 test("a machine whose preflight could not run says why on the fleet screen, not its last green report", async ({
   page,
   request,

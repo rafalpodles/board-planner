@@ -114,6 +114,7 @@ describe("reviewGate", () => {
       type: "result",
       subtype: "success",
       is_error: true,
+      total_cost_usd: 0,
       result: "Not logged in · Please run /login",
     });
     const { runner } = claudeStdout(stdout, { code: 1 });

@@ -34,6 +34,8 @@ export interface PreflightCheck {
    * not left in a tooltip an instance admin has to hover to find (BP-606).
    */
   warn?: boolean;
+  /** Failed, and the machine takes no work until it passes. Told to the server, which would otherwise read the machine as live */
+  stopsClaims?: boolean;
   detail: string;
 }
 
@@ -160,6 +162,8 @@ async function runs(
   };
 }
 
+const SIGNED_OUT_ROW: PreflightCheck = { name: "claude", ok: false, stopsClaims: true, detail: CLAUDE_SIGNED_OUT };
+
 interface ClaudeAuth {
   loggedIn?: unknown;
   authMethod?: unknown;
@@ -205,7 +209,7 @@ async function claudeSession(
     return {
       account: "",
       answered: true,
-      check: { name: "claude", ok: false, detail: CLAUDE_SIGNED_OUT },
+      check: SIGNED_OUT_ROW,
     };
   }
 
@@ -252,15 +256,22 @@ export async function refreshClaudeSession(
     ...childEnv([], deps.env),
     PATH: pathWithTools(report.paths, deps.env.PATH ?? ""),
   });
-  if (!session.answered) return report;
+  return session.answered ? withClaudeSession(report, session.check, session.account) : report;
+}
 
-  const checks = report.checks.map((check) => (check.name === "claude" ? session.check : check));
+/** For a run refused a login `auth status` still calls good, which only the server can know */
+export function markClaudeSignedOut(report: PreflightReport): PreflightReport {
+  return withClaudeSession(report, SIGNED_OUT_ROW, "");
+}
+
+function withClaudeSession(report: PreflightReport, row: PreflightCheck, account: string): PreflightReport {
+  const checks = report.checks.map((check) => (check.name === "claude" ? row : check));
   return {
     ...report,
-    account: session.account,
+    account,
     checks,
     ok: checks.every((check) => check.ok),
-    agents: [...(session.check.ok ? ["claude"] : []), ...report.agents.filter((agent) => agent !== "claude")],
+    agents: [...(row.ok ? ["claude"] : []), ...report.agents.filter((agent) => agent !== "claude")],
   };
 }
 
@@ -645,7 +656,7 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
   for (const tool of TOOLS) {
     const path = paths[tool];
     if (!path) {
-      checks.push(missing(tool));
+      checks.push(tool === "claude" ? { ...missing(tool), stopsClaims: true } : missing(tool));
       continue;
     }
 
