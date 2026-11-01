@@ -37,7 +37,7 @@ describe("FleetPanel", () => {
   });
 
   it("does not show a machine that takes no work as idle", async () => {
-    await showing([machine({ state: "failing", task: null })]);
+    await showing([machine({ state: "failing" })]);
     const row = screen.getByTestId("fleet-machine");
     expect(row.getAttribute("data-state")).toBe("failing");
     expect(row.textContent).toContain("Not taking work");
