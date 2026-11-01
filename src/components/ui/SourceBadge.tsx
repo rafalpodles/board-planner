@@ -4,7 +4,7 @@ export function SourceBadge({ source, detail, edited }: { source?: string; detai
   const shown = sourceOf(source);
   const title = edited ? `Last edited ${lowerFirst(sourceTitle(shown, detail))}` : sourceTitle(shown, detail);
   const tone = isMachineSource(shown)
-    ? "border-primary/30 bg-primary/10 text-primary"
+    ? "border-primary/30 bg-primary/10 text-primary-on-tint"
     : "border-border bg-bg-input text-text-muted";
   return (
     <span

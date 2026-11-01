@@ -56,6 +56,13 @@ export function bodyOf(message: StubMessage): string {
   return message.data.replace(/=\r?\n/g, "").replace(/=3D/g, "=");
 }
 
+/** The password-reset link as the message carries it */
+export function resetLinkIn(message: StubMessage): string {
+  const match = bodyOf(message).match(/https?:\/\/[^\s"<>]+\/reset\?token=[A-Za-z0-9_%-]+/);
+  expect(match, "no reset link in the message").not.toBeNull();
+  return match![0];
+}
+
 /** The confirmation link as the message carries it, quoted-printable soft breaks and `=3D` undone */
 export function confirmLinkIn(message: StubMessage): string {
   const unfolded = bodyOf(message);

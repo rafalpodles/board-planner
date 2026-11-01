@@ -87,7 +87,7 @@ export function TaskActivityPanel({
             }`}
           >
             {t.label}
-            {t.count !== null && <span className="ml-1.5 opacity-60">{t.count}</span>}
+            {t.count !== null && <span className="ml-1.5">{t.count}</span>}
           </button>
         ))}
       </div>
