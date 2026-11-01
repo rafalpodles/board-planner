@@ -1059,14 +1059,17 @@ would run npm and report that as the project's check.
   chosen by a person who may not own the machine, and development needs the network, so they keep the
   network and shut the home: `sealedHomes` in `sandbox.ts` makes a read under the real home answer
   ENOENT, but for the worktree, the run's home, the clone's `.git`, the worker's `PATH` directories and
-  the program's own directory, whose parents answer their metadata and nothing else; writes answer EPERM.
+  the program's own directory, whose parents answer their metadata and nothing else.
   ENOENT and not a refusal, because `cp-worktrees` usually sits under the home and a tool walks up from
   it: yarn opens a `.yarnrc` in every parent with no `stat` first and stops on anything but ENOENT.
-  Existence is shut by name, for the files in those parents, the first 2,000 listed when the step starts:
-  yarn 1 stops on a parent's `package.json` that exists and will not read. Elsewhere `access` and `mkdir`
-  confirm a guessed name, and whether it is a directory, with no content, size or listing: shut for the
-  whole home, `mkdir` answers ENOENT under a parent that exists and node's recursive `mkdir` loops for
-  ever. Exact directories:
+  Existence is shut by name, for the 64 shortest files in each parent of a writable directory, listed
+  when the step starts: yarn 1 stops on a parent's `package.json` that exists and will not read, and a
+  name costs the profile more the more there are (2,000 took 7 s, on every spawn). A file past those, one
+  that appears later, or a parent that cannot be listed stays visible, so yarn stops on it. Elsewhere
+  `access` and `mkdir` confirm a guessed name, and whether it is a directory, with no content, size or
+  listing: shut for the whole home, `mkdir` answers ENOENT under a parent that exists and node's
+  recursive `mkdir` loops for ever. It still does on the path of a named file, where it could only have
+  failed. Exact directories:
   `~/.cargo/bin` must not open `~/.cargo/credentials.toml`. It also denies the login keychain's daemon,
   sockets under the home but for the writable directories' own, and launchd's ssh-agent socket. Measured
   on macOS 26.7: a planted file, `stat` of it, `ls ~/.ssh` and `security show-keychain-info` get nothing,

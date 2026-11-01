@@ -419,14 +419,15 @@ describe("a shut home", () => {
     expect((spawn as { args: string[] }).args.filter((arg) => /^A\d+=/.test(arg)).map((arg) => arg.slice(arg.indexOf("=") + 1)).sort()).toEqual(["/Users/x", "/Users/x/inner", "/Users/x/inner/a"]);
   });
 
-  describe("the files beside those parents", () => {
+  describe("the files beside the parents of a writable directory", () => {
     let home = "";
+    const wt = () => join(home, "proj", "wt");
     const named = (spawn: unknown) => (spawn as { args: string[] }).args.filter((arg) => /^F\d+=/.test(arg)).map((arg) => arg.slice(arg.indexOf("=") + 1));
     const profile = (spawn: unknown) => (spawn as { args: string[] }).args[1];
 
     beforeEach(() => {
       home = mkdtempSync(join(tmpdir(), "bp985-beside-"));
-      mkdirSync(join(home, "proj", "wt"), { recursive: true });
+      mkdirSync(wt(), { recursive: true });
     });
 
     afterEach(() => {
@@ -436,18 +437,23 @@ describe("a shut home", () => {
     it("names the files, and no directory, so node's recursive mkdir still has one that answers", () => {
       writeFileSync(join(home, "package.json"), "{}");
       writeFileSync(join(home, "proj", ".npmrc"), "");
-      writeFileSync(join(home, "proj", "wt", "inside"), "");
+      writeFileSync(join(wt(), "inside"), "");
       mkdirSync(join(home, ".cache"));
 
-      const spawn = sealed([home], [join(home, "proj", "wt")], ["/private/tmp/w"]);
+      expect(named(sealed([home], [], [wt()])).sort()).toEqual([join(home, "package.json"), join(home, "proj", ".npmrc")].sort());
+    });
 
-      expect(named(spawn).sort()).toEqual([join(home, "package.json"), join(home, "proj", ".npmrc")].sort());
+    it("leaves the parents of a directory that is only readable, since no tool walks up from one", () => {
+      mkdirSync(join(home, "tools", "bin"), { recursive: true });
+      writeFileSync(join(home, "tools", "beside-a-tool"), "");
+
+      expect(named(sealed([home], [join(home, "tools", "bin")], [wt()]))).toEqual([]);
     });
 
     it("leaves a readable file answering: its allow comes after the deny", () => {
       writeFileSync(join(home, "session.json"), "{}");
 
-      const spawn = sealed([home], [join(home, "session.json"), join(home, "proj", "wt")], ["/private/tmp/w"]);
+      const spawn = sealed([home], [join(home, "session.json")], [wt()]);
       const rules = profile(spawn);
 
       expect(named(spawn)).toContain(join(home, "session.json"));
@@ -455,14 +461,19 @@ describe("a shut home", () => {
       expect(rules.indexOf("(deny file-test-existence")).toBeLessThan(rules.indexOf("(allow file-read* file-test-existence"));
     });
 
-    it("stops at a cap, so a directory of downloads leaves the argument list alone", () => {
-      for (let index = 0; index < 2_001; index += 1) writeFileSync(join(home, `file-${index}`), "");
+    it("keeps the shortest of a crowded parent, and a full parent takes nothing from the next", () => {
+      writeFileSync(join(home, "package.json"), "{}");
+      writeFileSync(join(home, "proj", "package.json"), "{}");
+      for (let index = 0; index < 100; index += 1) writeFileSync(join(home, "proj", `a-download-with-a-long-name-${index}`), "");
 
-      expect(named(sealed([home], [join(home, "proj", "wt")], ["/private/tmp/w"]))).toHaveLength(2_000);
+      const names = named(sealed([home], [], [wt()]));
+
+      expect(names).toHaveLength(65);
+      expect(names).toEqual(expect.arrayContaining([join(home, "package.json"), join(home, "proj", "package.json")]));
     });
 
     it("adds no rule where there is nothing to name, and a parent it cannot list is not a failure", () => {
-      const spawn = sealed(["/nonexistent/home"], ["/nonexistent/home/wt"], ["/private/tmp/w"]);
+      const spawn = sealed(["/nonexistent/home"], [], ["/nonexistent/home/wt/inner"]);
 
       expect(spawn).not.toHaveProperty("refusal");
       expect(profile(spawn)).not.toContain("(deny file-test-existence");

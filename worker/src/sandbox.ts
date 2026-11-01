@@ -286,8 +286,8 @@ export const PROFILE_TAIL = [...NAMED_SERVICE_DENIES, ...OWN_SANDBOX_SIGNALS_ONL
 // `sessionReadable`. A read under a shut home answers ENOENT rather than EPERM: yarn opens a `.yarnrc` in
 // every parent with no `stat` first and stops on any other error, and go and cargo do the same with what
 // they find on the way up. It also keeps a size from being probed. Existence is shut by name, for the
-// files in each parent of what stays readable, which is where a tool walking up looks: yarn 1 stops on a
-// `package.json` there that exists and will not read. Shut for the whole home, mkdir answers ENOENT under
+// files in each parent of a writable directory, which is where a tool walking up looks: yarn 1 stops on
+// a `package.json` there that exists and will not read. Shut for the whole home, mkdir answers ENOENT under
 // a parent that exists and node's recursive mkdir goes round for ever, which held the agent on an
 // operator's hook until the run timed out, so everywhere else `access` can confirm a guessed name. Each
 // parent of what stays readable answers its metadata, or node and java could not resolve a path through
@@ -324,18 +324,19 @@ function ancestorsUnder(homes: string[], paths: string[]): string[] {
   return [...found];
 }
 
-// A parent may be a directory of downloads, and the names travel in the argument list
-const MAX_FILES_BESIDE = 2_000;
+// Each name costs the profile, and not linearly: 2,000 took seven seconds to compile, on every spawn. The
+// shortest go first, since a parent may be a directory of downloads and what a tool looks for is short
+const MAX_FILES_BESIDE_A_PARENT = 64;
 
 function filesBeside(directories: string[]): string[] {
-  const files = directories.flatMap((directory) => {
+  return directories.flatMap((directory) => {
     try {
-      return readdirSync(directory, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => join(directory, entry.name));
+      const names = readdirSync(directory, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name);
+      return names.sort((a, b) => a.length - b.length).slice(0, MAX_FILES_BESIDE_A_PARENT).map((name) => join(directory, name));
     } catch {
       return [];
     }
   });
-  return files.slice(0, MAX_FILES_BESIDE);
 }
 
 // Rules for a mode go in `modeRules`, never after the result: the tail must come last.
@@ -392,7 +393,7 @@ export function confine(command: string, args: string[], options: ConfineOptions
   const readableNames = readable.map((_, index) => `R${index}`);
   const ancestors = ancestorsUnder(homes, readable);
   const ancestorNames = ancestors.map((_, index) => `A${index}`);
-  const beside = filesBeside(ancestors);
+  const beside = filesBeside(ancestorsUnder(homes, resolved));
   const besideNames = beside.map((_, index) => `F${index}`);
   const modeRules = [
     ...(options.network === "loopback" ? LOOPBACK_ONLY : []),

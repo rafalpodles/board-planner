@@ -68,7 +68,7 @@ export function createLoop(deps: LoopDeps): Loop {
   let running = true;
   let pausedState = false;
   let lastBlocked = "";
-  // The assignment whose run reported the last machine fault. assignments() is stable in order, so
+  // The assignment whose run reported the last fault. assignments() is stable in order, so
   // without this a project that faults on every pass keeps the head of the list and no assignment
   // behind it is ever claimed for again — starvation for as long as the fault lasts, not for one
   // pass. Starting the next pass after that project puts it last instead.
@@ -107,9 +107,9 @@ export function createLoop(deps: LoopDeps): Loop {
           // Every assignment gets its own attempt and its own try/catch: a project that cannot be
           // claimed from, or a task that blows up, must not cost a sibling project its turn in this
           // pass — that would starve whichever assignment comes last in the list. A fault is the
-          // one thing that does end the pass, because the next claim would hit it too, on the
-          // machine or in the project's settings; passOrder is what keeps that from starving a
-          // sibling across passes.
+          // one thing that does end the pass: a broken machine fails every claim after it, and the
+          // poll interval is all that paces a queue through a project's broken settings. passOrder
+          // is what keeps that from starving a sibling across passes.
           for (const projectId of passOrder(deps.assignments())) {
             if (!running) return;
             try {
@@ -119,7 +119,7 @@ export function createLoop(deps: LoopDeps): Loop {
                 const disposition = await deps.execute(task);
                 if (disposition) {
                   // The board gets a comment on the task; the operator watching this log got
-                  // nothing at all, which is the wrong way round for a fault that is the machine's
+                  // nothing at all, which is the wrong way round for a fault that is not the task's
                   // (BP-349 review). The reason itself is on the board — a run's fault is not a
                   // string this loop holds — so this says which task carried it.
                   log(`${disposition === "machine-fault" ? "machine" : "settings"} fault on ${task.taskKey}; not claiming again this pass`);
@@ -147,8 +147,8 @@ export function createLoop(deps: LoopDeps): Loop {
         }
 
         if (!running) return;
-        // A fault outranks work done earlier in the pass: the fault is what the next claim
-        // would hit, so the pass ends here whatever else succeeded before it.
+        // A fault outranks work done earlier in the pass, which ends here whatever else
+        // succeeded before it.
         if (claimedAny && !faulted) continue;
         await deps.sleep(deps.pollIntervalMs(), stopping.signal);
       }
