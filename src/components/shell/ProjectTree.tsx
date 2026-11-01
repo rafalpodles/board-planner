@@ -9,7 +9,6 @@ import { reorderedIds } from "@/lib/reorder";
 import {
   DndContext,
   DragEndEvent,
-  KeyboardSensor,
   PointerSensor,
   closestCenter,
   useSensor,
@@ -18,7 +17,6 @@ import {
 import { restrictToParentElement, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import {
   SortableContext,
-  sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
@@ -148,11 +146,9 @@ function SubItem({ href, icon, label, active, dot, pill }: SubItemProps) {
 }
 
 /**
- * Carries useSortable for one project. A pointer drags the whole row, so its listener goes on
- * the row while the sortable element is the wrapper that also holds the expanded sub-items —
- * otherwise the sub-items would not travel with it. The keyboard gets a handle of its own: the
- * row holds a link and a button, and dnd-kit takes Space and Enter from anything inside the element
- * carrying its key listener unless an activator is named.
+ * Carries useSortable for one project. The whole row is the handle here, so the
+ * listeners go on the row while the sortable element is the wrapper that also holds
+ * the expanded sub-items — otherwise the sub-items would not travel with it.
  */
 function SortableProject({
   id,
@@ -163,22 +159,16 @@ function SortableProject({
   disabled: boolean;
   children: (state: {
     setNodeRef: (el: HTMLElement | null) => void;
-    setHandleRef: (el: HTMLElement | null) => void;
-    rowProps: Record<string, unknown>;
     handleProps: Record<string, unknown>;
     style: React.CSSProperties;
     isDragging: boolean;
   }) => React.ReactNode;
 }) {
-  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } =
-    useSortable({ id, disabled });
-  const { onKeyDown, ...rowProps } = listeners ?? {};
+  const { setNodeRef, listeners, transform, transition, isDragging } = useSortable({ id, disabled });
 
   return children({
     setNodeRef,
-    setHandleRef: setActivatorNodeRef,
-    rowProps,
-    handleProps: { ...attributes, onKeyDown },
+    handleProps: { ...listeners },
     style: {
       transform: CSS.Transform.toString(transform),
       transition,
@@ -212,10 +202,9 @@ export function ProjectTree({
 
   const canReorder = !!onReorder && projects.length > 1;
   const sensors = useSensors(
-    // The whole row drags and it holds a link, so a drag only begins once the
-    // pointer has actually travelled — a plain click still navigates
+    // The whole row is the handle and it is full of links, so a drag only begins
+    // once the pointer has actually travelled — a plain click still navigates
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
   // An expanded project is several times taller than a collapsed one, and dnd-kit
@@ -289,11 +278,12 @@ export function ProjectTree({
 
         return (
           <SortableProject key={project._id} id={project._id} disabled={!canReorder}>
-            {({ setNodeRef, setHandleRef, rowProps, handleProps, style, isDragging }) => (
+            {({ setNodeRef, handleProps, style, isDragging }) => (
           <div ref={setNodeRef} style={style}>
             <div
               data-active-project={isRouteProject || undefined}
-              {...rowProps}
+              data-reorderable={canReorder || undefined}
+              {...(canReorder ? handleProps : {})}
               className={`relative flex w-full items-center gap-1.5 rounded-lg pr-2.5 transition-colors hover:bg-bg-hover ${
                 isRouteProject ? "shadow-[inset_3px_0_0_var(--color-primary)]" : ""
               } ${canReorder ? "cursor-grab touch-pan-y active:cursor-grabbing" : ""} ${
@@ -329,19 +319,6 @@ export function ProjectTree({
                   {project.key}
                 </span>
               </Link>
-              {canReorder && (
-                <button
-                  type="button"
-                  ref={setHandleRef}
-                  aria-label={`Reorder ${project.name}`}
-                  {...handleProps}
-                  className="focus-ring pointer-events-none absolute right-2 top-1/2 flex h-5 w-4 -translate-y-1/2 items-center justify-center rounded bg-bg-hover text-text opacity-0 focus-visible:opacity-100"
-                >
-                  <svg aria-hidden className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M9 5h2v2H9zm0 6h2v2H9zm0 6h2v2H9zm4-12h2v2h-2zm0 6h2v2h-2zm0 6h2v2h-2z" />
-                  </svg>
-                </button>
-              )}
             </div>
 
             {expanded && (

@@ -1,9 +1,8 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import {
   NEWEST_PROJECT_ID,
   PROJECT_ID,
   NEWEST_PROJECT_KEY,
-  NEWEST_PROJECT_NAME,
   PROJECT_KEY,
   PROJECT_NAME,
   SECOND_PROJECT_ID,
@@ -23,11 +22,9 @@ import { signIn } from "./session";
  * test either — a dnd-kit regression here reverts on the next reload with nothing going red, which
  * is exactly the failure a person would report and no test would catch.
  *
- * Driven from the keyboard, because dnd-kit's KeyboardSensor is the only sensor that can be driven
- * deterministically: a pointer drag depends on the row's height and on the 5px activation
- * constraint. The live region is both the synchronisation and the evidence that the sensor
- * actually picked the row up — see BP-455, where four separate test mistakes made a working drag
- * look broken.
+ * Driven with the mouse, the only way a row moves. The live region is both the synchronisation and
+ * the evidence that the sensor actually picked the row up — see BP-455, where four separate test
+ * mistakes made a working drag look broken.
  */
 
 test.beforeEach(async () => {
@@ -40,12 +37,12 @@ test.beforeEach(async () => {
 const announced = (page: Page) =>
   page.locator('[id^="DndLiveRegion"]').filter({ hasText: /./ }).last();
 
-/** The rows' keyboard handles, in the order the sidebar shows them. */
-const sortableRows = (page: Page) => page.locator('aside [aria-roledescription="sortable"]');
+/** The rows a drag can pick up, in the order the sidebar shows them. */
+const sortableRows = (page: Page) => page.locator("aside [data-reorderable]");
 
 async function keysInSidebar(page: Page): Promise<string[]> {
   return sortableRows(page).evaluateAll((rows) =>
-    rows.map((row) => row.parentElement?.querySelector("a span:last-child")?.textContent?.trim() ?? "")
+    rows.map((row) => row.querySelector("a span:last-child")?.textContent?.trim() ?? "")
   );
 }
 
@@ -55,8 +52,14 @@ async function storedOrder(page: Page): Promise<string[]> {
   return ((await response.json()) as { key: string }[]).map((project) => project.key);
 }
 
+async function centreOf(row: Locator) {
+  const box = await row.boundingBox();
+  if (!box) throw new Error("the row is not on screen");
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
 /**
- * Picks the first sortable row up from the keyboard and drops it one place down.
+ * Picks the first sortable row up with the mouse and drops it one place down.
  *
  * `overFirst` is the row's own droppable: a sortable starts over itself, so waiting for that line
  * — rather than for either of "picked up"/"was moved" — is what proves the sensor is live and has
@@ -68,26 +71,20 @@ async function dragFirstRowDown(
   overFirst: { toString(): string },
   overNext: { toString(): string }
 ) {
-  await sortableRows(page).first().focus();
-  await page.keyboard.press("Space");
+  const from = await centreOf(sortableRows(page).first());
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  // Past the 5px a drag waits for, which is what keeps a click on the row's link a click
+  await page.mouse.move(from.x, from.y + 10, { steps: 3 });
   await expect(announced(page)).toContainText(`over droppable area ${overFirst}`);
 
-  // The press is retried because an arrow can still be swallowed while dnd-kit is between ticks,
-  // and a lost keystroke is indistinguishable from a broken drag until the announcement names the
-  // row it is now over. Retried only while the announcement still names the starting droppable,
-  // though: pressing again after a press that landed walks the row past the target, and from the
-  // bottom of the list no further press can bring it back
-  await expect(async () => {
-    const over = await announced(page).textContent();
-    if (over?.includes(`over droppable area ${overFirst}`)) {
-      await page.keyboard.press("ArrowDown");
-    }
-    await expect(announced(page)).toContainText(`over droppable area ${overNext}`, {
-      timeout: 2_000,
-    });
-  }).toPass({ timeout: 20_000 });
-  await page.keyboard.press("Space");
-  // The drag is finished, not merely keyed: the drop announcement is dnd-kit's own commit signal
+  // Read after the pick-up, and once: the pick-up collapses the tree, and from here on the next row
+  // is drawn wherever the drag has pushed it
+  const to = await centreOf(sortableRows(page).nth(1));
+  await page.mouse.move(to.x, to.y, { steps: 5 });
+  await expect(announced(page)).toContainText(`over droppable area ${overNext}`);
+  await page.mouse.up();
+  // The drag is finished, not merely released: the drop announcement is dnd-kit's own commit signal
   await expect(announced(page)).toContainText(/was dropped/i);
 }
 
@@ -153,8 +150,6 @@ test("a board dragged down the sidebar stays there, for everybody, after a reloa
   await dragFirstRowDown(page, NEWEST_PROJECT_ID, PROJECT_ID);
 
   expect((await saved).status()).toBe(200);
-  // A keyboard user carries on from the row they just moved
-  await expect(page.getByRole("button", { name: `Reorder ${NEWEST_PROJECT_NAME}`, exact: true })).toBeFocused();
 
   // Polled: the list is reordered optimistically, so a one-shot read races the render rather than
   // the request it is gated on
@@ -179,11 +174,11 @@ test("a board dragged down the sidebar stays there, for everybody, after a reloa
 });
 
 /**
- * BP-1090. dnd-kit starts a keyboard drag on Space or Enter from anything inside whatever carries
- * its listeners unless it is told which element is the activator, and the row is full of controls:
- * the key that should have opened a board picked it up instead.
+ * BP-1090. A row is dragged with the mouse and nothing else, because dnd-kit's keyboard drag took
+ * Space and Enter from everything inside the row: the key that should have opened a board picked
+ * it up instead.
  */
-test("the keyboard opens and expands a board, and only the handle picks a row up", async ({ page }) => {
+test("the keyboard opens and expands a board, and picks no row up", async ({ page }) => {
   await signIn(page);
   await page.goto("/projects");
   await expect(sortableRows(page)).toHaveCount(3);
@@ -202,8 +197,8 @@ test("the keyboard opens and expands a board, and only the handle picks a row up
 test("a member has no rows to drag, and reordering is refused if they ask anyway", async ({
   page,
 }) => {
-  // Two boards, because the tree hides its handles when there is only one row to move: on a
-  // one-board sidebar this test would pass with the gate removed
+  // Two boards, because the tree offers no drag when there is only one row to move: on a one-board
+  // sidebar this test would pass with the gate removed
   await grantMemberOn(NEWEST_PROJECT_ID);
 
   await signIn(page, "member");
@@ -211,7 +206,7 @@ test("a member has no rows to drag, and reordering is refused if they ask anyway
   await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
   await expect(page.locator('aside a[href^="/projects/"]')).toHaveCount(2);
 
-  // Two rows they may open and neither carries the sortable attributes dnd-kit needs
+  // Two rows they may open and neither is one a drag can pick up
   await expect(sortableRows(page)).toHaveCount(0);
 
   const asMember = await page.request.put("/api/projects/reorder", {

@@ -205,7 +205,7 @@ describe("ProjectTree reordering", () => {
   // The drag itself belongs to dnd-kit and needs real pointer geometry, which this
   // environment cannot provide; the order a drop produces is covered in reorder.test
   function sortableRows(container: HTMLElement) {
-    return [...container.querySelectorAll('[aria-roledescription="sortable"]')];
+    return [...container.querySelectorAll("[data-reorderable]")];
   }
 
   it("makes rows sortable when reordering is allowed", () => {
@@ -213,12 +213,11 @@ describe("ProjectTree reordering", () => {
     expect(sortableRows(container)).toHaveLength(2);
   });
 
-  it("gives the keyboard a named handle and leaves the row a plain container of controls", () => {
+  it("leaves the row a plain container of controls", () => {
     const { container } = renderTree({ onReorder: () => {} });
-    const handle = screen.getByRole("button", { name: "Reorder Mobile App" });
 
-    expect(sortableRows(container)).toContain(handle);
-    expect(handle.closest('[role="button"]:not(button)')).toBeNull();
+    expect(container.querySelector('[role="button"]:not(button)')).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Reorder / })).toBeNull();
   });
 
   it("leaves Space and Enter to the controls inside the row", () => {
