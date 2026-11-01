@@ -26,6 +26,7 @@ import { dirname, join, resolve } from "node:path";
 import mongoose from "mongoose";
 import { BASE_URL } from "../../playwright.config";
 import { SAME_ORIGIN } from "../api";
+import { signIn } from "../session";
 import { ADMIN_ID, ADMIN_SESSION_TOKEN, E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed, taskFactory } from "../seed";
 
 test.skip(process.platform !== "darwin", "the worker confines its agent with seatbelt, which is macOS only");
@@ -52,11 +53,23 @@ const PR_URL = `https://github.com/${REPO}/pull/1`;
 
 const SESSION = { ...SAME_ORIGIN, Cookie: `__Host-bp_session=${ADMIN_SESSION_TOKEN}` };
 
+// The stub answers the first `auth status` after SESSION_ENDS is laid down as signed in, and is signed out
+// from then on: a session that ended under a worker whose preflight had passed.
+const SIGNED_OUT = join(BIN, "signed-out");
+const SESSION_ENDS = join(BIN, "session-ends-after-preflight");
+
 const CLAUDE_STUB = `#!/bin/sh
 case "$1" in
   --version) echo "2.1.999 (Claude Code stub)"; exit 0 ;;
-  auth) echo '{"loggedIn":true,"authMethod":"claude.ai","email":"smoke@example.test","subscriptionType":"max"}'; exit 0 ;;
+  auth)
+    if [ -f '${SIGNED_OUT}' ]; then echo '{"loggedIn":false,"authMethod":"none"}'; exit 1; fi
+    if [ -f '${SESSION_ENDS}' ]; then mv '${SESSION_ENDS}' '${SIGNED_OUT}'; fi
+    echo '{"loggedIn":true,"authMethod":"claude.ai","email":"smoke@example.test","subscriptionType":"max"}'; exit 0 ;;
 esac
+if [ -f '${SIGNED_OUT}' ]; then
+  echo '{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}'
+  exit 1
+fi
 prompt=""
 sys=""
 while [ $# -gt 0 ]; do
@@ -427,6 +440,55 @@ test("the real worker claims, runs, delivers and reports a task, and releases th
   expect(released?.execution?.runId).toBeUndefined();
   expect(released?.execution?.attempts).toBe(0);
   expect(await commentsOn(STOPPED.id)).toContainEqual(expect.stringContaining("Returned to the queue: the run was stopped"));
+});
+
+// BP-1077. Every run of a signed-out CLI fails in a second with the attempt refunded, so a worker that went
+// on claiming would take the same task on every poll for as long as nobody signed in.
+test("the real worker hands a task back unspent when claude signs out, shows why, and takes it again once signed in", async ({ page, request }) => {
+  layDownRepository();
+  const port = await freePort();
+  daemon = await startDaemon(port);
+  cloneCheckout(port);
+  write(join(STATE, "repos.json"), JSON.stringify({ repos: [CHECKOUT] }) + "\n", 0o600);
+  await withDb((db) => db.collection("tasks").deleteOne({ _id: STOPPED.id }));
+  write(SESSION_ENDS, "");
+
+  worker = startWorker(await mintEnrolmentToken(request));
+
+  const signedOut = "claude is not signed in on this machine";
+  await expect
+    .poll(async () => commentsOn(DELIVERED.id), { message: "see worker.log", timeout: 2 * 60_000, intervals: [1_000] })
+    .toContainEqual(expect.stringContaining(`Returned to the queue: ${signedOut}`));
+  await expect
+    .poll(() => readFileSync(WORKER_LOG, "utf8"), { timeout: 60_000 })
+    .toContain(`not claiming any work: ${signedOut}`);
+  const refused = await storedTask(DELIVERED.id);
+  expect(refused?.status).toBe("todo");
+  expect(refused?.execution?.runId).toBeUndefined();
+  expect(refused?.execution?.attempts).toBe(0);
+
+  await signIn(page);
+  await expect(async () => {
+    await page.goto("/settings/workers");
+    await expect(page.getByTestId("preflight-failure")).toContainText(`claude — ${signedOut}`, { timeout: 2_000 });
+  }).toPass({ timeout: 90_000, intervals: [5_000] });
+
+  rmSync(SIGNED_OUT);
+
+  await expect
+    .poll(async () => (await storedTask(DELIVERED.id))?.status, {
+      message: "the task should run once claude is signed in, with no restart; see worker.log",
+      timeout: 2 * 60_000,
+      intervals: [2_000],
+    })
+    .toBe("needs_human_review");
+  const delivered = await storedTask(DELIVERED.id);
+  expect(delivered?.execution?.attempts).toBe(1);
+  expect(await commentsOn(DELIVERED.id)).toContainEqual(expect.stringContaining(`Opened ${PR_URL} for review`));
+
+  const log = readFileSync(WORKER_LOG, "utf8");
+  expect(log).toContain("claude is signed in again");
+  expect(log.match(/machine fault on /g)).toHaveLength(1);
 });
 
 // BP-1073. One task, one project that lists two repositories: the worker takes it only with a checkout of

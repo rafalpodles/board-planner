@@ -644,6 +644,14 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   per run of consecutive faults, not once per poll, because the fault repeats every cycle for as
   long as it lasts — and reads `.faulted` rather than idle.
 
+  **A claude that is not signed in** (**BP-1077**) is the same fault with a way out. Preflight's
+  `claude` row reads red on it, and a session that ends under a running worker first shows as a run
+  that exits 1 on `Not logged in · Please run /login`, with stderr empty. Either way the task goes
+  back with its attempt refunded, the machine claims nothing, and it asks `claude auth status` once
+  per poll, so `claude auth login` is all it takes: no restart. That covers a Codex task too, since
+  every machine needs Claude Code to claim. A login that `auth status` still calls good while runs
+  refuse it stays a machine fault per pass.
+
   Preflight answers the question at boot by confining a probe and watching it fail to escape, so a
   machine where `sandbox-exec` is missing or the profile stopped compiling reads red rather than
   green. To run unconfined anyway, set `CP_ALLOW_UNCONFINED_AGENT=1` in the worker's own
