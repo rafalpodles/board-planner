@@ -76,7 +76,32 @@ describe("PATCH .../tasks/:taskId/status", () => {
     expect(changeStatus).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", "in_review", "u1", {
       force: false,
       workerId: "w1",
+      refundAttempt: false,
     });
+  });
+
+  it("hands a worker's refund down", async () => {
+    const res = await PATCH(request({ status: "in_review", refundAttempt: true }, "worker"), ctx());
+
+    expect(res.status).toBe(200);
+    expect(changeStatus).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", "in_review", "u1", {
+      force: false,
+      workerId: "w1",
+      refundAttempt: true,
+    });
+  });
+
+  it.each(["person", "machineToken"] as const)("refuses a refund from a %s, and moves nothing", async (principal) => {
+    const res = await PATCH(request({ status: "in_review", refundAttempt: true }, principal), ctx());
+
+    expect(res.status).toBe(403);
+    expect(changeStatus).not.toHaveBeenCalled();
+  });
+
+  it("takes only a real true as the refund", async () => {
+    await PATCH(request({ status: "in_review", refundAttempt: "true" }, "worker"), ctx());
+
+    expect(changeStatus.mock.calls[0][5]).toMatchObject({ refundAttempt: false });
   });
 
   it("leaves a person's force alone — it is how the board takes a task back", async () => {
@@ -86,6 +111,7 @@ describe("PATCH .../tasks/:taskId/status", () => {
     expect(changeStatus).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", "todo", "u1", {
       force: true,
       workerId: undefined,
+      refundAttempt: false,
     });
   });
 
@@ -106,6 +132,7 @@ describe("PATCH .../tasks/:taskId/status", () => {
     expect(changeStatus).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", "in_review", "u1", {
       force: false,
       workerId: undefined,
+      refundAttempt: false,
     });
   });
 
@@ -116,6 +143,7 @@ describe("PATCH .../tasks/:taskId/status", () => {
     expect(changeStatus).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", "in_review", "u1", {
       force: false,
       workerId: undefined,
+      refundAttempt: false,
     });
   });
 });

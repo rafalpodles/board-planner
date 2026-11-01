@@ -1449,6 +1449,41 @@ describe("clearing the phase on every exit from the active column", () => {
     expect(unsetKeys(findOneAndUpdate.mock.calls[0][1])).toEqual(RUN_KEYS);
   });
 
+  // BP-1117. Which writes give an attempt back; that the pipeline really does is e2e/settings-fault-hold
+  describe("the attempt of a run stopped by settings", () => {
+    const setOf = () => (findOneAndUpdate.mock.calls[0][1] as { $set?: Record<string, unknown> }[])[0].$set ?? {};
+
+    beforeEach(() => {
+      const held = { _id: "t1", taskNumber: 1, status: "doing", title: "x", execution: { runId: "run-1", workerId: "w1", attempts: 2 } };
+      findOne.mockReturnValue({ lean: () => Promise.resolve(held) });
+    });
+
+    it("comes back in the write that moves the task, for the worker holding the run", async () => {
+      await changeStatus(db, "p1", "t1", "checking", "actor", { workerId: "w1", refundAttempt: true });
+
+      expect(findOneAndUpdate).toHaveBeenCalledTimes(1);
+      expect(setOf()).toMatchObject({ status: "checking", "execution.attempts": expect.anything() });
+    });
+
+    it("stays spent when nobody asked", async () => {
+      await changeStatus(db, "p1", "t1", "checking", "actor", { workerId: "w1" });
+
+      expect(setOf()).not.toHaveProperty("execution.attempts");
+    });
+
+    it("stays spent for a machine that is not holding the run", async () => {
+      await changeStatus(db, "p1", "t1", "checking", "actor", { workerId: "w2", refundAttempt: true, force: true });
+
+      expect(setOf()).not.toHaveProperty("execution.attempts");
+    });
+
+    it("stays spent when the status is resent, which is what a replayed report looks like", async () => {
+      await changeStatus(db, "p1", "t1", "doing", "actor", { workerId: "w1", refundAttempt: true });
+
+      expect(setOf()).not.toHaveProperty("execution.attempts");
+    });
+  });
+
   // BP-758: this is the write the worker's outcome record is sent after, and lastRunId is what the
   // record is then matched by
   it("keeps the id the run's record is matched by", async () => {
