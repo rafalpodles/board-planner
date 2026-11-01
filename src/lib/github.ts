@@ -83,9 +83,8 @@ export { escapeRegex };
  * was in both.
  *
  * The lookbehind is the hole: without it the key is found inside a longer word, so a branch named
- * `feat/websubp-99` contains `bp-99` and was read as task 99 — beating the `BP-5` the title
- * actually said, because the branch is tried first. A two-letter key makes that easy, and this
- * board's key is two letters. Since a sync now removes a link the round contradicts, a matcher
+ * `feat/websubp-99` contains `bp-99` and was read as task 99. A two-letter key makes that easy,
+ * and this board's key is two letters. Since a sync now removes a link the round contradicts, a matcher
  * false negative deletes a correct link rather than merely adding a wrong one (BP-611).
  *
  * A lookbehind rather than a consumed character, so the digits stay group 1.

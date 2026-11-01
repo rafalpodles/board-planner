@@ -105,8 +105,8 @@ describe("matchPRsToTasks", () => {
     expect(matchPRsToTasks([pr({ ref: "c(-5/x" })], "C(")).toHaveLength(1);
   });
 
-  // BP-611. `websubp-99` contains `bp-99`, the branch is tried before the title, and since a sync
-  // removes the links a round contradicts, the correct link is deleted rather than duplicated.
+  // BP-611. `websubp-99` contains `bp-99`, and a link to the wrong task is one a later sync would
+  // have to contradict.
   it("does not find the key inside a longer word", () => {
     const matched = matchPRsToTasks(
       [pr({ ref: "feat/websubp-99", title: "BP-5 real work" })],
