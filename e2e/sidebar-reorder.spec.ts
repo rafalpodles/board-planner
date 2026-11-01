@@ -4,6 +4,7 @@ import {
   PROJECT_ID,
   NEWEST_PROJECT_KEY,
   PROJECT_KEY,
+  PROJECT_NAME,
   SECOND_PROJECT_ID,
   SECOND_PROJECT_KEY,
   grantMemberOn,
@@ -38,12 +39,12 @@ test.beforeEach(async () => {
 const announced = (page: Page) =>
   page.locator('[id^="DndLiveRegion"]').filter({ hasText: /./ }).last();
 
-/** The draggable rows, in the order the sidebar shows them. */
+/** The rows' keyboard handles, in the order the sidebar shows them. */
 const sortableRows = (page: Page) => page.locator('aside [aria-roledescription="sortable"]');
 
 async function keysInSidebar(page: Page): Promise<string[]> {
   return sortableRows(page).evaluateAll((rows) =>
-    rows.map((row) => row.querySelector("a span:last-child")?.textContent?.trim() ?? "")
+    rows.map((row) => row.parentElement?.querySelector("a span:last-child")?.textContent?.trim() ?? "")
   );
 }
 
@@ -172,6 +173,26 @@ test("a board dragged down the sidebar stays there, for everybody, after a reloa
     NEWEST_PROJECT_KEY,
     SECOND_PROJECT_KEY,
   ]);
+});
+
+/**
+ * BP-1090. dnd-kit starts a keyboard drag on Space or Enter from anything inside whatever carries
+ * its listeners unless it is told which element is the activator, and the row is full of controls:
+ * the key that should have opened a board picked it up instead.
+ */
+test("the keyboard opens and expands a board, and only the handle picks a row up", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/projects");
+  await expect(sortableRows(page)).toHaveCount(3);
+  const sidebar = page.locator("aside");
+
+  await sidebar.getByRole("button", { name: `Expand ${PROJECT_NAME}`, exact: true }).focus();
+  await page.keyboard.press("Space");
+  await expect(sidebar.getByRole("button", { name: `Collapse ${PROJECT_NAME}`, exact: true })).toBeVisible();
+
+  await sidebar.locator(`a[href="/projects/${PROJECT_KEY}"]`).focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(`/projects/${PROJECT_KEY}`);
 });
 
 test("a member has no rows to drag, and reordering is refused if they ask anyway", async ({

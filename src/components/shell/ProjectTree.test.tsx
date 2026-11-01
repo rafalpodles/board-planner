@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, act } from "@testing-library/react";
+import { render, screen, cleanup, act, fireEvent } from "@testing-library/react";
 import { ProjectTree } from "./ProjectTree";
 import { ApiProject } from "@/types";
 
@@ -211,6 +211,22 @@ describe("ProjectTree reordering", () => {
   it("makes rows sortable when reordering is allowed", () => {
     const { container } = renderTree({ onReorder: () => {} });
     expect(sortableRows(container)).toHaveLength(2);
+  });
+
+  it("gives the keyboard a named handle and leaves the row a plain container of controls", () => {
+    const { container } = renderTree({ onReorder: () => {} });
+    const handle = screen.getByRole("button", { name: "Reorder Mobile App" });
+
+    expect(sortableRows(container)).toContain(handle);
+    expect(handle.closest('[role="button"]:not(button)')).toBeNull();
+  });
+
+  it("leaves Space and Enter to the controls inside the row", () => {
+    renderTree({ onReorder: () => {} });
+    const link = screen.getAllByRole("link").find((a) => a.getAttribute("href") === "/projects/MOB");
+
+    expect(fireEvent.keyDown(link!, { code: "Enter" })).toBe(true);
+    expect(fireEvent.keyDown(screen.getByRole("button", { name: "Expand Mobile App" }), { code: "Space" })).toBe(true);
   });
 
   it("makes nothing sortable without a reorder handler", () => {
