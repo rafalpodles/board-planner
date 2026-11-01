@@ -217,6 +217,8 @@ describe("every real env-building call site stays inside the allowlist, across a
       const verdict = await reviewGate(runner, gitPath, CLAUDE_PATH, 30_000).run({
         worktreePath: worktree.path,
         worktreeDir: worktree.dir,
+        gateHome: worktree.gateHome,
+        checkoutGitDir: worktree.pin.gitDir,
         task,
         result: {
           status: "completed",

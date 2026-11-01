@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentArgs, isAgentSpawn } from "../__fixtures__/agent-spawn.js";
+import { gateCommandsOf } from "./gate-commands.js";
 import { gateFromEntry } from "./from-entry.js";
 import { GateContext, SnapshotEntry } from "../types.js";
 import { CLAUDE_PATH, NPM_PATH } from "../__fixtures__/tool-paths.js";
@@ -23,6 +24,8 @@ function ctx(changedLines: number): GateContext {
   return {
     worktreePath: "/wt",
     worktreeDir: { path: "/wt", dev: 0, ino: 0 },
+    gateHome: { path: "/wt.home", dev: 0, ino: 1 },
+    checkoutGitDir: "/repo/.git",
     task: { taskKey: "CP-1", title: "t", description: "", acceptanceCriteria: [] } as never,
     result: {} as never,
     diff: {
@@ -151,6 +154,8 @@ describe("gateFromEntry", () => {
         ...ctx(5),
         worktreePath,
         worktreeDir: recordDir(worktreePath),
+        gateHome: recordDir(worktreePath),
+        checkoutGitDir: "/repo/.git",
       });
     } finally {
       rmSync(worktreePath, { recursive: true, force: true });
@@ -158,6 +163,26 @@ describe("gateFromEntry", () => {
 
     expect(run).toHaveBeenCalled();
     for (const [, args] of run.mock.calls) expect(args).toContain(NPM_PATH);
+  });
+
+  // BP-985: a program an agent could rewrite turns the Tests gate green having judged nothing
+  it("hands the protected-paths gate the project's commands", async () => {
+    const own = gateCommandsOf({ testCommand: "./bin/test" });
+    const context = { ...ctx(5), diff: { ...ctx(5).diff, changedFiles: ["bin/test"] } };
+
+    const verdict = await gateFromEntry(entry({ gateKind: "protected-paths" }), idleRunner, tools, 1000, FALLBACKS, own)!.run(context);
+
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain("bin/test");
+  });
+
+  it("hands the test-presence gate the project's commands, or a Go test is not one", async () => {
+    const own = gateCommandsOf({ testCommand: "go test ./..." });
+    const context = { ...ctx(5), diff: { ...ctx(5).diff, changedFiles: ["a.go", "a_test.go"], patch: "+++ b/a_test.go\n+x" } };
+
+    const verdict = await gateFromEntry(entry({ gateKind: "test-presence" }), idleRunner, tools, 1000, FALLBACKS, own)!.run(context);
+
+    expect(verdict.ok).toBe(true);
   });
 
   // That this list IS the catalog's is asserted in catalog-contract.test.ts, which reads the app's

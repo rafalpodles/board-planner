@@ -52,11 +52,14 @@ export interface RunState {
 export interface StepContext {
   worktreePath: string;
   worktreeDir: RecordedDir;
+  checkoutGitDirs?: string[];
   branch: string;
   task: ClaimedTask;
   executor: Executor;
   delivery: Delivery;
   commit: (message: string) => Promise<string>;
+  /** After a commit is recorded, so that what throws here cannot read as the commit having failed. */
+  treeChanged?: () => void;
   /** What the run has done to `.git` or the index flags, checked before anything is delivered (BP-794). */
   tampering: () => Promise<string | null>;
   state: RunState;
@@ -174,6 +177,7 @@ export async function runStep(
     task: ctx.task,
     worktreePath: ctx.worktreePath,
     worktreeDir: ctx.worktreeDir,
+    checkoutGitDirs: ctx.checkoutGitDirs,
     signal: ctx.signal,
     onEvent: ctx.onEvent,
     brief: {
@@ -206,8 +210,9 @@ export async function runStep(
   // letting it throw would reach the pipeline's outer catch, which destroys the worktree holding the
   // only copy of the work.
   if (entry.capability === "edit") {
+    let sha = "";
     try {
-      const sha = await ctx.commit(
+      sha = await ctx.commit(
         `${ctx.task.taskKey}: ${entry.name.toLowerCase()}`,
       );
       if (sha) {
@@ -226,6 +231,13 @@ export async function runStep(
         return { kind: "tampered", finding: error.finding, message: error.message };
       }
       return { kind: "error", message: String(error) };
+    }
+    if (sha) {
+      try {
+        ctx.treeChanged?.();
+      } catch (error) {
+        return { kind: "error", message: String(error) };
+      }
     }
   }
 

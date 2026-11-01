@@ -2,6 +2,8 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
+import { NO_RUN } from "./agents/agent.js";
+import { claudeAgent } from "./agents/claude.js";
 import { createExecutor } from "./executor.js";
 import { SANDBOX_COMMAND } from "./sandbox.js";
 import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
@@ -188,6 +190,48 @@ describe("createExecutor", () => {
     const args = run.mock.calls[0][1] as string[];
     const prompt = args[args.indexOf("--append-system-prompt") + 1];
     expect(prompt.indexOf("untrusted party")).toBeLessThan(prompt.indexOf("tidy the imports"));
+  });
+
+  // BP-985: the brief forbids what a project's commands name, which an agent can only obey if told them
+  it("names the project's own gate commands, and says nothing on the npm gates", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+    const own = workerConfig({ buildCommand: "go build ./...", testCommand: "./bin/test", workingDirectory: "svc" });
+
+    await createExecutor(own, runner, CLAUDE_PATH).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
+
+    const promptOf = (call: number) => {
+      const args = run.mock.calls[call][1] as string[];
+      return args[args.indexOf("--append-system-prompt") + 1];
+    };
+    expect(promptOf(0)).toContain("This project's gates run `go build ./...`, `./bin/test` in svc.");
+    expect(promptOf(1)).not.toContain("This project's gates run");
+  });
+
+  it("shuts the home to a step on a project's own commands, keeping the CLI's session, and leaves an npm project as it was", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(workerConfig({ testCommand: "go test ./..." }), runner, CLAUDE_PATH).execute(options);
+    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
+
+    const argv = (call: number) => (run.mock.calls[call][1] as string[]).join("\n");
+    expect(argv(0)).toContain("(deny file-read* (with errno ENOENT)");
+    expect(argv(0)).toContain("/.claude.json");
+    expect(argv(0)).toContain("/Library/Keychains");
+    expect(argv(0)).not.toContain("com.apple.SecurityServer");
+    expect(argv(1)).not.toContain("(deny file-read* (with errno ENOENT)");
+  });
+
+  it("keeps a worktree readable under a shut home for a step that may not write it", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+    const reader = { ...claudeAgent(CLAUDE_PATH), worktreeWritable: () => false, prepare: async () => ({ ...NO_RUN, writable: [tmpdir()] }) };
+
+    await createExecutor(workerConfig({ testCommand: "go test ./..." }), runner, reader).execute({ ...options, brief: { ...options.brief, capability: "read-only" } });
+
+    const argv = run.mock.calls[0][1] as string[];
+    const named = (prefix: string) => argv.filter((arg) => arg.startsWith(prefix)).map((arg) => arg.slice(arg.indexOf("=") + 1));
+    expect(named("R")).toContain(options.worktreeDir.path);
+    expect(named("W")).not.toContain(options.worktreeDir.path);
   });
 
   // An agent told to commit and unable to would report itself blocked

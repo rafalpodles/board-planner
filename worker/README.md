@@ -451,7 +451,8 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   fetch a URL on a process's behalf, outside the profile, are denied by name in those two commands:
   nsurlsessiond (a background `NSURLSession`), trustd (the AIA and OCSP URLs of a certificate the
   test hands it) and WebKit's networking process — each reached a listener from a process with no
-  network at all. That is a denylist, and it closes those three, not the category. What else this
+  network at all, trustd only where it still fetches from a private address, which macOS 15.8.2's
+  trustd refused. That is a denylist, and it closes those three, not the category. What else this
   does not close: seatbelt's `localhost` is every address this machine holds, so a listener here
   that forwards — an HTTP proxy, an SSH tunnel — is still a way out, and it ignores an IPv6 scope,
   so `fe80::1%en0` or `%utun0` is let through and a packet goes out on that link (narrowing it to
@@ -845,6 +846,8 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   | `baseBranch` | project policy | `git ls-remote -- <url> refs/heads/<baseBranch>`, `git fetch --no-tags -- <url> <baseBranch>`, `gh pr create --base` | a git ref name, refused where an admin sets it and again in `applyPolicy`; delivery re-checks it and drops `--base` rather than pass a value that is not one, and the two remote calls keep it behind `--`. It no longer reaches `git diff` at all: since BP-382 the gates diff against the resolved base **sha**, and that sink refuses anything that is not `[0-9a-f]{7,64}` |
   | `model`, `fallbackModel`, `reviewModel` | project policy, a step, a review gate's params | `claude --model` | a model name, at `modelOr` — the one place all three overrides meet |
   | limits and timeouts | policy, gate params | numbers | parsed as numbers; a value that is not one is the default, never zero |
+  | `installCommand`, `buildCommand`, `testCommand` | project policy | a program and its arguments, with no shell | words split on spaces and refused where an admin sets it and again in `applyPolicy` if a shell would act on them; the program is a bare name resolved on this worker's `PATH`, or `./path` from the working directory |
+  | `workingDirectory` | project policy | the `cwd` of the gates' commands | a relative path with no leading dot in any part, same two places; each part is checked to be a real directory before each command, so a symlink is refused |
   | `taskKey` | the project's key and the task number | a directory under the worktree root (`<taskKey>.<nonce>`, a new name on every attempt), and a git branch | `^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$`, `pathFor` refuses a path that leaves the root, and `push` refuses a branch that is not a git ref name before building `<commit>:refs/heads/<branch>` out of it — git splits a push refspec at its *last* colon |
   | `capability`, `gateKind` | agent snapshot | a tool list, a gate | closed maps this side, so a server cannot widen what a step may do |
   | `title`, `description`, `prompt`, `focus`, summaries | claim, agent snapshot | prompt text, the PR title and body | option *values*, never positionals, and scrubbed before they reach a pull request. Prompt injection is a different problem and nothing here claims to solve it |
@@ -1042,6 +1045,91 @@ checkout (BP-777).
 An entry that has gone missing, or has no `origin`, is skipped rather than failing the whole list —
 one stale line must not cost this machine every other checkout it could serve.
 
+## A project's own gate commands
+
+By default the Builds gate runs `npm ci --ignore-scripts` and `npm run build`, and the Tests gate runs
+`npm test`, at the repository's root. From 1.10.0 a project's owner can replace them in Settings →
+Workers with an install command, a build command, a test command and a working directory (**BP-985**).
+The values travel in the assignment like the rest of the project's policy; nothing is read from the
+checkout, and a machine credential cannot set them. A worker says `gate-commands` in
+`X-CP-Capabilities`, and one that does not is neither offered nor given such a project, because it
+would run npm and report that as the project's check.
+
+- **The opposite trade from the npm gates.** Those keep reads open and shut the network. These are
+  chosen by a person who may not own the machine, and development needs the network, so they keep the
+  network and shut the home: `sealedHomes` in `sandbox.ts` makes a read under the real home answer
+  ENOENT, but for the worktree, the run's home, the clone's `.git`, the worker's `PATH` directories and
+  the program's own directory, whose parents answer their metadata and nothing else.
+  ENOENT and not a refusal, because `cp-worktrees` usually sits under the home and a tool walks up from
+  it: yarn opens a `.yarnrc` in every parent with no `stat` first and stops on anything but ENOENT.
+  Existence is shut by name, for the 64 shortest files in each parent of a writable directory, listed
+  when the step starts: yarn 1 stops on a parent's `package.json` that exists and will not read, and a
+  name costs the profile more the more there are (2,000 took 7 s, on every spawn). A file past those, one
+  that appears later, or a parent that cannot be listed stays visible, so yarn stops on it. Elsewhere
+  `access` and `mkdir` confirm a guessed name, and whether it is a directory, with no content, size or
+  listing: shut for the whole home, `mkdir` answers ENOENT under a parent that exists and node's
+  recursive `mkdir` loops for ever. It still does on the path of a named file, where it could only have
+  failed. Exact directories:
+  `~/.cargo/bin` must not open `~/.cargo/credentials.toml`. It also denies the login keychain's daemon,
+  sockets under the home but for the writable directories' own, and launchd's ssh-agent socket. Measured
+  on macOS 26.7: a planted file, `stat` of it, `ls ~/.ssh` and `security show-keychain-info` get nothing,
+  while the network, git, go, python3, pip3, uv, yarn, mvn, gradle, ruby and a node under `~/.nvm` run.
+  `(with errno …)` is not documented, so a macOS that dropped it would fail to compile the profile and
+  refuse the step, which is the safe way to find out. What it leaves open: files outside the home, such
+  as `/tmp` and the per-user temp directory, the clipboard, other processes' command lines, and services
+  on this machine. With the network on, what it can read it can send, so every
+  branch in the clone and its git config are exposed. `CP_ALLOW_UNCONFINED_AGENT` drops all of it.
+- **The agent and the reviewer get the same seal on such a project**, because otherwise a steered
+  `Read` puts a key in a test file for the next gate to send. Each CLI's adapter says what its session
+  needs (`sessionReadable`). Measured with the real CLIs: Claude Code answers "Not logged in" without
+  `~/Library/Keychains`, and reads and edits with `~/.claude`, `~/.claude.json` and the keychain open;
+  Codex needs only its run's own home. It keeps the keychain's daemon, which a gate command does not.
+  A project on the npm gates is unchanged: its agent reads as it always has.
+- **No shell.** A command is words split on spaces. Anything a shell would act on, `*` and `?` among
+  them but not the `[` and `]` of `pip install -e .[dev]`, which nothing expands, is refused where it is
+  saved and again in `applyPolicy`, and so is a password in a URL, since a command reaches the
+  agent's prompt, the pull request and the audit log. The program is a bare name found on the worker's
+  own `PATH`, or `./path` from the working directory. A pipeline belongs in a script.
+- **Any command set means the project has left npm.** An empty install is then no install. A working
+  directory on its own keeps npm, in that directory; it is resolved in the worktree, checked again
+  before each command, and refused if any part of it is a symlink.
+- **A home of the run's own**, `<worktree>.home`: `HOME`, with `CFFIXED_USER_HOME` and
+  `JAVA_TOOL_OPTIONS=-Djava.io.tmpdir=…` because the JVM reads neither `HOME` nor `TMPDIR` on macOS,
+  which also prints a "Picked up JAVA_TOOL_OPTIONS" line on stderr. Beside the worktree, under a root no
+  confined process can write. Kept from install to test, replaced after any step that commits so that
+  what one gate left cannot steer the gate after the change, and removed with the worktree, which a
+  failed run keeps. The Tests gate runs the install first when none has passed in this home, which is
+  a sequence with no Builds gate or a Tests gate after a later commit. Remembered by the worker and not
+  read off the home, which a venv in the worktree leaves empty.
+  Not a shared cache: code one project's install ran could poison another's, and pip checks no lockfile
+  hash the way npm does. So every run downloads again, which is why the gate's time limit here is the
+  project's step timeout rather than 10 minutes, whichever is longer.
+- **What it runs stays out of the agent's reach.** On npm, `package.json` and `scripts/` are protected
+  so that an agent cannot change what `npm test` executes. On a project's own commands
+  `OWN_COMMANDS_FILE` does the same for `gradlew`, `mvnw`, `justfile`, `conftest.py`, `GNUmakefile`,
+  `go.work` and the like, and the Protected-paths gate refuses a file a command names: as a word, after
+  `=` or a short option, or as the module of `-m`, in any case, because macOS runs `bin/test` for
+  `./bin/Test`. The agent is told the commands. A list closes names and not the category: `go run
+  ./cmd/check` names a directory, and a test can gut a suite from inside a test file.
+- **What a passed gate left is the gate's.** pytest's cache and a venv each carry a `.gitignore` of `*`,
+  which is how a hidden file looks, so `hiddenFromGit` takes the baseline after a passed gate as read,
+  at the next gate, the next commit and delivery. A step that writes the same thing is still refused.
+- **Before anybody pays.** A program a command names that is not on this machine's `PATH` makes the
+  project unusable here, with the reason. `gateConfigFault` fails the task before the first step, for a
+  gate with no command, or a `./path` that is missing or not executable as the first command the
+  sequence runs: only that one, since an install makes what a later one names. In a run across several
+  repositories it takes all of them, because a gate runs only where something changed. Failed and not
+  released: the fault depends on the task's agent, and a refund would keep the task at the head of the
+  queue for ever with the tasks behind it waiting. The pass ends, so one wrong setting takes a task a
+  poll, each with its comment and its move to review, until a person corrects it: at the default 30 s,
+  120 tasks an hour per machine. A working directory the checkout lacks is left to the gate: the task may be the one that
+  creates it. A project on the npm
+  gates is not claimed from without npm; the worker itself no longer needs it.
+- **Test-presence** recognises other ecosystems' test files on these projects only: on the npm gates a
+  `foo_test.py` is a file `npm test` never runs. Rust tests inline in `src/` are not recognised.
+- **Whose command it is.** It runs on the machine of whoever the task is assigned to, chosen by the
+  project's owner, who can change it at any time. Run a worker only on projects whose owner you trust.
+
 ## A project that lists several repositories
 
 From 1.10.0 the worker runs a task in every repository of a project that lists more than one. Every
@@ -1077,7 +1165,8 @@ task of such a project inherits all of them; there is no per-task choice.
 
 What it does not do yet: a refusal in a run across several repositories offers no decision to accept
 (the worktrees are kept and the change is in the comment), the Review gate reads one repository's diff,
-and one base branch and one set of diff limits apply to all of them.
+and one base branch, one set of diff limits, one set of gate commands and one working directory apply
+to all of them.
 
 ## What a worker's credential grants
 
@@ -1115,7 +1204,7 @@ an agent merges because its sequence ends with a **Merge** step, and a change is
 the blocks that use them.
 
 **On the project** (Settings → Workers, the project owner; an instance admin can lock it off, and
-the lock wins): whether workers may run it at all, `baseBranch`, `taskTimeoutMs` and `runCeilingMs`. These describe the repository, so every machine
+the lock wins): whether workers may run it at all, `baseBranch`, `taskTimeoutMs`, `runCeilingMs` and the gate commands (`installCommand`, `buildCommand`, `testCommand`, `workingDirectory`). These describe the repository, so every machine
 serving that project runs under the same values.
 
 **On the worker** (Settings → Workers, the fleet console): what this machine is called, whether it

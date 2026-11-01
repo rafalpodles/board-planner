@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   confine,
   confineTool,
@@ -396,5 +399,84 @@ describe("the operator's escape hatch", () => {
     });
 
     expect("refusal" in result).toBe(true);
+  });
+});
+
+describe("a shut home", () => {
+  const sealed = (homes: string[], readable: string[], writable: string[]) =>
+    confine(CLAUDE_PATH, [], { writable, platform: "darwin", realpath: identity, lstat: aDirectory, env: {}, sealedHomes: { homes, readable } });
+
+  it("refuses to leave open what holds a home, which would be all of it", () => {
+    expect(sealed(["/Users/x"], [], ["/Users/x"])).toMatchObject({ refusal: expect.stringContaining("holds that home") });
+    expect(sealed(["/Users/x"], [], ["/Users"])).toMatchObject({ refusal: expect.stringContaining("holds that home") });
+    expect(sealed(["/Users/x"], [], ["/"])).toMatchObject({ refusal: expect.stringContaining("holds that home") });
+    expect(sealed(["/Users/x"], [], ["/Users/xy"])).not.toHaveProperty("refusal");
+  });
+
+  it("lets the parents of what stays readable answer, up to the outermost home", () => {
+    const spawn = sealed(["/Users/x/inner", "/Users/x"], ["/Users/x/inner/a/b"], ["/private/tmp/w"]);
+
+    expect((spawn as { args: string[] }).args.filter((arg) => /^A\d+=/.test(arg)).map((arg) => arg.slice(arg.indexOf("=") + 1)).sort()).toEqual(["/Users/x", "/Users/x/inner", "/Users/x/inner/a"]);
+  });
+
+  describe("the files beside the parents of a writable directory", () => {
+    let home = "";
+    const wt = () => join(home, "proj", "wt");
+    const named = (spawn: unknown) => (spawn as { args: string[] }).args.filter((arg) => /^F\d+=/.test(arg)).map((arg) => arg.slice(arg.indexOf("=") + 1));
+    const profile = (spawn: unknown) => (spawn as { args: string[] }).args[1];
+
+    beforeEach(() => {
+      home = mkdtempSync(join(tmpdir(), "bp985-beside-"));
+      mkdirSync(wt(), { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(home, { recursive: true, force: true });
+    });
+
+    it("names the files, and no directory, so node's recursive mkdir still has one that answers", () => {
+      writeFileSync(join(home, "package.json"), "{}");
+      writeFileSync(join(home, "proj", ".npmrc"), "");
+      writeFileSync(join(wt(), "inside"), "");
+      mkdirSync(join(home, ".cache"));
+
+      expect(named(sealed([home], [], [wt()])).sort()).toEqual([join(home, "package.json"), join(home, "proj", ".npmrc")].sort());
+    });
+
+    it("leaves the parents of a directory that is only readable, since no tool walks up from one", () => {
+      mkdirSync(join(home, "tools", "bin"), { recursive: true });
+      writeFileSync(join(home, "tools", "beside-a-tool"), "");
+
+      expect(named(sealed([home], [join(home, "tools", "bin")], [wt()]))).toEqual([]);
+    });
+
+    it("leaves a readable file answering: its allow comes after the deny", () => {
+      writeFileSync(join(home, "session.json"), "{}");
+
+      const spawn = sealed([home], [join(home, "session.json")], [wt()]);
+      const rules = profile(spawn);
+
+      expect(named(spawn)).toContain(join(home, "session.json"));
+      expect(rules.indexOf("(deny file-test-existence")).toBeGreaterThan(-1);
+      expect(rules.indexOf("(deny file-test-existence")).toBeLessThan(rules.indexOf("(allow file-read* file-test-existence"));
+    });
+
+    it("keeps the shortest of a crowded parent, and a full parent takes nothing from the next", () => {
+      writeFileSync(join(home, "package.json"), "{}");
+      writeFileSync(join(home, "proj", "package.json"), "{}");
+      for (let index = 0; index < 100; index += 1) writeFileSync(join(home, "proj", `a-download-with-a-long-name-${index}`), "");
+
+      const names = named(sealed([home], [], [wt()]));
+
+      expect(names).toHaveLength(65);
+      expect(names).toEqual(expect.arrayContaining([join(home, "package.json"), join(home, "proj", "package.json")]));
+    });
+
+    it("adds no rule where there is nothing to name, and a parent it cannot list is not a failure", () => {
+      const spawn = sealed(["/nonexistent/home"], [], ["/nonexistent/home/wt/inner"]);
+
+      expect(spawn).not.toHaveProperty("refusal");
+      expect(profile(spawn)).not.toContain("(deny file-test-existence");
+    });
   });
 });

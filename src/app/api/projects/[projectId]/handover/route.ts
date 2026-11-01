@@ -5,10 +5,10 @@ import { check } from "@/lib/grants";
 import { getProjectColumns } from "@/lib/columns";
 import { projectRepositoryUrl } from "@/lib/repository";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
-import { machineReadinessFor } from "@/lib/worker-service";
+import { machineReadinessFor, namesGateCommands } from "@/lib/worker-service";
 import { hasSeveralRepositories } from "@/lib/repositories";
 import { repositoryCoverage } from "@/lib/repo-match";
-import { MULTI_REPOSITORY } from "@/lib/worker-capabilities";
+import { GATE_COMMANDS, MULTI_REPOSITORY } from "@/lib/worker-capabilities";
 import type { ApiHandoverReadiness } from "@/types";
 import { claimingMachineIds } from "@/lib/machine-limit";
 
@@ -60,9 +60,12 @@ type ReaderWorker = { enabled?: boolean; repos?: { remote: string; path: string 
  * Only the reader's own machines ever reach this: whose machine holds what is not a member's business.
  */
 function judgeMachines<W extends ReaderWorker>(
-  project: Parameters<typeof hasSeveralRepositories>[0] & Parameters<typeof repositoryCoverage>[0],
+  project: Parameters<typeof hasSeveralRepositories>[0] & Parameters<typeof repositoryCoverage>[0] & Parameters<typeof namesGateCommands>[0],
   workers: W[]
 ): { workers: W[]; extra: { machineMissing?: string[]; machineNeedsUpdate?: boolean } } {
+  if (namesGateCommands(project) && !workers.some((worker) => (worker.capabilities ?? []).includes(GATE_COMMANDS))) {
+    return { workers, extra: { machineNeedsUpdate: true } };
+  }
   if (!hasSeveralRepositories(project)) return { workers, extra: {} };
 
   const covered = workers.map((worker) => ({

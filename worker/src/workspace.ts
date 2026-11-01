@@ -104,6 +104,18 @@ export interface Worktree {
   pin: GitPin;
   /** `path` as `worktree add` left it; every confinement of the run is to this and never to `path` resolved again (BP-804). */
   dir: RecordedDir;
+  /**
+   * The `HOME` of a project's own gate commands. Beside the worktree rather than in it, so no diff
+   * sees it, and under a root no confined process may write, so nothing can have planted it. Its
+   * name keeps the task key, which is how `clear` removes it with the worktree.
+   */
+  gateHome: RecordedDir;
+  /**
+   * Replaces it with an empty one, after a step that committed: the next gate judges a new tree and
+   * must start clean. Never by emptying: a gate command can swap the directory for a link to the real
+   * home, and this runs unconfined. `discard` moves whatever is there aside and follows nothing.
+   */
+  emptyGateHome(): void;
   /** What a step or gate has done to the directory, `.git` or the index flags since creation, or null. */
   tampering(): Promise<string | null>;
 }
@@ -114,7 +126,9 @@ export interface Workspace {
   listWorktrees(): Promise<string[]>;
 }
 
-/** The task a directory under the root belongs to: `<KEY>` or, since BP-804, `<KEY>.<nonce>`. */
+const GATE_HOME_SUFFIX = ".home";
+
+/** The task a directory under the root belongs to: `<KEY>`, since BP-804 `<KEY>.<nonce>`, and that with `.home`. */
 export function taskKeyOf(name: string): string {
   return name.split(".")[0];
 }
@@ -222,7 +236,11 @@ export function createWorkspace(
     const onDisk = [...known];
     for (const name of disk.names(root).filter((name) => taskKeyOf(name) === taskKey)) {
       const path = join(root, name);
-      if (!known.includes(path) && !(await belongsToAnotherClone(path))) onDisk.push(path);
+      // A gate home belongs to whoever its worktree does: it has no pointer of its own, and one a
+      // gate command wrote into it says nothing
+      const owner = path.endsWith(GATE_HOME_SUFFIX) ? path.slice(0, -GATE_HOME_SUFFIX.length) : path;
+      if (known.includes(path)) continue;
+      if (known.includes(owner) || !(await belongsToAnotherClone(owner))) onDisk.push(path);
     }
     for (const path of new Set(onDisk)) {
       disk.discard(root, path);
@@ -477,6 +495,9 @@ export function createWorkspace(
       // -B resets the branch instead of failing if a crashed previous attempt already created it
       await git(["worktree", "add", "-B", branch, "--", path, baseSha]);
       const dir = recordDir(path, files.realpath, files.lstat);
+      const gateHomePath = `${path}${GATE_HOME_SUFFIX}`;
+      disk.makeDir(gateHomePath);
+      const gateHome = recordDir(gateHomePath, files.realpath, files.lstat);
       const pin = await recordPin(runner, gitPath, config.repoPath, path, files);
       return {
         path,
@@ -484,6 +505,12 @@ export function createWorkspace(
         commitIdentity: identity.identity,
         pin,
         dir,
+        gateHome,
+        emptyGateHome(this: Worktree) {
+          disk.discard(dirname(gateHomePath), gateHomePath);
+          disk.makeDir(gateHomePath);
+          this.gateHome = recordDir(gateHomePath, files.realpath, files.lstat);
+        },
         tampering: async () => {
           const replaced = dirReplaced(dir, files.lstat);
           return replaced ? `its directory ${replaced}` : pinTampering(runner, gitPath, pin, files);

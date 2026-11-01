@@ -466,6 +466,9 @@ describe("markConfinedSpawn", () => {
 
   it("reads the writable paths out of a sandbox-exec argument list", () => {
     expect(writableIn(["-p", "(version 1)", "-D", "W0=/wt", "-D", "W1=/tmp/x", "-D", "CP_SPAWN_MARK=com.x", "/bin/sh"])).toEqual(["/wt", "/tmp/x"]);
+    // A project's own command can say anything after the program: `cmake -D PREFIX=/`
+    expect(writableIn(["-p", "(version 1)", "-D", "W0=/wt", "/usr/bin/cmake", "-D", "PREFIX=/"])).toEqual(["/wt"]);
+    expect(writableIn(["-p", "(version 1)", "-D", "W0=/wt", "-D", "H0=/Users/x", "-D", "R0=/Users/x/.git", "-D", "A0=/Users/x", "/bin/sh"])).toEqual(["/wt"]);
   });
 
   it("adds the spawn's own deny rule and parameter to the inline profile", () => {

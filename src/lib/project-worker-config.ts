@@ -1,8 +1,11 @@
 import {
+  GATE_COMMAND_FIELDS,
   PROJECT_POLICY_DEFAULTS,
+  gateFieldProblem,
   isGitRefName,
   isModelName,
   isProjectPolicyField,
+  normaliseGateField,
 } from "@/lib/worker-policy";
 
 const BOOLEAN_FIELDS: ReadonlySet<string> = new Set<string>();
@@ -17,6 +20,7 @@ const STRING_FIELDS: ReadonlyMap<string, { valid: (value: string) => boolean; ex
     ["fallbackModel", { valid: isModelName, expected: "a model name" }],
     ["reviewModel", { valid: isModelName, expected: "a model name" }],
   ]);
+const GATE_FIELDS: ReadonlySet<string> = new Set([...GATE_COMMAND_FIELDS, "workingDirectory"]);
 
 export type WorkerConfigPatch =
   | { ok: true; update: Record<string, unknown> }
@@ -83,6 +87,10 @@ export function parseProjectWorkerConfig(
         if (typeof value !== "boolean") {
           return { ok: false, error: `${field} must be a boolean` };
         }
+      } else if (GATE_FIELDS.has(field)) {
+        if (typeof value !== "string") return { ok: false, error: `${field} must be a string` };
+        const problem = gateFieldProblem(field, value);
+        if (problem) return { ok: false, error: problem };
       } else if (STRING_FIELDS.has(field)) {
         const shape = STRING_FIELDS.get(field)!;
         if (typeof value !== "string" || !value.trim()) {
@@ -98,7 +106,7 @@ export function parseProjectWorkerConfig(
         return { ok: false, error: `${field} cannot be set and reset in the same request` };
       }
       update[`worker.policy.${field}`] =
-        typeof value === "string" ? value.trim() : value;
+        typeof value === "string" ? normaliseGateField(field, value) : value;
       touched.add(field);
     }
   }

@@ -1,8 +1,10 @@
+import { dirname } from "path";
 import { ApiClient, BoardColumnRole, StatusIds } from "./api.js";
 import { createBudget } from "./budget.js";
 import { commitAll, MissingIdentityError, TamperedCheckoutError } from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { GateFallbacks } from "./gates/from-entry.js";
+import { gateCommandsOf, gateConfigFault, usesOwnCommands } from "./gates/gate-commands.js";
 import { unexpectedHistory } from "./provenance.js";
 import { RunState, runStep } from "./steps.js";
 import { recordFor, RunRecord } from "./run-record.js";
@@ -12,7 +14,7 @@ import { Delivery } from "./delivery.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
-import { HiddenFiles, hiddenFromGit, ignoredFiles, PORCELAIN_STATUS } from "./hidden-files.js";
+import { HiddenFiles, hiddenFromGit, IgnoredFiles, ignoredFiles, PORCELAIN_STATUS } from "./hidden-files.js";
 import { removeFromWorktree } from "./ignored-removal.js";
 import { pinGit } from "./worktree-pin.js";
 import { Reporter } from "./reporter.js";
@@ -218,6 +220,12 @@ export function hitUsageLimit(verdict: GateResult): boolean {
 // into the gate cap silently cut every step from thirty minutes to ten.
 export const GATE_CAP_MS = 600_000;
 
+// A project's own commands start with an empty home every run, so a slow toolchain never warms up and
+// ten minutes could never pass. The project's own step timeout is the knob that says otherwise.
+export function gateCapFor(config: WorkerConfig): number {
+  return usesOwnCommands(gateCommandsOf(config)) ? Math.max(GATE_CAP_MS, config.taskTimeoutMs) : GATE_CAP_MS;
+}
+
 // Below this there is no point starting anything: whatever it is would fail on the clock and be
 // reported as its own verdict rather than as the ceiling.
 export const MIN_ENTRY_MS = 30_000;
@@ -279,6 +287,7 @@ export async function unfinishedWork(
   gitPath: string,
   worktreePath: string,
   baseSha: string,
+  ignoredByGates?: IgnoredFiles,
 ): Promise<string | null> {
   const result = await runner.run(requireGitPath(gitPath), gitArgs(PORCELAIN_STATUS), {
     cwd: worktreePath,
@@ -291,7 +300,7 @@ export async function unfinishedWork(
     return `\`git status\` failed: ${result.stderr || result.stdout}`;
   return (
     result.stdout.trim() ||
-    (await hiddenFromGit(runner, gitPath, worktreePath, baseSha))?.detail ||
+    (await hiddenFromGit(runner, gitPath, worktreePath, baseSha, undefined, ignoredByGates))?.detail ||
     null
   );
 }
@@ -367,8 +376,12 @@ export async function releaseIfAborted(
  * is still handed back with `reporter.released`, attempt refunded — what changed in BP-609 is only
  * what the run is recorded as, because a plain `released` reads the same as a usage limit and it is
  * the machine, not the task, that an operator has to be told about.
+ *
+ * "settings-fault" ends the pass the same way for a project's own commands that cannot run here, and the
+ * task is failed rather than handed back: nothing on this machine changes until a person edits them, so
+ * a task handed back would be claimed again on every poll.
  */
-export type RunDisposition = void | "machine-fault";
+export type RunDisposition = void | "machine-fault" | "settings-fault";
 
 /**
  * What a run owes the board and the machine when it could not make its worktree. Shared by the run in
@@ -514,11 +527,12 @@ export async function vetBeforeGate(
   ignoredBeforeSteps: Awaited<ReturnType<typeof ignoredFiles>>,
   gateName: string,
   noted: (note: string) => Promise<void>,
+  ignoredByGates?: IgnoredFiles,
 ): Promise<GateRefusal | null> {
   const tampered = await worktree.tampering();
   let hidden: HiddenFiles | { kind: "tampered"; detail: string } | null = tampered
     ? { kind: "tampered" as const, detail: `the checkout now has ${tampered}` }
-    : await hiddenFromGit(runner, gitPath, worktree.path, worktree.baseSha, ignoredBeforeSteps);
+    : await hiddenFromGit(runner, gitPath, worktree.path, worktree.baseSha, ignoredBeforeSteps, ignoredByGates);
   if (hidden?.kind === "written") {
     const removal = removeFromWorktree(worktree.path, hidden.paths);
     if (removal.refused.length > 0) {
@@ -668,6 +682,17 @@ export async function runTask(
     const budget = createBudget(config.runCeilingMs, now);
     let ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, worktree.path);
 
+    const onOwnCommands = usesOwnCommands(gateCommandsOf(config));
+    // Here and not at the gate, which is after the step somebody pays for. Failed and not released: a
+    // refund would hold this task at the head of the queue for ever, with the tasks of agents the fault
+    // does not touch behind it. The pass ends, so one wrong setting takes a task a poll, not the queue
+    const configFault = gateConfigFault(task.agent.sequence, gateCommandsOf(config), worktree.path);
+    if (configFault) {
+      settle("failed", configFault);
+      await reporter.failed(task, `this run stopped before any step: ${configFault}`);
+      return "settings-fault";
+    }
+
     for (const [position, entry] of task.agent.sequence.entries()) {
       if (
         await releaseIfAborted(deps, reporter, task, whatLanded(state, branch))
@@ -694,6 +719,7 @@ export async function runTask(
         const outcome = await runStep(entry, {
           worktreePath: worktree.path,
           worktreeDir: worktree.dir,
+          checkoutGitDirs: [dirname(dirname(worktree.pin.gitDir))],
           branch,
           task,
           executor,
@@ -701,8 +727,10 @@ export async function runTask(
           commit: async (message) => {
             const tampered = await worktree.tampering();
             if (tampered) throw new TamperedCheckoutError(tampered);
-            return commitAll(runner, deps.gitPath, worktree.path, message, worktree.commitIdentity, worktree.baseSha);
+            return commitAll(runner, deps.gitPath, worktree.path, message, worktree.commitIdentity, worktree.baseSha, onOwnCommands ? ignoredBeforeSteps : undefined);
           },
+          // What a gate left must not reach the gate after this step: that one judges a new tree
+          treeChanged: onOwnCommands ? () => worktree.emptyGateHome() : undefined,
           tampering: () => worktree.tampering(),
           state,
           timeoutMs: budget.forEntry(config.taskTimeoutMs),
@@ -807,14 +835,14 @@ export async function runTask(
               // committed: `rev-parse` can fail after `commit` succeeded, and "nothing was
               // committed" would then be the one sentence a person checks and finds untrue.
               `${entry.name} failed: ${outcome.message}${
-                state.uncommittedWork ? keptWorktree(worktree.path) : ""
+                state.committed || state.uncommittedWork ? keptWorktree(worktree.path) : ""
               }`,
             );
           }
           return;
         }
       } else {
-        const gate = deps.gateFor(entry, runner, budget.forEntry(GATE_CAP_MS), {
+        const gate = deps.gateFor(entry, runner, budget.forEntry(gateCapFor(config)), {
           maxDiffLines: config.maxDiffLines,
           maxDiffFiles: config.maxDiffFiles,
           reviewModel: config.reviewModel ?? "",
@@ -840,6 +868,7 @@ export async function runTask(
           ignoredBeforeSteps,
           gate.name,
           (note) => reporter.noted(task, note),
+          onOwnCommands ? ignoredBeforeSteps : undefined,
         );
         if (refused) {
           keepWorktree = true;
@@ -860,6 +889,8 @@ export async function runTask(
         const verdict = await gate.run({
           worktreePath: worktree.path,
           worktreeDir: worktree.dir,
+          gateHome: worktree.gateHome,
+          checkoutGitDir: dirname(dirname(worktree.pin.gitDir)),
           task,
           result: state.lastResult,
           diff,
@@ -945,6 +976,7 @@ export async function runTask(
                 baseSha: worktree.baseSha,
                 pin: worktree.pin,
                 dir: worktree.dir,
+                commands: gateCommandsOf(config),
               });
             } catch (error) {
               deps.logError?.(
@@ -1005,7 +1037,7 @@ export async function runTask(
       // artifact the target repo does not gitignore would fail a run that did nothing wrong.
       if (entry.kind !== "step" || entry.capability !== "edit") continue;
 
-      const leftover = await unfinishedWork(runner, deps.gitPath, worktree.path, worktree.baseSha);
+      const leftover = await unfinishedWork(runner, deps.gitPath, worktree.path, worktree.baseSha, onOwnCommands ? ignoredBeforeSteps : undefined);
       if (leftover) {
         keepWorktree = true;
         settle("failed", `${entry.name} left the worktree unclean`);

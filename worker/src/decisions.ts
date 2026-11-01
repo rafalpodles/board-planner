@@ -12,6 +12,7 @@ import { ApiClient, DecisionSettlement } from "./api.js";
 import { Delivery } from "./delivery.js";
 import { Runner } from "./exec.js";
 import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
+import { GateCommands } from "./gates/gate-commands.js";
 import { protectedPaths, workflowPaths } from "./gates/protected-paths.js";
 import { ClaimedTask, DiffStats } from "./types.js";
 import { GitPin, pinTampering } from "./worktree-pin.js";
@@ -251,6 +252,8 @@ export interface OpenDecisionInput {
   baseSha: string;
   pin: GitPin;
   dir: RecordedDir;
+  /** What the project's own gates run, so that a file one names is shown as what tripped the gate. */
+  commands?: GateCommands;
 }
 
 /**
@@ -294,7 +297,7 @@ export async function openDecision(
       // The whole change, not the gate's hits: accepting pushes the commit, all of it. The hits
       // travel separately so the panel can say which of them is the reason this is here.
       files: input.diff.changedFiles,
-      protectedFiles: protectedPaths(input.diff.changedFiles),
+      protectedFiles: protectedPaths(input.diff.changedFiles, input.commands),
       patch: deps.scrub(input.diff.patch),
       patchTruncated: input.diff.truncated,
       patchSha256: sha256(input.diff.patch),

@@ -29,6 +29,8 @@ function context(diff: Partial<DiffStats> = {}, task: Partial<ClaimedTask> = {})
   return {
     worktreePath: "/wt",
     worktreeDir: { path: "/wt", dev: 0, ino: 0 },
+    gateHome: { path: "/wt.home", dev: 0, ino: 1 },
+    checkoutGitDir: "/repo/.git",
     task: claimedTask(task),
     result: {
       status: "completed",
@@ -317,6 +319,18 @@ describe("reviewGate", () => {
   // BP-349. The reviewer holds no write tool, so the only thing left that can write during a review
   // is a hook — which is exactly what the escape this closes plants. Confined to the throwaway
   // checkout, so nothing it leaves outlives the gate that made it.
+  // BP-985: on a project's own commands the reviewer reads with the home shut, like the steps
+  it("shuts the home to the reviewer only when told to", async () => {
+    const sealed = claudeReturning({ approved: true, reason: "" });
+    const open = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(sealed.runner, gitPath, CLAUDE_PATH, TIMEOUT_MS, undefined, undefined, true).run(context());
+    await reviewGate(open.runner, gitPath, CLAUDE_PATH, TIMEOUT_MS).run(context());
+
+    expect(spawnCall(sealed.run)[1].join("\n")).toContain("(deny file-read* (with errno ENOENT)");
+    expect(spawnCall(open.run)[1].join("\n")).not.toContain("(deny file-read* (with errno ENOENT)");
+  });
+
   it("spawns the reviewer through the sandbox", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 

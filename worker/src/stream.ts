@@ -19,6 +19,7 @@ export type ResultSubtype = "success" | "error_max_turns" | "error_during_execut
 export interface ResultEvent {
   type: "result";
   subtype?: ResultSubtype;
+  stop_reason?: string;
   is_error?: boolean;
   result?: unknown;
   structured_output?: unknown;

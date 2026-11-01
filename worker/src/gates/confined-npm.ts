@@ -1,10 +1,12 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CommandResult, Runner, RunOpts } from "../exec.js";
 import { GateResult } from "../types.js";
 import { agentEnv, npmCacheOverride, tempDirOverride } from "../env.js";
-import { confineTool, Network, RecordedDir, SANDBOX_COMMAND } from "../sandbox.js";
+import { confine, Confinement, ConfineOptions, confineTool, Network, RecordedDir, SANDBOX_COMMAND } from "../sandbox.js";
+import { sealedHomesFor } from "../sealed-home.js";
+import { removeTree } from "../worktree-disk.js";
 
 /**
  * The npm gates, run where the agent's own tools already are.
@@ -110,22 +112,23 @@ export interface ConfinedNpmOptions extends RunOpts {
   env?: NodeJS.ProcessEnv;
 }
 
+type GateRun = (CommandResult & { loopbackOnly: boolean }) | { refusal: string; replaced?: string };
+
 /**
- * Runs one npm command confined to the worktree, or says why it could not be confined.
+ * Runs one command confined to the worktree, or says why it could not be confined.
  *
  * A refusal is not a failure of the command: it means this machine cannot confine anything, which
  * is the same state `preflight` refuses to claim work in and the same sentence `confine` gives the
  * agent's own spawn. The gate reports it rather than running the command anyway — running it
  * anyway is the hole.
  */
-export async function runConfinedNpm(
+async function runInGateSandbox(
   runner: Runner,
-  npmPath: string,
-  args: string[],
-  options: ConfinedNpmOptions
-): Promise<(CommandResult & { loopbackOnly: boolean }) | { refusal: string; replaced?: string }> {
-  const { withCache, network, env: source, worktree, ...runOptions } = options;
-  const cache = npmCacheDir(source);
+  options: ConfinedNpmOptions & { writable: (string | RecordedDir)[] },
+  spawnFor: (confinement: ConfineOptions) => Confinement,
+  envFor: (temp: string) => NodeJS.ProcessEnv
+): Promise<GateRun> {
+  const { withCache: _withCache, network, env: source, worktree, writable, ...runOptions } = options;
 
   // This run's own scratch directory, inside the machine's. Created before `confine` resolves it:
   // seatbelt matches the real path, and realpath on a directory that does not exist throws —
@@ -134,38 +137,92 @@ export async function runConfinedNpm(
   let temp: string;
   try {
     temp = mkdtempSync(join(npmTempBase(source), "cp-gate-"));
-    if (withCache) mkdirSync(cache, { recursive: true, mode: 0o700 });
   } catch (error) {
     return { refusal: `could not prepare a directory for this gate to write in: ${String(error)}` };
   }
 
-  const writable: (string | RecordedDir)[] = [worktree, temp];
-  if (withCache) writable.push(cache);
-
   try {
     // `env` left to `confine`'s own default unless a test said otherwise, so the operator's risk
     // acceptance is read in the one place that owns it.
-    const spawn = confineTool("npm", npmPath, args, source ? { writable, network, env: source } : { writable, network });
+    const allowed = [worktree, temp, ...writable];
+    const spawn = spawnFor(source ? { writable: allowed, network, env: source } : { writable: allowed, network });
     if ("refusal" in spawn) return spawn;
 
     // False under the escape hatch, where confine hands back a bare spawn with the network open
     const loopbackOnly = network === "loopback" && spawn.command === SANDBOX_COMMAND;
-    const result = await runner.run(spawn.command, spawn.args, {
-      ...runOptions,
-      // The cache location and the scratch directory travel as the child's own settings, so they
-      // hold for npm and for everything it shells out to. `childEnv` is what every other spawn
-      // here gets: the allowlist, and nothing of the operator's beyond it.
-      env: {
-        ...(source ? agentEnv([], source) : agentEnv()),
-        ...NPM_CONFIG_PINNED,
-        npm_config_cache: cache,
-        TMPDIR: temp,
-      },
-    });
+    const result = await runner.run(spawn.command, spawn.args, { ...runOptions, env: envFor(temp) });
     return result.machineFault ? { refusal: result.machineFault } : { ...result, loopbackOnly };
   } finally {
-    rmSync(temp, { recursive: true, force: true });
+    // In a `finally`, so a removal that threw would replace the verdict: a confined command can make
+    // its temp directory undeletable
+    removeTree(temp);
   }
+}
+
+export async function runConfinedNpm(runner: Runner, npmPath: string, args: string[], options: ConfinedNpmOptions): Promise<GateRun> {
+  const { withCache, env: source } = options;
+  const cache = npmCacheDir(source);
+  if (withCache) {
+    try {
+      mkdirSync(cache, { recursive: true, mode: 0o700 });
+    } catch (error) {
+      return { refusal: `could not prepare a directory for this gate to write in: ${String(error)}` };
+    }
+  }
+  return runInGateSandbox(
+    runner,
+    { ...options, writable: withCache ? [cache] : [] },
+    (confinement) => confineTool("npm", npmPath, args, confinement),
+    // The cache location and the scratch directory travel as the child's own settings, so they
+    // hold for npm and for everything it shells out to. `childEnv` is what every other spawn
+    // here gets: the allowlist, and nothing of the operator's beyond it.
+    (temp) => ({
+      ...(source ? agentEnv([], source) : agentEnv()),
+      ...NPM_CONFIG_PINNED,
+      npm_config_cache: cache,
+      TMPDIR: temp,
+    })
+  );
+}
+
+/**
+ * One of a project's own commands (BP-985). The project's owner chooses it and the machine may be
+ * somebody else's, so it runs with the network open and with the real home unreadable, where the npm
+ * gates are the other way round. It gets the run's `gateHome` as its home: go, pip and cargo keep
+ * their downloads under `HOME`, and the JVM reads `CFFIXED_USER_HOME` on macOS (with only `HOME`
+ * moved Gradle dies on "Could not initialize native services") and takes its temp directory from
+ * `java.io.tmpdir`, not `TMPDIR`. Not the per-account cache npm gets: that is bounded by npm checking
+ * the lockfile's hashes, and pip's cache is not.
+ */
+export async function runConfinedProgram(
+  runner: Runner,
+  programPath: string,
+  args: string[],
+  options: Omit<ConfinedNpmOptions, "withCache" | "network"> & { home: RecordedDir; readable: string[] }
+): Promise<GateRun> {
+  const { home, readable, env: source, ...rest } = options;
+  // Quoted: the JVM splits this on whitespace, and an operator's TMPDIR may hold a space
+  return runInGateSandbox(
+    runner,
+    { ...rest, env: source, writable: [home] },
+    (confinement) => confine(programPath, args, { ...confinement, sealedHomes: sealedHomesFor(readable, source) }),
+    (temp) => ({
+      ...(source ? agentEnv([], source) : agentEnv()),
+      HOME: home.path,
+      CFFIXED_USER_HOME: home.path,
+      TMPDIR: temp,
+      JAVA_TOOL_OPTIONS: `"-Djava.io.tmpdir=${temp}"`,
+    })
+  );
+}
+
+const MAX_REASON_CHARS = 2000;
+
+/** The end of what a failed command printed, which is where the reason is. */
+export function outputTail(result: Pick<CommandResult, "stdout" | "stderr">): string {
+  const output = [result.stdout, result.stderr].filter((stream) => stream.trim()).join("\n");
+  if (output.length <= MAX_REASON_CHARS) return output;
+  return `[output truncated to the last ${MAX_REASON_CHARS} characters]\n${output.slice(-MAX_REASON_CHARS)}`;
 }
 
 /** A refusal as a gate reports it: the worktree swapped under it is the run's, anything else the machine's. */

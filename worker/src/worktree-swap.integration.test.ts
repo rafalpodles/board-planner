@@ -172,6 +172,8 @@ describe.skipIf(process.platform !== "darwin")("a worktree a confined process re
     const verdict = await testRunGate(recording, installedToolPath("npm"), 30_000).run({
       worktreePath: worktree.path,
       worktreeDir: worktree.dir,
+      gateHome: worktree.gateHome,
+      checkoutGitDir: worktree.pin.gitDir,
       task: claimedTask({ taskKey: "BP-1" }),
       result: { status: "completed", summary: "", filesChanged: [], testsAdded: [], blockedReason: "" },
       diff: { changedLines: 0, changedFiles: [], patch: "", truncated: false, headSha: worktree.baseSha, symlinks: [], suppressedDiffs: [], gitlinks: [] },

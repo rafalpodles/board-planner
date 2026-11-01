@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { chmodSync, lstatSync, readdirSync, readFileSync, renameSync, rmSync } from "fs";
+import { chmodSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "fs";
 import { execFileSync } from "child_process";
 import { dirname, isAbsolute, join, resolve } from "path";
 
@@ -18,6 +18,7 @@ const CHMOD = "/bin/chmod";
  */
 export interface WorktreeDisk {
   names(root: string): string[];
+  makeDir(path: string): void;
   discard(root: string, path: string): void;
   /** Removes each admin dir under `adminRoot` whose `gitdir` names a worktree `owns` accepts. */
   forget(adminRoot: string, owns: (workTree: string) => boolean): void;
@@ -34,6 +35,9 @@ export const nodeWorktreeDisk: WorktreeDisk = {
     } catch {
       return [];
     }
+  },
+  makeDir(path) {
+    mkdirSync(path, { mode: 0o700 });
   },
   discard(root, path) {
     // Beside it rather than into a directory of its own: moving a directory to another parent needs
@@ -56,7 +60,7 @@ export const nodeWorktreeDisk: WorktreeDisk = {
         return;
       }
     }
-    removeDiscarded(trash);
+    removeTree(trash);
   },
   forget(adminRoot, owns) {
     for (const name of this.names(adminRoot)) {
@@ -80,8 +84,8 @@ function namedWorkTree(admin: string): string | null {
   }
 }
 
-// Never throws: the path is already free, and a tree a step made unwritable is retried by the next clear
-function removeDiscarded(trash: string): void {
+// Never throws: a tree a step made unwritable is left for whoever clears it next
+export function removeTree(trash: string): void {
   try {
     rmSync(trash, { recursive: true, force: true });
     return;

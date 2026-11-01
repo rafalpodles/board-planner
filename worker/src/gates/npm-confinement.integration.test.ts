@@ -43,6 +43,8 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
     return {
       worktreePath: worktree,
       worktreeDir: recordDir(worktree),
+      gateHome: recordDir(worktree),
+      checkoutGitDir: "/repo/.git",
       task: claimedTask({ title: "t", description: "d" }),
       result: {
         status: "completed",

@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from "fs";
+import { lstatSync, readdirSync, realpathSync } from "fs";
 import { basename, dirname, isAbsolute, join, resolve } from "path";
 import { UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
 import { ResolvedTool, unresolvedToolReason } from "./tool-path.js";
@@ -133,6 +133,11 @@ export interface ConfineOptions {
   env?: NodeJS.ProcessEnv;
   /** Defaults to "open"; "loopback" refuses every outbound connection except to this machine. */
   network?: Network;
+  /**
+   * Refuses reads under these homes, but for the writable directories and `readable`. `keychain` keeps
+   * the login keychain's daemon: a CLI's session is in there, so only a coding CLI gets it.
+   */
+  sealedHomes?: { homes: string[]; readable: string[]; keychain?: boolean };
 }
 
 /**
@@ -185,8 +190,11 @@ export type Network = "open" | "loopback";
 // - Daemons fetch on a process's behalf, outside the profile: nsurlsessiond (a background
 //   NSURLSession), trustd (a certificate's AIA and OCSP URLs) and WebKit's networking process each
 //   reached a listener from a process with no network at all, and a deny on the name closes each.
-//   The nsurlsessiond deny alone also stops WebKit's here, so no test fails on removing only the
-//   WebKit one. A denylist of service names: it closes these three, not the category.
+//   The nsurlsessiond deny alone also stops WebKit's here, and `security` reaches trustd through
+//   trustd.agent, so only the unit test's string pin fails on removing the WebKit name or
+//   com.apple.trustd alone. On macOS 15.8.2 trustd's log showed it refusing private addresses by
+//   itself and opening a connection for a public one, so its deny stays. A denylist of service
+//   names: it closes these three, not the category.
 const LOOPBACK_ONLY = [
   "(deny network-outbound)",
   '(allow network-outbound (remote ip "localhost:*") (remote unix-socket))',
@@ -272,6 +280,65 @@ export const OWN_SANDBOX_SIGNALS_ONLY = ["(deny signal)", "(allow signal (target
 
 export const PROFILE_TAIL = [...NAMED_SERVICE_DENIES, ...OWN_SANDBOX_SIGNALS_ONLY];
 
+// For a project on its own gate commands (BP-985), which the project's owner chooses and which may run
+// on somebody else's machine with the network open. The agent's steps get it too, or a steered `Read`
+// would put a key in a test file for the next gate to send; a CLI's session then stays readable through
+// `sessionReadable`. A read under a shut home answers ENOENT rather than EPERM: yarn opens a `.yarnrc` in
+// every parent with no `stat` first and stops on any other error, and go and cargo do the same with what
+// they find on the way up. It also keeps a size from being probed. Existence is shut by name, for the
+// files in each parent of a writable directory, which is where a tool walking up looks: yarn 1 stops on
+// a `package.json` there that exists and will not read. Shut for the whole home, mkdir answers ENOENT under
+// a parent that exists and node's recursive mkdir goes round for ever, which held the agent on an
+// operator's hook until the run timed out, so everywhere else `access` can confirm a guessed name. Each
+// parent of what stays readable answers its metadata, or node and java could not resolve a path through
+// it. The keychain goes through a daemon, and an ssh-agent or a password manager's agent signs for
+// whoever connects, so reading nothing would not stop either; both agents' sockets are refused by where
+// they live, which leaves a project's own socket in its worktree alone.
+function sealedHomeRules(homeNames: string[], readableNames: string[], ancestorNames: string[], besideNames: string[], writableNames: string[], keychain: boolean): string[] {
+  const under = (names: string[]) => names.map((name) => `(subpath (param "${name}"))`).join(" ");
+  const exactly = (names: string[]) => names.map((name) => `(literal (param "${name}"))`).join(" ");
+  const sockets = (rule: string, names: string[]) => names.map((name) => `(${rule} network-outbound (remote unix-socket (subpath (param "${name}"))))`);
+  return [
+    `(deny file-read* (with errno ENOENT) ${under(homeNames)})`,
+    ...(besideNames.length ? [`(deny file-test-existence (with errno ENOENT) ${exactly(besideNames)})`] : []),
+    ...(readableNames.length ? [`(allow file-read* file-test-existence ${under(readableNames)})`] : []),
+    ...(ancestorNames.length ? [`(allow file-read-metadata ${exactly(ancestorNames)})`] : []),
+    ...(keychain ? [] : ['(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd"))']),
+    ...sockets("deny", homeNames),
+    ...sockets("allow", writableNames),
+    '(deny network-outbound (remote unix-socket (path-regex #"^/private/tmp/com\\.apple\\.launchd\\.[^/]+/Listeners$")))',
+  ];
+}
+
+export const directoryHolds = (directory: string, path: string): boolean =>
+  path === directory || path.startsWith(directory === "/" ? "/" : `${directory}/`);
+
+// Every directory from a path up to the outermost home it sits under, that home included
+function ancestorsUnder(homes: string[], paths: string[]): string[] {
+  const found = new Set<string>();
+  for (const path of paths) {
+    const [home] = homes.filter((candidate) => path.startsWith(`${candidate}/`)).sort((a, b) => a.length - b.length);
+    if (!home) continue;
+    for (let parent = dirname(path); parent.length >= home.length; parent = dirname(parent)) found.add(parent);
+  }
+  return [...found];
+}
+
+// Each name costs the profile, and not linearly: 2,000 took seven seconds to compile, on every spawn. The
+// shortest go first, since a parent may be a directory of downloads and what a tool looks for is short
+const MAX_FILES_BESIDE_A_PARENT = 64;
+
+function filesBeside(directories: string[]): string[] {
+  return directories.flatMap((directory) => {
+    try {
+      const names = readdirSync(directory, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name);
+      return names.sort((a, b) => a.length - b.length).slice(0, MAX_FILES_BESIDE_A_PARENT).map((name) => join(directory, name));
+    } catch {
+      return [];
+    }
+  });
+}
+
 // Rules for a mode go in `modeRules`, never after the result: the tail must come last.
 export function profileWith(names: string[], modeRules: string[] = []): string {
   return [profileFor(names), ...modeRules, ...PROFILE_TAIL].join("\n");
@@ -318,12 +385,30 @@ export function confine(command: string, args: string[], options: ConfineOptions
   }
 
   const names = resolved.map((_, index) => `W${index}`);
+  const homes = options.sealedHomes?.homes ?? [];
+  const opensAHome = resolved.find((path) => homes.some((home) => directoryHolds(path, home)));
+  if (opensAHome) return { refusal: `refusing to shut a home and leave ${opensAHome} open: it holds that home` };
+  const homeNames = homes.map((_, index) => `H${index}`);
+  const readable = options.sealedHomes ? [...resolved, ...options.sealedHomes.readable] : [];
+  const readableNames = readable.map((_, index) => `R${index}`);
+  const ancestors = ancestorsUnder(homes, readable);
+  const ancestorNames = ancestors.map((_, index) => `A${index}`);
+  const beside = filesBeside(ancestorsUnder(homes, resolved));
+  const besideNames = beside.map((_, index) => `F${index}`);
+  const modeRules = [
+    ...(options.network === "loopback" ? LOOPBACK_ONLY : []),
+    ...(options.sealedHomes ? sealedHomeRules(homeNames, readableNames, ancestorNames, besideNames, names, !!options.sealedHomes.keychain) : []),
+  ];
   return {
     command: SANDBOX_COMMAND,
     args: [
       "-p",
-      profileWith(names, options.network === "loopback" ? LOOPBACK_ONLY : []),
+      profileWith(names, modeRules),
       ...names.flatMap((name, index) => ["-D", `${name}=${resolved[index]}`]),
+      ...homes.flatMap((home, index) => ["-D", `H${index}=${home}`]),
+      ...readable.flatMap((path, index) => ["-D", `R${index}=${path}`]),
+      ...ancestors.flatMap((path, index) => ["-D", `A${index}=${path}`]),
+      ...beside.flatMap((path, index) => ["-D", `F${index}=${path}`]),
       command,
       ...args,
     ],

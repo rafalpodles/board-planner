@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiClient } from "./api.js";
@@ -31,6 +31,7 @@ const COMPLETED = { status: "completed" as const, summary: "Changed it.", filesC
 const READ: SnapshotEntry = { key: "read", kind: "step", name: "Read", prompt: "look", capability: "read-only" };
 const IMPLEMENT: SnapshotEntry = { key: "implement", kind: "step", name: "Implement", prompt: "make the change", capability: "edit" };
 const GATE: SnapshotEntry = { key: "diff-size", kind: "gate", name: "Size", gateKind: "diff-size" };
+const TESTS: SnapshotEntry = { key: "test-run", kind: "gate", name: "Tests", gateKind: "test-run" };
 const PUSH: SnapshotEntry = { key: "push", kind: "step", name: "Push", deterministic: true };
 const PR: SnapshotEntry = { key: "pull-request", kind: "step", name: "Pull request", deterministic: true };
 const MERGE: SnapshotEntry = { key: "merge", kind: "step", name: "Merge", deterministic: true };
@@ -85,6 +86,7 @@ describe("a run across several repositories", () => {
     signal?: AbortSignal;
     now?: () => number;
     ceilingMs?: number;
+    commands?: { buildCommand?: string; testCommand?: string };
   } = {}) {
     const reporter = {
       blocked: vi.fn<Reporter["blocked"]>(async () => {}),
@@ -152,18 +154,18 @@ describe("a run across several repositories", () => {
       }),
     };
 
-    const gateRuns: { gate: string; path: string }[] = [];
+    const gateRuns: { gate: string; path: string; home: string }[] = [];
     const gateTimeouts: number[] = [];
     const gateFor: PipelineDeps["gateFor"] = (entry, _runner, timeoutMs) => (gateTimeouts.push(timeoutMs), {
       name: entry.name,
       run: async (context) => {
-        gateRuns.push({ gate: entry.key, path: context.worktreePath });
+        gateRuns.push({ gate: entry.key, path: context.worktreePath, home: context.gateHome.path });
         return over.gates?.[entry.key]?.(context) ?? { ok: true, reason: "" };
       },
     });
 
     const deps: SeveralRepositoriesDeps = {
-      config: workerConfig({ worktreeRoot: join(dir, "api-wt"), repoPath: clones.api, ...(over.ceilingMs ? { runCeilingMs: over.ceilingMs } : {}) }),
+      config: workerConfig({ worktreeRoot: join(dir, "api-wt"), repoPath: clones.api, ...(over.ceilingMs ? { runCeilingMs: over.ceilingMs } : {}), ...over.commands }),
       now: over.now,
       api,
       boardColumns: async () => [
@@ -209,6 +211,76 @@ describe("a run across several repositories", () => {
     expect(vi.mocked(run.deliveries.web.linkRelated)).toHaveBeenCalledWith(expect.any(String), "https://github.com/acme/web/pull/9", ["https://github.com/acme/api/pull/3"]);
     expect(run.reporter.requeued).not.toHaveBeenCalled();
     expect(run.reporter.failed).not.toHaveBeenCalled();
+  });
+
+  it("fails the task before any step on commands that cannot pass, and ends the pass", async () => {
+    const run = build({ commands: { buildCommand: "sh b" } });
+
+    const disposition = await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, TESTS, PUSH));
+
+    expect(disposition).toBe("settings-fault");
+    expect(run.seen).toHaveLength(0);
+    expect(run.reporter.failed).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("no test command"));
+    expect(run.reporter.released).not.toHaveBeenCalled();
+  });
+
+  it("does not stop a run over a program one repository lacks, whose gate may not run there", async () => {
+    write(clones.api, "gradlew", "#!/bin/sh\n");
+    chmodSync(join(clones.api, "gradlew"), 0o755);
+    git(clones.api, "add", ".");
+    git(clones.api, "commit", "-qm", "gradlew");
+    git(clones.api, "push", "-q", "origin", "HEAD:main");
+    const run = build({ commands: { testCommand: "./gradlew test" }, write: (w) => write(w.api, "api.txt", "a\n") });
+
+    await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, TESTS, PUSH));
+
+    expect(run.seen).toHaveLength(1);
+    expect(pushedTo(run, "api")).toHaveLength(1);
+  });
+
+  it("empties the gates' home of a repository with a new commit, and only that one", async () => {
+    const homes: Record<string, boolean> = {};
+    let webHome = "";
+    const run = build({
+      commands: { testCommand: "sh t" },
+      write: (w) => {
+        write(w.api, "api.txt", "a\n");
+        for (const path of [w.api, w.web]) writeFileSync(`${path}.home/left`, "x");
+        webHome = `${w.web}.home`;
+      },
+      gates: {
+        "test-run": async (context) => {
+          homes.api = existsSync(`${context.gateHome.path}/left`);
+          homes.web = existsSync(`${webHome}/left`);
+          return { ok: true, reason: "" };
+        },
+      },
+    });
+
+    await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, TESTS));
+
+    expect(run.gateRuns).toHaveLength(1);
+    expect(homes).toEqual({ api: false, web: true });
+  });
+
+  it("takes what a passed gate left in a repository as read, on a project's own commands", async () => {
+    const run = build({
+      commands: { testCommand: "sh t" },
+      write: (w) => write(w.api, "api.py", "a\n"),
+      gates: {
+        "test-run": async (context) => {
+          mkdirSync(join(context.worktreePath, ".pytest_cache", "v"), { recursive: true });
+          write(context.worktreePath, ".pytest_cache/.gitignore", "*\n");
+          write(context.worktreePath, ".pytest_cache/v/lastfailed", "{}\n");
+          return { ok: true, reason: "" };
+        },
+      },
+    });
+
+    await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, TESTS, GATE, PUSH));
+
+    expect(run.reporter.failed).not.toHaveBeenCalled();
+    expect(pushedTo(run, "api")).toHaveLength(1);
   });
 
   it("hands the agent every worktree, the first one its working directory", async () => {
@@ -286,6 +358,7 @@ describe("a run across several repositories", () => {
 
     expect(run.gateRuns.map((g) => g.gate)).toEqual(["diff-size", "diff-size"]);
     expect(new Set(run.gateRuns.map((g) => g.path)).size).toBe(2);
+    for (const gate of run.gateRuns) expect(gate.home).toBe(`${gate.path}.home`);
   });
 
   describe("the run's ceiling across the repositories of one gate", () => {

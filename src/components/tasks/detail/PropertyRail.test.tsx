@@ -1686,7 +1686,7 @@ describe("a board that lists several repositories", () => {
   it("says the worker is too old when the machine has them all", () => {
     rail({ machineNeedsUpdate: true });
 
-    expect(screen.getByText(/its worker is too old to run more than one in a task/)).toBeTruthy();
+    expect(screen.getByText(/its worker is too old to run this board/)).toBeTruthy();
   });
 
   it("says nothing of it for a board that lists one repository, and waits for the machine as it did", () => {
