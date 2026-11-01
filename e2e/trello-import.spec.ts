@@ -283,7 +283,13 @@ test("a disabled Import says what to do, and says nothing once the import is don
   await expect(card(page).getByRole("alert")).toHaveCount(0);
   await expect(again).toBeVisible();
 
-  await press(page, "Check");
+  let answer = () => {};
+  const held = new Promise<void>((resolve) => (answer = resolve));
+  await page.route("**/import", async (route) => { await held; await route.continue(); }, { times: 1 });
+  await card(page).getByRole("button", { name: "Check", exact: true }).click();
+  await expect(card(page).getByRole("button", { name: "Checking…" })).toBeVisible();
+  await expect(again).toHaveCount(0);
+  answer();
   await expect(importButton).toBeEnabled();
   await expect(again).toHaveCount(0);
   await expect(first).toHaveCount(0);
