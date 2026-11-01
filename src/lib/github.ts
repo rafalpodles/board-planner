@@ -96,7 +96,7 @@ function projectKeyPattern(keys: string[]): RegExp {
 /** `fix: a sync round (BP-628, BP-631)`: two or more keys in round brackets closing a title, and nothing else in them. */
 function closingKeyList(keys: string[]): RegExp {
   const key = `(?:${keys.map(escapeRegex).join("|")})-\\d+`;
-  return new RegExp(`\\((${key}(?:(?:\\s*[,&]\\s*|\\s+(?:and\\s+)?)${key})+)\\)\\s*$`, "i");
+  return new RegExp(`\\((${key}(?:(?:\\s*[,&]\\s*(?:and\\s+)?|\\s+(?:and\\s+)?)${key})+)\\)\\s*$`, "i");
 }
 
 /**
@@ -104,7 +104,7 @@ function closingKeyList(keys: string[]): RegExp {
  * and every key in a list closing the title (BP-635).
  *
  * A branch is written once, by whoever started the work, while a title is edited freely afterwards
- * (BP-611). So once a branch names a task, a title adds another only by listing it on purpose:
+ * (BP-611). So once a branch names a task, a title adds another only through that list:
  * `follow-up to BP-12`, a version, and a task title the worker copies that ends in `(BP-293)` all
  * carry keys nobody meant as a link, and a link cannot be taken off by hand.
  */

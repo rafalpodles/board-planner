@@ -127,11 +127,11 @@ describe("matchPRsToTasks", () => {
 
   it("reads a closing list on a branch with no key, however it is joined", () => {
     const [matched] = matchPRsToTasks(
-      [pr({ ref: "family/tidy", title: "chore: tidy (bp-8, BP-9 & BP-10 and CP-11)" })],
+      [pr({ ref: "family/tidy", title: "chore: tidy (bp-8, BP-9 & BP-10 and CP-11, and BP-12)" })],
       "BP",
       ["CP"]
     );
-    expect(matched.matchedTaskNumbers).toEqual([8, 9, 10, 11]);
+    expect(matched.matchedTaskNumbers).toEqual([8, 9, 10, 11, 12]);
   });
 
   it("names a task once, under whichever key", () => {
