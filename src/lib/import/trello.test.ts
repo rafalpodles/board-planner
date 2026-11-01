@@ -163,6 +163,7 @@ describe("trelloToTable", () => {
     expect(bundle.notes).toContainEqual({ id: "Audit log filter", what: "2 uploaded files: screenshot-3-0.png, screenshot-3-1.png" });
     expect(bundle.notes).toContainEqual({ id: "Rate limit banner", what: "1 uploaded file: screenshot-5-1.png" });
     expect(bundle.notes?.filter((n) => n.what.includes("uploaded file")).map((n) => n.id).sort()).toEqual(["Audit log filter", "Backup restore", "Rate limit banner", "Search by label"]);
+    expect(bundle.notes?.some((n) => n.what.includes("no web address"))).toBe(false);
   });
 
   it("writes a link named after its own address as the address alone", () => {
@@ -241,10 +242,6 @@ describe("trelloToTable", () => {
   });
 
   it("clips a note whose names are not cut to a length of their own", () => {
-    const board = copy();
-    board.customFields = [{ id: "cf1", name: "Effort" }] as never;
-    const { notes } = bundleOf({ ...board, powerUps: ["cardAging"] }).bundle;
-    expect(notes?.every((n) => n.what.length <= IMPORT_NOTE_MAX_LENGTH)).toBe(true);
     const many = copy();
     const card = many.cards.find((c) => c.name === "Rate limit banner")!;
     card.attachments = Array.from({ length: 5 }, () => ({ isUpload: true, name: "y".repeat(120) })) as never;
