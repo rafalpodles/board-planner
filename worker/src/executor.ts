@@ -1,5 +1,7 @@
 import { DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, modelOr, WorkerConfig } from "./config.js";
 import { agentEnv } from "./env.js";
+import { GateCommands, gateCommandsOf, NPM_GATES, usesOwnCommands } from "./gates/gate-commands.js";
+import { sealedHomesFor } from "./sealed-home.js";
 import { PROTECTED_PATHS_BRIEF } from "./gates/protected-paths.js";
 import { Runner } from "./exec.js";
 import { confineTool, RecordedDir } from "./sandbox.js";
@@ -44,8 +46,16 @@ function checksNote(laterChecks: string[]): string {
   return ` You have no shell and cannot run anything. After this step the worker itself runs ${named.join(" and ")}, before anything is delivered, and lists what passed on the pull request — so do not say in your summary that it was not run.`;
 }
 
-function systemPromptFor(brief: StepBrief, repositories: readonly WorktreeRef[] = []): string {
-  const base = SYSTEM_PROMPT + checksNote(brief.laterChecks ?? []) + layoutNote(repositories);
+// The brief says not to change what these commands name, which an agent can only do if it is told them
+function gateCommandsNote(commands: GateCommands): string {
+  const named = [commands.installCommand, commands.buildCommand, commands.testCommand].filter(Boolean);
+  if (named.length === 0) return "";
+  const where = commands.workingDirectory ? ` in ${commands.workingDirectory}` : "";
+  return ` This project's gates run ${named.map((command) => `\`${command}\``).join(", ")}${where}. The rule above also covers any file those commands name, and gradlew, mvnw, justfile, Taskfile.yml, noxfile.py, pytest.ini, conftest.py, build.rs, GNUmakefile, go.work, .cargo/, .mvn/ and gradle/wrapper/.`;
+}
+
+function systemPromptFor(brief: StepBrief, repositories: readonly WorktreeRef[] = [], commands: GateCommands = NPM_GATES): string {
+  const base = SYSTEM_PROMPT + gateCommandsNote(commands) + checksNote(brief.laterChecks ?? []) + layoutNote(repositories);
   const step = brief.prompt.trim();
   return step ? `${base}\n\nThis step: ${step}` : base;
 }
@@ -178,6 +188,8 @@ export interface ExecuteOptions {
   worktreePath: string;
   /** What the worktree was at creation; the confinement is to this and not to `worktreePath` resolved now (BP-804). */
   worktreeDir: RecordedDir;
+  /** The clones' `.git`, read under a shut home so that a CLI that runs commands can use git. */
+  checkoutGitDirs?: string[];
   brief: StepBrief;
   /**
    * Every worktree of a run that spans several repositories, the working directory's first. The
@@ -204,7 +216,7 @@ export function createExecutor(
     codex: !codex ? undefined : typeof codex === "string" ? codexAgent(codex) : codex,
   };
   return {
-    async execute({ task, worktreePath, worktreeDir, brief, repositories, signal, onEvent }) {
+    async execute({ task, worktreePath, worktreeDir, brief, repositories, checkoutGitDirs = [], signal, onEvent }) {
       const provider = brief.provider || "claude";
       const chosen = Object.hasOwn(agents, provider) ? agents[provider] : undefined;
       // Before anything is made: a machine that cannot run this step will be just as unable on the
@@ -236,7 +248,7 @@ export function createExecutor(
 
       const agentArgs = agent.editArgs({
         prompt: buildPrompt(task),
-        systemPrompt: systemPromptFor(brief, repositories),
+        systemPrompt: systemPromptFor(brief, repositories, gateCommandsOf(config)),
         capability: brief.capability,
         model: agent.id === "claude" ? modelOr(brief.model || config.model, DEFAULT_MODEL) : brief.model.trim(),
         fallbackModel: agent.id === "claude" ? modelOr(brief.fallbackModel || config.fallbackModel, DEFAULT_FALLBACK_MODEL) : "",
@@ -252,6 +264,9 @@ export function createExecutor(
       const worktrees = repositories && repositories.length > 1 ? repositories.map((ref) => ref.dir) : [worktreeDir];
       const spawn = confineTool(agent.tool, agent.path, agentArgs, {
         writable: [...(agent.worktreeWritable(brief.capability) ? worktrees : []), ...run.writable],
+        ...(usesOwnCommands(gateCommandsOf(config))
+          ? { sealedHomes: { ...sealedHomesFor([...agent.sessionReadable(), ...worktrees.map((dir) => (typeof dir === "string" ? dir : dir.path)), ...checkoutGitDirs]), keychain: true } }
+          : {}),
       });
 
       // Before the spawn, not after: a step that cannot be confined does not run half-confined and

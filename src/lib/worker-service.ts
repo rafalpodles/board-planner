@@ -4,10 +4,10 @@ import { isValidObjectId, Types } from "mongoose";
 import { connectDB } from "./db";
 import { Worker } from "@/models/worker";
 import { ApiUserSummary, ApiWorker, ApiWorkerTask, IUser, IWorker } from "@/types";
-import { PROJECT_POLICY_DEFAULTS, WORKER_POLICY_DEFAULTS } from "@/lib/worker-policy";
+import { GATE_COMMAND_FIELDS, PROJECT_POLICY_DEFAULTS, WORKER_POLICY_DEFAULTS } from "@/lib/worker-policy";
 import { MatchableProject, RepoReport, matchRepo, repositoryCoverage, type HeldRepository } from "@/lib/repo-match";
 import { hasSeveralRepositories } from "@/lib/repositories";
-import { MULTI_REPOSITORY } from "@/lib/worker-capabilities";
+import { GATE_COMMANDS, MULTI_REPOSITORY } from "@/lib/worker-capabilities";
 import { projectRepositoryUrl } from "@/lib/repository";
 import { ensureWorkerUser } from "@/lib/worker-user";
 import { accessibleProjectIds } from "@/lib/grants";
@@ -106,6 +106,9 @@ export function verdictFor(
   // only narrow what its owner can already reach — never stand in for it (BP-305)
   if (!canServe(reachable, String(project._id))) {
     return { ok: false, reason: "this machine's owner cannot reach this project" };
+  }
+  if (namesGateCommands(project) && !capabilities.includes(GATE_COMMANDS)) {
+    return { ok: false, reason: "this project names its own gate commands and this worker cannot run them yet — update the worker" };
   }
   const usable = usableRepos(worker as unknown as CheckoutClaimant, others, now);
   // A project that lists several repositories is one run in several working trees, so the machine has
@@ -316,6 +319,14 @@ export function overriddenPolicy(
   return out;
 }
 
+export function namesGateCommands(project: { worker?: { policy?: unknown; policyOverrides?: string[] | null } | null }): boolean {
+  const policy = overriddenPolicy(
+    { policy: project.worker?.policy as Record<string, unknown> | null, policyOverrides: project.worker?.policyOverrides },
+    PROJECT_POLICY_DEFAULTS
+  );
+  return [...GATE_COMMAND_FIELDS, "workingDirectory"].some((field) => Boolean(policy[field]));
+}
+
 export const overriddenWorkerPolicy = (worker: IWorker) =>
   overriddenPolicy(worker as never, WORKER_POLICY_DEFAULTS);
 
@@ -334,6 +345,8 @@ export function assignmentsFor(
   for (const project of projects) {
     if (!projectRunsWorkers(project.worker)) continue;
     if (!canServe(reachable, String(project._id))) continue;
+    // An assignment the claim would refuse must never be offered, for the reason below
+    if (namesGateCommands(project) && !capabilities.includes(GATE_COMMANDS)) continue;
     let remote: string | null;
     let repositories: HeldRepository[] | undefined;
     if (hasSeveralRepositories(project)) {

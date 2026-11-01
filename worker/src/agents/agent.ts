@@ -64,6 +64,8 @@ export interface CodingAgent {
   worktreeWritable(capability: Capability): boolean;
   /** Whether the review gate's clean checkout is writable to the reviewer */
   readonly reviewerWritesCheckout: boolean;
+  /** What its session and its own files need of a shut home (BP-985), measured per CLI */
+  sessionReadable(): string[];
   /** The per-run setup for a call whose answer must have this shape, or why this machine cannot make it */
   prepare(schema: object): Promise<AgentRun | { refusal: string }>;
   editArgs(call: EditCall): string[];

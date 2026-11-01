@@ -4,6 +4,7 @@ import { dirname, join } from "path";
 import { childEnv, unconfinedAgentAllowed } from "./env.js";
 import { confine, recordDir, SANDBOX_COMMAND, UNCONFINED_ACCEPTED_DETAIL } from "./sandbox.js";
 import { npmCacheDir } from "./gates/confined-npm.js";
+import { GateCommands, gateProgramOf, resolveGateProgram } from "./gates/gate-commands.js";
 import { Runner } from "./exec.js";
 import { GateNode, nodeVerdict } from "./node-engines.js";
 import { CommitIdentity, resolveCommitIdentity } from "./commit.js";
@@ -16,9 +17,10 @@ import {
   usableAccount,
 } from "./github-account.js";
 
-// The four binaries the worker shells out to. Nothing here is optional. Each is spawned by the path
-// found here and refused without one (BP-733); a missing claude or npm stops the worker claiming at
-// all, and a missing git or gh fails the task until the attempt cap routes it to a human.
+// The four binaries the worker shells out to. Each is spawned by the path found here and refused
+// without one (BP-733); a missing claude stops the worker claiming at all, a missing npm stops it
+// claiming from a project on the npm gates, and a missing git or gh fails the task until the attempt
+// cap routes it to a human.
 export const TOOLS = ["git", "npm", "claude", "gh"] as const;
 export type ToolName = (typeof TOOLS)[number];
 
@@ -106,11 +108,36 @@ async function resolve(deps: PreflightDeps, tool: string): Promise<string> {
 }
 
 function missing(tool: ToolName): PreflightCheck {
+  // A project that names its own gate commands runs no npm, so this is a fact about some projects
+  // and not about the machine: `gateChecks` refuses the ones that need it
+  if (tool === "npm") {
+    return { name: tool, ok: true, warn: true, detail: "npm could not be found on this machine, so a project on the npm gates is not claimed from" };
+  }
   return {
     name: tool,
     ok: false,
     detail: `${tool} could not be found on this machine, and every task needs it`,
   };
+}
+
+export function npmMissingForProject(repoPath: string): PreflightCheck {
+  return { name: "npm", ok: false, detail: `npm could not be found on this machine, and the gates of ${repoPath} run it` };
+}
+
+/** The programs a project's own commands name, as far as they can be known before a checkout exists. */
+export function checkGateCommands(commands: GateCommands, path: string): PreflightCheck[] {
+  const programs = [commands.installCommand, commands.buildCommand, commands.testCommand].filter(Boolean).map(gateProgramOf);
+  return [...new Set(programs)]
+    .filter((program) => !program.startsWith("./"))
+    .map((program) => {
+      const found = resolveGateProgram(program, "", path);
+      return {
+        // Prefixed: the server reads a row named `sandbox` as this machine's own, and a program may be called anything
+        name: `gate program ${program}`,
+        ok: found !== null,
+        detail: found ?? `${program} is not on this worker's PATH, and this project's gate commands run it`,
+      };
+    });
 }
 
 async function runs(
@@ -660,6 +687,14 @@ export function pathWithTools(paths: Record<string, string>, currentPath: string
   return [...additions, ...existing].join(":");
 }
 
+function declaresWorkspaces(manifest: string | null): boolean {
+  try {
+    return manifest !== null && Boolean((JSON.parse(manifest) as { workspaces?: unknown }).workspaces);
+  } catch {
+    return false;
+  }
+}
+
 // `npm ci` and `npm run build` are unconditional in the gates, so a repository without a lockfile
 // or without those scripts fails every task forever with nothing saying why. Checked per bound
 // repository, because a worker can serve several.
@@ -670,22 +705,28 @@ export function pathWithTools(paths: Record<string, string>, currentPath: string
 export function checkRepo(
   read: (path: string) => string | null,
   repoPath: string,
-  node?: GateNode | null
+  node?: GateNode | null,
+  workingDirectory = ""
 ): PreflightCheck[] {
   const checks: PreflightCheck[] = [];
+  const packageRoot = join(repoPath, workingDirectory);
 
-  const hasLock = read(join(repoPath, "package-lock.json")) !== null;
+  // A member of an npm workspace has its lockfile at the root, and `npm ci` finds it there. A root
+  // with no workspaces has no such members. Which directories are members is left to `npm ci`
+  const hasLock =
+    read(join(packageRoot, "package-lock.json")) !== null ||
+    (read(join(repoPath, "package-lock.json")) !== null && declaresWorkspaces(read(join(repoPath, "package.json"))));
   checks.push({
     name: "package-lock.json",
     ok: hasLock,
     detail: hasLock
-      ? `present in ${repoPath}`
-      : `${repoPath} has no package-lock.json, and the build gate runs npm ci, which fails without one`,
+      ? `present for ${packageRoot}`
+      : `${packageRoot} has no package-lock.json, and the build gate runs npm ci, which fails without one`,
   });
 
   let scripts: Record<string, unknown> = {};
   let engine: unknown;
-  const manifest = read(join(repoPath, "package.json"));
+  const manifest = read(join(packageRoot, "package.json"));
   if (manifest !== null) {
     try {
       const parsed = JSON.parse(manifest) as { scripts?: Record<string, unknown>; engines?: { node?: unknown } };
@@ -704,12 +745,12 @@ export function checkRepo(
       ok,
       detail: ok
         ? `npm run ${script} is defined`
-        : `${repoPath} has no ${script} script, and the ${script} gate runs on every task`,
+        : `${packageRoot} has no ${script} script, and the ${script} gate runs on every task`,
     });
   }
 
   if (node !== undefined && typeof engine === "string" && engine.trim() !== "") {
-    checks.push(nodeEngineCheck(engine.trim(), node, repoPath));
+    checks.push(nodeEngineCheck(engine.trim(), node, packageRoot));
   }
 
   return checks;

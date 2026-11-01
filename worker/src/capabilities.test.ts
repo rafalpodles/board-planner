@@ -4,6 +4,7 @@ import {
   CAPABILITIES_HEADER,
   capabilities,
   capabilityHeaders,
+  GATE_COMMANDS,
   MULTI_REPOSITORY,
   reportAgents,
   SAYS_IT_RUNS_SEVERAL_REPOSITORIES,
@@ -19,13 +20,13 @@ describe("what this worker says it can do", () => {
 
   it("says it runs several repositories", () => {
     expect(SAYS_IT_RUNS_SEVERAL_REPOSITORIES).toBe(true);
-    expect(capabilities()).toEqual([MULTI_REPOSITORY]);
-    expect(capabilityHeaders()).toEqual({ "X-CP-Capabilities": "multi-repository" });
+    expect(capabilities()).toEqual([GATE_COMMANDS, MULTI_REPOSITORY]);
+    expect(capabilityHeaders()).toEqual({ "X-CP-Capabilities": "gate-commands,multi-repository" });
   });
 
-  it("sends no header at all once the capability is taken back, so the server hands this worker no such project", () => {
-    expect(capabilities(false)).toEqual([]);
-    expect(capabilityHeaders(false)).toEqual({});
+  it("takes back only that capability, so the server hands this worker no such project", () => {
+    expect(capabilities(false)).toEqual([GATE_COMMANDS]);
+    expect(capabilityHeaders(false)).toEqual({ "X-CP-Capabilities": "gate-commands" });
   });
 });
 
@@ -34,14 +35,14 @@ describe("what this worker says it can run", () => {
   afterEach(() => reportAgents([]));
 
   it("says nothing about agents until preflight has looked", () => {
-    expect(capabilities()).toEqual([MULTI_REPOSITORY]);
+    expect(capabilities()).toEqual([GATE_COMMANDS, MULTI_REPOSITORY]);
   });
 
   it("names each usable CLI as agent-<id>, after the capability it already said", () => {
     reportAgents(["claude", "codex"]);
 
-    expect(capabilities()).toEqual(["multi-repository", "agent-claude", "agent-codex"]);
-    expect(capabilityHeaders()).toEqual({ "X-CP-Capabilities": "multi-repository,agent-claude,agent-codex" });
+    expect(capabilities()).toEqual([GATE_COMMANDS, "multi-repository", "agent-claude", "agent-codex"]);
+    expect(capabilityHeaders()).toEqual({ "X-CP-Capabilities": "gate-commands,multi-repository,agent-claude,agent-codex" });
   });
 
   it("says nothing of Codex on a machine that has none", () => {
@@ -53,14 +54,14 @@ describe("what this worker says it can run", () => {
   it("keeps saying what the machine can run when the several-repositories capability is taken back", () => {
     reportAgents(["claude", "codex"]);
 
-    expect(capabilities(false)).toEqual(["agent-claude", "agent-codex"]);
+    expect(capabilities(false)).toEqual([GATE_COMMANDS, "agent-claude", "agent-codex"]);
   });
 
   it("stops saying it when the report is emptied, as a restart does", () => {
     reportAgents(["codex"]);
     reportAgents([]);
 
-    expect(capabilities()).toEqual([MULTI_REPOSITORY]);
+    expect(capabilities()).toEqual([GATE_COMMANDS, MULTI_REPOSITORY]);
   });
 
   it("stops claiming a CLI the moment it is no longer usable, without waiting for a new preflight", () => {
@@ -70,8 +71,8 @@ describe("what this worker says it can run", () => {
 
     codexIsThere = false;
 
-    expect(capabilities()).toEqual(["multi-repository", "agent-claude"]);
-    expect(capabilityHeaders()).toEqual({ "X-CP-Capabilities": "multi-repository,agent-claude" });
+    expect(capabilities()).toEqual([GATE_COMMANDS, "multi-repository", "agent-claude"]);
+    expect(capabilityHeaders()).toEqual({ "X-CP-Capabilities": "gate-commands,multi-repository,agent-claude" });
   });
 
   it("claims it again when it comes back", () => {

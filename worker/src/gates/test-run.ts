@@ -1,24 +1,21 @@
-import { CommandResult, Runner } from "../exec.js";
+import { Runner } from "../exec.js";
 import { Gate } from "../types.js";
-import { LOOPBACK_ONLY_NOTE, refused, runConfinedNpm } from "./confined-npm.js";
+import { LOOPBACK_ONLY_NOTE, outputTail, refused, runConfinedNpm } from "./confined-npm.js";
+import { gateDirectory, GateCommands, NPM_GATES, runOwnTests, usesOwnCommands } from "./gate-commands.js";
 
-const MAX_REASON_CHARS = 2000;
-
-function outputTail(result: CommandResult): string {
-  const output = [result.stdout, result.stderr].filter((stream) => stream.trim()).join("\n");
-  if (output.length <= MAX_REASON_CHARS) return output;
-  return `[output truncated to the last ${MAX_REASON_CHARS} characters]\n${output.slice(-MAX_REASON_CHARS)}`;
-}
-
-export function testRunGate(runner: Runner, npmPath: string, timeoutMs: number): Gate {
+export function testRunGate(runner: Runner, npmPath: string, timeoutMs: number, commands: GateCommands = NPM_GATES): Gate {
   return {
     name: "test-run",
-    async run({ worktreePath, worktreeDir, signal }) {
+    async run(context) {
+      if (usesOwnCommands(commands)) return runOwnTests(runner, commands, timeoutMs, context);
+      const { worktreeDir, signal } = context;
+      const place = gateDirectory(context.worktreePath, commands.workingDirectory);
+      if ("reason" in place) return { ok: false, reason: place.reason };
       // Confined, because this is the command that runs the agent's own code: a test file the
       // Implement step wrote is inside the worktree, so the agent's sandbox permitted writing it,
       // and this is where it executes (BP-608).
       const result = await runConfinedNpm(runner, npmPath, ["test"], {
-        cwd: worktreePath,
+        cwd: place.path,
         worktree: worktreeDir,
         timeoutMs,
         signal,
@@ -38,7 +35,7 @@ export function testRunGate(runner: Runner, npmPath: string, timeoutMs: number):
           reason: `the test suite failed (exit ${result.code}${result.loopbackOnly ? `; ${LOOPBACK_ONLY_NOTE}` : ""}):\n${outputTail(result)}`,
         };
       }
-      return { ok: true, reason: "", commands: ["npm test"] };
+      return { ok: true, reason: "", commands: [commands.workingDirectory ? `npm test (in ${commands.workingDirectory})` : "npm test"] };
     },
   };
 }

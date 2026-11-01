@@ -277,7 +277,7 @@ describe("createApiClient", () => {
     expect(init.headers.Authorization).toBe("Bearer cpw_secret");
     expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
     expect(init.headers["X-CP-Protocol"]).toBe("1");
-    expect(init.headers["X-CP-Capabilities"]).toBe("multi-repository");
+    expect(init.headers["X-CP-Capabilities"]).toBe("gate-commands,multi-repository");
   });
 
   it("sends the worker credential, X-Worker-Id and X-CP-Protocol on claim, not the api token", async () => {
@@ -288,7 +288,7 @@ describe("createApiClient", () => {
     expect(init.headers.Authorization).toBe("Bearer cpw_secret");
     expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
     expect(init.headers["X-CP-Protocol"]).toBe("1");
-    expect(init.headers["X-CP-Capabilities"]).toBe("multi-repository");
+    expect(init.headers["X-CP-Capabilities"]).toBe("gate-commands,multi-repository");
   });
 
   it("sends only runId in the claim body — the credential identifies the worker", async () => {
@@ -671,7 +671,7 @@ describe("createApiClient", () => {
     expect(init.headers.Authorization).toBe("Bearer cpw_secret");
     expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
     expect(init.headers["X-CP-Protocol"]).toBe("1");
-    expect(init.headers["X-CP-Capabilities"]).toBe("multi-repository");
+    expect(init.headers["X-CP-Capabilities"]).toBe("gate-commands,multi-repository");
   });
 
   it("reads columns for boardColumns on the worker credential too", async () => {
@@ -798,7 +798,7 @@ describe("createApiClient", () => {
     expect(init.headers.Authorization).toBe("Bearer cpw_secret");
     expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
     expect(init.headers["X-CP-Protocol"]).toBe("1");
-    expect(init.headers["X-CP-Capabilities"]).toBe("multi-repository");
+    expect(init.headers["X-CP-Capabilities"]).toBe("gate-commands,multi-repository");
   });
 
   // The one thing the run can learn from a phase post: the server wrote nothing, because the task

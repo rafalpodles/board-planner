@@ -19,6 +19,7 @@ const OWN_KEY = "sk-or-acme-own-e2e-0123456789";
 const now = new Date();
 const TODAY = now.toISOString().slice(0, 10);
 const MONTH = now.toISOString().slice(0, 7);
+const RENEWS = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 
 async function makePro(request: APIRequestContext, who: OrganisationFixture, trial = false) {
   const path = `/api/platform/organisations/${who.organisation.toHexString()}/licence`;
@@ -235,7 +236,7 @@ test("on screen: AI Assist and the PM chat say how much was used and when it ren
   await page.goto(`${originOf(ACME)}/projects/${SHARED_KEY}/pm`);
   await page.getByPlaceholder(/Message the PM/).fill("hello");
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await expect(page.getByText(/its allowance for the month\. It renews on 1 November 2026 \(UTC\)/)).toBeVisible();
+  await expect(page.getByText(new RegExp(`its allowance for the month\\. It renews on ${RENEWS} \\(UTC\\)`))).toBeVisible();
   await page.screenshot({ path: "e2e/.artifacts/bp680-chat-refused-phone.png" });
 });
 

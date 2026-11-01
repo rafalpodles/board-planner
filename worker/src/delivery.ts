@@ -130,7 +130,7 @@ function checksSection(checks: PassedCheck[]): string {
   if (checks.length === 0) return "";
   const lines = checks.map((check) => {
     const ran = check.commands.length
-      ? `: ${check.commands.map((command) => `\`${command}\``).join(", ")}`
+      ? `: ${check.commands.map((command) => `\`${scrub(command)}\``).join(", ")}`
       : "";
     return `- **${check.name}**${ran} (${formatDuration(check.durationMs)})`;
   });

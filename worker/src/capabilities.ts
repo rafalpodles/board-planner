@@ -6,6 +6,9 @@
  */
 export const MULTI_REPOSITORY = "multi-repository";
 
+/** Runs a project's own gate commands (BP-985). A worker without it would run npm and report that as the project's check. */
+export const GATE_COMMANDS = "gate-commands";
+
 /**
  * Whether this worker says it can run several repositories of one project: `runTaskInRepositories`
  * exists, is exercised against real git by `pipeline-several.integration.test.ts` and, in CI, by a
@@ -39,7 +42,7 @@ export function capabilities(
   says: boolean = SAYS_IT_RUNS_SEVERAL_REPOSITORIES,
   agents: readonly string[] = reportedAgents
 ): string[] {
-  return [...(says ? [MULTI_REPOSITORY] : []), ...agents.filter((agent) => stillUsable(agent)).map((agent) => `agent-${agent}`)];
+  return [GATE_COMMANDS, ...(says ? [MULTI_REPOSITORY] : []), ...agents.filter((agent) => stillUsable(agent)).map((agent) => `agent-${agent}`)];
 }
 
 /** Spread into the headers of every request to the server, next to `X-CP-Protocol` */

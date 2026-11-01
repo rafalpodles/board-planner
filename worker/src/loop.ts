@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { ApiClient, ClaimRefused } from "./api.js";
+import type { RunDisposition } from "./pipeline.js";
 import { ClaimedTask } from "./types.js";
 
 export interface LoopDeps {
@@ -11,8 +12,8 @@ export interface LoopDeps {
   // "machine-fault" says the run failed for a reason that has nothing to do with the task and will
   // repeat on the next one — an unreachable remote, say. Claiming onward would walk the whole
   // approved queue through a failure none of those tasks caused, so the pass ends and the worker
-  // waits out its poll interval instead.
-  execute: (task: ClaimedTask) => Promise<void | "machine-fault">;
+  // waits out its poll interval instead. "settings-fault" is the same for a project's own commands.
+  execute: (task: ClaimedTask) => Promise<RunDisposition>;
   // The signal is aborted by stop(); a sleep that ignores it delays every shutdown by up to a full
   // poll interval, which at the default 30 s outlasts launchd's 20 s exit timeout
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -67,7 +68,7 @@ export function createLoop(deps: LoopDeps): Loop {
   let running = true;
   let pausedState = false;
   let lastBlocked = "";
-  // The assignment whose run reported the last machine fault. assignments() is stable in order, so
+  // The assignment whose run reported the last fault. assignments() is stable in order, so
   // without this a project that faults on every pass keeps the head of the list and no assignment
   // behind it is ever claimed for again — starvation for as long as the fault lasts, not for one
   // pass. Starting the next pass after that project puts it last instead.
@@ -86,7 +87,7 @@ export function createLoop(deps: LoopDeps): Loop {
     async start() {
       while (running) {
         let claimedAny = false;
-        let machineFault = false;
+        let faulted = false;
 
         if (deps.drain) {
           try {
@@ -105,22 +106,24 @@ export function createLoop(deps: LoopDeps): Loop {
         if (!pausedState && !blocked) {
           // Every assignment gets its own attempt and its own try/catch: a project that cannot be
           // claimed from, or a task that blows up, must not cost a sibling project its turn in this
-          // pass — that would starve whichever assignment comes last in the list. A machine fault
-          // is the one thing that does end the pass, because it is the machine and not the project
-          // that is broken; passOrder is what keeps that from starving a sibling across passes.
+          // pass — that would starve whichever assignment comes last in the list. A fault is the
+          // one thing that does end the pass: a broken machine fails every claim after it, and the
+          // poll interval is all that paces a queue through a project's broken settings. passOrder
+          // is what keeps that from starving a sibling across passes.
           for (const projectId of passOrder(deps.assignments())) {
             if (!running) return;
             try {
               const task = await deps.api.claim(projectId, randomUUID());
               if (refused.delete(projectId)) log(`project ${projectId} can be claimed from again`);
               if (task) {
-                if ((await deps.execute(task)) === "machine-fault") {
+                const disposition = await deps.execute(task);
+                if (disposition) {
                   // The board gets a comment on the task; the operator watching this log got
-                  // nothing at all, which is the wrong way round for a fault that is the machine's
+                  // nothing at all, which is the wrong way round for a fault that is not the task's
                   // (BP-349 review). The reason itself is on the board — a run's fault is not a
                   // string this loop holds — so this says which task carried it.
-                  log(`machine fault on ${task.taskKey}; not claiming again this pass`);
-                  machineFault = true;
+                  log(`${disposition === "machine-fault" ? "machine" : "settings"} fault on ${task.taskKey}; not claiming again this pass`);
+                  faulted = true;
                   faultedLast = projectId;
                   break;
                 }
@@ -144,9 +147,9 @@ export function createLoop(deps: LoopDeps): Loop {
         }
 
         if (!running) return;
-        // A machine fault outranks work done earlier in the pass: the fault is what the next claim
-        // would hit, so the pass ends here whatever else succeeded before it.
-        if (claimedAny && !machineFault) continue;
+        // A fault outranks work done earlier in the pass, which ends here whatever else
+        // succeeded before it.
+        if (claimedAny && !faulted) continue;
         await deps.sleep(deps.pollIntervalMs(), stopping.signal);
       }
     },

@@ -1,3 +1,5 @@
+import { dirname } from "path";
+import { gateCommandsOf, gateConfigFault, usesOwnCommands } from "./gates/gate-commands.js";
 import { createBudget } from "./budget.js";
 import { commitAll, TamperedCheckoutError } from "./commit.js";
 import { branchFor, WORKER_BRANCH_SLUG } from "./decisions.js";
@@ -9,7 +11,7 @@ import { ignoredFiles } from "./hidden-files.js";
 import {
   EMPTY_RESULT,
   fitDetail,
-  GATE_CAP_MS,
+  gateCapFor,
   hitUsageLimit,
   keptWorktree,
   MIN_ENTRY_MS,
@@ -237,10 +239,21 @@ export async function runTaskInRepositories(
   };
 
   const budget = createBudget(config.runCeilingMs, now);
+  const onOwnCommands = usesOwnCommands(gateCommandsOf(config));
 
   try {
     for (const leg of legs) leg.ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, leg.worktree.path);
     const anyMerged = (): boolean => legs.some((leg) => leg.state.merged);
+
+    // Every repository or none: a gate runs only where the agent changes something, so a `./gradlew` one
+    // of them lacks says nothing about this task
+    const configFaults = legs.map((leg) => gateConfigFault(task.agent.sequence, gateCommandsOf(config), leg.worktree.path));
+    const configFault = configFaults.every(Boolean) ? configFaults[0] : null;
+    if (configFault) {
+      settle("failed", configFault);
+      await reporter.failed(task, `this run stopped before any step: ${configFault}`);
+      return "settings-fault";
+    }
 
     for (const [position, entry] of task.agent.sequence.entries()) {
       if (await releaseIfAborted(deps, reporter, task, landed())) return;
@@ -277,7 +290,7 @@ export async function runTaskInRepositories(
       // after it, and the agent could have written in any of them
       if (entry.kind !== "step" || entry.capability !== "edit") continue;
       for (const leg of legs) {
-        const leftover = await unfinishedWork(runner, deps.gitPath, leg.worktree.path, leg.worktree.baseSha);
+        const leftover = await unfinishedWork(runner, deps.gitPath, leg.worktree.path, leg.worktree.baseSha, onOwnCommands ? leg.ignoredBeforeSteps : undefined);
         if (leftover) {
           return (
             await end({
@@ -341,6 +354,7 @@ export async function runTaskInRepositories(
       worktreePath: legs[0].worktree.path,
       worktreeDir: legs[0].worktree.dir,
       repositories,
+      checkoutGitDirs: legs.map((leg) => dirname(dirname(leg.worktree.pin.gitDir))),
       signal: deps.signal,
       onEvent,
       brief: {
@@ -371,6 +385,7 @@ export async function runTaskInRepositories(
     if (entry.capability === "edit") {
       // Every repository is committed, or the step fails: what the agent wrote is in the trees and in
       // no history until each commit has happened
+      const changed: Leg[] = [];
       for (const leg of legs) {
         try {
           const tamperedNow = await leg.worktree.tampering();
@@ -382,10 +397,12 @@ export async function runTaskInRepositories(
             `${task.taskKey}: ${entry.name.toLowerCase()}`,
             leg.worktree.commitIdentity,
             leg.worktree.baseSha,
+            onOwnCommands ? leg.ignoredBeforeSteps : undefined,
           );
           if (sha) {
             leg.state.commits.push(sha);
             leg.state.checks.splice(0);
+            changed.push(leg);
           }
           leg.state.committed = leg.state.committed || sha !== "";
         } catch (error) {
@@ -394,6 +411,16 @@ export async function runTaskInRepositories(
             return { kind: "tampered", finding: error.finding, message: `${leg.label}: ${error.message}` };
           }
           return { kind: "error", message: `${leg.label}: ${String(error)}` };
+        }
+      }
+      // After every commit has happened, so that what throws here cannot read as one having failed
+      if (onOwnCommands) {
+        for (const leg of changed) {
+          try {
+            leg.worktree.emptyGateHome();
+          } catch (error) {
+            return { kind: "error", message: `${leg.label}: ${String(error)}` };
+          }
         }
       }
     }
@@ -575,7 +602,7 @@ export async function runTaskInRepositories(
       report: () =>
         reporter.requeued(
           task,
-          `${entry.name} failed: ${outcome.message}${legs.some((leg) => leg.state.uncommittedWork) ? kept() : ""}`,
+          `${entry.name} failed: ${outcome.message}${legs.some((leg) => leg.state.committed || leg.state.uncommittedWork) ? kept() : ""}`,
         ),
     });
   }
@@ -590,7 +617,7 @@ export async function runTaskInRepositories(
       maxDiffFiles: config.maxDiffFiles,
       reviewModel: config.reviewModel ?? "",
     };
-    const gate = deps.gateFor(entry, runner, budget.forEntry(GATE_CAP_MS), gateOptions);
+    const gate = deps.gateFor(entry, runner, budget.forEntry(gateCapFor(config)), gateOptions);
     if (!gate) {
       return done({
         outcome: "failed",
@@ -607,8 +634,14 @@ export async function runTaskInRepositories(
     // Every worktree is vetted, the ones with nothing committed too: the gate is about to run code
     // somewhere, and the agent could have written anywhere it was confined to
     for (const leg of legs) {
-      const refused = await vetBeforeGate(runner, deps.gitPath, leg.worktree, leg.ignoredBeforeSteps, gate.name, (note) =>
-        reporter.noted(task, `${leg.label}: ${note}`),
+      const refused = await vetBeforeGate(
+        runner,
+        deps.gitPath,
+        leg.worktree,
+        leg.ignoredBeforeSteps,
+        gate.name,
+        (note) => reporter.noted(task, `${leg.label}: ${note}`),
+        onOwnCommands ? leg.ignoredBeforeSteps : undefined,
       );
       if (refused) {
         return done({
@@ -656,12 +689,14 @@ export async function runTaskInRepositories(
             ),
         });
       }
-      const legGate = index === 0 ? gate : (deps.gateFor(entry, runner, budget.forEntry(GATE_CAP_MS), gateOptions) ?? gate);
+      const legGate = index === 0 ? gate : (deps.gateFor(entry, runner, budget.forEntry(gateCapFor(config)), gateOptions) ?? gate);
       const diff = await deps.collectDiff(runner, leg.worktree.path, leg.worktree.baseSha);
       const startedGate = now();
       const verdict = await legGate.run({
         worktreePath: leg.worktree.path,
         worktreeDir: leg.worktree.dir,
+        gateHome: leg.worktree.gateHome,
+        checkoutGitDir: dirname(dirname(leg.worktree.pin.gitDir)),
         task,
         result: leg.state.lastResult,
         diff,

@@ -100,6 +100,8 @@ describe("the review gate against an ignored instruction file", () => {
     return {
       worktreePath: work,
       worktreeDir: { path: work, dev: 0, ino: 0 },
+      gateHome: { path: work, dev: 0, ino: 0 },
+      checkoutGitDir: "/repo/.git",
       task: claimedTask({}),
       result: {
         status: "completed",

@@ -23,6 +23,10 @@ export interface WorkerConfig {
   model?: string;
   fallbackModel?: string;
   reviewModel?: string;
+  installCommand?: string;
+  buildCommand?: string;
+  testCommand?: string;
+  workingDirectory?: string;
 }
 
 export const DEFAULT_MODEL = "opus";
@@ -52,6 +56,26 @@ export function isGitRefName(value: string): boolean {
 
 export function isModelName(value: string): boolean {
   return value.length <= MAX_VALUE_CHARS && MODEL_NAME.test(value);
+}
+
+const GATE_COMMAND_WORD = /^[A-Za-z0-9._/=+:@%,~[\]-]+$/;
+const GATE_PROGRAM = /^(?:[A-Za-z0-9_][A-Za-z0-9._+-]*|\.\/[A-Za-z0-9._+/-]+)$/;
+const WORKING_DIRECTORY = /^[A-Za-z0-9_][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_][A-Za-z0-9._-]*)*$/;
+const CREDENTIAL_IN_URL = /:\/\/[^/]*@/;
+const MAX_COMMAND_CHARS = 500;
+
+export function isGateCommand(value: string): boolean {
+  const [program, ...args] = value.split(/ +/);
+  return (
+    value.length <= MAX_COMMAND_CHARS &&
+    GATE_PROGRAM.test(program) &&
+    !program.split("/").includes("..") &&
+    args.every((word) => GATE_COMMAND_WORD.test(word) && !CREDENTIAL_IN_URL.test(word))
+  );
+}
+
+export function isWorkingDirectory(value: string): boolean {
+  return value.length <= MAX_VALUE_CHARS && WORKING_DIRECTORY.test(value);
 }
 
 // Unset or blank means today's model, never `--model ""` — measured: the CLI answers
@@ -94,6 +118,10 @@ export interface EffectiveConfig {
   model: string;
   fallbackModel: string;
   reviewModel: string;
+  installCommand: string;
+  buildCommand: string;
+  testCommand: string;
+  workingDirectory: string;
 }
 
 export const DEFAULT_POLICY: EffectiveConfig = {
@@ -106,6 +134,10 @@ export const DEFAULT_POLICY: EffectiveConfig = {
   model: DEFAULT_MODEL,
   fallbackModel: DEFAULT_FALLBACK_MODEL,
   reviewModel: DEFAULT_REVIEW_MODEL,
+  installCommand: "",
+  buildCommand: "",
+  testCommand: "",
+  workingDirectory: "",
 };
 
 // One repository of a project that lists several, as the server names it: its own id and name, and the
@@ -344,6 +376,15 @@ export function applyPolicy(current: EffectiveConfig, patch: unknown): Effective
   }
   if (isNonEmptyString(source.reviewModel) && isModelName(source.reviewModel.trim())) {
     next.reviewModel = source.reviewModel.trim();
+  }
+  // An empty value is a project clearing its command, so unlike the fields above it is applied
+  for (const field of ["installCommand", "buildCommand", "testCommand"] as const) {
+    const value = source[field];
+    if (typeof value === "string" && (!value.trim() || isGateCommand(value.trim()))) next[field] = value.trim();
+  }
+  const { workingDirectory } = source;
+  if (typeof workingDirectory === "string" && (!workingDirectory.trim() || isWorkingDirectory(workingDirectory.trim()))) {
+    next.workingDirectory = workingDirectory.trim();
   }
 
   return next;

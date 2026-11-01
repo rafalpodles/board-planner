@@ -1,4 +1,6 @@
+import { join } from "node:path";
 import { CommandResult } from "../exec.js";
+import { programDirectory, realHomes } from "../sealed-home.js";
 import { isRateLimitEvent, lastResultEvent, parseStream, ResultEvent, StreamEvent } from "../stream.js";
 import { RunOutcome } from "../types.js";
 import { Capability, CodingAgent, EditCall, NO_RUN, ReviewCall, Verdict } from "./agent.js";
@@ -72,6 +74,9 @@ export function claudeAgent(path: string): CodingAgent {
     path,
     worktreeWritable: () => true,
     reviewerWritesCheckout: true,
+    // Measured: without the keychains the CLI answers "Not logged in", and it reads no other part of a home
+    sessionReadable: () =>
+      realHomes().flatMap((home) => [join(home, ".claude"), join(home, ".claude.json"), join(home, "Library", "Keychains")]).concat(programDirectory(path)),
     prepare: async () => NO_RUN,
 
     editArgs(call: EditCall) {
@@ -161,9 +166,12 @@ export function claudeAgent(path: string): CodingAgent {
       // happened, and carries its own `sandbox-exec:` prefix when the wrapper is the one that
       // refused — which is how a person reading this on the board learns it is the machine and not
       // their task, without this code having to classify anything.
+      // A refusal or an API error ends in a result event and leaves stderr empty. Its two fixed fields
+      // and not its `result`, which is model text
+      const ended = [final?.subtype, final?.stop_reason].filter(Boolean).join(", ");
       return {
         kind: "error",
-        message: `the agent exited ${result.code}${result.stderr ? `\n${result.stderr}` : ""}`,
+        message: `the agent exited ${result.code}${ended ? ` (${ended})` : ""}${result.stderr ? `\n${result.stderr}` : ""}`,
       };
     },
 

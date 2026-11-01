@@ -1,6 +1,7 @@
 import { posix } from "node:path";
 
 import { DiffStats, Gate } from "../types.js";
+import { GateCommands, namedByGateCommand, NPM_GATES, usesOwnCommands } from "./gate-commands.js";
 
 // The CLI loads these from its cwd as instructions and configuration, above any "untrusted data"
 // boundary a prompt can draw
@@ -62,10 +63,8 @@ export const AGENT_INSTRUCTION_FILE =
 export const EXECUTABLE_CONFIG_FILE =
   /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|\.npmrc|\.yarnrc(\.yml)?|binding\.gyp)$|(^|\/)(next|vite|vitest|webpack|rollup|jest|babel|astro|svelte|nuxt|tailwind|postcss|playwright|esbuild|metro|remix|gatsby)\.config\.[cm]?[jt]sx?$|(^|\/)(\.babelrc(\.[cm]?js(on)?)?|Makefile|CMakeLists\.txt|\.gitattributes|\.gitmodules)$|(^|\/)(\.husky|\.github\/workflows|\.github\/actions|scripts)\//i;
 
-// Manifests that decide what runs *after* this change lands, in a repository this worker's gates
-// cannot execute at all. A non-JS repo fails the build gate on `npm ci` before reading anything, so
-// nothing here is executed locally — which is exactly why it was invisible to the list above and
-// why leaving it out was worse than not supporting those repos: the gates report as having run.
+// Manifests that decide what runs *after* this change lands, in a repository whose gates are npm's.
+// On a project's own commands they decide what runs here too, with OWN_COMMANDS_FILE beside them.
 //
 // The hazard is the same one .github/workflows carries. Under an agent that merges without a
 // review gate, a change to a build backend, a task runner or a dependency pin reaches the default
@@ -76,6 +75,13 @@ export const EXECUTABLE_CONFIG_FILE =
 // one editing the root — so anchoring to the root would protect the least interesting one.
 export const BUILD_MANIFEST_FILE =
   /(^|\/)(pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|requirements[^/]*\.txt|setup\.(py|cfg)|tox\.ini|pom\.xml|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|gradle\.properties|Gemfile(\.lock)?|Rakefile|Cargo\.(toml|lock)|go\.(mod|sum)|composer\.(json|lock)|mix\.exs|pubspec\.yaml|Dockerfile|docker-compose\.ya?ml|\.gitlab-ci\.ya?ml|Jenkinsfile)$/i;
+
+// A project's own commands (BP-985): the job package.json and scripts/ do for the npm gates, so an
+// agent cannot rewrite what `./gradlew test` executes and have the gate pass having judged nothing.
+// Only there: an npm project can hold an `android/gradlew` that no gate of its runs. A list, so it
+// closes these names and not the category; a suite can always be gutted through test code.
+export const OWN_COMMANDS_FILE =
+  /(^|\/)(gradlew(\.bat)?|mvnw(\.cmd)?|\.?justfile|Taskfile(\.dist)?\.ya?ml|noxfile\.py|\.?pytest\.ini|conftest\.py|build\.rs|GNUmakefile|go\.work(\.sum)?|libs\.versions\.toml|Package\.swift|Directory\.Build\.(props|targets)|deno\.jsonc?|bunfig\.toml|phpunit\.xml(\.dist)?|uv\.lock|BUILD(\.bazel)?|WORKSPACE|build\.sbt)$|\.(mk|csproj|gradle)$|(^|\/)(gradle\/wrapper|\.mvn|\.cargo|buildSrc)\//i;
 
 /**
  * A file that decides what CI itself does.
@@ -116,8 +122,10 @@ export function isProtectedPath(file: string): boolean {
   );
 }
 
-export function protectedPaths(files: string[]): string[] {
-  return files.filter(isProtectedPath);
+/** What the gate refuses: the lists above, and on a project's own commands whatever they name. */
+export function protectedPaths(files: string[], commands: GateCommands = NPM_GATES): string[] {
+  const own = usesOwnCommands(commands);
+  return files.filter((file) => isProtectedPath(file) || (own && (OWN_COMMANDS_FILE.test(file) || namedByGateCommand(file, commands))));
 }
 
 /**
@@ -149,7 +157,7 @@ export function escapingSymlinks(
   });
 }
 
-export function protectedPathsGate(): Gate {
+export function protectedPathsGate(commands: GateCommands = NPM_GATES): Gate {
   return {
     name: "protected-paths",
     async run({ diff }) {
@@ -179,7 +187,7 @@ export function protectedPathsGate(): Gate {
         };
       }
 
-      const hits = protectedPaths(diff.changedFiles);
+      const hits = protectedPaths(diff.changedFiles, commands);
       if (hits.length === 0) return { ok: true, reason: "" };
 
       return {

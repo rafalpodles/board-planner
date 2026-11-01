@@ -87,6 +87,15 @@ describe("the claude adapter reading a finished step", () => {
     });
   });
 
+  it("says how the CLI ended a run it exited on with nothing on stderr, and none of its text", () => {
+    const ended = JSON.stringify({ type: "result", subtype: "error_during_execution", stop_reason: "refusal", is_error: true, result: "model text" });
+
+    expect(agent.interpretEdit(run({ code: 1, stdout: ended }))).toEqual({
+      kind: "error",
+      message: "the agent exited 1 (error_during_execution, refusal)",
+    });
+  });
+
   it("reads a verdict, and nothing else as one", () => {
     const verdict = JSON.stringify({ result: JSON.stringify({ approved: true, reason: "fine" }) });
 

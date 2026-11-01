@@ -6,7 +6,7 @@ import { CommandResult, createRunner, Runner } from "./exec.js";
 import { SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
 import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
 import { answerSandboxProbe, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
-import { checkRepo, npmCacheCheck, pathWithTools, runPreflight } from "./preflight.js";
+import { checkGateCommands, checkRepo, npmCacheCheck, pathWithTools, runPreflight, SANDBOX_CHECK } from "./preflight.js";
 
 const LOGGED_IN = JSON.stringify({
   loggedIn: true,
@@ -208,6 +208,16 @@ describe("runPreflight", () => {
     expect(check(report, "gh").ok).toBe(false);
     expect(check(report, "gh").detail).toMatch(/not installed|could not be found/i);
     expect(check(report, "git").ok).toBe(true);
+  });
+
+  it("passes without npm, in amber, since a project on its own gate commands needs none", async () => {
+    const m = machine({ has: ["git", "claude", "gh"] });
+
+    const report = await runPreflight(depsFor(m));
+
+    expect(check(report, "npm")).toMatchObject({ ok: true, warn: true });
+    expect(check(report, "npm").detail).toMatch(/npm gates is not claimed from/);
+    expect(report.paths.npm).toBeUndefined();
   });
 
   it("fails when a resolved binary will not run", async () => {
@@ -847,6 +857,63 @@ describe("the identity commits are authored as", () => {
 
 // BP-804: the Build gate refuses a cache that is a symlink, which reads as a machine fault at the
 // first Build gate unless it is said here first
+describe("checkRepo with a working directory", () => {
+  const files = (present: Record<string, string>) => (path: string) => present[path] ?? null;
+  const manifest = JSON.stringify({ scripts: { build: "tsc", test: "vitest" } });
+
+  it("reads the scripts there and takes the root's lockfile, as `npm ci` does for a workspace member", () => {
+    const root = JSON.stringify({ workspaces: ["apps/*"] });
+    const checks = checkRepo(files({ "/r/package-lock.json": "{}", "/r/package.json": root, "/r/apps/web/package.json": manifest }), "/r", undefined, "apps/web");
+
+    expect(checks.every((check) => check.ok)).toBe(true);
+  });
+
+  it("does not take the root's lockfile for a directory that is no workspace member, where `npm ci` fails", () => {
+    const plain = checkRepo(files({ "/r/package-lock.json": "{}", "/r/package.json": "{}", "/r/frontend/package.json": manifest }), "/r", undefined, "frontend");
+    const member = checkRepo(
+      files({ "/r/package-lock.json": "{}", "/r/package.json": JSON.stringify({ workspaces: ["frontend"] }), "/r/frontend/package.json": manifest }),
+      "/r",
+      undefined,
+      "frontend"
+    );
+
+    expect(plain.find((check) => check.name === "package-lock.json")).toMatchObject({ ok: false, detail: expect.stringContaining("/r/frontend has no package-lock.json") });
+    expect(member.find((check) => check.name === "package-lock.json")?.ok).toBe(true);
+  });
+
+  it("still fails when neither place has a lockfile, or the scripts are only at the root", () => {
+    const noLock = checkRepo(files({ "/r/apps/web/package.json": manifest }), "/r", undefined, "apps/web");
+    const rootOnly = checkRepo(files({ "/r/package-lock.json": "{}", "/r/package.json": manifest }), "/r", undefined, "apps/web");
+
+    expect(noLock.find((check) => check.name === "package-lock.json")?.ok).toBe(false);
+    expect(rootOnly.find((check) => check.name === "build script")?.ok).toBe(false);
+  });
+});
+
+describe("what a project's own gate commands need of the machine", () => {
+  const onThisMachine = process.env.PATH ?? "";
+
+  it("names each program once and resolves it on the worker's PATH", () => {
+    const checks = checkGateCommands({ installCommand: "sh a", buildCommand: "sh b", testCommand: "no-such-tool-bp985 c", workingDirectory: "" }, onThisMachine);
+
+    expect(checks.map((check) => [check.name, check.ok])).toEqual([
+      ["gate program sh", true],
+      ["gate program no-such-tool-bp985", false],
+    ]);
+  });
+
+  it("cannot name a row after anything the server reads as the machine's own", () => {
+    const [row] = checkGateCommands({ installCommand: "", buildCommand: "", testCommand: "sandbox run", workingDirectory: "" }, "");
+
+    expect(row.name).not.toBe(SANDBOX_CHECK);
+    expect(row.ok).toBe(false);
+  });
+
+  it("leaves a program in the checkout to the gate, since no checkout exists yet", () => {
+    expect(checkGateCommands({ installCommand: "", buildCommand: "./gradlew build", testCommand: "", workingDirectory: "" }, "")).toEqual([]);
+  });
+});
+
 describe("npmCacheCheck", () => {
   function inScratch(test: (dir: string) => void) {
     const dir = mkdtempSync(join(tmpdir(), "bp804-cache-"));

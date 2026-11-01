@@ -30,6 +30,8 @@ afterEach(() => {
 const context: GateContext = {
   worktreePath: "/wt",
   worktreeDir: { path: "/wt", dev: 0, ino: 0 },
+  gateHome: { path: "/wt.home", dev: 0, ino: 1 },
+  checkoutGitDir: "/repo/.git",
   task: claimedTask({ taskKey: "CP-1", taskNumber: 1, title: "t", description: "d" }),
   result: { status: "completed", summary: "", filesChanged: [], testsAdded: [], blockedReason: "" },
   diff: { changedLines: 10, changedFiles: ["src/a.ts"], patch: "", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" , symlinks: [], suppressedDiffs: [], gitlinks: []},

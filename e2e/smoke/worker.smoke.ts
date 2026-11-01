@@ -66,6 +66,7 @@ while [ $# -gt 0 ]; do
 done
 case "$prompt" in
   *"[stall]"*) : > ${STALL_MARKER}; exec sleep 600 ;;
+  *"[rewrite the gate]"*) printf 'exit 0\\n' > svc/check.sh ;;
 esac
 case "$sys" in
   *"spans several repositories"*)
@@ -210,25 +211,41 @@ async function seedBoard() {
   }
 }
 
-function layDownRepository(repo: string = REPO): string {
+// BP-985. No package.json anywhere: what the gates run is these three scripts, under the real sandbox.
+// The install leaves a file in its home for the build and the test, reaches off the machine, and proves
+// the worker's home is shut to it. TEST-NET-1 is never routed, so an open network times out or fails on
+// the route, where a closed one answers EPERM at once.
+const NETWORK_OPEN = `require("net").connect({ host: "192.0.2.1", port: 443, timeout: 2000 }).on("error", (e) => process.exit(e.code === "EPERM" ? 1 : 0)).on("connect", () => process.exit(0)).on("timeout", () => process.exit(0))`;
+
+function writeGateScripts(dir: string) {
+  write(join(dir, "fetch.sh"), `set -e\nnode -e '${NETWORK_OPEN}'\nif cat '${join(HOME, ".profile")}'; then exit 1; fi\necho fetched > "$HOME/fetched"\n`);
+  write(join(dir, "build.sh"), `set -e\ntest "$(cat "$HOME/fetched")" = fetched\ntop=$(git rev-parse --show-toplevel)\nfor f in "$top"/src/*.js; do node --check "$f"; done\n`);
+  write(join(dir, "check.sh"), `set -e\ntest "$(cat "$HOME/fetched")" = fetched\ntop=$(git rev-parse --show-toplevel)\nnode --test "$top"/test/*.test.js\n`);
+}
+
+function layDownRepository(repo: string = REPO, gateScriptsIn?: string): string {
   const bare = join(GIT_ROOT, `${repo}.git`);
   const seedClone = join(ROOT, `seed-clone-${repo.replace(/\W+/g, "-")}`);
   mkdirSync(bare, { recursive: true });
   git(bare, "init", "--bare", "-q", "-b", "main");
   mkdirSync(seedClone, { recursive: true });
   git(seedClone, "init", "-q", "-b", "main");
-  write(
-    join(seedClone, "package.json"),
-    JSON.stringify(
-      { name: "smoke", version: "1.0.0", private: true, scripts: { build: "node --check src/index.js", test: "node --test test/*.test.js" } },
-      null,
-      2
-    ) + "\n"
-  );
-  write(
-    join(seedClone, "package-lock.json"),
-    JSON.stringify({ name: "smoke", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "smoke", version: "1.0.0" } } }, null, 2) + "\n"
-  );
+  if (gateScriptsIn === undefined) {
+    write(
+      join(seedClone, "package.json"),
+      JSON.stringify(
+        { name: "smoke", version: "1.0.0", private: true, scripts: { build: "node --check src/index.js", test: "node --test test/*.test.js" } },
+        null,
+        2
+      ) + "\n"
+    );
+    write(
+      join(seedClone, "package-lock.json"),
+      JSON.stringify({ name: "smoke", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "smoke", version: "1.0.0" } } }, null, 2) + "\n"
+    );
+  } else {
+    writeGateScripts(join(seedClone, gateScriptsIn));
+  }
   write(join(seedClone, ".gitignore"), "node_modules/\n");
   write(join(seedClone, "src", "index.js"), "module.exports = {};\n");
   write(
@@ -486,4 +503,96 @@ test("the real worker runs one task in two repositories and opens a pull request
   expect(ghCalls).not.toContain("Added a greeting and a farewell");
   // ...nor lists the other pull request, for the same reason
   expect(ghCalls).not.toContain("pr edit");
+});
+
+// BP-985. A repository with no package.json, on a machine with npm as ever: the real worker runs the
+// project's own commands under the real sandbox, the pull request names them, the run's home goes with its
+// worktree, and an agent that rewrites what a command runs is refused rather than passed.
+const OWN = { id: new mongoose.Types.ObjectId(), number: 714, title: "Greet on own commands" };
+const REWRITES = { id: new mongoose.Types.ObjectId(), number: 715, title: "Make the tests pass [rewrite the gate]" };
+const OWN_COMMANDS = { installCommand: "sh fetch.sh", buildCommand: "sh build.sh", testCommand: "sh check.sh" };
+
+async function onOwnCommands(tasks: { id: mongoose.Types.ObjectId; number: number; title: string }[], policy: Record<string, string>) {
+  await withDb(async (db) => {
+    await db.collection("tasks").deleteMany({ _id: { $in: [DELIVERED.id, STOPPED.id] } });
+    await db.collection("projects").updateOne(
+      { _id: PROJECT_ID },
+      {
+        $set: {
+          ...Object.fromEntries(Object.entries(policy).map(([field, value]) => [`worker.policy.${field}`, value])),
+          "worker.policyOverrides": Object.keys(policy),
+          taskCounter: Math.max(...tasks.map((t) => t.number)),
+        },
+      }
+    );
+    await db.collection("tasks").insertMany(
+      tasks.map((t, order) =>
+        taskFactory(new Date())({ _id: t.id, taskNumber: t.number, title: t.title, status: "todo", order, assignee: ADMIN_ID, assignedBy: ADMIN_ID, agent: AGENT_ID })
+      )
+    );
+  });
+}
+
+const homesUnder = (root: string) =>
+  existsSync(root) ? readdirSync(root, { recursive: true, encoding: "utf8" }).filter((path) => path.endsWith(".home")) : [];
+
+test("the real worker runs a repository with no npm on the project's own commands, and refuses an agent that rewrites one", async ({ request }) => {
+  await onOwnCommands([OWN, REWRITES], { ...OWN_COMMANDS, workingDirectory: "svc" });
+  const bare = layDownRepository(REPO, "svc");
+  const port = await freePort();
+  daemon = await startDaemon(port);
+  cloneCheckout(port);
+  write(join(STATE, "repos.json"), JSON.stringify({ repos: [CHECKOUT] }) + "\n", 0o600);
+
+  worker = startWorker(await mintEnrolmentToken(request));
+
+  const key = `${PROJECT_KEY}-${OWN.number}`;
+  await expect
+    .poll(async () => (await storedTask(OWN.id))?.status, { message: `${key} should reach review; see worker.log`, timeout: 4 * 60_000, intervals: [2_000] })
+    .toBe("needs_human_review");
+  expect(await commentsOn(OWN.id)).toContainEqual(expect.stringContaining(`Opened ${PR_URL} for review`));
+  expect(git(bare, "ls-tree", "-r", "--name-only", `refs/heads/${key}/worker`).split("\n")).toEqual(expect.arrayContaining(["src/greet.js", "svc/check.sh"]));
+
+  const ghCalls = readFileSync(GH_LOG, "utf8");
+  expect(ghCalls).toContain("`sh fetch.sh (in svc)`, `sh build.sh (in svc)`");
+  expect(ghCalls).toContain("`sh check.sh (in svc)`");
+  expect(ghCalls).not.toContain("npm");
+
+  const rewritten = `${PROJECT_KEY}-${REWRITES.number}`;
+  await expect
+    .poll(async () => (await commentsOn(REWRITES.id)).join("\n"), { message: `${rewritten} should be refused; see worker.log`, timeout: 4 * 60_000, intervals: [2_000] })
+    .toContain("svc/check.sh");
+  expect(git(bare, "for-each-ref", "--format=%(refname)", "refs/heads").split("\n")).not.toContain(`refs/heads/${rewritten}/worker`);
+  expect((await storedTask(REWRITES.id))?.decision?.protectedFiles).toEqual(["svc/check.sh"]);
+
+  await expect.poll(() => homesUnder(join(ROOT, "cp-worktrees")).filter((path) => path.includes(`${OWN.number}.`)), { timeout: 30_000 }).toEqual([]);
+});
+
+// The first review of BP-985 found this by reading: two clones share a worktree root, so the second clone's
+// creation took the first's home, and every such run ended as tampering at its first gate
+test("the real worker runs a project's own commands in two repositories that share a worktree root", async ({ request }) => {
+  const several = { id: new mongoose.Types.ObjectId(), number: 716, title: "Greet and say goodbye on own commands" };
+  await onOwnCommands([several], OWN_COMMANDS);
+  await withDb((db) =>
+    db.collection("projects").updateOne(
+      { _id: PROJECT_ID },
+      { $set: { repositoryUrl: API.repo, repositories: [API, WEB].map((r) => ({ _id: r.id, url: r.repo, name: r.name })) }, $unset: { githubRepo: "", gitlabRepo: "" } }
+    )
+  );
+  layDownRepository(API.repo, "");
+  layDownRepository(WEB.repo, "");
+  const port = await freePort();
+  daemon = await startDaemon(port, API.repo);
+  const checkouts = [join(ROOT, "checkout-api"), join(ROOT, "checkout-web")];
+  cloneCheckout(port, API.repo, checkouts[0]);
+  cloneCheckout(port, WEB.repo, checkouts[1]);
+  write(join(STATE, "repos.json"), JSON.stringify({ repos: checkouts }) + "\n", 0o600);
+
+  worker = startWorker(await mintEnrolmentToken(request));
+
+  await expect
+    .poll(async () => (await storedTask(several.id))?.status, { message: "the run should reach review; see worker.log", timeout: 4 * 60_000, intervals: [2_000] })
+    .toBe("needs_human_review");
+  expect((await commentsOn(several.id)).join("\n")).not.toMatch(/tamper|replaced/i);
+  expect(readFileSync(GH_LOG, "utf8").match(/^pr create /gm)).toHaveLength(2);
 });
