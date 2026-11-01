@@ -142,7 +142,7 @@ export function trelloToTable(board: Json): CsvTable {
         text(card.name),
         text(lists.get(text(card.idList))?.name),
         people.join(", "),
-        text(card.due).slice(0, 10),
+        text(card.due),
         madeAt(id),
         text(card.dateCompleted),
         descriptionOf(card, links),

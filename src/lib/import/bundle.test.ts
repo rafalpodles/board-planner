@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { MAX_IMPORT_TASKS, parseBundle, parseMapping } from "./bundle";
+import { MAX_IMPORT_NOTES } from "./limits";
 
 const task = (over: Record<string, unknown> = {}) => ({ id: "1", title: "t", ...over });
 
@@ -33,6 +34,11 @@ describe("parseBundle", () => {
     const checklist = [{ text: "a", done: true }, { text: "b" }];
     const notes = [{ id: "Card", what: "an archived card" }];
     expect(parseBundle({ source: "x", tasks: [task({ checklist })], notes })).toEqual({ ok: true, value: { source: "x", tasks: [task({ checklist })], notes } });
+  });
+
+  it("refuses more notes than one import takes", () => {
+    const notes = Array.from({ length: MAX_IMPORT_NOTES + 1 }, () => ({ id: "a", what: "b" }));
+    expect(parseBundle({ source: "x", tasks: [], notes })).toEqual({ ok: false, error: "notes must be a list of at most 50,000" });
   });
 
   it("refuses more tasks than one import takes", () => {

@@ -117,6 +117,7 @@ describe("trelloToTable", () => {
     expect(named(bundle.tasks, "Rate limit banner").description).toBe("Links from Trello:\n- [Design note 5](https://example.com/notes/5)");
     expect(named(bundle.tasks, "Search by label").description).toBe("Notes for **Search by label**.\n\nA second paragraph.\n\nLinks from Trello:\n- [Design note 6](https://example.com/notes/6)");
     expect(bundle.notes).toContainEqual({ id: "Audit log filter", what: "2 uploaded files: screenshot-3-0.png, screenshot-3-1.png" });
+    expect(bundle.notes).toContainEqual({ id: "Rate limit banner", what: "1 uploaded file: screenshot-5-1.png" });
     expect(bundle.notes?.filter((n) => n.what.includes("uploaded file")).map((n) => n.id).sort()).toEqual(["Audit log filter", "Backup restore", "Rate limit banner", "Search by label"]);
   });
 
