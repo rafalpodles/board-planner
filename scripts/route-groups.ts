@@ -19,6 +19,7 @@ import { computeAffectedGroups } from "../e2e/affected-groups.ts";
 import {
   backToBack,
   groupsOf,
+  lostLog,
   measureCallers,
   routeResolver,
   unplannedCallers,
@@ -73,9 +74,9 @@ function measure(dir: string): Map<string, Caller[]> {
     const requests = filesOf(job, "requests-").flatMap((file) => ndjson<LoggedRequest>(job, file));
     const tests = testsOf(job);
     const callers = measureCallers(requests, tests, routeFor);
-    // A job that ran tests and logged no call from any of them has lost its log, not its callers
-    if (tests.length > 0 && callers.size === 0) {
-      console.log(`::error::${relative(ROOT, job) || job} ran ${tests.length} tests and logged no direct call to a route`);
+    const lost = lostLog(requests.length, tests.length, callers.size);
+    if (lost) {
+      console.log(`::error::${relative(ROOT, job) || job} ${lost}`);
       process.exit(1);
     }
     for (const [file, found] of callers) {

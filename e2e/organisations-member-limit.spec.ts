@@ -66,7 +66,7 @@ async function makePro(request: APIRequestContext, who: OrganisationFixture) {
 const send = (page: Page, method: string, path: string, body?: unknown) =>
   page.evaluate(
     async ({ method, path, body }) => {
-      const res = await fetch(path, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+      const res = await fetch(path, { method, headers: { "x-e2e-direct": "1", "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
       return { status: res.status, body: await res.json().catch(() => null) };
     },
     { method, path, body }

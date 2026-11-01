@@ -513,8 +513,8 @@ jobs:
     # because a hand-kept table drifted from them within weeks (BP-1081). This job holds a push to
     # that: a spec calling a route from a group a change to the route would not run fails here,
     # naming both. Only the groups that ran are measured, so a pull request checks what it touched;
-    # a run of every group that passed also writes the map it measured, as the `route-groups`
-    # artifact, which is how the file is regenerated. Like plan_e2e, it needs no `npm ci`.
+    # a run of every group on main or by workflow_dispatch that passed also writes the map it
+    # measured, as the `route-groups` artifact, which is how the file is regenerated. Like plan_e2e, it needs no `npm ci`.
     name: Route files — every direct caller is in the plan
     needs: e2e
     if: ${{ !cancelled() }}

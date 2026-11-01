@@ -70,7 +70,7 @@ async function generate(page: Page, modal: ReturnType<Page["getByRole"]>) {
 const post = (page: Page, path: string, body: unknown) =>
   page.evaluate(
     async ({ path, body }) => {
-      const res = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const res = await fetch(path, { method: "POST", headers: { "x-e2e-direct": "1", "content-type": "application/json" }, body: JSON.stringify(body) });
       return { status: res.status, body: await res.json().catch(() => null) };
     },
     { path, body }
@@ -230,7 +230,7 @@ test.describe("an organisation's own key", () => {
         expect((await generate(globex, modal)).status()).toBe(200);
         expect(await lastAuthorization("assist")).toBe(OPERATORS_KEY);
 
-        const state = await globex.evaluate(async () => (await fetch("/api/settings/ai-keys")).json());
+        const state = await globex.evaluate(async () => (await fetch("/api/settings/ai-keys", { headers: { "x-e2e-direct": "1" } })).json());
         expect(state).toMatchObject({ set: false, hint: "" });
         expect(JSON.stringify(state)).not.toContain("acme-e2e");
       } finally {

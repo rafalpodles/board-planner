@@ -186,7 +186,7 @@ test("the server refuses a checkout without the consent, and the service is neve
   await open(page);
   await expect(page.getByTestId("subscription")).toBeVisible();
   const order = (body: Record<string, unknown>) =>
-    page.evaluate(async (body) => (await fetch("/api/admin/billing/checkout", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).status, body);
+    page.evaluate(async (body) => (await fetch("/api/admin/billing/checkout", { method: "POST", headers: { "x-e2e-direct": "1", "content-type": "application/json" }, body: JSON.stringify(body) })).status, body);
 
   expect(await order({ interval: "month" })).toBe(400);
   expect(await order({ interval: "month", immediateStart: "yes" })).toBe(400);
@@ -316,7 +316,7 @@ test("a member who is not an administrator cannot read the subscription, start a
   await expect(page.getByTestId("subscription")).toBeVisible();
   const call = (method: "GET" | "POST", path: string) =>
     page.evaluate(
-      async ({ method, path }) => (await fetch(path, { method, headers: { "content-type": "application/json" }, body: method === "POST" ? JSON.stringify({ interval: "month" }) : undefined })).status,
+      async ({ method, path }) => (await fetch(path, { method, headers: { "x-e2e-direct": "1", "content-type": "application/json" }, body: method === "POST" ? JSON.stringify({ interval: "month" }) : undefined })).status,
       { method, path }
     );
   expect(await call("GET", "/api/admin/billing")).toBe(200);
@@ -400,7 +400,7 @@ const idOf = async (username: string) => {
 
 /** From inside the page, so the browser's own headers and cookie are on the request */
 const adminPut = (page: Page, path: string, body: unknown) =>
-  page.evaluate(async ({ path, body }) => (await fetch(path, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).status, { path, body });
+  page.evaluate(async ({ path, body }) => (await fetch(path, { method: "PUT", headers: { "x-e2e-direct": "1", "content-type": "application/json" }, body: JSON.stringify(body) })).status, { path, body });
 
 test("a person who is deactivated stops being counted and one who is reactivated is counted again, at the next run", async ({ page, request }) => {
   expect((await pushKey(request)).status()).toBe(200);

@@ -108,7 +108,7 @@ test.describe("BP-1027: switching GitHub off for an organisation", () => {
     await openLogin(visitor, ACME);
     await expectNoGitHub(visitor, ACME);
     const started = await visitor.evaluate(async () => {
-      const res = await fetch("/api/auth/oidc/github/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const res = await fetch("/api/auth/oidc/github/start", { method: "POST", headers: { "x-e2e-direct": "1", "Content-Type": "application/json" }, body: "{}" });
       return { status: res.status, body: await res.json().catch(() => ({})) };
     });
     expect(started.status).toBe(404);
@@ -120,7 +120,7 @@ test.describe("BP-1027: switching GitHub off for an organisation", () => {
     await expect(visitor.getByText("That sign-in is not available for this organisation. Use another way to sign in, or ask an administrator.")).toBeVisible();
 
     // What is open stays open, and the other organisation is not touched
-    expect(await page.evaluate(async () => (await fetch("/api/auth/me")).status)).toBe(200);
+    expect(await page.evaluate(async () => (await fetch("/api/auth/me", { headers: { "x-e2e-direct": "1" } })).status)).toBe(200);
     await openLogin(visitor, GLOBEX);
     await expect(visitor.getByRole("button", { name: "Continue with GitHub" })).toBeVisible();
 
@@ -133,7 +133,7 @@ test.describe("BP-1027: switching GitHub off for an organisation", () => {
     await expect(visitor.getByRole("button", { name: "Continue with GitHub" })).toBeVisible();
     expect(
       await visitor.evaluate(async () => {
-        const res = await fetch("/api/auth/oidc/github/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        const res = await fetch("/api/auth/oidc/github/start", { method: "POST", headers: { "x-e2e-direct": "1", "Content-Type": "application/json" }, body: "{}" });
         return { status: res.status, hasUrl: typeof (await res.json().catch(() => ({}))).url === "string" };
       })
     ).toEqual({ status: 200, hasUrl: true });

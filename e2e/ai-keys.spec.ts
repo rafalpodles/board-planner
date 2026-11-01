@@ -139,10 +139,10 @@ test("a member is turned away from the AI key, on screen and at the route", asyn
   const answers = await page.evaluate(async (key) => {
     const put = await fetch("/api/settings/ai-keys", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { "x-e2e-direct": "1", "content-type": "application/json" },
       body: JSON.stringify({ openrouterKey: key }),
     });
-    const get = await fetch("/api/settings/ai-keys");
+    const get = await fetch("/api/settings/ai-keys", { headers: { "x-e2e-direct": "1" } });
     return { put: [put.status, (await put.json()).error], get: [get.status, (await get.json()).error] };
   }, OWN_OPENROUTER);
   expect(answers).toEqual({ put: [403, "Forbidden"], get: [403, "Forbidden"] });

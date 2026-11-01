@@ -212,7 +212,7 @@ test("on Free, the menubar's confirmation page says so before the click, and con
     async ({ path, projectId }) => {
       const res = await fetch(`/api/workers/enrolment/device/${path.split("/").pop()}/approve`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "x-e2e-direct": "1", "content-type": "application/json" },
         body: JSON.stringify({ projectId }),
       });
       return { status: res.status, body: await res.json() };

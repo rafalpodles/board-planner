@@ -33,7 +33,7 @@ const confirmAddress = (who: OrganisationFixture) => withDb((db) => db.collectio
 async function putFrom(page: Page, body: Record<string, unknown>) {
   return page.evaluate(
     async (data) => {
-      const res = await fetch("/api/settings/sso", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+      const res = await fetch("/api/settings/sso", { method: "PUT", headers: { "x-e2e-direct": "1", "Content-Type": "application/json" }, body: JSON.stringify(data) });
       return { status: res.status, body: await res.json().catch(() => ({})) };
     },
     { ...body }
@@ -79,7 +79,7 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
     const stored = await withDb((db) => db.collection("settings").findOne({ organisation: ACME.organisation }));
     expect(stored?.sso.clientSecret).toMatch(/^enc:v3:/);
     expect(JSON.stringify(stored?.sso)).not.toContain(SSO_CLIENT.clientSecret);
-    const answer = await page.evaluate(async () => (await fetch("/api/settings/sso")).text());
+    const answer = await page.evaluate(async () => (await fetch("/api/settings/sso", { headers: { "x-e2e-direct": "1" } })).text());
     expect(answer).not.toContain(SSO_CLIENT.clientSecret);
 
     // Somebody who is not signed in uses it
@@ -127,7 +127,7 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
     // The operator's GitHub app is everybody's; ACME's own provider is nobody else's
     expect(await (await page.request.get(`${originOf(GLOBEX)}/api/auth/oidc/providers`)).json()).not.toContainEqual(expect.objectContaining({ id: "oidc" }));
     const started = await page.evaluate(async () => {
-      const res = await fetch("/api/auth/oidc/oidc/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const res = await fetch("/api/auth/oidc/oidc/start", { method: "POST", headers: { "x-e2e-direct": "1", "Content-Type": "application/json" }, body: "{}" });
       return { status: res.status, body: await res.json().catch(() => ({})) };
     });
     expect(started.status).toBe(404);
@@ -468,7 +468,7 @@ test.describe("BP-862: roles from identity provider groups", () => {
     await signInOn(page.context(), GLOBEX);
     await page.goto(`${originOf(GLOBEX)}/projects/${SHARED_KEY}/settings`);
     const refused = await page.evaluate(async (project) => {
-      const res = await fetch(`/api/projects/${project}/group-roles`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ map: [{ group: "staff", role: "member" }] }) });
+      const res = await fetch(`/api/projects/${project}/group-roles`, { method: "PUT", headers: { "x-e2e-direct": "1", "Content-Type": "application/json" }, body: JSON.stringify({ map: [{ group: "staff", role: "member" }] }) });
       return { status: res.status, body: await res.json().catch(() => ({})) };
     }, String(GLOBEX.projectId));
     expect(refused.status).toBe(402);

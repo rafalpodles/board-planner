@@ -2,7 +2,8 @@
 // E2E_REQUEST_LOG_DIR set, every request is appended to a file of this process's own, for
 // e2e/route-groups.ts to attribute to the test that made it (BP-1081). A browser sends
 // Sec-Fetch-Dest; Playwright's API request context and Node's own fetch do not (Node's does send
-// Sec-Fetch-Mode), which is what `direct` records.
+// Sec-Fetch-Mode), which is what `direct` records. A spec that calls a route from inside the page,
+// to get the browser's cookie and Sec-Fetch-Site, says so with x-e2e-direct.
 const dir = process.env.E2E_REQUEST_LOG_DIR;
 
 if (dir) {
@@ -19,7 +20,7 @@ if (dir) {
     server.on("request", (req) => {
       const path = (req.url ?? "").split("?")[0];
       if (path.startsWith("/_next/")) return;
-      const line = { t: Date.now(), method: req.method, path, direct: !req.headers["sec-fetch-dest"] };
+      const line = { t: Date.now(), method: req.method, path, direct: !req.headers["sec-fetch-dest"] || req.headers["x-e2e-direct"] === "1" };
       appendFileSync(file, `${JSON.stringify(line)}\n`);
     });
     return server;

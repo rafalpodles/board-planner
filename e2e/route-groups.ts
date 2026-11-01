@@ -6,7 +6,8 @@
  * run's logs into `e2e/route-groups.json`, which `computeAffectedGroups` adds to its own table.
  *
  * Only a spec's own calls count (`direct`): a page fetching a route on every load reaches it from
- * every group and pins it from none.
+ * every group and pins it from none. A spec's fetch inside `page.evaluate` looks like a page's to the
+ * server, so it carries the x-e2e-direct header, and route-groups.test.ts refuses one that does not.
  */
 import type { GroupName } from "./groups.ts";
 
@@ -138,8 +139,8 @@ export interface Caller {
 
 /**
  * Who called each route file directly, from one CI job's logs. Logs from different jobs overlap in
- * time and must be measured apart. A request outside every test (global setup's warm-up, the
- * teardown) belongs to no group and is left out.
+ * time and must be measured apart. A request outside every test (global setup's warm-up) belongs to
+ * no group and is left out.
  */
 export function measureCallers(
   requests: readonly LoggedRequest[],
@@ -161,6 +162,13 @@ export function measureCallers(
     callers.set(file, known);
   }
   return callers;
+}
+
+/** Why one CI job's logs cannot be trusted to have measured anything, or null when they can. */
+export function lostLog(requests: number, tests: number, routesCalled: number): string | null {
+  if (requests > 0 && tests === 0) return `logged ${requests} requests and no test to attribute them to`;
+  if (tests > 0 && routesCalled === 0) return `ran ${tests} tests and logged no direct call to a route`;
+  return null;
 }
 
 export function groupsOf(callers: ReadonlyMap<string, readonly Caller[]>, order: readonly string[]): RouteGroups {

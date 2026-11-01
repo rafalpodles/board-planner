@@ -1,6 +1,7 @@
 import { mkdtempSync, readdirSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import nextConfig from "../next.config";
 import { GROUP_NAMES, type GroupName } from "./groups.ts";
@@ -11,6 +12,7 @@ import {
   REWRITES,
   backToBack,
   groupsOf,
+  lostLog,
   measureCallers,
   routeResolver,
   unplannedCallers,
@@ -187,6 +189,51 @@ describe("e2e/route-groups.json", () => {
       expect.arrayContaining(["tasks", "automation"])
     );
     expect(computeAffectedGroups(["src/app/api/admin/sign-up/route.ts"])).toEqual(expect.arrayContaining(["people"]));
+  });
+});
+
+describe("lostLog", () => {
+  it("refuses a job whose requests have no test to belong to, or whose tests have no call", () => {
+    expect(lostLog(40, 0, 0)).toMatch(/40 requests and no test/);
+    expect(lostLog(40, 12, 0)).toMatch(/12 tests and logged no direct call/);
+  });
+
+  it("accepts a job that measured something, and one that ran nothing", () => {
+    expect(lostLog(40, 12, 3)).toBeNull();
+    expect(lostLog(0, 0, 0)).toBeNull();
+  });
+});
+
+function unmarkedPageFetches(source: string): number {
+  let found = 0;
+  const file = ts.createSourceFile("spec.ts", source, ts.ScriptTarget.Latest, true);
+  const visit = (node: ts.Node, inPage: boolean): void => {
+    if (inPage && ts.isCallExpression(node) && node.expression.getText() === "fetch") {
+      if (!node.arguments[1]?.getText().includes('"x-e2e-direct"')) found++;
+    }
+    const evaluates =
+      ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "evaluate";
+    ts.forEachChild(node, (child) => visit(child, inPage || evaluates));
+  };
+  visit(file, false);
+  return found;
+}
+
+describe("a spec's fetch inside the page", () => {
+  it("counts one with no marker, not one with it, nor Node's own, nor one named in a comment", () => {
+    expect(unmarkedPageFetches('page.evaluate(() => fetch("/api/a"));')).toBe(1);
+    expect(unmarkedPageFetches('page.evaluate(() => fetch("/api/a", { headers: { "x-e2e-direct": "1" } }));')).toBe(0);
+    expect(unmarkedPageFetches('await fetch("/api/a"); route.fetch();')).toBe(0);
+    expect(unmarkedPageFetches('page.evaluate(() => { /* fetch("/api/a") */ });')).toBe(0);
+  });
+
+  it("carries x-e2e-direct in every spec, so the route it calls is measured", () => {
+    const sources = (readdirSync(join(ROOT, "e2e"), { recursive: true }) as string[]).filter(
+      (file) => /\.ts$/.test(file) && !file.endsWith(".test.ts") && file !== "request-log.spec.ts"
+    );
+    expect(sources.length).toBeGreaterThan(100);
+    const unmarked = sources.filter((file) => unmarkedPageFetches(readFileSync(join(ROOT, "e2e", file), "utf8")) > 0);
+    expect(unmarked).toEqual([]);
   });
 });
 
