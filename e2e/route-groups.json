@@ -1,1 +1,564 @@
-{}
+{
+  "src/app/.well-known/oauth-authorization-server/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/.well-known/oauth-protected-resource/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/admin/agents/route.ts": [
+    "people"
+  ],
+  "src/app/api/admin/audit/export/route.ts": [
+    "project"
+  ],
+  "src/app/api/admin/audit/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/admin/billing/checkout/route.ts": [
+    "people"
+  ],
+  "src/app/api/admin/billing/portal/route.ts": [
+    "people"
+  ],
+  "src/app/api/admin/billing/route.ts": [
+    "people"
+  ],
+  "src/app/api/admin/email/route.ts": [
+    "people"
+  ],
+  "src/app/api/admin/export/route.ts": [
+    "people"
+  ],
+  "src/app/api/admin/licence/route.ts": [
+    "people"
+  ],
+  "src/app/api/admin/runs/route.ts": [
+    "people",
+    "automation"
+  ],
+  "src/app/api/admin/sign-up/route.ts": [
+    "people"
+  ],
+  "src/app/api/admin/workers/route.ts": [
+    "people",
+    "automation"
+  ],
+  "src/app/api/agent-blocks/[blockId]/route.ts": [
+    "project"
+  ],
+  "src/app/api/agent-blocks/route.ts": [
+    "project",
+    "automation"
+  ],
+  "src/app/api/agents/[agentId]/route.ts": [
+    "project"
+  ],
+  "src/app/api/agents/route.ts": [
+    "project",
+    "automation"
+  ],
+  "src/app/api/auth/confirm-email/route.ts": [
+    "people"
+  ],
+  "src/app/api/auth/forgot/route.ts": [
+    "people"
+  ],
+  "src/app/api/auth/handoff/route.ts": [
+    "people"
+  ],
+  "src/app/api/auth/instance/route.ts": [
+    "people"
+  ],
+  "src/app/api/auth/login/route.ts": [
+    "tasks",
+    "project",
+    "people",
+    "automation"
+  ],
+  "src/app/api/auth/logout/route.ts": [
+    "people"
+  ],
+  "src/app/api/auth/me/route.ts": [
+    "tasks",
+    "task-fields",
+    "board",
+    "project",
+    "people",
+    "automation",
+    "a11y"
+  ],
+  "src/app/api/auth/oidc/[provider]/callback/route.ts": [
+    "people"
+  ],
+  "src/app/api/auth/oidc/[provider]/start/route.ts": [
+    "people"
+  ],
+  "src/app/api/auth/oidc/providers/route.ts": [
+    "people"
+  ],
+  "src/app/api/auth/reset/route.ts": [
+    "people"
+  ],
+  "src/app/api/csp-report/route.ts": [
+    "people"
+  ],
+  "src/app/api/e2e/dead-organisations/route.ts": [
+    "people"
+  ],
+  "src/app/api/e2e/digest/route.ts": [
+    "automation"
+  ],
+  "src/app/api/e2e/legal-terms/route.ts": [
+    "people"
+  ],
+  "src/app/api/e2e/licence-pull/route.ts": [
+    "people"
+  ],
+  "src/app/api/e2e/licence/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/e2e/member-sync/route.ts": [
+    "people"
+  ],
+  "src/app/api/e2e/organisation-cache/route.ts": [
+    "people"
+  ],
+  "src/app/api/entitlements/route.ts": [
+    "people"
+  ],
+  "src/app/api/fleet/route.ts": [
+    "project"
+  ],
+  "src/app/api/invitations/[invitationId]/resend/route.ts": [
+    "people"
+  ],
+  "src/app/api/invitations/[invitationId]/route.ts": [
+    "people"
+  ],
+  "src/app/api/invitations/accept/route.ts": [
+    "people"
+  ],
+  "src/app/api/invitations/lookup/route.ts": [
+    "people"
+  ],
+  "src/app/api/invitations/route.ts": [
+    "people"
+  ],
+  "src/app/api/legal/terms/route.ts": [
+    "people"
+  ],
+  "src/app/api/mcp/route.ts": [
+    "tasks",
+    "task-fields",
+    "board",
+    "project",
+    "people"
+  ],
+  "src/app/api/notifications/read/route.ts": [
+    "people",
+    "automation"
+  ],
+  "src/app/api/notifications/route.ts": [
+    "tasks",
+    "people",
+    "automation"
+  ],
+  "src/app/api/organisation/route.ts": [
+    "people"
+  ],
+  "src/app/api/organisation/storage/files/[fileId]/route.ts": [
+    "people"
+  ],
+  "src/app/api/organisation/storage/files/route.ts": [
+    "people"
+  ],
+  "src/app/api/platform/audit/route.ts": [
+    "people"
+  ],
+  "src/app/api/platform/organisations/[organisationId]/ai-allowance/route.ts": [
+    "people"
+  ],
+  "src/app/api/platform/organisations/[organisationId]/ai/route.ts": [
+    "people"
+  ],
+  "src/app/api/platform/organisations/[organisationId]/export/route.ts": [
+    "people"
+  ],
+  "src/app/api/platform/organisations/[organisationId]/licence/route.ts": [
+    "people"
+  ],
+  "src/app/api/platform/organisations/[organisationId]/resume/route.ts": [
+    "people"
+  ],
+  "src/app/api/platform/organisations/[organisationId]/route.ts": [
+    "people"
+  ],
+  "src/app/api/platform/organisations/[organisationId]/suspend/route.ts": [
+    "people"
+  ],
+  "src/app/api/platform/organisations/route.ts": [
+    "people"
+  ],
+  "src/app/api/pm/oauth/callback/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/agent/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/assignable-users/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/projects/[projectId]/audit/export/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/audit/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/categories/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/coda/sync/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/columns/[columnId]/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/columns/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/projects/[projectId]/custom-fields/[fieldId]/route.ts": [
+    "board",
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/custom-fields/route.ts": [
+    "board",
+    "project",
+    "people"
+  ],
+  "src/app/api/projects/[projectId]/duplicates/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/export/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/projects/[projectId]/github/sync/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/projects/[projectId]/gitlab/sync/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/group-roles/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/handover/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/import/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/insights/route.ts": [
+    "people"
+  ],
+  "src/app/api/projects/[projectId]/invitations/[invitationId]/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/invitations/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/projects/[projectId]/members/candidates/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/members/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/projects/[projectId]/notifications/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/projects/[projectId]/pm/chat/route.ts": [
+    "people",
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/pm/interrupt/route.ts": [
+    "task-fields",
+    "people",
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/pm/mcp-oauth/disconnect/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/pm/mcp-oauth/start/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/pm/mcp-test/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/pm/messages/route.ts": [
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/pm/review/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/pm/usage/route.ts": [
+    "project",
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/release-notes/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/route.ts": [
+    "board",
+    "project",
+    "people",
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/runs/route.ts": [
+    "people",
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/setup-guide/route.ts": [
+    "tasks",
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/sprints/[sprintId]/route.ts": [
+    "tasks",
+    "board",
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/sprints/route.ts": [
+    "tasks",
+    "board",
+    "project",
+    "people"
+  ],
+  "src/app/api/projects/[projectId]/stats/route.ts": [
+    "tasks",
+    "project",
+    "people"
+  ],
+  "src/app/api/projects/[projectId]/summaries/post/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/summaries/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/tasks/[taskId]/activity/route.ts": [
+    "tasks",
+    "project",
+    "people",
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/tasks/[taskId]/archive/route.ts": [
+    "tasks",
+    "board"
+  ],
+  "src/app/api/projects/[projectId]/tasks/[taskId]/checklist/route.ts": [
+    "people"
+  ],
+  "src/app/api/projects/[projectId]/tasks/[taskId]/comments/route.ts": [
+    "tasks",
+    "project",
+    "people",
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/tasks/[taskId]/decision/route.ts": [
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/tasks/[taskId]/links/route.ts": [
+    "tasks",
+    "board",
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/tasks/[taskId]/release/route.ts": [
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/tasks/[taskId]/route.ts": [
+    "tasks",
+    "task-fields",
+    "board",
+    "project",
+    "people",
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/tasks/[taskId]/status/route.ts": [
+    "tasks",
+    "task-fields",
+    "project",
+    "people",
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/tasks/[taskId]/triage/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/tasks/[taskId]/watch/route.ts": [
+    "tasks"
+  ],
+  "src/app/api/projects/[projectId]/tasks/claim/route.ts": [
+    "people",
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/tasks/route.ts": [
+    "tasks",
+    "task-fields",
+    "board",
+    "project",
+    "people",
+    "automation"
+  ],
+  "src/app/api/projects/[projectId]/templates/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/views/route.ts": [
+    "board",
+    "project"
+  ],
+  "src/app/api/projects/[projectId]/webhooks/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/projects/[projectId]/webhooks/signing-secret/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/projects/reorder/route.ts": [
+    "project"
+  ],
+  "src/app/api/projects/route.ts": [
+    "tasks",
+    "board",
+    "project",
+    "people"
+  ],
+  "src/app/api/projects/setup/route.ts": [
+    "project"
+  ],
+  "src/app/api/search/route.ts": [
+    "people"
+  ],
+  "src/app/api/settings/ai-keys/route.ts": [
+    "people"
+  ],
+  "src/app/api/settings/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/sign-in/organisation/route.ts": [
+    "people"
+  ],
+  "src/app/api/sign-in/password/route.ts": [
+    "people"
+  ],
+  "src/app/api/sign-in/remembered/route.ts": [
+    "people"
+  ],
+  "src/app/api/sign-in/start/route.ts": [
+    "people"
+  ],
+  "src/app/api/sign-in/verify/route.ts": [
+    "people"
+  ],
+  "src/app/api/tasks/mine/route.ts": [
+    "board",
+    "project",
+    "people"
+  ],
+  "src/app/api/tokens/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/uploads/[fileId]/route.ts": [
+    "tasks",
+    "people"
+  ],
+  "src/app/api/uploads/route.ts": [
+    "people"
+  ],
+  "src/app/api/users/[userId]/route.ts": [
+    "people"
+  ],
+  "src/app/api/users/me/email-change/route.ts": [
+    "people"
+  ],
+  "src/app/api/users/me/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/api/users/route.ts": [
+    "project",
+    "people",
+    "automation"
+  ],
+  "src/app/api/version/route.ts": [
+    "people"
+  ],
+  "src/app/api/workers/[workerId]/command/route.ts": [
+    "automation"
+  ],
+  "src/app/api/workers/[workerId]/decisions/route.ts": [
+    "people",
+    "automation"
+  ],
+  "src/app/api/workers/[workerId]/events/route.ts": [
+    "automation"
+  ],
+  "src/app/api/workers/[workerId]/heartbeat/route.ts": [
+    "tasks",
+    "project",
+    "people",
+    "automation"
+  ],
+  "src/app/api/workers/[workerId]/projects/route.ts": [
+    "project",
+    "automation"
+  ],
+  "src/app/api/workers/[workerId]/route.ts": [
+    "people",
+    "automation"
+  ],
+  "src/app/api/workers/[workerId]/stream/route.ts": [
+    "automation"
+  ],
+  "src/app/api/workers/enrolment/device/[userCode]/approve/route.ts": [
+    "project"
+  ],
+  "src/app/api/workers/enrolment/device/[userCode]/route.ts": [
+    "project"
+  ],
+  "src/app/api/workers/enrolment/device/route.ts": [
+    "project",
+    "people",
+    "automation"
+  ],
+  "src/app/api/workers/enrolment/device/token/route.ts": [
+    "people",
+    "automation"
+  ],
+  "src/app/api/workers/enrolment/route.ts": [
+    "automation"
+  ],
+  "src/app/api/workers/register/route.ts": [
+    "people",
+    "automation"
+  ],
+  "src/app/oauth/authorize/route.ts": [
+    "people"
+  ],
+  "src/app/oauth/register/route.ts": [
+    "project",
+    "people"
+  ],
+  "src/app/oauth/token/route.ts": [
+    "project",
+    "people"
+  ]
+}
