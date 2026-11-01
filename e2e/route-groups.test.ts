@@ -209,7 +209,7 @@ function unmarkedPageFetches(source: string): number {
   const file = ts.createSourceFile("spec.ts", source, ts.ScriptTarget.Latest, true);
   const visit = (node: ts.Node, inPage: boolean): void => {
     if (inPage && ts.isCallExpression(node) && node.expression.getText() === "fetch") {
-      if (!node.arguments[1]?.getText().includes('"x-e2e-direct"')) found++;
+      if (!node.arguments[1]?.getText().includes('"x-e2e-direct": "1"')) found++;
     }
     const evaluates =
       ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "evaluate";
