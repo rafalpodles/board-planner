@@ -10,7 +10,9 @@ which are the time the object was created. Dates, counts and `badges` are the bo
 Changed so that one small file exercises every path, and so not as Trello wrote them:
 
 - two cards name members in `idMembers`, one of them two, because the public board's cards have none
-- the second checklist on the first card is a copy of its first
+- the second checklist on the first card is a copy of its first, renamed, with its items unticked
+- every action is credited to one of the two members left, and cards are renamed from a short list
+- link attachments are given names, where Trello usually names one after its address
 - only the list "Old ideas" is archived
 - `actions` is cut to the entries about these cards; the export it came from held 1,000
 

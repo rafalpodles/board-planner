@@ -28,6 +28,7 @@ describe("parseBundle", () => {
     [{ source: "x", tasks: [], notes: {} }, "notes must be a list of at most 50,000"],
     [{ source: "x", tasks: [], notes: [{ id: "", what: "a" }] }, "notes[0] needs an id of at most 200 characters and a what of at most 500"],
     [{ source: "x", tasks: [], notes: [{ id: "a", what: "b".repeat(501) }] }, "notes[0] needs an id of at most 200 characters and a what of at most 500"],
+    [{ source: "x", tasks: [], notes: [{ id: "a".repeat(201), what: "b" }] }, "notes[0] needs an id of at most 200 characters and a what of at most 500"],
   ])("refuses %j before anything is written", (raw, error) => {
     expect(parseBundle(raw)).toEqual({ ok: false, error });
   });

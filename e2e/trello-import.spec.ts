@@ -87,7 +87,7 @@ test("a Trello export imports through the mapping step, reports what it left beh
   await expect(report).toContainText("Would create 9 and would update 0 of 9 tasks from Trello, with 2 comments.");
   const left = report.locator("details", { hasText: "Not imported" });
   await expect(left).toContainText("Old ideas: an archived list, with its 1 card");
-  await expect(left).toContainText("https://example.com/a-link-card: an archived card");
+  await expect(left).toContainText("https://example.com/link-8: an archived card");
   await expect(left).toContainText("Audit log filter: 2 uploaded files: screenshot-3-0.png, screenshot-3-1.png");
   await expect(left).toContainText("Invoice export: the split into 2 checklists");
   await expect(left).toContainText("Backup restore: 673 of its 673 comments");
@@ -141,15 +141,14 @@ test("a Trello export imports through the mapping step, reports what it left beh
   await expect(page.getByText("Definition of done: Step 1")).toBeVisible();
   await expect(page.getByText("Rollout: Tell people 3")).toBeVisible();
 
-  await (await db()).collection("tasks").updateOne(
-    { _id: invoice._id },
-    { $push: { checklist: { _id: new mongoose.Types.ObjectId(), text: "Added on the board", done: false } } } as never
-  );
+  const added = new mongoose.Types.ObjectId();
+  await (await db()).collection("tasks").updateOne({ _id: invoice._id }, { $push: { checklist: { _id: added, text: "Added on the board", done: false } } } as never);
 
   // Exported again later, with a card renamed and a step ticked: nothing is made twice
   const later = JSON.parse(BOARD);
   later.cards.find((c: { name: string }) => c.name === "Single sign-on").name = "Single sign-on for everyone";
   later.checklists[0].checkItems[1].state = "complete";
+  later.checklists[0].checkItems.push({ ...later.checklists[0].checkItems[2], id: "5914b29a0000000000000099", name: "Step 4", pos: 90000 });
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
   await upload(page, JSON.stringify(later), "sample-board (1).json");
   await expect(page.getByLabel("Source name")).toHaveValue("Trello");
@@ -163,11 +162,33 @@ test("a Trello export imports through the mapping step, reports what it left beh
   expect(again).toHaveLength(9);
   expect(again.map((t) => t.title)).toContain("Single sign-on for everyone");
   const reread = again.find((t) => String(t._id) === String(invoice._id))!;
-  expect(reread.checklist[1]).toMatchObject({ text: "Definition of done: Step 2", done: true });
-  expect(reread.checklist.map((i: { _id: unknown }) => String(i._id)).slice(0, 6)).toEqual(invoice.checklist.map((i: { _id: unknown }) => String(i._id)));
-  expect(reread.checklist).toHaveLength(7);
-  expect(reread.checklist[6]).toMatchObject({ text: "Added on the board", done: false });
+  const items: { _id: mongoose.Types.ObjectId; text: string; done: boolean }[] = reread.checklist;
+  expect(items.map((i) => [i.text, i.done])).toEqual([
+    ["Definition of done: Step 1", true],
+    ["Definition of done: Step 2", true],
+    ["Definition of done: Step 3", false],
+    ["Definition of done: Step 4", false],
+    ["Rollout: Tell people 1", false],
+    ["Rollout: Tell people 2", false],
+    ["Rollout: Tell people 3", false],
+    ["Added on the board", false],
+  ]);
+  const first: string[] = invoice.checklist.map((i: { _id: unknown }) => String(i._id));
+  expect(items.map((i) => String(i._id))).toEqual([...first.slice(0, 3), String(items[3]._id), ...first.slice(3), String(added)]);
+  expect(items[3]._id).toBeInstanceOf(mongoose.Types.ObjectId);
+  expect(first).not.toContain(String(items[3]._id));
   expect(await (await db()).collection("comments").countDocuments({ task: signOn._id })).toBe(2);
+
+  // What the second import wrote is an ordinary criterion on the page, and the page's own save takes the whole list
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${invoice.taskNumber}`);
+  const criterion = (name: string) => page.getByRole("checkbox", { name, exact: true });
+  await expect(criterion("Definition of done: Step 2")).toBeChecked();
+  await expect(criterion("Added on the board")).not.toBeChecked();
+  const saved = page.waitForResponse((r) => r.url().includes("/tasks/") && r.request().method() === "PUT");
+  await criterion("Definition of done: Step 4").click();
+  expect((await saved).status()).toBe(200);
+  const done = await (await db()).collection("tasks").findOne({ _id: invoice._id });
+  expect(done!.checklist[3]).toMatchObject({ text: "Definition of done: Step 4", done: true });
 });
 
 test("a report longer than a page can be read to its last line", async ({ page }) => {

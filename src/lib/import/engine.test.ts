@@ -146,7 +146,7 @@ describe("runImport", () => {
 
   it("writes a new task's checklist, unticked unless the file says otherwise", async () => {
     const { db, writes } = fakeDb();
-    await run(db, [{ id: "1", title: "a", checklist: [{ text: " one ", done: true }, { text: "two" }, { text: "   " }, { text: "​" }] }, { id: "2", title: "b" }]);
+    await run(db, [{ id: "1", title: "a", checklist: [{ text: " one ", done: true }, { text: "two" }, { text: "   " }, { text: "\u3164" }] }, { id: "2", title: "b" }]);
     expect(writes.tasks.map((t) => t.checklist)).toEqual([[{ text: "one", done: true }, { text: "two", done: false }], []]);
   });
 

@@ -129,11 +129,15 @@ export function trelloToTable(board: Json): CsvTable {
     const attachments = records(card.attachments);
     const uploads = attachments.filter((a) => a.isUpload === true);
     const links = attachments.filter((a) => a.isUpload !== true && /^https?:\/\//i.test(text(a.url)));
-    const people = (Array.isArray(card.idMembers) ? card.idMembers : []).flatMap((m) => members.get(text(m)) || []);
+    const unlinked = attachments.filter((a) => a.isUpload !== true && !links.includes(a));
+    const onCard = Array.isArray(card.idMembers) ? card.idMembers : [];
+    const people = onCard.flatMap((m) => members.get(text(m)) || []);
     const itsChecklists = (checklists.get(id) ?? []).filter((c) => itemsOf(c).length > 0);
     const said = comments.get(id) ?? [];
 
     if (uploads.length) noteOn(card, `${plural(uploads.length, "uploaded file")}: ${namedUpTo(uploads.map((u) => text(u.name)))}`);
+    if (unlinked.length) noteOn(card, `${plural(unlinked.length, "attachment")} with no web address: ${namedUpTo(unlinked.map((a) => text(a.name)))}`);
+    if (onCard.length > people.length) noteOn(card, `${plural(onCard.length - people.length, "member")} the export does not name`);
     if (people.length > 1) noteOn(card, `its other members, as a task has one assignee: ${namedUpTo(people.slice(1))}`);
     if (itsChecklists.length > 1) noteOn(card, `the split into ${itsChecklists.length} checklists: each criterion starts with its checklist's name`);
     noteOn(card, missedComments(card, said.length));
