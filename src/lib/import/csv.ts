@@ -36,6 +36,8 @@ export interface CsvTable {
   checklists?: ImportChecklistItem[][];
   // What the format's reader left behind, for the report
   notes?: ImportNote[];
+  // The rows are in the order the source shows them, which the board should keep
+  ordered?: boolean;
 }
 
 const DELIMITERS = [",", ";", "\t", "|"] as const;
@@ -173,7 +175,7 @@ const PRESETS: { source: (headers: Set<string>) => KnownSource; recognised: (hea
   },
   {
     source: () => ({ name: "Trello", columns: { "trello card": "id", members: "assignee" }, severalAssignees: true }),
-    recognised: (h) => h.has("trello card"),
+    recognised: (h) => ["trello card", "name", "list", "members", "due", "created", "completed", "description"].every((column) => h.has(column)),
   },
 ];
 
@@ -367,6 +369,7 @@ export function csvToBundle(table: CsvTable, targets: CsvTarget[], source: strin
     const structured = table.comments?.[index] ?? [];
     if (structured.length || comments.length) task.comments = [...structured, ...comments];
     if (table.checklists?.[index]?.length) task.checklist = table.checklists[index];
+    if (table.ordered) task.order = index;
     return Object.fromEntries(Object.entries(task).filter(([, v]) => v !== undefined)) as unknown as ImportTask;
   });
   return { source, tasks, ...(table.notes?.length && { notes: table.notes }) };

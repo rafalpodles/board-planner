@@ -76,7 +76,7 @@ test("a Trello export imports through the mapping step, reports what it left beh
   await expect(mapping.getByLabel("Labels", { exact: true })).toHaveValue("field:Labels");
   await expect(page.getByLabel("Source name")).toHaveValue("Trello");
 
-  // A list is matched to a column by a person, not by its name
+  // A list with no column of its name is matched by a person
   await mapping.getByLabel("Status “Backlog”").selectOption("todo");
   await mapping.getByLabel("Status “Doing”").selectOption("in_progress");
   await expect(mapping.getByLabel("Status “Done”")).toHaveValue("done");
@@ -111,6 +111,18 @@ test("a Trello export imports through the mapping step, reports what it left beh
   expect(byTitle("Webhook retries").customFieldValues[String(LABELS_FIELD)]).toEqual(["lbl-design"]);
   expect(byTitle("Rate limit banner").description).toContain("- [Design note 5](https://example.com/notes/5)");
 
+  // Newest first would be the board's order for tasks that all sit at the same place
+  const listed: { title: string; status: string }[] = await (await page.request.get(`/api/projects/${PROJECT_KEY}/tasks`)).json();
+  const ideas = byTitle("Webhook retries").status;
+  const titles = new Set(tasks.map((t) => t.title));
+  expect(listed.filter((t) => t.status === ideas && titles.has(t.title)).map((t) => t.title)).toEqual([
+    "Webhook retries",
+    "Rate limit banner",
+    "Single sign-on",
+    "Invoice export",
+    "Audit log filter",
+  ]);
+
   const invoice = byTitle("Invoice export");
   expect(invoice.checklist.map((i: { text: string; done: boolean }) => [i.text, i.done])).toEqual([
     ["Definition of done: Step 1", true],
@@ -128,6 +140,11 @@ test("a Trello export imports through the mapping step, reports what it left beh
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${invoice.taskNumber}`);
   await expect(page.getByText("Definition of done: Step 1")).toBeVisible();
   await expect(page.getByText("Rollout: Tell people 3")).toBeVisible();
+
+  await (await db()).collection("tasks").updateOne(
+    { _id: invoice._id },
+    { $push: { checklist: { _id: new mongoose.Types.ObjectId(), text: "Added on the board", done: false } } } as never
+  );
 
   // Exported again later, with a card renamed and a step ticked: nothing is made twice
   const later = JSON.parse(BOARD);
@@ -147,7 +164,9 @@ test("a Trello export imports through the mapping step, reports what it left beh
   expect(again.map((t) => t.title)).toContain("Single sign-on for everyone");
   const reread = again.find((t) => String(t._id) === String(invoice._id))!;
   expect(reread.checklist[1]).toMatchObject({ text: "Definition of done: Step 2", done: true });
-  expect(reread.checklist.every((i: { _id?: unknown }) => i._id)).toBe(true);
+  expect(reread.checklist.map((i: { _id: unknown }) => String(i._id)).slice(0, 6)).toEqual(invoice.checklist.map((i: { _id: unknown }) => String(i._id)));
+  expect(reread.checklist).toHaveLength(7);
+  expect(reread.checklist[6]).toMatchObject({ text: "Added on the board", done: false });
   expect(await (await db()).collection("comments").countDocuments({ task: signOn._id })).toBe(2);
 });
 

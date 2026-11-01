@@ -34,7 +34,7 @@ let linkFailure: Error | null = null;
 
 const ACCOUNTS = [{ _id: MEMBER, username: "maya", email: "maya.k@example.com" }];
 
-type Existing = { id: string; status?: string; held?: boolean; comments?: string[] };
+type Existing = { id: string; status?: string; held?: boolean; comments?: string[]; checklist?: { _id: Types.ObjectId; text: string; done: boolean }[] };
 
 function fakeDb({ existing = [] as Existing[], failOn = 0, landBeforeFailing = 0 } = {}) {
   let counter = 10;
@@ -46,7 +46,7 @@ function fakeDb({ existing = [] as Existing[], failOn = 0, landBeforeFailing = 0
     sources: [] as string[],
     taskQueries: [] as Record<string, unknown>[],
   };
-  const rows = existing.map((e) => ({ _id: new Types.ObjectId(), status: e.status ?? "backlog", externalRef: { id: e.id }, execution: e.held ? { runId: "r1" } : {}, comments: e.comments ?? [] }));
+  const rows = existing.map((e) => ({ _id: new Types.ObjectId(), status: e.status ?? "backlog", externalRef: { id: e.id }, execution: e.held ? { runId: "r1" } : {}, comments: e.comments ?? [], checklist: e.checklist }));
   const chain = <T>(value: () => T) => ({ select: () => ({ lean: async () => value() }), lean: async () => value() });
   const db = {
     Project: {
@@ -168,11 +168,44 @@ describe("runImport", () => {
     expect(report.truncated).toEqual([{ id: "1", field: "checklist" }]);
   });
 
-  it("replaces the checklist of a task imported before, and leaves it alone when the file has none", async () => {
-    const { db, writes } = fakeDb({ existing: [{ id: "1" }, { id: "2" }] });
-    await run(db, [{ id: "1", title: "a", checklist: [{ text: "one", done: true }] }, { id: "2", title: "b", checklist: [] }]);
-    expect(writes.updates[0].update.$set.checklist).toEqual([{ text: "one", done: true }]);
-    expect(writes.updates[1].update.$set).not.toHaveProperty("checklist");
+  it("keeps a criterion's id and what only the board has when a task is imported again, the file deciding the tick", async () => {
+    const [same, reworded, added] = [new Types.ObjectId(), new Types.ObjectId(), new Types.ObjectId()];
+    const checklist = [
+      { _id: same, text: "Step one", done: false },
+      { _id: reworded, text: "Step  TWO", done: true },
+      { _id: added, text: "Added on the board", done: true },
+    ];
+    const { db, writes } = fakeDb({ existing: [{ id: "1", checklist }] });
+    await run(db, [{ id: "1", title: "a", checklist: [{ text: "Step one", done: true }, { text: "step two" }, { text: "New in the file" }] }]);
+    expect(writes.updates[0].update.$set.checklist).toEqual([
+      { _id: same, text: "Step one", done: true },
+      { _id: reworded, text: "step two", done: false },
+      { text: "New in the file", done: false },
+      { _id: added, text: "Added on the board", done: true },
+    ]);
+  });
+
+  it("leaves a task's checklist alone when the file has none for it", async () => {
+    const { db, writes } = fakeDb({ existing: [{ id: "1", checklist: [{ _id: new Types.ObjectId(), text: "Kept", done: false }] }] });
+    await run(db, [{ id: "1", title: "a", checklist: [] }]);
+    expect(writes.updates[0].update.$set).not.toHaveProperty("checklist");
+  });
+
+  it("keeps the file's criteria first when the two together are more than a task holds, and says so", async () => {
+    const held = Array.from({ length: MAX_CHECKLIST_ITEMS }, (_, i) => ({ _id: new Types.ObjectId(), text: `board ${i}`, done: false }));
+    const { db, writes } = fakeDb({ existing: [{ id: "1", checklist: held }] });
+    const report = await run(db, [{ id: "1", title: "a", checklist: [{ text: "from the file" }] }]);
+    const written = writes.updates[0].update.$set.checklist as { text: string }[];
+    expect(written).toHaveLength(MAX_CHECKLIST_ITEMS);
+    expect(written[0].text).toBe("from the file");
+    expect(report.truncated).toEqual([{ id: "1", field: "checklist" }]);
+  });
+
+  it("writes a new task's place, and never moves a task imported before", async () => {
+    const { db, writes } = fakeDb({ existing: [{ id: "1" }] });
+    await run(db, [{ id: "1", title: "a", order: 4 }, { id: "2", title: "b", order: 5 }, { id: "3", title: "c" }]);
+    expect(writes.tasks.map((t) => t.order)).toEqual([5, 0]);
+    expect(writes.updates[0].update.$set).not.toHaveProperty("order");
   });
 
   it("puts what the file's reader left behind in the report, on a check and on the run itself", async () => {

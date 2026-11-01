@@ -33,6 +33,7 @@ export interface ImportTask {
   fields?: Record<string, unknown>;
   comments?: ImportComment[];
   checklist?: ImportChecklistItem[];
+  order?: number;
   parent?: string;
   blockedBy?: string[];
 }
@@ -122,6 +123,9 @@ export function parseBundle(raw: unknown): Parsed<ImportBundle> {
         task.blockedBy.some((b) => typeof b !== "string" || b.length > EXTERNAL_ID_MAX_LENGTH))
     ) {
       return { ok: false, error: `${at}.blockedBy must be a list of at most ${MAX_BLOCKERS} ids` };
+    }
+    if (task.order !== undefined && (!Number.isSafeInteger(task.order) || (task.order as number) < 0)) {
+      return { ok: false, error: `${at}.order must be a whole number, 0 or more` };
     }
     if (task.checklist !== undefined) {
       if (!Array.isArray(task.checklist)) return { ok: false, error: `${at}.checklist must be a list` };

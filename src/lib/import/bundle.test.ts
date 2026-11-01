@@ -23,6 +23,8 @@ describe("parseBundle", () => {
     [{ source: "x", tasks: [task({ checklist: {} })] }, "tasks[0].checklist must be a list"],
     [{ source: "x", tasks: [task({ checklist: [{ text: 1 }] })] }, "tasks[0].checklist[0].text must be a string"],
     [{ source: "x", tasks: [task({ checklist: [{ text: "a", done: "yes" }] })] }, "tasks[0].checklist[0].done must be true or false"],
+    [{ source: "x", tasks: [task({ order: -1 })] }, "tasks[0].order must be a whole number, 0 or more"],
+    [{ source: "x", tasks: [task({ order: 1.5 })] }, "tasks[0].order must be a whole number, 0 or more"],
     [{ source: "x", tasks: [], notes: {} }, "notes must be a list of at most 50,000"],
     [{ source: "x", tasks: [], notes: [{ id: "", what: "a" }] }, "notes[0] needs an id of at most 200 characters and a what of at most 500"],
     [{ source: "x", tasks: [], notes: [{ id: "a", what: "b".repeat(501) }] }, "notes[0] needs an id of at most 200 characters and a what of at most 500"],

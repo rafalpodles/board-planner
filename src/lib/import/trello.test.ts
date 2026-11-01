@@ -19,7 +19,9 @@ describe("isTrelloExport", () => {
   it("knows a board export from a bundle and from anything else", () => {
     expect(isTrelloExport(fixture)).toBe(true);
     expect(isTrelloExport({ source: "x", tasks: [], cards: [], lists: [] })).toBe(false);
-    expect(isTrelloExport({ cards: [] })).toBe(false);
+    expect(isTrelloExport({ bundle: {}, cards: [], lists: [] })).toBe(false);
+    expect(isTrelloExport({ title: "Another kanban tool", cards: [], lists: [] })).toBe(false);
+    expect(isTrelloExport({ cards: [], shortLink: "aBcD1234" })).toBe(false);
     expect(isTrelloExport([])).toBe(false);
     expect(isTrelloExport(null)).toBe(false);
   });
@@ -29,6 +31,7 @@ describe("trelloToTable", () => {
   it("is recognised, and its columns need no mapping by hand", () => {
     const table = trelloToTable(fixture);
     expect(knownSource(table.headers)?.name).toBe("Trello");
+    expect(knownSource(["Task", "Trello card", "ID"])).toBeNull();
     expect(guessTargets(table.headers, [LABELS])).toEqual(["id", "title", "status", "assignee", "dueDate", "createdAt", "completedAt", "description", "field:Labels"]);
   });
 
@@ -38,6 +41,7 @@ describe("trelloToTable", () => {
     expect(bundle.tasks.map((t) => t.status)).toEqual(["Backlog", "Backlog", "Doing", "Done", "Ideas", "Ideas", "Later", "Later", "Parked"]);
     expect(bundle.tasks.map((t) => t.title)).not.toContain("Mobile menu");
     expect(bundle.tasks.every((t) => /^[A-Za-z0-9]{8}$/.test(t.id))).toBe(true);
+    expect(bundle.tasks.map((t) => t.order)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
   });
 
   it("reports archived cards and lists instead of importing them", () => {
@@ -66,6 +70,15 @@ describe("trelloToTable", () => {
     board.checklists = board.checklists.slice(0, 1);
     const { bundle } = bundleOf(board);
     expect(named(bundle.tasks, "Invoice export").checklist?.[0]).toEqual({ text: "Step 1", done: true });
+    expect(bundle.notes?.some((n) => n.what.startsWith("the split"))).toBe(false);
+  });
+
+  it("skips a blank item and an empty checklist, which would otherwise read as a criterion and a second checklist", () => {
+    const board = copy();
+    board.checklists[0].checkItems[0].name = "  ";
+    board.checklists[1].checkItems = [];
+    const { bundle } = bundleOf(board);
+    expect(named(bundle.tasks, "Invoice export").checklist?.map((c) => c.text)).toEqual(["Step 2", "Step 3"]);
     expect(bundle.notes?.some((n) => n.what.startsWith("the split"))).toBe(false);
   });
 
@@ -141,13 +154,19 @@ describe("trelloToTable", () => {
   it("reports custom fields, Power-Ups and start dates as not carried", () => {
     const board = copy();
     board.customFields = [{ id: "cf1", name: "Effort" }] as never;
-    board.powerUps = ["cardAging"] as never;
     board.cards[3].pluginData = [{ id: "p1" }] as never;
     (board.cards[3] as Record<string, unknown>).start = "2026-01-01T00:00:00.000Z";
     const { notes } = bundleOf(board).bundle;
     expect(notes).toContainEqual({ id: "Effort", what: "a Trello custom field: its values are not carried" });
     expect(notes).toContainEqual({ id: "Power-Ups", what: "what they keep on 1 card is not carried" });
     expect(notes).toContainEqual({ id: "Start dates", what: "on 1 card: a task has none" });
+  });
+
+  it("reports Power-Ups kept on the board alone", () => {
+    for (const on of [{ powerUps: ["cardAging"] }, { pluginData: [{ id: "p1" }] }]) {
+      expect(bundleOf({ ...copy(), ...on }).bundle.notes).toContainEqual({ id: "Power-Ups", what: "what they keep is not carried" });
+    }
+    expect(bundleOf(copy()).bundle.notes?.some((n) => n.id === "Power-Ups")).toBe(false);
   });
 
   it("clips what it notes, so one long name cannot refuse the whole import", () => {

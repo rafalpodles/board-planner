@@ -14,6 +14,7 @@ import {
   rendersBlank,
   stripControlCharacters,
 } from "@/lib/identifiers";
+import { mergeCriteria } from "@/lib/checklist";
 import { logActivities } from "@/lib/activity";
 import { actingThrough } from "@/lib/activity-source";
 import { logProjectAudit } from "@/lib/projectAudit";
@@ -77,6 +78,7 @@ interface Resolved {
   customFieldValues: Record<string, unknown>;
   comments: { ref: string; body: string; author: Types.ObjectId; createdAt: Date | null }[];
   checklist: { text: string; done: boolean }[];
+  order: number;
 }
 
 const shown = (value: unknown) => {
@@ -279,6 +281,7 @@ function resolveTask(
     customFieldValues: resolveFields(report, task, board),
     comments: (task.comments ?? []).flatMap((comment) => resolveComment(report, task.id, comment, users, importer)),
     checklist: resolveChecklist(report, task),
+    order: task.order ?? 0,
   };
 }
 
@@ -342,13 +345,24 @@ interface Stored {
   _id: Types.ObjectId;
   status: string;
   held: boolean;
+  checklist: IChecklistItem[];
 }
 
 async function storedTasks(db: ScopedDb, projectId: string, source: string, refs: string[]): Promise<Map<string, Stored>> {
   const rows = await db.Task.find({ project: projectId, "externalRef.source": source, "externalRef.id": { $in: refs } })
-    .select("_id status externalRef execution.runId")
-    .lean<{ _id: Types.ObjectId; status: string; externalRef: { id: string }; execution?: { runId?: string } }[]>();
-  return new Map(rows.map((t) => [t.externalRef.id, { _id: t._id, status: t.status, held: !!t.execution?.runId }]));
+    .select("_id status externalRef execution.runId checklist")
+    .lean<{ _id: Types.ObjectId; status: string; externalRef: { id: string }; execution?: { runId?: string }; checklist?: IChecklistItem[] }[]>();
+  return new Map(rows.map((t) => [t.externalRef.id, { _id: t._id, status: t.status, held: !!t.execution?.runId, checklist: t.checklist ?? [] }]));
+}
+
+// A criterion the file also has keeps its id and takes the file's tick; one only the board has stays
+function mergedChecklist(report: ImportReport, t: Resolved, held: IChecklistItem[]): IChecklistItem[] {
+  const markdown = t.checklist.map((item) => `- [${item.done ? "x" : " "}] ${item.text}`).join("\n");
+  const merged = mergeCriteria(markdown, held) as IChecklistItem[];
+  const matched = new Set(merged.map((item) => String(item._id)));
+  const all = [...merged, ...held.filter((item) => !matched.has(String(item._id)))];
+  if (all.length > MAX_CHECKLIST_ITEMS) report.truncated.push({ id: t.ref, field: "checklist" });
+  return all.slice(0, MAX_CHECKLIST_ITEMS);
 }
 
 // A run's task refuses to leave its column through every writer, an import included
@@ -408,6 +422,7 @@ async function writeChunk(
         assignedBy: t.assignee ? importer : null,
         dueDate: t.dueDate,
         checklist: t.checklist,
+        order: t.order,
         customFieldValues: t.customFieldValues,
         externalRef: { source, id: t.ref },
         createdBy: importer,
@@ -467,7 +482,7 @@ async function writeChunk(
                 // An import never unassigns: somebody it cannot name is left as the board has it
                 ...(t.assignee && { assignee: t.assignee, assignedBy: importer }),
                 ...(t.dueDate && { dueDate: t.dueDate }),
-                ...(t.checklist.length > 0 && { checklist: t.checklist as IChecklistItem[] }),
+                ...(t.checklist.length > 0 && { checklist: mergedChecklist(report, t, before.checklist) }),
                 ...(moved && { status: t.status }),
                 ...Object.fromEntries(Object.entries(t.customFieldValues).map(([k, v]) => [`customFieldValues.${k}`, v])),
               },

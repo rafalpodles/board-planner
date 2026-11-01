@@ -1,7 +1,8 @@
 # trello-board.json
 
 A real Trello board export, the JSON behind *Print, export, and share → Export as JSON*, taken from a
-public board on 2026-11-01 and cut down to eleven cards. Every key Trello wrote is kept.
+public board on 2026-11-01 and cut down to eleven cards. Every key Trello wrote on a card, list,
+label, member, checklist and action is kept; the top-level `memberships` is dropped.
 
 Anonymised: all text, names, URLs and ids were replaced. An id keeps its first eight hex digits,
 which are the time the object was created. Dates, counts and `badges` are the board's own.
@@ -21,5 +22,5 @@ What the real file showed, against what its ticket assumed:
 - `dateCompleted` is null on every card, including those in a Done list and those with `dueComplete`, so no real value of it has been seen
 - members carry a `username` and no e-mail
 - an uploaded attachment has `isUpload: true` and a URL behind Trello's sign-in, a link has `isUpload: false`
-- archived lists keep their cards, and those cards do not have `closed` set
+- an archived list keeps its cards, and most of them do not have `closed` set themselves
 - 142 of the 222 attachments were uploads, so most of what a board attaches stays behind

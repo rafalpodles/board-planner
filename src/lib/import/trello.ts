@@ -12,7 +12,7 @@ const text = (v: unknown) => (typeof v === "string" ? v : "");
 const inPlace = (rows: Json[]) => [...rows].sort((a, b) => (Number(a.pos) || 0) - (Number(b.pos) || 0));
 
 export function isTrelloExport(value: unknown): value is Json {
-  return isRecord(value) && Array.isArray(value.cards) && Array.isArray(value.lists) && !("tasks" in value);
+  return isRecord(value) && Array.isArray(value.cards) && Array.isArray(value.lists) && typeof value.shortLink === "string";
 }
 
 // A card has no date of its own: its id starts with the Unix time it was made at
@@ -67,9 +67,11 @@ function checklistsByCard(board: Json): Map<string, Json[]> {
   return byCard;
 }
 
+const itemsOf = (checklist: Json) => inPlace(records(checklist.checkItems)).filter((item) => text(item.name).trim());
+
 function criteriaOf(checklists: Json[]): ImportChecklistItem[] {
   return checklists.flatMap((checklist) =>
-    inPlace(records(checklist.checkItems)).map((item) => ({
+    itemsOf(checklist).map((item) => ({
       text: checklists.length > 1 ? `${text(checklist.name)}: ${text(item.name)}` : text(item.name),
       done: item.state === "complete",
     }))
@@ -92,7 +94,7 @@ function boardNotes(board: Json, open: Json[]): ImportNote[] {
   }
   for (const field of records(board.customFields)) notes.push(note(text(field.name), "a Trello custom field: its values are not carried"));
   const powered = open.filter((c) => records(c.pluginData).length > 0).length;
-  if (powered > 0 || (Array.isArray(board.powerUps) && board.powerUps.length > 0)) {
+  if (powered > 0 || records(board.pluginData).length > 0 || (Array.isArray(board.powerUps) && board.powerUps.length > 0)) {
     notes.push(note("Power-Ups", powered ? `what they keep on ${plural(powered, "card")} is not carried` : "what they keep is not carried"));
   }
   const started = open.filter((c) => text(c.start)).length;
@@ -102,8 +104,8 @@ function boardNotes(board: Json, open: Json[]): ImportNote[] {
 
 /**
  * Trello's board export is laid out as a sheet would be, so a list is matched to a column and a
- * member to an account in the mapping step every other import goes through. Everything the file
- * holds that a task cannot is written into `notes` for the report.
+ * member to an account in the mapping step every other import goes through. Archived work, uploads,
+ * missing comments and the fields a task lacks are written into `notes` for the report.
  */
 export function trelloToTable(board: Json): CsvTable {
   const lists = new Map(records(board.lists).map((l) => [text(l.id), l]));
@@ -128,7 +130,7 @@ export function trelloToTable(board: Json): CsvTable {
     const uploads = attachments.filter((a) => a.isUpload === true);
     const links = attachments.filter((a) => a.isUpload !== true && /^https?:\/\//i.test(text(a.url)));
     const people = (Array.isArray(card.idMembers) ? card.idMembers : []).flatMap((m) => members.get(text(m)) || []);
-    const itsChecklists = checklists.get(id) ?? [];
+    const itsChecklists = (checklists.get(id) ?? []).filter((c) => itemsOf(c).length > 0);
     const said = comments.get(id) ?? [];
 
     if (uploads.length) noteOn(card, `${plural(uploads.length, "uploaded file")}: ${namedUpTo(uploads.map((u) => text(u.name)))}`);
@@ -160,5 +162,6 @@ export function trelloToTable(board: Json): CsvTable {
     comments: rows.map((r) => r.said),
     checklists: rows.map((r) => r.criteria),
     notes,
+    ordered: true,
   };
 }
