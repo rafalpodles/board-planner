@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, act } from "@testing-library/react";
+import { render, screen, cleanup, act, fireEvent } from "@testing-library/react";
 import { ProjectTree } from "./ProjectTree";
 import { ApiProject } from "@/types";
 
@@ -205,12 +205,27 @@ describe("ProjectTree reordering", () => {
   // The drag itself belongs to dnd-kit and needs real pointer geometry, which this
   // environment cannot provide; the order a drop produces is covered in reorder.test
   function sortableRows(container: HTMLElement) {
-    return [...container.querySelectorAll('[aria-roledescription="sortable"]')];
+    return [...container.querySelectorAll("[data-reorderable]")];
   }
 
   it("makes rows sortable when reordering is allowed", () => {
     const { container } = renderTree({ onReorder: () => {} });
     expect(sortableRows(container)).toHaveLength(2);
+  });
+
+  it("leaves the row a plain container of controls", () => {
+    const { container } = renderTree({ onReorder: () => {} });
+
+    expect(container.querySelector('[role="button"]:not(button)')).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Reorder / })).toBeNull();
+  });
+
+  it("leaves Space and Enter to the controls inside the row", () => {
+    renderTree({ onReorder: () => {} });
+    const link = screen.getAllByRole("link").find((a) => a.getAttribute("href") === "/projects/MOB");
+
+    expect(fireEvent.keyDown(link!, { code: "Enter" })).toBe(true);
+    expect(fireEvent.keyDown(screen.getByRole("button", { name: "Expand Mobile App" }), { code: "Space" })).toBe(true);
   });
 
   it("makes nothing sortable without a reorder handler", () => {

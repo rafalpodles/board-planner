@@ -125,7 +125,7 @@ export function TaskTopBar({
 
       <button type="button" onClick={onToggleWatch} className={`hidden lg:block ${ghost}`}>
         {watching ? "Watching" : "Watch"}
-        {watcherCount > 0 && <span className="ml-1 opacity-60">({watcherCount})</span>}
+        {watcherCount > 0 && <span className="ml-1">({watcherCount})</span>}
       </button>
       <button type="button" onClick={onDuplicate} className={`hidden lg:block ${ghost}`}>
         Duplicate

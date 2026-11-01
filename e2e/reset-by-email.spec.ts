@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { createHash, randomBytes } from "crypto";
 import mongoose from "mongoose";
 import { SAME_ORIGIN } from "./api";
+import { mailFor, resetLinkIn } from "./mailbox";
 import { E2E_MONGODB_URI, MEMBER_ID, MEMBER_PASSWORD, MEMBER_USERNAME, seed } from "./seed";
 
 /**
@@ -10,9 +11,8 @@ import { E2E_MONGODB_URI, MEMBER_ID, MEMBER_PASSWORD, MEMBER_USERNAME, seed } fr
  * The link is planted in the database exactly as a delivered email would leave it — a row holding
  * the hash, and the raw token in hand. That is not a shortcut around the thing under test: what
  * has to be proven here is that a link works once, stops working after the hour, and cannot be
- * used twice, none of which is about delivery. The run does have a mail server since BP-465, but
- * reading the token out of a message would only add a parsing step between the fixture and the
- * same three assertions.
+ * used twice, none of which is about delivery. Delivery has one test of its own, the first below,
+ * which drives the form, reads the link out of the message and spends it (BP-1090).
  */
 
 const HOUR = 60 * 60 * 1000;
@@ -39,12 +39,16 @@ async function plantLink(overrides: Record<string, unknown> = {}) {
   return token;
 }
 
-async function setNewPassword(page: Page, token: string, password: string) {
-  await page.goto(`/reset?token=${token}`);
+async function chooseNewPassword(page: Page, password: string) {
   // exact, because "New password" is a substring of "Confirm new password"
   await page.getByLabel("New password", { exact: true }).fill(password);
   await page.getByLabel("Confirm new password").fill(password);
   await page.getByRole("button", { name: "Set the password" }).click();
+}
+
+async function setNewPassword(page: Page, token: string, password: string) {
+  await page.goto(`/reset?token=${token}`);
+  await chooseNewPassword(page, password);
 }
 
 async function signIn(page: Page, username: string, password: string) {
@@ -61,6 +65,30 @@ test.beforeEach(async () => {
 
 test.afterEach(async () => {
   if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
+});
+
+test("somebody who forgot asks on the form, gets the mail, and signs in with what they chose", async ({ page }) => {
+  const address = `forgot-${randomBytes(4).toString("hex")}@example.com`;
+  await (await db()).collection("users").updateOne({ _id: MEMBER_ID }, { $set: { email: address } });
+
+  await page.goto("/login");
+  await page.getByRole("link", { name: "Forgot your password?" }).click();
+  await page.getByLabel("Username or email").fill(MEMBER_USERNAME);
+  const asked = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/auth/forgot" && response.request().method() === "POST"
+  );
+  await page.getByRole("button", { name: "Send the link" }).click();
+  expect((await asked).status()).toBe(200);
+  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+
+  await expect.poll(async () => (await mailFor(address)).length).toBe(1);
+  const [message] = await mailFor(address);
+  await page.goto(resetLinkIn(message));
+  await chooseNewPassword(page, "chosen-from-the-email");
+  await expect(page.getByText("Your password is set")).toBeVisible();
+
+  await signIn(page, MEMBER_USERNAME, "chosen-from-the-email");
+  await expect(page).toHaveURL(/\/projects/);
 });
 
 test("a link sets a new password, and the account signs in with it", async ({ page }) => {

@@ -1,6 +1,11 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { createHash, randomBytes } from "crypto";
 import mongoose from "mongoose";
+import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
+import { OIDC_STUB_LABEL, OIDC_STUB_URL } from "../playwright.config";
+import { ADMIN_AUTH, SAME_ORIGIN } from "./api";
+import { boardWithHistory } from "./insights-board";
 import {
   ADMIN_ID,
   E2E_MONGODB_URI,
@@ -10,11 +15,13 @@ import {
   PROJECT_ID,
   PROJECT_KEY,
   PROJECT_NAME,
+  SIBLING_TASK_ID,
   SIBLING_TASK_NUMBER,
   SIBLING_TASK_TITLE,
   WORKER_NAME,
   seed,
   seedMyTasks,
+  seedRepository,
   seedSprintPlanning,
 } from "./seed";
 import { signIn } from "./session";
@@ -29,12 +36,16 @@ import { signIn } from "./session";
  *
  * Each screen waits for something only its loaded state can show, because a spinner has nothing
  * on it to violate.
+ *
+ * Every screen is swept again in dark for the two rules that compare colours (BP-1090); the rest
+ * read the markup, which the theme does not touch. `dark-theme.spec.ts` keeps the assertions axe
+ * cannot make, such as a surface that should be dark and a colour that is project data.
  */
 
 const WCAG_A_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
-async function violations(page: Page): Promise<string[]> {
-  const { violations } = await new AxeBuilder({ page }).withTags(WCAG_A_AA).analyze();
+async function violations(page: Page, axe = new AxeBuilder({ page }).withTags(WCAG_A_AA)): Promise<string[]> {
+  const { violations } = await axe.analyze();
   return violations.map(
     (v) =>
       `${v.id}: ${v.help}\n${v.nodes
@@ -60,6 +71,81 @@ async function seedCatalog() {
   const { seedAgents } = await import("@/lib/agent-seed");
   const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
   await withDb(() => seedAgents(scopedToDefaultOrganisation()));
+}
+
+const COMMENT_LINK = "the guide";
+
+async function seedCommentWithLink(request: APIRequestContext) {
+  const posted = await request.post(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}/comments`, {
+    headers: ADMIN_AUTH,
+    data: { body: `Start from [${COMMENT_LINK}](https://example.com/guide) before anything else.` },
+  });
+  expect(posted.status(), await posted.text()).toBe(201);
+}
+
+const INSIGHTS_KEY = "AXE";
+
+async function seedInsights(request: APIRequestContext) {
+  await withDb((db) =>
+    db
+      .collection("organisations")
+      .updateOne(
+        { _id: DEFAULT_ORGANISATION_ID },
+        { $set: { "entitlements.plan": "pro", "entitlements.features": [] } },
+        { upsert: true }
+      )
+  );
+  await boardWithHistory(request, INSIGHTS_KEY);
+}
+
+async function plantInvitation(email: string) {
+  const token = `cpi_${randomBytes(32).toString("hex")}`;
+  await withDb((db) =>
+    db.collection("invitations").insertOne({
+      email,
+      role: "member",
+      boards: [{ project: PROJECT_ID, relation: "member", addedBy: ADMIN_ID }],
+      invitedBy: ADMIN_ID,
+      tokenHash: createHash("sha256").update(token).digest("hex"),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      status: "pending",
+      acceptedBy: null,
+      acceptedAt: null,
+      deliveredAs: "email",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+  );
+  return token;
+}
+
+const PROVIDER_ADDRESS = "newcomer@sweep.example.com";
+
+async function nextProviderSignIn() {
+  const answer = await fetch(`${OIDC_STUB_URL}/control`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sub: `sweep-${randomBytes(4).toString("hex")}`,
+      email: PROVIDER_ADDRESS,
+      email_verified: true,
+      name: "Sweep Newcomer",
+    }),
+  });
+  expect(answer.ok, "the OIDC stub refused its script").toBe(true);
+}
+
+// Disabled until the terms have answered, and axe skips a disabled control's contrast
+const accountForm = (page: Page) => button(page, "Create my account").and(page.locator(":enabled"));
+
+async function machineAsksToEnrol(page: Page) {
+  const asked = await page.request.post("/api/workers/enrolment/device", {
+    headers: { ...SAME_ORIGIN, "x-cp-protocol": "1" },
+    data: { name: "sweep-laptop", host: "sweep-laptop.local" },
+  });
+  expect(asked.status(), await asked.text()).toBe(201);
+  const { verificationUrl } = (await asked.json()) as { verificationUrl: string };
+  await page.goto(new URL(verificationUrl).pathname);
 }
 
 const NOTIFICATION_TITLE = `${PROJECT_KEY}-${SIBLING_TASK_NUMBER} assigned to you`;
@@ -97,7 +183,7 @@ async function onTheBoard(page: Page) {
 interface Screen {
   name: string;
   signedOut?: boolean;
-  prepare?: () => Promise<unknown>;
+  prepare?: (request: APIRequestContext) => Promise<unknown>;
   open: (page: Page) => Promise<unknown>;
   ready: (page: Page) => Locator;
 }
@@ -111,6 +197,58 @@ const SCREENS: Screen[] = [
     signedOut: true,
     open: at("/forgot"),
     ready: (page) => heading(page, "Forgot your password?"),
+  },
+  {
+    name: "new password",
+    signedOut: true,
+    open: at("/reset?token=cpr_read-only-when-the-form-is-sent"),
+    ready: (page) => heading(page, "Choose a new password"),
+  },
+  {
+    name: "confirm an address",
+    signedOut: true,
+    open: at("/confirm-email#token=cpe_read-only-when-the-button-is-pressed"),
+    ready: (page) => button(page, "Confirm this address"),
+  },
+  {
+    name: "invitation",
+    signedOut: true,
+    open: async (page) => page.goto(`/invite?token=${await plantInvitation("invited@sweep.example.com")}`),
+    ready: (page) => button(page, `Accept with ${OIDC_STUB_LABEL}`),
+  },
+  {
+    name: "invitation through a provider",
+    signedOut: true,
+    open: async (page) => {
+      await nextProviderSignIn();
+      await page.goto(`/invite?token=${await plantInvitation(PROVIDER_ADDRESS)}`);
+      await button(page, `Accept with ${OIDC_STUB_LABEL}`).click();
+      // The plain invitation has the same button, so the form alone would not prove the provider answered
+      await page.waitForURL("**/invite/sso");
+    },
+    ready: accountForm,
+  },
+  {
+    name: "sign-up through a provider",
+    signedOut: true,
+    prepare: () =>
+      withDb((db) =>
+        db
+          .collection("settings")
+          .updateOne({}, { $set: { signUpDomains: [PROVIDER_ADDRESS.split("@")[1]] } }, { upsert: true })
+      ),
+    open: async (page) => {
+      await nextProviderSignIn();
+      await page.goto("/login");
+      await button(page, `Continue with ${OIDC_STUB_LABEL}`).click();
+    },
+    ready: accountForm,
+  },
+  {
+    name: "connecting a machine",
+    prepare: () => seedRepository({ repositoryUrl: "https://github.com/owner/repo" }),
+    open: machineAsksToEnrol,
+    ready: (page) => page.getByRole("radio"),
   },
   { name: "projects", open: at("/projects"), ready: (page) => page.getByRole("link", { name: PROJECT_NAME }).first() },
   { name: "new project", open: at("/projects/new"), ready: (page) => heading(page, "New project") },
@@ -172,6 +310,12 @@ const SCREENS: Screen[] = [
     ready: (page) => statusPicker(page).filter({ visible: true }).first(),
   },
   {
+    name: "a comment with a link",
+    prepare: seedCommentWithLink,
+    open: at(`${BOARD}/tasks/${SIBLING_TASK_NUMBER}`),
+    ready: (page) => page.getByRole("main").getByRole("link", { name: COMMENT_LINK, exact: true }).first(),
+  },
+  {
     name: "sprints",
     prepare: seedSprintPlanning,
     open: at(`${BOARD}/sprints`),
@@ -192,7 +336,14 @@ const SCREENS: Screen[] = [
     ready: (page) => page.getByRole("main").getByText(SIBLING_TASK_TITLE).first(),
   },
   { name: "dashboard", open: at(`${BOARD}/dashboard`), ready: (page) => heading(page, "Status Breakdown") },
-  { name: "insights", open: at(`${BOARD}/insights`), ready: (page) => page.getByTestId("insights-upsell") },
+  { name: "insights on Free", open: at(`${BOARD}/insights`), ready: (page) => page.getByTestId("insights-upsell") },
+  {
+    name: "insights with data",
+    prepare: seedInsights,
+    open: at(`/projects/${INSIGHTS_KEY}/insights`),
+    // The upsell draws tiles too, over sample data: a plotted task is what only a live board has
+    ready: (page) => page.getByTestId("insights-live").getByTestId("insights-scatter").locator("circle").first(),
+  },
   ...(
     [
       ["general", "General"],
@@ -271,18 +422,33 @@ const SCREENS: Screen[] = [
 
 test.beforeEach(seed);
 
+async function arrive(page: Page, request: APIRequestContext, screen: Screen) {
+  await screen.prepare?.(request);
+  if (!screen.signedOut) await signIn(page);
+  await screen.open(page);
+  // Turbopack compiles a route on its first visit, and a click is not covered by navigationTimeout
+  await expect(screen.ready(page)).toBeVisible({ timeout: 90_000 });
+  // A heading can stand while what it heads is still a spinner or a "Loading…" line
+  const main = page.getByRole("main");
+  await expect(main.getByText(/^Loading…?$/).filter({ visible: true })).toHaveCount(0, { timeout: 30_000 });
+  await expect(main.locator(".animate-spin").filter({ visible: true })).toHaveCount(0, { timeout: 30_000 });
+}
+
+const inDark = (page: Page) => page.addInitScript(() => localStorage.setItem("theme", "dark"));
+
+const contrast = (page: Page) => violations(page, new AxeBuilder({ page }).withRules(["color-contrast", "link-in-text-block"]));
+
 for (const screen of SCREENS) {
-  test(`${screen.name} has no WCAG A or AA violations`, async ({ page }) => {
-    await screen.prepare?.();
-    if (!screen.signedOut) await signIn(page);
-    await screen.open(page);
-    // Turbopack compiles a route on its first visit, and a click is not covered by navigationTimeout
-    await expect(screen.ready(page)).toBeVisible({ timeout: 90_000 });
-    // A heading can stand while what it heads is still a spinner or a "Loading…" line
-    const main = page.getByRole("main");
-    await expect(main.getByText(/^Loading…?$/).filter({ visible: true })).toHaveCount(0, { timeout: 30_000 });
-    await expect(main.locator(".animate-spin").filter({ visible: true })).toHaveCount(0, { timeout: 30_000 });
+  test(`${screen.name} has no WCAG A or AA violations`, async ({ page, request }) => {
+    await arrive(page, request, screen);
     expect(await violations(page)).toEqual([]);
+  });
+
+  test(`${screen.name} reads at AA in dark`, async ({ page, request }) => {
+    await inDark(page);
+    await arrive(page, request, screen);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    expect(await contrast(page)).toEqual([]);
   });
 }
 
@@ -297,4 +463,20 @@ test("the sweep reports an unlabelled button, so a clean result means something"
     main.prepend(unlabelled);
   });
   expect((await violations(page)).map((v) => v.split(":")[0])).toEqual(["button-name"]);
+});
+
+test("the dark pass reports unreadable text, so a clean result means something", async ({ page }) => {
+  await inDark(page);
+  await signIn(page);
+  await onTheBoard(page);
+  expect(await contrast(page)).toEqual([]);
+
+  await page.getByRole("main").evaluate((main) => {
+    const unreadable = document.createElement("p");
+    unreadable.textContent = "Nearly the colour of the page";
+    // Not the page's own colour: axe calls an exact 1:1 undecided rather than a violation
+    unreadable.style.color = "#3f3f46";
+    main.prepend(unreadable);
+  });
+  expect((await contrast(page)).map((v) => v.split(":")[0])).toEqual(["color-contrast"]);
 });

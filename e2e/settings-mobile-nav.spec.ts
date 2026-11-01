@@ -89,6 +89,15 @@ for (const surface of SURFACES) {
   });
 }
 
+test("the bare settings address opens on the profile", async ({ page }) => {
+  await arriveSignedIn(page, "member");
+
+  await page.goto("/settings");
+
+  await expect(page).toHaveURL("/settings/profile");
+  await expect(page.getByRole("heading", { name: "Profile", exact: true })).toBeVisible();
+});
+
 test("the pill you tap is the pill you can still see", async ({ page }) => {
   await signIn(page);
   await page.goto(`/projects/${PROJECT_KEY}/settings`);

@@ -9,7 +9,6 @@ import { reorderedIds } from "@/lib/reorder";
 import {
   DndContext,
   DragEndEvent,
-  KeyboardSensor,
   PointerSensor,
   closestCenter,
   useSensor,
@@ -18,7 +17,6 @@ import {
 import { restrictToParentElement, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import {
   SortableContext,
-  sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
@@ -166,12 +164,11 @@ function SortableProject({
     isDragging: boolean;
   }) => React.ReactNode;
 }) {
-  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
-    useSortable({ id, disabled });
+  const { setNodeRef, listeners, transform, transition, isDragging } = useSortable({ id, disabled });
 
   return children({
     setNodeRef,
-    handleProps: { ...attributes, ...listeners },
+    handleProps: { ...listeners },
     style: {
       transform: CSS.Transform.toString(transform),
       transition,
@@ -208,7 +205,6 @@ export function ProjectTree({
     // The whole row is the handle and it is full of links, so a drag only begins
     // once the pointer has actually travelled — a plain click still navigates
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
   // An expanded project is several times taller than a collapsed one, and dnd-kit
@@ -286,6 +282,7 @@ export function ProjectTree({
           <div ref={setNodeRef} style={style}>
             <div
               data-active-project={isRouteProject || undefined}
+              data-reorderable={canReorder || undefined}
               {...(canReorder ? handleProps : {})}
               className={`relative flex w-full items-center gap-1.5 rounded-lg pr-2.5 transition-colors hover:bg-bg-hover ${
                 isRouteProject ? "shadow-[inset_3px_0_0_var(--color-primary)]" : ""

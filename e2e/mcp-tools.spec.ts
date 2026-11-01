@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 import { MONGO_PROXY_CONTROL_URL } from "../playwright.config";
 import { ADMIN_AUTH, SAME_ORIGIN } from "./api";
 import { SERVER_INSTRUCTIONS } from "../src/lib/mcp/instructions";
-import { McpSession, authorize, type ToolCall } from "./mcp";
+import { MCP_HEADERS, McpSession, authorize, type ToolCall } from "./mcp";
 import {
   ADMIN_USERNAME,
   API_TOKEN,
@@ -120,6 +120,23 @@ test("initialize hands the client the board's working rules", async ({ request }
 
   expect(answer.result?.instructions).toBe(SERVER_INSTRUCTIONS);
 });
+
+// A server with no stream and no sessions says so with a 405: the client then keeps to POST. Behind
+// the credential check like everything else, so an anonymous caller learns nothing about the method
+for (const method of ["GET", "DELETE"] as const) {
+  test(`${method} on the endpoint is a 405 with a credential and a 401 without`, async ({ request }) => {
+    const anonymous = await request.fetch("/api/mcp", { method, headers: MCP_HEADERS });
+    expect(anonymous.status()).toBe(401);
+    expect(anonymous.headers()["www-authenticate"]).toContain("resource_metadata");
+
+    const refused = await request.fetch("/api/mcp", {
+      method,
+      headers: { ...MCP_HEADERS, Authorization: `Bearer ${API_TOKEN}` },
+    });
+    expect(refused.status()).toBe(405);
+    expect(await refused.json()).toMatchObject({ error: { message: "Method not allowed." } });
+  });
+}
 
 test("create_task lands on the board with everything it named", async ({ page, request }) => {
   const session = await connected(request);

@@ -382,7 +382,8 @@
     "tasks",
     "project",
     "people",
-    "automation"
+    "automation",
+    "a11y"
   ],
   "src/app/api/projects/[projectId]/tasks/[taskId]/decision/route.ts": [
     "automation"
@@ -408,7 +409,8 @@
     "task-fields",
     "project",
     "people",
-    "automation"
+    "automation",
+    "a11y"
   ],
   "src/app/api/projects/[projectId]/tasks/[taskId]/triage/route.ts": [
     "project"
@@ -430,7 +432,8 @@
     "board",
     "project",
     "people",
-    "automation"
+    "automation",
+    "a11y"
   ],
   "src/app/api/projects/[projectId]/templates/route.ts": [
     "project"
@@ -455,7 +458,8 @@
     "task-fields",
     "board",
     "project",
-    "people"
+    "people",
+    "a11y"
   ],
   "src/app/api/projects/setup/route.ts": [
     "project"
@@ -569,7 +573,8 @@
   "src/app/api/workers/enrolment/device/route.ts": [
     "project",
     "people",
-    "automation"
+    "automation",
+    "a11y"
   ],
   "src/app/api/workers/enrolment/device/token/route.ts": [
     "people",
