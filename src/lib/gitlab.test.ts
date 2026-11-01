@@ -126,9 +126,14 @@ describe("matchMRsToTasks", () => {
     expect(states).toEqual(["open", "closed", "merged", "closed"]);
   });
 
-  it("links every key in the branch and the title, each once (BP-635)", () => {
-    const [matched] = matchMRsToTasks([mr({ branch: "bp-11/a", title: "BP-11, BP-22 and old-33" })], "BP", ["OLD"]);
+  it("takes the branch's key and every key in the list closing the title, each once (BP-635)", () => {
+    const [matched] = matchMRsToTasks([mr({ branch: "bp-11/a", title: "x (BP-11, BP-22 and old-33)" })], "BP", ["OLD"]);
     expect(matched.matchedTaskNumbers).toEqual([11, 22, 33]);
+  });
+
+  it("takes only the branch's key from a title that names another in passing (BP-635)", () => {
+    const [matched] = matchMRsToTasks([mr({ branch: "bp-11/a", title: "BP-22 b" })], "BP");
+    expect(matched.matchedTaskNumbers).toEqual([11]);
   });
 
   // BP-611, the GitLab half. The same regex was built twice; the hole was in both copies, and

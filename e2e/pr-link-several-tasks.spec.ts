@@ -13,9 +13,10 @@ import {
 import { signIn } from "./session";
 
 /**
- * BP-635. A family of tasks fixed in one pull request is listed in its title, and the branch can
- * only carry one of the keys. The matcher stopped at the branch, so PR #391 linked one task of
- * the four its title named, and the other three showed nothing.
+ * BP-635. A family of tasks fixed in one pull request is listed at the end of its title, and the
+ * branch can only carry one of the keys. The matcher stopped at the branch, so PR #391 linked one
+ * task of the four its title named, and the other three showed nothing. A key a title merely
+ * mentions is not such a list, and must neither link nor move anything.
  */
 
 const REPO = "https://github.com/example/board";
@@ -103,17 +104,26 @@ test("every task a title names shows the pull request, and a key taken out of th
   await expect(page.getByRole("link", { name: /#391/ })).toBeVisible();
 });
 
-test("a branch's key survives a title that names another task", async ({ page, request }) => {
-  await github(request, [pull(391, FAMILY_BRANCH, `fix: retitled onto ${DECOY}`)]);
+test("a key a merged title only mentions neither links nor moves its task", async ({ page, request }) => {
+  expect(await statusOf(request, DECOY_TASK_NUMBER)).toBe("in_review");
+  await github(request, [
+    pull(391, FAMILY_BRANCH, `fix: the follow-up to ${DECOY} (${SIBLING})`, {
+      state: "closed",
+      merged_at: "2026-09-02T00:00:00Z",
+    }),
+  ]);
   await signIn(page);
 
-  expect(await syncFromSettings(page)).toMatchObject({ prsFound: 1, prsLinked: 1, tasksLinked: 2 });
+  expect(await syncFromSettings(page)).toMatchObject({ prsLinked: 1, tasksLinked: 1, autoTransitioned: 0 });
 
   await openTheTask(page, SIBLING_TASK_NUMBER, SIBLING_TASK_TITLE);
   await expect(page.getByRole("link", { name: /#391/ })).toBeVisible();
+  await openTheTask(page, DECOY_TASK_NUMBER, DECOY_TASK_TITLE);
+  await expect(page.getByTestId("pr-state")).toHaveCount(0, { timeout: 1_000 });
+  expect(await statusOf(request, DECOY_TASK_NUMBER)).toBe("in_review");
 });
 
-test("a merged pull request moves a task in review that only its title names", async ({ page, request }) => {
+test("a merged pull request moves a task in review that its closing list names", async ({ page, request }) => {
   expect(await statusOf(request, DECOY_TASK_NUMBER)).toBe("in_review");
   await github(request, [
     pull(391, FAMILY_BRANCH, `fix: a family (${SIBLING}, ${DECOY})`, {

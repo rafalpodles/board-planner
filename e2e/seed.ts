@@ -2572,7 +2572,7 @@ export async function seedCrew(count = 14) {
 }
 
 /**
- * BP-695. A board whose repository is on GitLab — the stub at `host` — with one task for the stub
+ * BP-695. A board whose repository is on GitLab — the stub at `host` — with two tasks for the stub
  * to report branches, commits and merge requests about. Its own project, so no spec counting the
  * seeded boards sees it unless it asks for it.
  */

@@ -383,7 +383,7 @@ async function syncGithubRepository(
 
   // Every pull request this round saw, matched or not — the round's whole field of view. A stored
   // link whose url is in here and which this round did not give to that task has been seen and
-  // reassigned, which is a fact; one that is absent is merely out of the window (BP-610, BP-617).
+  // contradicted, which is a fact; one that is absent is merely out of the window (BP-610, BP-617).
   // By url rather than by number, so a repointed repository's numbers do not contradict the old
   // repository's links (BP-631).
   const seenList = seenUrls(

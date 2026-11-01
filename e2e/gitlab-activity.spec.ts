@@ -227,14 +227,14 @@ test.describe("the merge-request sync", () => {
     expect((await asked(request)).some((r) => r.path.endsWith("/merge_requests"))).toBe(true);
   });
 
-  // BP-635. The GitHub side is pr-link-several-tasks.spec.ts; this sync groups on its own.
-  test("links a merge request to every task its title names, and counts it once", async ({
+  // BP-635. The GitHub side is pr-link-several-tasks.spec.ts; this sync has its own write loop.
+  test("links a merge request to every task its closing list names, and counts it once", async ({
     page,
     request,
   }) => {
     const mergeRequest = {
       iid: 14,
-      title: `Mirror both fixes (${GITLAB_TASK_KEY}, ${GITLAB_PROJECT_KEY}-${GITLAB_SIBLING_TASK_NUMBER})`,
+      title: `Mirror both fixes (${GITLAB_TASK_KEY}, ${GITLAB_PROJECT_KEY}-${GITLAB_SIBLING_TASK_NUMBER}, ${GITLAB_PROJECT_KEY}-99)`,
       state: "opened",
       web_url: `${WEB}/-/merge_requests/14`,
       merged_at: null,
@@ -251,6 +251,15 @@ test.describe("the merge-request sync", () => {
     await expect(page.getByRole("link", { name: /#14/ })).toBeVisible();
     await page.goto(`/projects/${GITLAB_PROJECT_KEY}/tasks/${GITLAB_SIBLING_TASK_NUMBER}`);
     await expect(page.getByRole("textbox", { name: "Task title" })).toHaveValue(GITLAB_SIBLING_TASK_TITLE);
+    await expect(page.getByRole("link", { name: /#14/ })).toBeVisible();
+
+    await stub(request, { mergeRequests: [{ ...mergeRequest, title: `Mirror one fix (${GITLAB_TASK_KEY})` }] });
+    expect(await syncMergeRequests(page)).toMatchObject({ tasksLinked: 1, prsLinked: 1, prsUnlinked: 1 });
+
+    await page.goto(`/projects/${GITLAB_PROJECT_KEY}/tasks/${GITLAB_SIBLING_TASK_NUMBER}`);
+    await expect(page.getByRole("textbox", { name: "Task title" })).toHaveValue(GITLAB_SIBLING_TASK_TITLE);
+    await expect(page.getByRole("link", { name: /#14/ })).toHaveCount(0, { timeout: 1_000 });
+    await openTask(page);
     await expect(page.getByRole("link", { name: /#14/ })).toBeVisible();
   });
 });

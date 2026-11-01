@@ -90,14 +90,31 @@ export { escapeRegex };
  * A lookbehind rather than a consumed character, so the digits stay group 1.
  */
 function projectKeyPattern(keys: string[]): RegExp {
-  return new RegExp(`(?<![A-Za-z0-9])(?:${keys.map(escapeRegex).join("|")})[- ](\\d+)`, "gi");
+  return new RegExp(`(?<![A-Za-z0-9])(?:${keys.map(escapeRegex).join("|")})[- ](\\d+)`, "i");
 }
 
-/** Every task number these texts name, once each, in the order they name them. */
-export function taskNumbersIn(keys: string[], ...texts: string[]): number[] {
+/** `fix: a sync round (BP-628, BP-631)`: keys in brackets closing a title, and nothing else in them. */
+function closingKeyList(keys: string[]): RegExp {
+  const key = `(?:${keys.map(escapeRegex).join("|")})-\\d+`;
+  return new RegExp(`\\((${key}(?:(?:\\s*[,&]\\s*|\\s+and\\s+)${key})*)\\)\\s*$`, "i");
+}
+
+/**
+ * The tasks a branch and a title name: the first key in the branch, else the first in the title,
+ * and every key in a list closing the title (BP-635).
+ *
+ * A branch is written once, by whoever started the work, while a title is edited freely afterwards
+ * (BP-611). So a title adds tasks only by listing them on purpose, and a key it merely mentions
+ * adds nothing: `follow-up to BP-12`, a version, and the task titles the worker copies into its
+ * pull requests all carry keys nobody meant as a link, and a link moves a task when it merges.
+ */
+export function taskNumbersIn(keys: string[], branch: string, title: string): number[] {
   const pattern = projectKeyPattern(keys);
-  const named = texts.flatMap((text) => [...text.matchAll(pattern)].map((match) => parseInt(match[1], 10)));
-  return [...new Set(named)];
+  const first = branch.match(pattern) ?? title.match(pattern);
+  if (!first) return [];
+  const list = title.match(closingKeyList(keys))?.[1] ?? "";
+  const listed = [...list.matchAll(new RegExp(pattern, "gi"))];
+  return [...new Set([first, ...listed].map((match) => parseInt(match[1], 10)))];
 }
 
 export interface ParsedPR {
@@ -344,12 +361,7 @@ function rateLimit(res: Response): string | null {
 /**
  * Match PRs to task numbers by scanning branch name and PR title.
  * Pattern: project key (case-insensitive) followed by - and number.
- * E.g. "cp-5/some-slug" or "CP-5 add feature" → task number 5.
- *
- * Every key counts, from both: one branch and one pull request can carry a family of tasks, and
- * a title that lists them is how its author says so (BP-635). A branch key is never lost to a
- * retitle, which is what branch-first was protecting (BP-611); the keys in a title come and go
- * with the title, and a sync unlinks the task whose key left it.
+ * E.g. "cp-5/some-slug" or "CP-5 add feature" → task number 5. See `taskNumbersIn`.
  */
 export function matchPRsToTasks(
   prs: GitHubPR[],
