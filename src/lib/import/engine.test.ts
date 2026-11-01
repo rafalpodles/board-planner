@@ -11,6 +11,7 @@ vi.mock("@/lib/projectAudit", () => ({ logProjectAudit: (...a: unknown[]) => log
 
 const { runImport, IMPORT_CHUNK } = await import("./engine");
 const { currentProvenance } = await import("@/lib/activity-source");
+const { CRITERION_TEXT_MAX_LENGTH, MAX_CHECKLIST_ITEMS, isValidCriterionText } = await import("@/lib/identifiers");
 
 const IMPORTER = new Types.ObjectId();
 const MEMBER = new Types.ObjectId();
@@ -33,7 +34,7 @@ let linkFailure: Error | null = null;
 
 const ACCOUNTS = [{ _id: MEMBER, username: "maya", email: "maya.k@example.com" }];
 
-type Existing = { id: string; status?: string; held?: boolean; comments?: string[] };
+type Existing = { id: string; status?: string; held?: boolean; comments?: string[]; checklist?: { _id: Types.ObjectId; text: string; done: boolean }[] };
 
 function fakeDb({ existing = [] as Existing[], failOn = 0, landBeforeFailing = 0 } = {}) {
   let counter = 10;
@@ -45,7 +46,7 @@ function fakeDb({ existing = [] as Existing[], failOn = 0, landBeforeFailing = 0
     sources: [] as string[],
     taskQueries: [] as Record<string, unknown>[],
   };
-  const rows = existing.map((e) => ({ _id: new Types.ObjectId(), status: e.status ?? "backlog", externalRef: { id: e.id }, execution: e.held ? { runId: "r1" } : {}, comments: e.comments ?? [] }));
+  const rows = existing.map((e) => ({ _id: new Types.ObjectId(), status: e.status ?? "backlog", externalRef: { id: e.id }, execution: e.held ? { runId: "r1" } : {}, comments: e.comments ?? [], checklist: e.checklist }));
   const chain = <T>(value: () => T) => ({ select: () => ({ lean: async () => value() }), lean: async () => value() });
   const db = {
     Project: {
@@ -141,6 +142,102 @@ describe("runImport", () => {
     ]);
     expect(report.unmapped).toEqual({ statuses: [], users: ["ghost"], types: ["Epic"] });
     expect(report.dropped).toContainEqual({ id: "2", field: "priority", value: "Showstopper", reason: "not low, medium, high or urgent" });
+  });
+
+  it("writes a new task's checklist, unticked unless the file says otherwise", async () => {
+    const { db, writes } = fakeDb();
+    await run(db, [{ id: "1", title: "a", checklist: [{ text: " one ", done: true }, { text: "two" }, { text: "   " }, { text: "\u3164" }] }, { id: "2", title: "b" }]);
+    expect(writes.tasks.map((t) => t.checklist)).toEqual([[{ text: "one", done: true }, { text: "two", done: false }], []]);
+  });
+
+  it("makes a checklist's text what the board itself would take, and says what it shortened", async () => {
+    const { db, writes } = fakeDb();
+    const long = "x".repeat(CRITERION_TEXT_MAX_LENGTH + 1);
+    const report = await run(db, [{ id: "1", title: "a", checklist: [{ text: `line\none‮` }, { text: long }] }]);
+    const items = writes.tasks[0].checklist as { text: string }[];
+    expect(items.map((i) => i.text)).toEqual(["line one", long.slice(0, CRITERION_TEXT_MAX_LENGTH)]);
+    expect(items.every((i) => isValidCriterionText(i.text))).toBe(true);
+    expect(report.truncated).toEqual([{ id: "1", field: "checklist" }]);
+  });
+
+  it("cuts a checklist to what a task holds, and says so", async () => {
+    const { db, writes } = fakeDb();
+    const checklist = Array.from({ length: MAX_CHECKLIST_ITEMS + 1 }, (_, i) => ({ text: `c${i}` }));
+    const report = await run(db, [{ id: "1", title: "a", checklist }]);
+    expect(writes.tasks[0].checklist).toHaveLength(MAX_CHECKLIST_ITEMS);
+    expect(report.truncated).toEqual([{ id: "1", field: "checklist" }]);
+  });
+
+  it("keeps a criterion's id and what only the board has when a task is imported again, the file deciding the tick", async () => {
+    const [same, reworded, added] = [new Types.ObjectId(), new Types.ObjectId(), new Types.ObjectId()];
+    const checklist = [
+      { _id: same, text: "Step one", done: false },
+      { _id: reworded, text: "Step  TWO", done: true },
+      { _id: added, text: "Added on the board", done: true },
+    ];
+    const { db, writes } = fakeDb({ existing: [{ id: "1", checklist }] });
+    await run(db, [{ id: "1", title: "a", checklist: [{ text: "Step one", done: true }, { text: "step two" }, { text: "New in the file" }] }]);
+    expect(writes.updates[0].update.$set.checklist).toEqual([
+      { _id: same, text: "Step one", done: true },
+      { _id: reworded, text: "step two", done: false },
+      { text: "New in the file", done: false },
+      { _id: added, text: "Added on the board", done: true },
+    ]);
+  });
+
+  it("keeps a criterion with no id that the file does not name, and says what stayed, on a check and on the run", async () => {
+    const checklist = [{ text: "Old one", done: true }, { text: "Old two", done: false }] as never;
+    const tasks = [{ id: "1", title: "a", checklist: [{ text: "New" }] }];
+    const checked = await run(fakeDb({ existing: [{ id: "1", checklist }] }).db, tasks, {}, true);
+    const { db, writes } = fakeDb({ existing: [{ id: "1", checklist }] });
+    const report = await run(db, tasks);
+    const said = [{ id: "a", what: "2 criteria on the task that the file does not have, left in place" }];
+    expect(checked.notImported).toEqual(said);
+    expect(report.notImported).toEqual(said);
+    expect((writes.updates[0].update.$set.checklist as { text: string }[]).map((i) => i.text)).toEqual(["New", "Old one", "Old two"]);
+  });
+
+  it("says nothing about a checklist the file matches in full", async () => {
+    const checklist = [{ _id: new Types.ObjectId(), text: "One", done: false }];
+    const report = await run(fakeDb({ existing: [{ id: "1", checklist }] }).db, [{ id: "1", title: "a", checklist: [{ text: "One" }] }]);
+    expect(report.notImported).toEqual([]);
+  });
+
+  it("leaves a task's checklist alone when the file has none for it", async () => {
+    const { db, writes } = fakeDb({ existing: [{ id: "1", checklist: [{ _id: new Types.ObjectId(), text: "Kept", done: false }] }] });
+    await run(db, [{ id: "1", title: "a", checklist: [] }]);
+    expect(writes.updates[0].update.$set).not.toHaveProperty("checklist");
+  });
+
+  it("keeps the file's criteria first when the two together are more than a task holds, and a check says what will go", async () => {
+    const held = Array.from({ length: MAX_CHECKLIST_ITEMS }, (_, i) => ({ _id: new Types.ObjectId(), text: `board ${i}`, done: false }));
+    const tasks = [{ id: "1", title: "a", checklist: [{ text: "from the file" }] }];
+    const checked = await run(fakeDb({ existing: [{ id: "1", checklist: held }] }).db, tasks, {}, true);
+    const { db, writes } = fakeDb({ existing: [{ id: "1", checklist: held }] });
+    const report = await run(db, tasks);
+    const written = writes.updates[0].update.$set.checklist as { text: string }[];
+    expect(written).toHaveLength(MAX_CHECKLIST_ITEMS);
+    expect(written[0].text).toBe("from the file");
+    const said = [
+      { id: "a", what: "199 criteria on the task that the file does not have, left in place" },
+      { id: "a", what: "1 criterion removed from the task, as it holds 200 and the file comes first" },
+    ];
+    expect(report.notImported).toEqual(said);
+    expect(checked.notImported).toEqual(said);
+  });
+
+  it("writes a new task's place, and never moves a task imported before", async () => {
+    const { db, writes } = fakeDb({ existing: [{ id: "1" }] });
+    await run(db, [{ id: "1", title: "a", order: 4 }, { id: "2", title: "b", order: 5 }, { id: "3", title: "c" }]);
+    expect(writes.tasks.map((t) => t.order)).toEqual([5, 0]);
+    expect(writes.updates[0].update.$set).not.toHaveProperty("order");
+  });
+
+  it("puts what the file's reader left behind in the report, on a check and on the run itself", async () => {
+    const notes = [{ id: "Old ideas", what: "an archived list, with its 3 cards" }];
+    const bundle = { source: "Trello", tasks: [{ id: "1", title: "a" }], notes };
+    expect((await runImport(fakeDb().db, "p1", IMPORTER, bundle, {}, { dryRun: true })).notImported).toEqual(notes);
+    expect((await runImport(fakeDb().db, "p1", IMPORTER, bundle, {}, { dryRun: false })).notImported).toEqual(notes);
   });
 
   it("keeps the labels a board offers and lists each other one, instead of dropping them all", async () => {

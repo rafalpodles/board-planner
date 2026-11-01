@@ -105,6 +105,11 @@ type Held = { _id?: unknown; text: string; done?: boolean };
  * ("- [x]" or "- [ ]"): a plain line says nothing about done.
  */
 export function mergeCriteria(markdown: string, held: Held[]): { _id?: unknown; text: string; done: boolean }[] {
+  return matchCriteria(markdown, held).merged;
+}
+
+/** mergeCriteria, and the held criteria no line matched. */
+export function matchCriteria(markdown: string, held: Held[]): { merged: { _id?: unknown; text: string; done: boolean }[]; unmatched: Held[] } {
   const lines = parseChecklistLines(markdown);
   const unused = [...held];
   const matched: (Held | undefined)[] = lines.map(() => undefined);
@@ -118,10 +123,11 @@ export function mergeCriteria(markdown: string, held: Held[]): { _id?: unknown; 
       if (at !== -1) matched[i] = unused.splice(at, 1)[0];
     });
   }
-  return lines.map(({ text, explicit }, i) => {
+  const merged = lines.map(({ text, explicit }, i) => {
     const kept = matched[i];
     return kept ? { _id: kept._id, text, done: explicit ?? !!kept.done } : { text, done: explicit ?? false };
   });
+  return { merged, unmatched: unused };
 }
 
 /** The lines of a markdown list, each with the box it states, if it states one. */

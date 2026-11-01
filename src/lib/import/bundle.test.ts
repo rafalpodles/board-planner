@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { MAX_IMPORT_TASKS, parseBundle, parseMapping } from "./bundle";
+import { MAX_IMPORT_NOTES } from "./limits";
 
 const task = (over: Record<string, unknown> = {}) => ({ id: "1", title: "t", ...over });
 
@@ -19,8 +20,32 @@ describe("parseBundle", () => {
     [{ source: "x", tasks: [task({ fields: [] })] }, "tasks[0].fields must be an object"],
     [{ source: "x", tasks: [task({ comments: [{ id: "c", body: 1 }] })] }, "tasks[0].comments[0].body must be a string"],
     [{ source: "x", tasks: [task({ comments: [{ id: "c", body: "a" }, { id: "c", body: "b" }] })] }, "tasks[0].comments[1].id appears twice on its task"],
+    [{ source: "x", tasks: [task({ checklist: {} })] }, "tasks[0].checklist must be a list"],
+    [{ source: "x", tasks: [task({ checklist: [{ text: 1 }] })] }, "tasks[0].checklist[0].text must be a string"],
+    [{ source: "x", tasks: [task({ checklist: [{ text: "a", done: "yes" }] })] }, "tasks[0].checklist[0].done must be true or false"],
+    [{ source: "x", tasks: [task({ order: -1 })] }, "tasks[0].order must be a whole number, 0 or more"],
+    [{ source: "x", tasks: [task({ order: 1.5 })] }, "tasks[0].order must be a whole number, 0 or more"],
+    [{ source: "x", tasks: [], notes: {} }, "notes must be a list of at most 50,000"],
+    [{ source: "x", tasks: [], notes: [{ id: "", what: "a" }] }, "notes[0] needs an id of at most 200 characters and a what of at most 500"],
+    [{ source: "x", tasks: [], notes: [{ id: "a", what: "b".repeat(501) }] }, "notes[0] needs an id of at most 200 characters and a what of at most 500"],
+    [{ source: "x", tasks: [], notes: [{ id: "a".repeat(201), what: "b" }] }, "notes[0] needs an id of at most 200 characters and a what of at most 500"],
   ])("refuses %j before anything is written", (raw, error) => {
     expect(parseBundle(raw)).toEqual({ ok: false, error });
+  });
+
+  it("keeps a task's checklist and the bundle's notes", () => {
+    const checklist = [{ text: "a", done: true }, { text: "b" }];
+    const notes = [{ id: "Card", what: "an archived card" }];
+    expect(parseBundle({ source: "x", tasks: [task({ checklist })], notes })).toEqual({ ok: true, value: { source: "x", tasks: [task({ checklist })], notes } });
+  });
+
+  it("reads an order of null as none, as it reads the other optional fields", () => {
+    expect(parseBundle({ source: "x", tasks: [task({ order: null })] }).ok).toBe(true);
+  });
+
+  it("refuses more notes than one import takes", () => {
+    const notes = Array.from({ length: MAX_IMPORT_NOTES + 1 }, () => ({ id: "a", what: "b" }));
+    expect(parseBundle({ source: "x", tasks: [], notes })).toEqual({ ok: false, error: "notes must be a list of at most 50,000" });
   });
 
   it("refuses more tasks than one import takes", () => {

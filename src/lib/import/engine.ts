@@ -1,16 +1,20 @@
 import { Types } from "mongoose";
 import type { ScopedDb } from "@/lib/db-scope";
-import type { ICustomField, IProjectColumn, Priority } from "@/types";
+import type { IChecklistItem, ICustomField, IProjectColumn, Priority } from "@/types";
 import { defaultStatusFor, getProjectColumns } from "@/lib/columns";
 import { activeFields, matchOptionValue, normalizeFields, validateCustomFieldValues } from "@/lib/custom-fields";
 import { recipientsWithAccess } from "@/lib/grants";
 import {
   COMMENT_BODY_MAX_LENGTH,
+  CRITERION_TEXT_MAX_LENGTH,
+  MAX_CHECKLIST_ITEMS,
   TASK_DESCRIPTION_MAX_LENGTH,
   TASK_TITLE_MAX_LENGTH,
   isControlCodePoint,
+  rendersBlank,
   stripControlCharacters,
 } from "@/lib/identifiers";
+import { matchCriteria } from "@/lib/checklist";
 import { logActivities } from "@/lib/activity";
 import { actingThrough } from "@/lib/activity-source";
 import { logProjectAudit } from "@/lib/projectAudit";
@@ -73,6 +77,8 @@ interface Resolved {
   given: { status: boolean; description: boolean; category: boolean; priority: boolean };
   customFieldValues: Record<string, unknown>;
   comments: { ref: string; body: string; author: Types.ObjectId; createdAt: Date | null }[];
+  checklist: { text: string; done: boolean }[];
+  order: number;
 }
 
 const shown = (value: unknown) => {
@@ -274,7 +280,19 @@ function resolveTask(
     given: { status: statusGiven, description: task.description !== undefined && task.description !== null, category: categoryGiven, priority: priorityGiven },
     customFieldValues: resolveFields(report, task, board),
     comments: (task.comments ?? []).flatMap((comment) => resolveComment(report, task.id, comment, users, importer)),
+    checklist: resolveChecklist(report, task),
+    order: task.order ?? 0,
   };
+}
+
+function resolveChecklist(report: ImportReport, task: ImportTask): Resolved["checklist"] {
+  const items = (task.checklist ?? []).flatMap((item) => {
+    const text = clip(report, task.id, "checklist", item.text, CRITERION_TEXT_MAX_LENGTH);
+    return rendersBlank(text) ? [] : [{ text, done: item.done === true }];
+  });
+  if (items.length <= MAX_CHECKLIST_ITEMS) return items;
+  report.truncated.push({ id: task.id, field: "checklist" });
+  return items.slice(0, MAX_CHECKLIST_ITEMS);
 }
 
 function resolveComment(
@@ -317,7 +335,7 @@ const emptyReport = (dryRun: boolean, bundle: ImportBundle): ImportReport => ({
   dropped: [],
   truncated: [],
   unmapped: { statuses: [], users: [], types: [] },
-  notImported: [],
+  notImported: [...(bundle.notes ?? [])],
   links: 0,
   processed: 0,
   complete: false,
@@ -327,13 +345,26 @@ interface Stored {
   _id: Types.ObjectId;
   status: string;
   held: boolean;
+  checklist: IChecklistItem[];
 }
 
 async function storedTasks(db: ScopedDb, projectId: string, source: string, refs: string[]): Promise<Map<string, Stored>> {
   const rows = await db.Task.find({ project: projectId, "externalRef.source": source, "externalRef.id": { $in: refs } })
-    .select("_id status externalRef execution.runId")
-    .lean<{ _id: Types.ObjectId; status: string; externalRef: { id: string }; execution?: { runId?: string } }[]>();
-  return new Map(rows.map((t) => [t.externalRef.id, { _id: t._id, status: t.status, held: !!t.execution?.runId }]));
+    .select("_id status externalRef execution.runId checklist")
+    .lean<{ _id: Types.ObjectId; status: string; externalRef: { id: string }; execution?: { runId?: string }; checklist?: IChecklistItem[] }[]>();
+  return new Map(rows.map((t) => [t.externalRef.id, { _id: t._id, status: t.status, held: !!t.execution?.runId, checklist: t.checklist ?? [] }]));
+}
+
+// A criterion the file also has keeps its id and takes the file's tick; one only the board has stays
+function mergedChecklist(report: ImportReport, t: Resolved, held: IChecklistItem[]): IChecklistItem[] {
+  const markdown = t.checklist.map((item) => `- [${item.done ? "x" : " "}] ${item.text}`).join("\n");
+  const { merged, unmatched } = matchCriteria(markdown, held);
+  const all = [...merged, ...unmatched] as IChecklistItem[];
+  const cut = Math.max(0, all.length - MAX_CHECKLIST_ITEMS);
+  const stayed = unmatched.length - cut;
+  if (stayed > 0) report.notImported.push({ id: t.title, what: `${stayed} ${stayed === 1 ? "criterion" : "criteria"} on the task that the file does not have, left in place` });
+  if (cut > 0) report.notImported.push({ id: t.title, what: `${cut} ${cut === 1 ? "criterion" : "criteria"} removed from the task, as it holds ${MAX_CHECKLIST_ITEMS} and the file comes first` });
+  return all.slice(0, MAX_CHECKLIST_ITEMS);
 }
 
 // A run's task refuses to leave its column through every writer, an import included
@@ -392,6 +423,8 @@ async function writeChunk(
         assignee: t.assignee,
         assignedBy: t.assignee ? importer : null,
         dueDate: t.dueDate,
+        checklist: t.checklist,
+        order: t.order,
         customFieldValues: t.customFieldValues,
         externalRef: { source, id: t.ref },
         createdBy: importer,
@@ -451,6 +484,7 @@ async function writeChunk(
                 // An import never unassigns: somebody it cannot name is left as the board has it
                 ...(t.assignee && { assignee: t.assignee, assignedBy: importer }),
                 ...(t.dueDate && { dueDate: t.dueDate }),
+                ...(t.checklist.length > 0 && { checklist: mergedChecklist(report, t, before.checklist) }),
                 ...(moved && { status: t.status }),
                 ...Object.fromEntries(Object.entries(t.customFieldValues).map(([k, v]) => [`customFieldValues.${k}`, v])),
               },
@@ -543,6 +577,7 @@ export async function runImport(
     for (const t of resolved) {
       const before = stored.get(t.ref);
       if (before) noteHeld(report, t, before);
+      if (before && t.checklist.length > 0) mergedChecklist(report, t, before.checklist);
       for (const c of t.comments) {
         if (before && comments.has(`${before._id}:${c.ref}`)) report.comments.updated += 1;
         else report.comments.created += 1;

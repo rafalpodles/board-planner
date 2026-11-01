@@ -8,6 +8,7 @@ import type { ImportReport } from "@/lib/import/engine";
 import { MAX_IMPORT_BYTES } from "@/lib/import/limits";
 import { type CsvTable, decodeCsv, readCsvTable } from "@/lib/import/csv";
 import { isJiraXml, jiraXmlToTable } from "@/lib/import/jira-xml";
+import { isTrelloExport, trelloToTable } from "@/lib/import/trello";
 import { readXlsxTable } from "@/lib/import/xlsx";
 import type { ApiProjectColumn } from "@/types";
 import { CsvMapping, type CsvPayload, rememberCsvMapping } from "./CsvMapping";
@@ -27,6 +28,7 @@ function payloadOf(parsed: unknown): Payload | null {
 }
 
 function Listed<T>({ title, items, line }: { title: string; items: T[]; line: (item: T) => string }) {
+  const [everything, setEverything] = useState(false);
   if (items.length === 0) return null;
   return (
     <details className="text-sm" open={items.length <= 5}>
@@ -34,13 +36,17 @@ function Listed<T>({ title, items, line }: { title: string; items: T[]; line: (i
         {title} ({items.length})
       </summary>
       <ul className="mt-1 list-disc space-y-0.5 pl-5 text-text-muted">
-        {items.slice(0, LISTED).map((item, i) => (
+        {(everything ? items : items.slice(0, LISTED)).map((item, i) => (
           <li key={i} className="break-words">
             {line(item)}
           </li>
         ))}
-        {items.length > LISTED && <li>and {items.length - LISTED} more</li>}
       </ul>
+      {items.length > LISTED && !everything && (
+        <Button variant="secondary" size="sm" className="mt-2" onClick={() => setEverything(true)}>
+          Show the other {items.length - LISTED}
+        </Button>
+      )}
     </details>
   );
 }
@@ -72,6 +78,14 @@ function Report({ report }: { report: ImportReport }) {
 }
 
 const isJson = (file: File) => /\.json$/i.test(file.name) || file.type === "application/json";
+
+function parsedJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
 
 export function ImportSection({ projectId, project, patchProject }: Pick<SectionProps, "projectId" | "project" | "patchProject">) {
   const api = useApi();
@@ -125,7 +139,12 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
         return { table: null, error: "This is a web page saved under a spreadsheet's name. Open it in Excel, save it as .xlsx or .csv, and try again." };
       }
       if (/^\s*</.test(text)) return { table: null, error: "Of XML files, only Jira's XML export can be read." };
-      if (isJson(file) || /^\s*\{/.test(text)) return { table: null };
+      if (isJson(file) || /^\s*\{/.test(text)) {
+        const json = parsedJson(text);
+        if (!isTrelloExport(json)) return { table: null };
+        const board = trelloToTable(json);
+        return board.rows.length ? { table: board, name: "Trello" } : { table: null, error: "This Trello export holds no open cards." };
+      }
       return { table: readCsvTable(text) };
     };
     const read = await tabular();

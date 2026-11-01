@@ -37,6 +37,17 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("CsvMapping", () => {
+  it("says what a table's format brought with it, singular and plural", async () => {
+    const carrying = { ...table, comments: [[{ id: "c", body: "a" }]], checklists: [[{ text: "a" }, { text: "b" }]] };
+    render(<CsvMapping projectId="p1" project={project} table={carrying} fileName="q2.csv" disabled={false} onColumns={vi.fn()} onChange={vi.fn()} />);
+    expect(await screen.findByText(/Its 1 comment comes with it\. Its 2 checklist items come with it\./)).toBeTruthy();
+    cleanup();
+    render(<CsvMapping projectId="p1" project={project} table={{ ...table, comments: [[]], checklists: [[{ text: "a" }]] }} fileName="q2.csv" disabled={false} onColumns={vi.fn()} onChange={vi.fn()} />);
+    expect(await screen.findByText(/Its 1 checklist item comes with it\./)).toBeTruthy();
+    expect(screen.queryByText(/comment/)).toBeNull();
+    await waitFor(() => expect(api.get).toHaveBeenCalled());
+  });
+
   it("names the source after the file, never after the file a mapping was remembered from", async () => {
     // As an older version stored it, with the source name
     window.localStorage.setItem(
