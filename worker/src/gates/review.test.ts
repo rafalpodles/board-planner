@@ -2,6 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { CLAUDE_SIGNED_OUT } from "../agents/claude.js";
 import { reviewGate } from "./review.js";
 import { SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
 import { isAgentSpawn } from "../__fixtures__/agent-spawn.js";
@@ -106,6 +107,20 @@ describe("reviewGate", () => {
     const verdict = await reviewGate(runner, gitPath, CLAUDE_PATH, TIMEOUT_MS).run(context());
 
     expect(verdict).toMatchObject({ ok: false, machineFault: true, reason: "a process a confined step started may still be running: cannot kill process 42" });
+  });
+
+  it("fails as the machine's fault when claude has no login, so the attempt is refunded", async () => {
+    const stdout = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      result: "Not logged in · Please run /login",
+    });
+    const { runner } = claudeStdout(stdout, { code: 1 });
+
+    const verdict = await reviewGate(runner, gitPath, CLAUDE_PATH, TIMEOUT_MS).run(context());
+
+    expect(verdict).toEqual({ ok: false, machineFault: true, reason: CLAUDE_SIGNED_OUT });
   });
 
   it("rejects and carries the reviewer's reason", async () => {

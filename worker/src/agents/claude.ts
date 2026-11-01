@@ -27,6 +27,22 @@ function isUsageLimit(text: string): boolean {
 // there; only the CLI's exact sentinel counts. stderr stays on the loose match — the CLI owns it.
 const USAGE_LIMIT_SENTINEL = /^Claude(?: AI)? usage limit reached\|\d+$/;
 
+export const CLAUDE_SIGNED_OUT =
+  "claude is not signed in on this machine: run `claude auth login` as the user the worker runs as";
+
+// Measured on 2.1.314, in both output formats: exit 1, stderr empty, this sentence in `result`. The
+// exit and `is_error` are the CLI's own, so an agent ending on the sentence does not read as this.
+const LOGIN_SENTINEL = /· Please run \/login$/;
+
+function signedOut(result: CommandResult, final: ResultEvent | undefined): boolean {
+  return (
+    result.code !== 0 &&
+    final?.is_error === true &&
+    typeof final.result === "string" &&
+    LOGIN_SENTINEL.test(final.result.trim())
+  );
+}
+
 function wasRateLimited(events: StreamEvent[]): boolean {
   return events.some((event) => isRateLimitEvent(event) && event.rate_limit_info?.status === "rejected");
 }
@@ -160,6 +176,8 @@ export function claudeAgent(path: string): CodingAgent {
         return { kind: "usage_limit" };
       }
 
+      if (signedOut(result, final)) return { kind: "machine_fault", message: CLAUDE_SIGNED_OUT };
+
       if (result.code === 0) return parsed;
       // "the agent", not "claude": the exit code now belongs to whichever process died, and since
       // BP-349 that may be the sandbox wrapper rather than the CLI. stderr rides along whatever
@@ -173,6 +191,10 @@ export function claudeAgent(path: string): CodingAgent {
         kind: "error",
         message: `the agent exited ${result.code}${ended ? ` (${ended})` : ""}${result.stderr ? `\n${result.stderr}` : ""}`,
       };
+    },
+
+    sessionFault(result: CommandResult): string | null {
+      return signedOut(result, lastResultEvent(parseStream(result.stdout))) ? CLAUDE_SIGNED_OUT : null;
     },
 
     parseVerdict(stdout: string): Verdict | null {

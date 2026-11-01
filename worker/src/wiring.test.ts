@@ -4,9 +4,11 @@ import { SANDBOX_COMMAND } from "./sandbox.js";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { CLAUDE_SIGNED_OUT } from "./agents/claude.js";
+import { capabilities } from "./capabilities.js";
 import { ApiClient, ClaimRefused, PhaseEvent } from "./api.js";
 import { ControlDeps } from "./control.js";
-import { Runner, RunOpts } from "./exec.js";
+import { CommandResult, Runner, RunOpts } from "./exec.js";
 import { LocalConfigView, LocalServer, LocalServerDeps } from "./local-server.js";
 import { Store } from "./outbox.js";
 import { PreflightReport, runPreflight } from "./preflight.js";
@@ -604,6 +606,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       preflightThrows?: boolean | number;
       // What it rejects with, when not the default Error
       preflightRejection?: unknown;
+      // What `claude auth status` answers, and what the agent's spawn does in place of its usual run
+      claudeAuth?: (nth: number) => CommandResult;
+      agentResult?: CommandResult;
       // Run between passes, after the clock jump — the one hook point available to change what is
       // on disk mid-run, for a test about recovering from a failure and then repeating it.
       onSleep?: (stateDir: string, sleepIndex: number) => void;
@@ -612,6 +617,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     let seenHeartbeat: HeartbeatDeps | undefined;
     const reportsBeforePreflight: ReturnType<NonNullable<HeartbeatDeps["preflight"]>>[] = [];
     let preflightFailures = opts.preflightThrows === true ? Infinity : Number(opts.preflightThrows ?? 0);
+    let claudeAsked = 0;
     const stateDir = mkdtempSync(join(tmpdir(), "cp-wiring-run-"));
     writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: opts.repos ?? [REPO] }), {
       mode: 0o600,
@@ -696,15 +702,22 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
             }
           : {}),
         ...inner,
-        run: (command: string, args: string[], runOpts: RunOpts) =>
-          opts.gateNode && command === opts.gateNode.path && args[0] === "--version"
+        run: (command: string, args: string[], runOpts: RunOpts) => {
+          if (opts.claudeAuth && command.endsWith("/claude") && args[0] === "auth") {
+            return Promise.resolve(opts.claudeAuth(claudeAsked++));
+          }
+          if (opts.agentResult && isAgentSpawn(command, args) && !isPreflightAsking(command, args)) {
+            return Promise.resolve(opts.agentResult);
+          }
+          return opts.gateNode && command === opts.gateNode.path && args[0] === "--version"
             ? Promise.resolve({
                 code: opts.gateNode.code ?? 0,
                 stdout: opts.gateNode.stdout ?? `v${opts.gateNode.version}\n`,
                 stderr: "",
                 timedOut: false,
               })
-            : inner.run(command, args, runOpts),
+            : inner.run(command, args, runOpts);
+        },
       },
       hostname: () => "host-1",
       // Found only through the probe above, so a tool the probe does not answer is really missing
@@ -912,6 +925,73 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(claimed).toBe(false);
     expect(claudeArgs).toEqual([]);
     expect(logError).toHaveBeenCalledWith("not claiming any work: claude could not be found on this machine, and every task needs it");
+  });
+
+  // BP-1077. Each attempt is refunded, so a worker still claiming would take the same task on every
+  // poll for as long as nobody signs in, a run record each time
+  describe("a claude that is not signed in", () => {
+    const SIGNED_OUT = { code: 1, stdout: JSON.stringify({ loggedIn: false }), stderr: "", timedOut: false };
+    const SIGNED_IN = { code: 0, stdout: JSON.stringify({ loggedIn: true, email: "a@b.c" }), stderr: "", timedOut: false };
+    const row = (report: ReturnType<NonNullable<HeartbeatDeps["preflight"]>>) =>
+      report?.checks.find((check) => check.name === "claude");
+
+    it("claims nothing, and takes work again once it is signed in, without a restart", async () => {
+      const { claims, claimed, logError, log, heartbeatDeps } = await runOneTask(undefined, undefined, {
+        // Preflight's answer and the first pass's, then the second pass finds the login
+        claudeAuth: (nth) => (nth < 2 ? SIGNED_OUT : SIGNED_IN),
+        passes: 3,
+      });
+
+      expect(logError).toHaveBeenCalledWith(`not claiming any work: ${CLAUDE_SIGNED_OUT}`);
+      expect(log).toHaveBeenCalledWith("claude is signed in again");
+      expect(claims).toBeGreaterThan(0);
+      expect(claimed).toBe(true);
+      expect(row(heartbeatDeps?.preflight?.())).toMatchObject({ ok: true });
+      expect(capabilities()).toContain("agent-claude");
+    });
+
+    it("shows the operator the reason while it stays that way", async () => {
+      const { claims, heartbeatDeps } = await runOneTask(undefined, undefined, {
+        claudeAuth: () => SIGNED_OUT,
+        passes: 2,
+      });
+
+      expect(claims).toBe(0);
+      expect(row(heartbeatDeps?.preflight?.())).toEqual({ name: "claude", ok: false, detail: CLAUDE_SIGNED_OUT });
+    });
+
+    it("hands the task back unspent and stops claiming when a run finds the session gone", async () => {
+      const stdout = JSON.stringify({ type: "result", is_error: true, result: "Not logged in · Please run /login" });
+      const { api, claims, logError, heartbeatDeps } = await runOneTask(undefined, undefined, {
+        // Green at startup; signed out by the time the run has failed
+        claudeAuth: (nth) => (nth === 0 ? SIGNED_IN : SIGNED_OUT),
+        agentResult: { code: 1, stdout, stderr: "", timedOut: false },
+        tasks: [CLAIMED, CLAIMED],
+        passes: 3,
+      });
+
+      expect(claims).toBe(1);
+      expect(api.release).toHaveBeenCalledTimes(1);
+      expect(api.release.mock.calls[0]).not.toContainEqual({ refund: false });
+      expect(api.comment).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.stringContaining(CLAUDE_SIGNED_OUT)
+      );
+      expect(logError).toHaveBeenCalledWith(`not claiming any work: ${CLAUDE_SIGNED_OUT}`);
+      expect(row(heartbeatDeps?.preflight?.())).toMatchObject({ ok: false });
+    });
+
+    it("goes on claiming after a machine fault that was not the session", async () => {
+      const { api } = await runOneTask(undefined, undefined, {
+        claudeAuth: () => SIGNED_IN,
+        agentResult: { code: 0, stdout: "", stderr: "", timedOut: false, machineFault: "a process survived its step" },
+        tasks: [CLAIMED, CLAIMED],
+        passes: 3,
+      });
+
+      expect(api.release).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("claims nothing from a project on the npm gates when preflight found no npm", async () => {

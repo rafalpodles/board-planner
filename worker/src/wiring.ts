@@ -1,4 +1,5 @@
 import { capabilityHeaders, reportAgents } from "./capabilities.js";
+import { CLAUDE_SIGNED_OUT } from "./agents/claude.js";
 import { codexUsable, sweepRunHomes } from "./agents/codex.js";
 import {
   accessSync,
@@ -70,6 +71,7 @@ import {
   PreflightCheck,
   PreflightDeps,
   PreflightReport,
+  refreshClaudeSession,
   runPreflight,
   SANDBOX_CHECK,
 } from "./preflight.js";
@@ -433,18 +435,41 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
     showLeftovers();
 
-    // What this machine can run, said to the server on every request from here on
-    const found = preflight.paths;
-    reportAgents(preflight.agents ?? [], (agent) =>
-      // Asked on every request: signing out of Codex, or removing it, takes it back at once
-      agent !== "codex" || codexUsable(found.codex, codexSourceHome(deps.env))
-    );
+    reportRunnableAgents(preflight);
     // A Codex run home carries the login; one a killed worker left behind goes before the next run
     sweepRunHomes(undefined, deps.logError);
 
     for (const check of preflight.checks) {
       if (!check.ok) deps.logError(`preflight: ${check.name} — ${check.detail}`);
     }
+  }
+
+  // What this machine can run, said to the server on every request from here on
+  function reportRunnableAgents(report: PreflightReport): void {
+    const found = report.paths;
+    reportAgents(report.agents ?? [], (agent) =>
+      // Asked on every request: signing out of Codex, or removing it, takes it back at once
+      agent !== "codex" || codexUsable(found.codex, codexSourceHome(deps.env))
+    );
+  }
+
+  function claudeSignedOut(): boolean {
+    return preflight?.checks.some((check) => check.name === "claude" && check.detail === CLAUDE_SIGNED_OUT) ?? false;
+  }
+
+  // Once per poll while claude is signed out, and after a run's machine fault, which is how a session
+  // that ended under a running worker first shows: `claude auth login` needs no restart to clear it
+  async function askClaudeAgain(): Promise<void> {
+    if (!preflight) return;
+    const wasSignedOut = claudeSignedOut();
+    try {
+      preflight = await refreshClaudeSession({ runner: deps.runner, env: deps.env }, preflight);
+    } catch (error) {
+      deps.logError(`could not ask claude whether it is signed in: ${String(error)}`);
+      return;
+    }
+    reportRunnableAgents(preflight);
+    if (wasSignedOut && !claudeSignedOut()) deps.log("claude is signed in again");
   }
 
   // Once per poll while preflight could not run, like retryLeftovers: the machine claims nothing
@@ -906,6 +931,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const settings = gateSettingsOf(task.projectId);
     const disposition = await execute(task);
     if (disposition === "settings-fault" && settings) settingsHolds.hold(task, settings);
+    if (disposition === "machine-fault") await askClaudeAgain();
     return disposition;
   }
 
@@ -934,6 +960,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   async function drain(): Promise<void> {
     await retryLeftovers().catch((error) => deps.logError(`reaping what an earlier run left failed: ${String(error)}`));
     await retryPreflight();
+    if (claudeSignedOut()) await askClaudeAgain();
     await refreshServerState();
     // Before the flush, so a settlement this pass produces goes out with it rather than waiting a
     // whole poll interval. Drained here rather than in the claim loop because `drain` runs even
@@ -973,8 +1000,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
    * Read off the preflight row rather than asking the platform, because the row is the answer for
    * this machine — it confined a probe and watched it fail to escape.
    *
-   * So is claude, if preflight never resolved it (BP-733): the step is refused as a machine fault
-   * with the attempt refunded, so without this every poll would claim the same task again. gh is
+   * So is claude, if preflight never resolved it (BP-733) or it is not signed in (BP-1077): the step
+   * is refused as a machine fault with the attempt refunded, so without this every poll would claim
+   * the same task again. gh is
    * not here: without it delivery fails through the ordinary, charged path, so it ends. npm is a
    * project's need and not the machine's, which `gateChecks` holds it to.
    */
@@ -982,6 +1010,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     if (leftovers) return leftovers;
     const row = preflight?.checks.find((check) => check.name === SANDBOX_CHECK);
     if (row && !row.ok) return row.detail;
+    if (claudeSignedOut()) return CLAUDE_SIGNED_OUT;
     if (!preflight) return preflightFailed ? `preflight could not run: ${preflightError}` : "";
     return isAbsolute(preflight.paths.claude ?? "") ? "" : "claude could not be found on this machine, and every task needs it";
   }

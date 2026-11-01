@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
+import { CLAUDE_SIGNED_OUT } from "./agents/claude.js";
 import { childEnv, unconfinedAgentAllowed } from "./env.js";
 import { confine, recordDir, SANDBOX_COMMAND, UNCONFINED_ACCEPTED_DETAIL } from "./sandbox.js";
 import { npmCacheDir } from "./gates/confined-npm.js";
@@ -168,12 +169,13 @@ interface ClaudeAuth {
 
 // `claude auth status --json` arrived after the worker did, so an older CLI answers with a usage
 // error. That is not a machine that cannot work — it is a machine we cannot ask, and saying so
-// beats failing a worker whose session is fine.
+// beats failing a worker whose session is fine. A signed-out CLI exits 1 too, and still prints the
+// JSON, so the output is read whatever the exit code.
 async function claudeSession(
-  deps: PreflightDeps,
+  deps: Pick<PreflightDeps, "runner" | "env">,
   path: string,
   env: NodeJS.ProcessEnv
-): Promise<{ check: PreflightCheck; account: string }> {
+): Promise<{ check: PreflightCheck; account: string; answered: boolean }> {
   const result = await deps.runner.run(path, ["auth", "status", "--json"], {
     cwd: deps.env.HOME?.trim() || "/",
     timeoutMs: TIMEOUT_MS,
@@ -181,17 +183,16 @@ async function claudeSession(
   });
 
   let parsed: ClaudeAuth | null = null;
-  if (result.code === 0) {
-    try {
-      parsed = JSON.parse(result.stdout.trim()) as ClaudeAuth;
-    } catch {
-      parsed = null;
-    }
+  try {
+    parsed = JSON.parse(result.stdout.trim()) as ClaudeAuth;
+  } catch {
+    parsed = null;
   }
 
   if (!parsed || typeof parsed.loggedIn !== "boolean") {
     return {
       account: "",
+      answered: false,
       check: {
         name: "claude",
         ok: true,
@@ -203,11 +204,8 @@ async function claudeSession(
   if (!parsed.loggedIn) {
     return {
       account: "",
-      check: {
-        name: "claude",
-        ok: false,
-        detail: "claude is installed but not signed in — run `claude auth login`",
-      },
+      answered: true,
+      check: { name: "claude", ok: false, detail: CLAUDE_SIGNED_OUT },
     };
   }
 
@@ -217,6 +215,7 @@ async function claudeSession(
   if (parsed.authMethod === "apiKey") {
     return {
       account,
+      answered: true,
       check: {
         name: "claude",
         ok: true,
@@ -227,11 +226,41 @@ async function claudeSession(
 
   return {
     account,
+    answered: true,
     check: {
       name: "claude",
       ok: true,
       detail: `signed in as ${account || "an unnamed account"}${plan ? ` on ${plan}` : ""}`,
     },
+  };
+}
+
+/**
+ * Asks claude again and puts the answer in the report: preflight runs once, and a session can end
+ * under a running worker or come back without a restart. A row that is red for any other reason is
+ * left alone, because `auth status` not answering would turn it green.
+ */
+export async function refreshClaudeSession(
+  deps: Pick<PreflightDeps, "runner" | "env">,
+  report: PreflightReport
+): Promise<PreflightReport> {
+  const row = report.checks.find((check) => check.name === "claude");
+  const path = report.paths.claude;
+  if (!row || !path || (!row.ok && row.detail !== CLAUDE_SIGNED_OUT)) return report;
+
+  const session = await claudeSession(deps, path, {
+    ...childEnv([], deps.env),
+    PATH: pathWithTools(report.paths, deps.env.PATH ?? ""),
+  });
+  if (!session.answered) return report;
+
+  const checks = report.checks.map((check) => (check.name === "claude" ? session.check : check));
+  return {
+    ...report,
+    account: session.account,
+    checks,
+    ok: checks.every((check) => check.ok),
+    agents: [...(session.check.ok ? ["claude"] : []), ...report.agents.filter((agent) => agent !== "claude")],
   };
 }
 

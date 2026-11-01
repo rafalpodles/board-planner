@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { NO_RUN } from "./agent.js";
-import { claudeAgent } from "./claude.js";
+import { CLAUDE_SIGNED_OUT, claudeAgent } from "./claude.js";
 
 const agent = claudeAgent("/opt/bin/claude");
 const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
@@ -70,6 +70,48 @@ describe("the claude adapter reading a finished step", () => {
     const stdout = JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected" } }) + "\n";
 
     expect(agent.interpretEdit(run({ stdout, code: 1 }))).toEqual({ kind: "usage_limit" });
+  });
+
+  describe("when the CLI has no login", () => {
+    const SENTENCE = "Not logged in · Please run /login";
+    // Cut down from a real run of 2.1.314 with an empty HOME: --output-format stream-json, exit 1, stderr empty
+    const STREAM = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({
+        type: "assistant",
+        error: "authentication_failed",
+        message: { model: "<synthetic>", content: [{ type: "text", text: SENTENCE }] },
+      }),
+      JSON.stringify({ type: "result", subtype: "success", is_error: true, stop_reason: "stop_sequence", result: SENTENCE }),
+    ].join("\n");
+
+    it("reads it as the machine's fault, which refunds the attempt", () => {
+      expect(agent.interpretEdit(run({ stdout: STREAM, code: 1 }))).toEqual({
+        kind: "machine_fault",
+        message: CLAUDE_SIGNED_OUT,
+      });
+    });
+
+    it("says so of a review too, whose output is one result object", () => {
+      const stdout = JSON.stringify({ type: "result", subtype: "success", is_error: true, result: SENTENCE });
+
+      expect(agent.sessionFault(run({ stdout, code: 1 }))).toBe(CLAUDE_SIGNED_OUT);
+    });
+
+    it("does not take the agent's own words for it", () => {
+      const written = JSON.stringify({ type: "result", result: SENTENCE });
+      const exitedCleanly = run({ stdout: STREAM, code: 0 });
+
+      expect(agent.interpretEdit(run({ stdout: written, code: 1 }))).toMatchObject({ kind: "error" });
+      expect(agent.interpretEdit(exitedCleanly)).toMatchObject({ kind: "error" });
+      expect(agent.sessionFault(exitedCleanly)).toBeNull();
+    });
+
+    it("leaves every other failed run alone", () => {
+      const refused = JSON.stringify({ type: "result", subtype: "success", is_error: true, result: "API Error: 500" });
+
+      expect(agent.sessionFault(run({ stdout: refused, code: 1 }))).toBeNull();
+    });
   });
 
   it("takes the CLI's own sentinel as a usage limit and a sentence the agent wrote as nothing of the kind", () => {
