@@ -204,7 +204,7 @@ test("a finished card reaches a done column with its time, and a disabled Import
 
   const mapping = page.getByTestId("csv-mapping");
   await expect(mapping.getByLabel("Status “Done”")).toHaveValue("done");
-  await mapping.getByLabel("Status “Doing”").selectOption("in_progress");
+  await expect(mapping.getByLabel("Status “Doing”")).toHaveCount(0);
 
   const importButton = card(page).getByRole("button", { name: "Import", exact: true });
   const firstCheck = card(page).getByText("Check first. Import opens once the check has passed.");
@@ -217,10 +217,10 @@ test("a finished card reaches a done column with its time, and a disabled Import
   await expect(importButton).toBeEnabled();
   await expect(firstCheck).toHaveCount(0);
   await expect(secondCheck).toHaveCount(0);
-  await expect(report.locator("details", { hasText: "Values left out" })).toHaveCount(0);
   const left = report.locator("details", { hasText: "Not imported" });
   await expect(left).toContainText("Search by label: its list “Doing”: a finished card goes under Done");
   await expect(left).toContainText("Audit log filter: 2 uploaded files: first shot.png, screenshot-3-1.png");
+  await expect(report).not.toContainText("completedAt");
 
   await mapping.getByLabel("Status “Backlog”").selectOption("todo");
   await expect(importButton).toBeDisabled();
