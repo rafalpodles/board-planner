@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   confine,
   confineTool,
@@ -414,5 +417,55 @@ describe("a shut home", () => {
     const spawn = sealed(["/Users/x/inner", "/Users/x"], ["/Users/x/inner/a/b"], ["/private/tmp/w"]);
 
     expect((spawn as { args: string[] }).args.filter((arg) => /^A\d+=/.test(arg)).map((arg) => arg.slice(arg.indexOf("=") + 1)).sort()).toEqual(["/Users/x", "/Users/x/inner", "/Users/x/inner/a"]);
+  });
+
+  describe("the files beside those parents", () => {
+    let home = "";
+    const named = (spawn: unknown) => (spawn as { args: string[] }).args.filter((arg) => /^F\d+=/.test(arg)).map((arg) => arg.slice(arg.indexOf("=") + 1));
+    const profile = (spawn: unknown) => (spawn as { args: string[] }).args[1];
+
+    beforeEach(() => {
+      home = mkdtempSync(join(tmpdir(), "bp985-beside-"));
+      mkdirSync(join(home, "proj", "wt"), { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(home, { recursive: true, force: true });
+    });
+
+    it("names the files, and no directory, so node's recursive mkdir still has one that answers", () => {
+      writeFileSync(join(home, "package.json"), "{}");
+      writeFileSync(join(home, "proj", ".npmrc"), "");
+      writeFileSync(join(home, "proj", "wt", "inside"), "");
+      mkdirSync(join(home, ".cache"));
+
+      const spawn = sealed([home], [join(home, "proj", "wt")], ["/private/tmp/w"]);
+
+      expect(named(spawn).sort()).toEqual([join(home, "package.json"), join(home, "proj", ".npmrc")].sort());
+    });
+
+    it("leaves a readable file answering: its allow comes after the deny", () => {
+      writeFileSync(join(home, "session.json"), "{}");
+
+      const spawn = sealed([home], [join(home, "session.json"), join(home, "proj", "wt")], ["/private/tmp/w"]);
+      const rules = profile(spawn);
+
+      expect(named(spawn)).toContain(join(home, "session.json"));
+      expect(rules.indexOf("(deny file-test-existence")).toBeGreaterThan(-1);
+      expect(rules.indexOf("(deny file-test-existence")).toBeLessThan(rules.indexOf("(allow file-read* file-test-existence"));
+    });
+
+    it("stops at a cap, so a directory of downloads leaves the argument list alone", () => {
+      for (let index = 0; index < 2_001; index += 1) writeFileSync(join(home, `file-${index}`), "");
+
+      expect(named(sealed([home], [join(home, "proj", "wt")], ["/private/tmp/w"]))).toHaveLength(2_000);
+    });
+
+    it("adds no rule where there is nothing to name, and a parent it cannot list is not a failure", () => {
+      const spawn = sealed(["/nonexistent/home"], ["/nonexistent/home/wt"], ["/private/tmp/w"]);
+
+      expect(spawn).not.toHaveProperty("refusal");
+      expect(profile(spawn)).not.toContain("(deny file-test-existence");
+    });
   });
 });

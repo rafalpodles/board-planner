@@ -128,12 +128,13 @@ describe.skipIf(!onMac)("a project's own gate commands against the real sandbox"
 
     // Seatbelt matches paths, so a hard link would be a second, allowed path to the same file
     it("refuses a hard link to a file in the real home", async () => {
-      script("link.sh", `ln "${join(canary, "id_ed25519")}" linked 2> error.txt; echo "exit $?" >> error.txt`);
+      writeFileSync(join(worktree, "link.js"), `try { require("fs").linkSync(${JSON.stringify(join(canary, "id_ed25519"))}, "linked") } catch (e) { console.log(e.code) }\n`);
+      script("link.sh", `"${process.execPath}" link.js > linked.txt`);
 
       await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./link.sh" })).run(context);
 
       expect(existsSync(join(worktree, "linked"))).toBe(false);
-      expect(readFileSync(join(worktree, "error.txt"), "utf8")).toContain("No such file or directory");
+      expect(readFileSync(join(worktree, "linked.txt"), "utf8")).toBe("EPERM\n");
     });
 
     it("answers node's recursive mkdir in the real home, which an ENOENT there would send round for ever", async () => {
@@ -198,6 +199,7 @@ const saw = {
   planted: answer(() => fs.readFileSync(path.join(above, ".npmrc"))),
   stat: answer(() => fs.statSync(path.join(above, ".npmrc"))),
   parent: answer(() => fs.statSync(above)),
+  exists: fs.existsSync(path.join(above, ".npmrc")),
 };
 net.createServer((s) => s.end()).listen(socket, () => net.connect(socket)
   .on("connect", () => { saw.socket = "reached"; fs.writeFileSync("saw.json", JSON.stringify(saw)); process.exit(0); })
@@ -210,7 +212,7 @@ net.createServer((s) => s.end()).listen(socket, () => net.connect(socket)
       const verdict = await testRunGate(runner, NOT_NPM, TIMEOUT_MS, own({ testCommand: "./walk.sh" })).run(underTheHome);
 
       expect(verdict).toMatchObject({ ok: true });
-      expect(JSON.parse(readFileSync(join(inHome, "saw.json"), "utf8"))).toEqual({ absent: "ENOENT", planted: "ENOENT", stat: "ENOENT", parent: "answered", socket: "reached" });
+      expect(JSON.parse(readFileSync(join(inHome, "saw.json"), "utf8"))).toEqual({ absent: "ENOENT", planted: "ENOENT", stat: "ENOENT", parent: "answered", exists: false, socket: "reached" });
     });
 
     it("refuses the socket launchd gives an ssh agent", async () => {

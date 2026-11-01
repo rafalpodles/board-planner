@@ -87,7 +87,7 @@ export function createLoop(deps: LoopDeps): Loop {
     async start() {
       while (running) {
         let claimedAny = false;
-        let machineFault = false;
+        let faulted = false;
 
         if (deps.drain) {
           try {
@@ -106,9 +106,10 @@ export function createLoop(deps: LoopDeps): Loop {
         if (!pausedState && !blocked) {
           // Every assignment gets its own attempt and its own try/catch: a project that cannot be
           // claimed from, or a task that blows up, must not cost a sibling project its turn in this
-          // pass — that would starve whichever assignment comes last in the list. A machine fault
-          // is the one thing that does end the pass, because it is the machine and not the project
-          // that is broken; passOrder is what keeps that from starving a sibling across passes.
+          // pass — that would starve whichever assignment comes last in the list. A fault is the
+          // one thing that does end the pass, because the next claim would hit it too, on the
+          // machine or in the project's settings; passOrder is what keeps that from starving a
+          // sibling across passes.
           for (const projectId of passOrder(deps.assignments())) {
             if (!running) return;
             try {
@@ -122,7 +123,7 @@ export function createLoop(deps: LoopDeps): Loop {
                   // (BP-349 review). The reason itself is on the board — a run's fault is not a
                   // string this loop holds — so this says which task carried it.
                   log(`${disposition === "machine-fault" ? "machine" : "settings"} fault on ${task.taskKey}; not claiming again this pass`);
-                  machineFault = true;
+                  faulted = true;
                   faultedLast = projectId;
                   break;
                 }
@@ -146,9 +147,9 @@ export function createLoop(deps: LoopDeps): Loop {
         }
 
         if (!running) return;
-        // A machine fault outranks work done earlier in the pass: the fault is what the next claim
+        // A fault outranks work done earlier in the pass: the fault is what the next claim
         // would hit, so the pass ends here whatever else succeeded before it.
-        if (claimedAny && !machineFault) continue;
+        if (claimedAny && !faulted) continue;
         await deps.sleep(deps.pollIntervalMs(), stopping.signal);
       }
     },

@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from "fs";
+import { lstatSync, readdirSync, realpathSync } from "fs";
 import { basename, dirname, isAbsolute, join, resolve } from "path";
 import { UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
 import { ResolvedTool, unresolvedToolReason } from "./tool-path.js";
@@ -280,23 +280,26 @@ export const PROFILE_TAIL = [...NAMED_SERVICE_DENIES, ...OWN_SANDBOX_SIGNALS_ONL
 // For a project on its own gate commands (BP-985), which the project's owner chooses and which may run
 // on somebody else's machine with the network open. The agent's steps get it too, or a steered `Read`
 // would put a key in a test file for the next gate to send; a CLI's session then stays readable through
-// `sessionReadable`. Everything under a shut home answers ENOENT rather than EPERM: yarn opens a
-// `.yarnrc` in every parent with no `stat` first and stops on any other error, and go and cargo do the
-// same with what they find on the way up, so to all of them it is a home with nothing in it. It also
-// keeps a size from being probed. `file-test-existence` stays open, so `access` and mkdir can confirm a
-// guessed name: denied, mkdir answers ENOENT under a parent that exists and node's recursive mkdir goes
-// round for ever, which held the agent on an operator's hook until the run timed out. Each parent of
-// what stays readable answers its metadata, or node and java could not resolve a path through it. The
-// keychain goes through a daemon, and an ssh-agent or a password manager's agent signs for whoever
-// connects, so reading nothing would not stop either; both agents' sockets are refused by where they
-// live, which leaves a project's own socket in its worktree alone.
-function sealedHomeRules(homeNames: string[], readableNames: string[], ancestorNames: string[], writableNames: string[], keychain: boolean): string[] {
+// `sessionReadable`. A read under a shut home answers ENOENT rather than EPERM: yarn opens a `.yarnrc` in
+// every parent with no `stat` first and stops on any other error, and go and cargo do the same with what
+// they find on the way up. It also keeps a size from being probed. Existence is shut by name, for the
+// files in each parent of what stays readable, which is where a tool walking up looks: yarn 1 stops on a
+// `package.json` there that exists and will not read. Shut for the whole home, mkdir answers ENOENT under
+// a parent that exists and node's recursive mkdir goes round for ever, which held the agent on an
+// operator's hook until the run timed out, so everywhere else `access` can confirm a guessed name. Each
+// parent of what stays readable answers its metadata, or node and java could not resolve a path through
+// it. The keychain goes through a daemon, and an ssh-agent or a password manager's agent signs for
+// whoever connects, so reading nothing would not stop either; both agents' sockets are refused by where
+// they live, which leaves a project's own socket in its worktree alone.
+function sealedHomeRules(homeNames: string[], readableNames: string[], ancestorNames: string[], besideNames: string[], writableNames: string[], keychain: boolean): string[] {
   const under = (names: string[]) => names.map((name) => `(subpath (param "${name}"))`).join(" ");
+  const exactly = (names: string[]) => names.map((name) => `(literal (param "${name}"))`).join(" ");
   const sockets = (rule: string, names: string[]) => names.map((name) => `(${rule} network-outbound (remote unix-socket (subpath (param "${name}"))))`);
   return [
     `(deny file-read* (with errno ENOENT) ${under(homeNames)})`,
-    ...(readableNames.length ? [`(allow file-read* ${under(readableNames)})`] : []),
-    ...(ancestorNames.length ? [`(allow file-read-metadata ${ancestorNames.map((name) => `(literal (param "${name}"))`).join(" ")})`] : []),
+    ...(besideNames.length ? [`(deny file-test-existence (with errno ENOENT) ${exactly(besideNames)})`] : []),
+    ...(readableNames.length ? [`(allow file-read* file-test-existence ${under(readableNames)})`] : []),
+    ...(ancestorNames.length ? [`(allow file-read-metadata ${exactly(ancestorNames)})`] : []),
     ...(keychain ? [] : ['(deny mach-lookup (global-name "com.apple.SecurityServer") (global-name "com.apple.securityd"))']),
     ...sockets("deny", homeNames),
     ...sockets("allow", writableNames),
@@ -316,6 +319,20 @@ function ancestorsUnder(homes: string[], paths: string[]): string[] {
     for (let parent = dirname(path); parent.length >= home.length; parent = dirname(parent)) found.add(parent);
   }
   return [...found];
+}
+
+// A parent may be a directory of downloads, and the names travel in the argument list
+const MAX_FILES_BESIDE = 2_000;
+
+function filesBeside(directories: string[]): string[] {
+  const files = directories.flatMap((directory) => {
+    try {
+      return readdirSync(directory, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => join(directory, entry.name));
+    } catch {
+      return [];
+    }
+  });
+  return files.slice(0, MAX_FILES_BESIDE);
 }
 
 // Rules for a mode go in `modeRules`, never after the result: the tail must come last.
@@ -372,9 +389,11 @@ export function confine(command: string, args: string[], options: ConfineOptions
   const readableNames = readable.map((_, index) => `R${index}`);
   const ancestors = ancestorsUnder(homes, readable);
   const ancestorNames = ancestors.map((_, index) => `A${index}`);
+  const beside = filesBeside(ancestors);
+  const besideNames = beside.map((_, index) => `F${index}`);
   const modeRules = [
     ...(options.network === "loopback" ? LOOPBACK_ONLY : []),
-    ...(options.sealedHomes ? sealedHomeRules(homeNames, readableNames, ancestorNames, names, !!options.sealedHomes.keychain) : []),
+    ...(options.sealedHomes ? sealedHomeRules(homeNames, readableNames, ancestorNames, besideNames, names, !!options.sealedHomes.keychain) : []),
   ];
   return {
     command: SANDBOX_COMMAND,
@@ -385,6 +404,7 @@ export function confine(command: string, args: string[], options: ConfineOptions
       ...homes.flatMap((home, index) => ["-D", `H${index}=${home}`]),
       ...readable.flatMap((path, index) => ["-D", `R${index}=${path}`]),
       ...ancestors.flatMap((path, index) => ["-D", `A${index}=${path}`]),
+      ...beside.flatMap((path, index) => ["-D", `F${index}=${path}`]),
       command,
       ...args,
     ],
