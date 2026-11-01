@@ -108,6 +108,7 @@ export const GROUPS = {
     "jira-import.spec.ts",
     "import-links.spec.ts",
     "import-presets.spec.ts",
+    "trello-import.spec.ts",
     "project-owner-persona.spec.ts",
     "project-owner-gate.spec.ts",
     "owner-manages-workers.spec.ts",

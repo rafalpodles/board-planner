@@ -1,4 +1,4 @@
-import { EXTERNAL_ID_MAX_LENGTH, EXTERNAL_SOURCE_MAX_LENGTH, MAX_IMPORT_COMMENTS, MAX_IMPORT_TASKS } from "./limits";
+import { EXTERNAL_ID_MAX_LENGTH, EXTERNAL_SOURCE_MAX_LENGTH, IMPORT_NOTE_MAX_LENGTH, MAX_IMPORT_COMMENTS, MAX_IMPORT_NOTES, MAX_IMPORT_TASKS } from "./limits";
 
 export { MAX_IMPORT_BYTES, MAX_IMPORT_TASKS } from "./limits";
 
@@ -7,6 +7,16 @@ export interface ImportComment {
   author?: string;
   body: string;
   createdAt?: string;
+}
+
+export interface ImportChecklistItem {
+  text: string;
+  done?: boolean;
+}
+
+export interface ImportNote {
+  id: string;
+  what: string;
 }
 
 export interface ImportTask {
@@ -22,6 +32,7 @@ export interface ImportTask {
   dueDate?: string;
   fields?: Record<string, unknown>;
   comments?: ImportComment[];
+  checklist?: ImportChecklistItem[];
   parent?: string;
   blockedBy?: string[];
 }
@@ -29,6 +40,8 @@ export interface ImportTask {
 export interface ImportBundle {
   source: string;
   tasks: ImportTask[];
+  // What the file's reader left behind, for the report
+  notes?: ImportNote[];
 }
 
 export interface ImportMapping {
@@ -110,6 +123,14 @@ export function parseBundle(raw: unknown): Parsed<ImportBundle> {
     ) {
       return { ok: false, error: `${at}.blockedBy must be a list of at most ${MAX_BLOCKERS} ids` };
     }
+    if (task.checklist !== undefined) {
+      if (!Array.isArray(task.checklist)) return { ok: false, error: `${at}.checklist must be a list` };
+      for (const [ci, item] of task.checklist.entries()) {
+        const cat = `${at}.checklist[${ci}]`;
+        if (!isRecord(item) || typeof item.text !== "string") return { ok: false, error: `${cat}.text must be a string` };
+        if (item.done !== undefined && typeof item.done !== "boolean") return { ok: false, error: `${cat}.done must be true or false` };
+      }
+    }
     if (task.comments !== undefined) {
       if (!Array.isArray(task.comments)) return { ok: false, error: `${at}.comments must be a list` };
       const commentIds = new Set<string>();
@@ -132,5 +153,17 @@ export function parseBundle(raw: unknown): Parsed<ImportBundle> {
   if (comments > MAX_IMPORT_COMMENTS) {
     return { ok: false, error: `A bundle holds at most ${MAX_IMPORT_COMMENTS.toLocaleString("en-US")} comments` };
   }
-  return { ok: true, value: { source: source.trim(), tasks: raw.tasks as ImportTask[] } };
+  if (raw.notes !== undefined) {
+    if (!Array.isArray(raw.notes) || raw.notes.length > MAX_IMPORT_NOTES) {
+      return { ok: false, error: `notes must be a list of at most ${MAX_IMPORT_NOTES.toLocaleString("en-US")}` };
+    }
+    for (const [index, note] of raw.notes.entries()) {
+      const fits = (v: unknown, max: number) => typeof v === "string" && v.length > 0 && v.length <= max;
+      if (!isRecord(note) || !fits(note.id, EXTERNAL_ID_MAX_LENGTH) || !fits(note.what, IMPORT_NOTE_MAX_LENGTH)) {
+        return { ok: false, error: `notes[${index}] needs an id of at most ${EXTERNAL_ID_MAX_LENGTH} characters and a what of at most ${IMPORT_NOTE_MAX_LENGTH}` };
+      }
+    }
+  }
+  const notes = raw.notes as ImportNote[] | undefined;
+  return { ok: true, value: { source: source.trim(), tasks: raw.tasks as ImportTask[], ...(notes?.length && { notes }) } };
 }

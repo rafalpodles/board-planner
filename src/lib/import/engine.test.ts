@@ -11,6 +11,7 @@ vi.mock("@/lib/projectAudit", () => ({ logProjectAudit: (...a: unknown[]) => log
 
 const { runImport, IMPORT_CHUNK } = await import("./engine");
 const { currentProvenance } = await import("@/lib/activity-source");
+const { CRITERION_TEXT_MAX_LENGTH, MAX_CHECKLIST_ITEMS, isValidCriterionText } = await import("@/lib/identifiers");
 
 const IMPORTER = new Types.ObjectId();
 const MEMBER = new Types.ObjectId();
@@ -141,6 +142,44 @@ describe("runImport", () => {
     ]);
     expect(report.unmapped).toEqual({ statuses: [], users: ["ghost"], types: ["Epic"] });
     expect(report.dropped).toContainEqual({ id: "2", field: "priority", value: "Showstopper", reason: "not low, medium, high or urgent" });
+  });
+
+  it("writes a new task's checklist, unticked unless the file says otherwise", async () => {
+    const { db, writes } = fakeDb();
+    await run(db, [{ id: "1", title: "a", checklist: [{ text: " one ", done: true }, { text: "two" }, { text: "   " }, { text: "​" }] }, { id: "2", title: "b" }]);
+    expect(writes.tasks.map((t) => t.checklist)).toEqual([[{ text: "one", done: true }, { text: "two", done: false }], []]);
+  });
+
+  it("makes a checklist's text what the board itself would take, and says what it shortened", async () => {
+    const { db, writes } = fakeDb();
+    const long = "x".repeat(CRITERION_TEXT_MAX_LENGTH + 1);
+    const report = await run(db, [{ id: "1", title: "a", checklist: [{ text: `line\none‮` }, { text: long }] }]);
+    const items = writes.tasks[0].checklist as { text: string }[];
+    expect(items.map((i) => i.text)).toEqual(["line one", long.slice(0, CRITERION_TEXT_MAX_LENGTH)]);
+    expect(items.every((i) => isValidCriterionText(i.text))).toBe(true);
+    expect(report.truncated).toEqual([{ id: "1", field: "checklist" }]);
+  });
+
+  it("cuts a checklist to what a task holds, and says so", async () => {
+    const { db, writes } = fakeDb();
+    const checklist = Array.from({ length: MAX_CHECKLIST_ITEMS + 1 }, (_, i) => ({ text: `c${i}` }));
+    const report = await run(db, [{ id: "1", title: "a", checklist }]);
+    expect(writes.tasks[0].checklist).toHaveLength(MAX_CHECKLIST_ITEMS);
+    expect(report.truncated).toEqual([{ id: "1", field: "checklist" }]);
+  });
+
+  it("replaces the checklist of a task imported before, and leaves it alone when the file has none", async () => {
+    const { db, writes } = fakeDb({ existing: [{ id: "1" }, { id: "2" }] });
+    await run(db, [{ id: "1", title: "a", checklist: [{ text: "one", done: true }] }, { id: "2", title: "b", checklist: [] }]);
+    expect(writes.updates[0].update.$set.checklist).toEqual([{ text: "one", done: true }]);
+    expect(writes.updates[1].update.$set).not.toHaveProperty("checklist");
+  });
+
+  it("puts what the file's reader left behind in the report, on a check and on the run itself", async () => {
+    const notes = [{ id: "Old ideas", what: "an archived list, with its 3 cards" }];
+    const bundle = { source: "Trello", tasks: [{ id: "1", title: "a" }], notes };
+    expect((await runImport(fakeDb().db, "p1", IMPORTER, bundle, {}, { dryRun: true })).notImported).toEqual(notes);
+    expect((await runImport(fakeDb().db, "p1", IMPORTER, bundle, {}, { dryRun: false })).notImported).toEqual(notes);
   });
 
   it("keeps the labels a board offers and lists each other one, instead of dropping them all", async () => {

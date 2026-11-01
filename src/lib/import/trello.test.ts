@@ -1,0 +1,157 @@
+import { describe, it, expect } from "vitest";
+import fixture from "./__fixtures__/trello-board.json";
+import { parseBundle, type ImportTask } from "./bundle";
+import { csvToBundle, guessTargets, knownSource } from "./csv";
+import { isTrelloExport, trelloToTable } from "./trello";
+
+const LABELS = { name: "Labels", fieldType: "multiselect" };
+
+const copy = () => JSON.parse(JSON.stringify(fixture)) as typeof fixture & Record<string, unknown>;
+
+function bundleOf(board: Record<string, unknown>) {
+  const table = trelloToTable(board);
+  return { table, bundle: csvToBundle(table, guessTargets(table.headers, [LABELS]), "Trello", [LABELS], "u1") };
+}
+
+const named = (tasks: ImportTask[], title: string) => tasks.find((t) => t.title === title)!;
+
+describe("isTrelloExport", () => {
+  it("knows a board export from a bundle and from anything else", () => {
+    expect(isTrelloExport(fixture)).toBe(true);
+    expect(isTrelloExport({ source: "x", tasks: [], cards: [], lists: [] })).toBe(false);
+    expect(isTrelloExport({ cards: [] })).toBe(false);
+    expect(isTrelloExport([])).toBe(false);
+    expect(isTrelloExport(null)).toBe(false);
+  });
+});
+
+describe("trelloToTable", () => {
+  it("is recognised, and its columns need no mapping by hand", () => {
+    const table = trelloToTable(fixture);
+    expect(knownSource(table.headers)?.name).toBe("Trello");
+    expect(guessTargets(table.headers, [LABELS])).toEqual(["id", "title", "status", "assignee", "dueDate", "createdAt", "completedAt", "description", "field:Labels"]);
+  });
+
+  it("makes a bundle the server takes, of the open cards in the board's own order", () => {
+    const { bundle } = bundleOf(fixture);
+    expect(parseBundle(JSON.parse(JSON.stringify(bundle))).ok).toBe(true);
+    expect(bundle.tasks.map((t) => t.status)).toEqual(["Backlog", "Backlog", "Doing", "Done", "Ideas", "Ideas", "Later", "Later", "Parked"]);
+    expect(bundle.tasks.map((t) => t.title)).not.toContain("Mobile menu");
+    expect(bundle.tasks.every((t) => /^[A-Za-z0-9]{8}$/.test(t.id))).toBe(true);
+  });
+
+  it("reports archived cards and lists instead of importing them", () => {
+    const { bundle } = bundleOf(fixture);
+    expect(bundle.notes).toContainEqual({ id: "Old ideas", what: "an archived list, with its 1 card" });
+    expect(bundle.notes).toContainEqual({ id: "https://example.com/a-link-card", what: "an archived card" });
+    expect(bundle.tasks).toHaveLength(9);
+  });
+
+  it("carries checklists as criteria in order, each with its checklist's name once there are two", () => {
+    const { bundle } = bundleOf(fixture);
+    const task = named(bundle.tasks, "Invoice export");
+    expect(task.checklist).toEqual([
+      { text: "Definition of done: Step 1", done: true },
+      { text: "Definition of done: Step 2", done: false },
+      { text: "Definition of done: Step 3", done: false },
+      { text: "Rollout: Tell people 1", done: false },
+      { text: "Rollout: Tell people 2", done: false },
+      { text: "Rollout: Tell people 3", done: false },
+    ]);
+    expect(bundle.notes).toContainEqual({ id: "Invoice export", what: "the split into 2 checklists: each criterion starts with its checklist's name" });
+  });
+
+  it("names no checklist when a card has only one", () => {
+    const board = copy();
+    board.checklists = board.checklists.slice(0, 1);
+    const { bundle } = bundleOf(board);
+    expect(named(bundle.tasks, "Invoice export").checklist?.[0]).toEqual({ text: "Step 1", done: true });
+    expect(bundle.notes?.some((n) => n.what.startsWith("the split"))).toBe(false);
+  });
+
+  it("carries comments oldest first, by their author's username, and known by Trello's own id", () => {
+    const { bundle } = bundleOf(fixture);
+    const { comments } = named(bundle.tasks, "Single sign-on");
+    expect(comments?.map((c) => [c.author, c.body])).toEqual([
+      ["member2", "Comment 10 on this card."],
+      ["member1", "Comment 3 on this card."],
+    ]);
+    expect(comments?.every((c) => /^[0-9a-f]{24}$/.test(c.id) && !Number.isNaN(Date.parse(c.createdAt ?? "")))).toBe(true);
+  });
+
+  it("says how many comments the export's limit of 1,000 actions left out", () => {
+    const { bundle } = bundleOf(fixture);
+    expect(bundle.notes).toContainEqual({ id: "Audit log filter", what: "2294 of its 2,294 comments: the export holds only the board's newest 1,000 actions" });
+    expect(bundle.notes?.some((n) => n.id === "Single sign-on" && n.what.includes("comment"))).toBe(false);
+  });
+
+  it("gives a task the first member and names the others, matched by username", () => {
+    const { table, bundle } = bundleOf(fixture);
+    expect(named(bundle.tasks, "Single sign-on").assignee).toBe("member1");
+    expect(table.rows.map((r) => r[3])).toContain("member1, member2");
+    expect(bundle.notes).toContainEqual({ id: "Single sign-on", what: "its other members, as a task has one assignee: member2" });
+  });
+
+  it("takes the creation time from the card's id and the due date as a day", () => {
+    const { bundle } = bundleOf(fixture);
+    const task = named(bundle.tasks, "Audit log filter");
+    const card = fixture.cards.find((c) => c.name === "Audit log filter")!;
+    expect(task.createdAt).toBe(new Date(parseInt(card.id.slice(0, 8), 16) * 1000).toISOString());
+    expect(task.dueDate).toBe("2017-04-12");
+  });
+
+  it("leaves a task with no creation time when the id is not Trello's", () => {
+    const board = copy();
+    board.cards[0].id = "not-a-trello-id";
+    expect(bundleOf(board).bundle.tasks.every((t) => t.title !== board.cards[0].name || t.createdAt === undefined)).toBe(true);
+  });
+
+  it("keeps a link in the description and names each uploaded file per card", () => {
+    const { bundle } = bundleOf(fixture);
+    expect(named(bundle.tasks, "Rate limit banner").description).toBe("Links from Trello:\n- [Design note 5](https://example.com/notes/5)");
+    expect(named(bundle.tasks, "Search by label").description).toBe("Notes for **Search by label**.\n\nA second paragraph.\n\nLinks from Trello:\n- [Design note 6](https://example.com/notes/6)");
+    expect(bundle.notes).toContainEqual({ id: "Audit log filter", what: "2 uploaded files: screenshot-3-0.png, screenshot-3-1.png" });
+    expect(bundle.notes?.filter((n) => n.what.includes("uploaded file")).map((n) => n.id).sort()).toEqual(["Audit log filter", "Backup restore", "Rate limit banner", "Search by label"]);
+  });
+
+  it("writes a link so that its name and address cannot break out of the Markdown", () => {
+    const board = copy();
+    const card = board.cards.find((c) => c.name === "Rate limit banner")!;
+    card.attachments = [{ isUpload: false, name: "a [b]\nc", url: "https://example.com/x (1)" }] as never;
+    expect(named(bundleOf(board).bundle.tasks, "Rate limit banner").description).toContain("- [a  b  c](https://example.com/x%20%281%29)");
+  });
+
+  it("puts a card's labels in the board's labels field, a label with no name by its colour", () => {
+    const board = copy();
+    const card = board.cards.find((c) => c.name === "Webhook retries")!;
+    expect(named(bundleOf(board).bundle.tasks, "Webhook retries").fields).toEqual({ Labels: ["design"] });
+    card.labels = [{ name: "", color: "green" }, { name: "ops", color: "red" }] as never;
+    const { table, bundle } = bundleOf(board);
+    expect(table.headers.filter((h) => h === "Labels")).toHaveLength(2);
+    expect(named(bundle.tasks, "Webhook retries").fields).toEqual({ Labels: ["green", "ops"] });
+  });
+
+  it("reports custom fields, Power-Ups and start dates as not carried", () => {
+    const board = copy();
+    board.customFields = [{ id: "cf1", name: "Effort" }] as never;
+    board.powerUps = ["cardAging"] as never;
+    board.cards[3].pluginData = [{ id: "p1" }] as never;
+    (board.cards[3] as Record<string, unknown>).start = "2026-01-01T00:00:00.000Z";
+    const { notes } = bundleOf(board).bundle;
+    expect(notes).toContainEqual({ id: "Effort", what: "a Trello custom field: its values are not carried" });
+    expect(notes).toContainEqual({ id: "Power-Ups", what: "what they keep on 1 card is not carried" });
+    expect(notes).toContainEqual({ id: "Start dates", what: "on 1 card: a task has none" });
+  });
+
+  it("clips what it notes, so one long name cannot refuse the whole import", () => {
+    const board = copy();
+    board.cards.find((c) => c.name === "Audit log filter")!.name = "x".repeat(5_000);
+    board.lists.find((l) => l.name === "Old ideas")!.name = "y".repeat(5_000);
+    expect(parseBundle(JSON.parse(JSON.stringify(bundleOf(board).bundle))).ok).toBe(true);
+  });
+
+  it("survives a file missing what it usually holds", () => {
+    expect(trelloToTable({ cards: [{ id: "a", name: "Only a name" }], lists: [] }).rows).toHaveLength(1);
+    expect(trelloToTable({ cards: [null, 1], lists: [{}], actions: [{}], checklists: "x" }).rows).toHaveLength(0);
+  });
+});

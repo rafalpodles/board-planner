@@ -1,4 +1,4 @@
-import type { ImportBundle, ImportComment, ImportTask } from "./bundle";
+import type { ImportBundle, ImportChecklistItem, ImportComment, ImportNote, ImportTask } from "./bundle";
 import { normaliseDay, normaliseInstant } from "./dates";
 import { jiraWikiToMarkdown } from "./jira-wiki";
 
@@ -33,6 +33,9 @@ export interface CsvTable {
   markup?: "jira-wiki";
   // Comments read from a format that keeps them apart from the columns, one list per row
   comments?: ImportComment[][];
+  checklists?: ImportChecklistItem[][];
+  // What the format's reader left behind, for the report
+  notes?: ImportNote[];
 }
 
 const DELIMITERS = [",", ";", "\t", "|"] as const;
@@ -167,6 +170,10 @@ const PRESETS: { source: (headers: Set<string>) => KnownSource; recognised: (hea
   {
     source: () => ({ name: "OpenProject", columns: { "finish date": "dueDate" }, hashRefs: true }),
     recognised: (h) => h.has("subject") && h.has("type") && h.has("status") && h.has("id") && (h.has("finish date") || (h.has("author") && h.has("updated on"))),
+  },
+  {
+    source: () => ({ name: "Trello", columns: { "trello card": "id", members: "assignee" }, severalAssignees: true }),
+    recognised: (h) => h.has("trello card"),
   },
 ];
 
@@ -359,7 +366,8 @@ export function csvToBundle(table: CsvTable, targets: CsvTarget[], source: strin
     if (Object.keys(values).length) task.fields = values;
     const structured = table.comments?.[index] ?? [];
     if (structured.length || comments.length) task.comments = [...structured, ...comments];
+    if (table.checklists?.[index]?.length) task.checklist = table.checklists[index];
     return Object.fromEntries(Object.entries(task).filter(([, v]) => v !== undefined)) as unknown as ImportTask;
   });
-  return { source, tasks };
+  return { source, tasks, ...(table.notes?.length && { notes: table.notes }) };
 }

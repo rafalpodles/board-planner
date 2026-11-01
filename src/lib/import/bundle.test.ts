@@ -19,8 +19,20 @@ describe("parseBundle", () => {
     [{ source: "x", tasks: [task({ fields: [] })] }, "tasks[0].fields must be an object"],
     [{ source: "x", tasks: [task({ comments: [{ id: "c", body: 1 }] })] }, "tasks[0].comments[0].body must be a string"],
     [{ source: "x", tasks: [task({ comments: [{ id: "c", body: "a" }, { id: "c", body: "b" }] })] }, "tasks[0].comments[1].id appears twice on its task"],
+    [{ source: "x", tasks: [task({ checklist: {} })] }, "tasks[0].checklist must be a list"],
+    [{ source: "x", tasks: [task({ checklist: [{ text: 1 }] })] }, "tasks[0].checklist[0].text must be a string"],
+    [{ source: "x", tasks: [task({ checklist: [{ text: "a", done: "yes" }] })] }, "tasks[0].checklist[0].done must be true or false"],
+    [{ source: "x", tasks: [], notes: {} }, "notes must be a list of at most 50,000"],
+    [{ source: "x", tasks: [], notes: [{ id: "", what: "a" }] }, "notes[0] needs an id of at most 200 characters and a what of at most 500"],
+    [{ source: "x", tasks: [], notes: [{ id: "a", what: "b".repeat(501) }] }, "notes[0] needs an id of at most 200 characters and a what of at most 500"],
   ])("refuses %j before anything is written", (raw, error) => {
     expect(parseBundle(raw)).toEqual({ ok: false, error });
+  });
+
+  it("keeps a task's checklist and the bundle's notes", () => {
+    const checklist = [{ text: "a", done: true }, { text: "b" }];
+    const notes = [{ id: "Card", what: "an archived card" }];
+    expect(parseBundle({ source: "x", tasks: [task({ checklist })], notes })).toEqual({ ok: true, value: { source: "x", tasks: [task({ checklist })], notes } });
   });
 
   it("refuses more tasks than one import takes", () => {

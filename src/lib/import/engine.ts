@@ -1,14 +1,17 @@
 import { Types } from "mongoose";
 import type { ScopedDb } from "@/lib/db-scope";
-import type { ICustomField, IProjectColumn, Priority } from "@/types";
+import type { IChecklistItem, ICustomField, IProjectColumn, Priority } from "@/types";
 import { defaultStatusFor, getProjectColumns } from "@/lib/columns";
 import { activeFields, matchOptionValue, normalizeFields, validateCustomFieldValues } from "@/lib/custom-fields";
 import { recipientsWithAccess } from "@/lib/grants";
 import {
   COMMENT_BODY_MAX_LENGTH,
+  CRITERION_TEXT_MAX_LENGTH,
+  MAX_CHECKLIST_ITEMS,
   TASK_DESCRIPTION_MAX_LENGTH,
   TASK_TITLE_MAX_LENGTH,
   isControlCodePoint,
+  rendersBlank,
   stripControlCharacters,
 } from "@/lib/identifiers";
 import { logActivities } from "@/lib/activity";
@@ -73,6 +76,7 @@ interface Resolved {
   given: { status: boolean; description: boolean; category: boolean; priority: boolean };
   customFieldValues: Record<string, unknown>;
   comments: { ref: string; body: string; author: Types.ObjectId; createdAt: Date | null }[];
+  checklist: { text: string; done: boolean }[];
 }
 
 const shown = (value: unknown) => {
@@ -274,7 +278,18 @@ function resolveTask(
     given: { status: statusGiven, description: task.description !== undefined && task.description !== null, category: categoryGiven, priority: priorityGiven },
     customFieldValues: resolveFields(report, task, board),
     comments: (task.comments ?? []).flatMap((comment) => resolveComment(report, task.id, comment, users, importer)),
+    checklist: resolveChecklist(report, task),
   };
+}
+
+function resolveChecklist(report: ImportReport, task: ImportTask): Resolved["checklist"] {
+  const items = (task.checklist ?? []).flatMap((item) => {
+    const text = clip(report, task.id, "checklist", item.text, CRITERION_TEXT_MAX_LENGTH);
+    return rendersBlank(text) ? [] : [{ text, done: item.done === true }];
+  });
+  if (items.length <= MAX_CHECKLIST_ITEMS) return items;
+  report.truncated.push({ id: task.id, field: "checklist" });
+  return items.slice(0, MAX_CHECKLIST_ITEMS);
 }
 
 function resolveComment(
@@ -317,7 +332,7 @@ const emptyReport = (dryRun: boolean, bundle: ImportBundle): ImportReport => ({
   dropped: [],
   truncated: [],
   unmapped: { statuses: [], users: [], types: [] },
-  notImported: [],
+  notImported: [...(bundle.notes ?? [])],
   links: 0,
   processed: 0,
   complete: false,
@@ -392,6 +407,7 @@ async function writeChunk(
         assignee: t.assignee,
         assignedBy: t.assignee ? importer : null,
         dueDate: t.dueDate,
+        checklist: t.checklist,
         customFieldValues: t.customFieldValues,
         externalRef: { source, id: t.ref },
         createdBy: importer,
@@ -451,6 +467,7 @@ async function writeChunk(
                 // An import never unassigns: somebody it cannot name is left as the board has it
                 ...(t.assignee && { assignee: t.assignee, assignedBy: importer }),
                 ...(t.dueDate && { dueDate: t.dueDate }),
+                ...(t.checklist.length > 0 && { checklist: t.checklist as IChecklistItem[] }),
                 ...(moved && { status: t.status }),
                 ...Object.fromEntries(Object.entries(t.customFieldValues).map(([k, v]) => [`customFieldValues.${k}`, v])),
               },

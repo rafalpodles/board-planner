@@ -102,6 +102,11 @@ function headerLabels(headers: string[]): string[] {
   return shown.map((label, i) => (shown.indexOf(label) !== shown.lastIndexOf(label) ? `${label} (column ${i + 1})` : label));
 }
 
+function comeWithIt(noun: string, perRow: unknown[][] | undefined): string {
+  const n = perRow?.reduce((total, row) => total + row.length, 0) ?? 0;
+  return n > 0 ? ` Its ${n} ${noun}${n === 1 ? " comes" : "s come"} with it.` : "";
+}
+
 function columnFor(columns: ApiProjectColumn[], value: string): string {
   const wanted = value.trim().toLowerCase();
   return columns.find((c) => c.id.toLowerCase() === wanted || c.label.trim().toLowerCase() === wanted)?.id ?? AUTOMATIC;
@@ -252,9 +257,8 @@ export function CsvMapping({
       <p className="text-sm text-text-muted">
         {table.rows.length} rows, {table.headers.length} columns.
         {known && ` Recognised as ${/^[AEIOU]/.test(known.name) ? "an" : "a"} ${known.name} export.`}
-        {((n) => (n > 0 ? ` Its ${n} ${n === 1 ? "comment comes" : "comments come"} with it.` : ""))(
-          table.comments?.reduce((total, c) => total + c.length, 0) ?? 0
-        )}
+        {comeWithIt("comment", table.comments)}
+        {comeWithIt("checklist item", table.checklists)}
       </p>
       {tooMany && (
         <p role="alert" className="text-sm text-danger">
