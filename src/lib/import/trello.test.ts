@@ -150,6 +150,60 @@ describe("trelloToTable", () => {
     expect(named(bundleOf(board).bundle.tasks, "Backup restore").completedAt).toBe("2026-03-01T10:00:00.000Z");
   });
 
+  describe("a card marked complete", () => {
+    const finish = (board: ReturnType<typeof copy>, name: string, fields: Record<string, unknown>) => Object.assign(board.cards.find((c) => c.name === name)!, fields);
+    const finished = { dueComplete: true, dateCompleted: "2026-11-01T17:41:47.543Z", due: null };
+
+    it("goes under Done, keeps its time, and the report names the list it left", () => {
+      const board = copy();
+      finish(board, "Search by label", finished);
+      const { bundle } = bundleOf(board);
+      const task = named(bundle.tasks, "Search by label");
+      expect(task.status).toBe("Done");
+      expect(task.completedAt).toBe("2026-11-01T17:41:47.543Z");
+      expect(bundle.notes).toContainEqual({ id: "Search by label", what: "its list “Doing”: a finished card goes under Done" });
+    });
+
+    it("goes under Done with no time when the export gives none, as an older card's does", () => {
+      const board = copy();
+      finish(board, "Search by label", { dueComplete: true });
+      const task = named(bundleOf(board).bundle.tasks, "Search by label");
+      expect(task.status).toBe("Done");
+      expect(task.completedAt).toBeUndefined();
+    });
+
+    it("says nothing when it was in a Done list already, whatever the case of its name", () => {
+      const board = copy();
+      board.lists.find((l) => l.name === "Done")!.name = " done ";
+      finish(board, "Backup restore", finished);
+      expect(bundleOf(board).bundle.notes!.filter((n) => n.id === "Backup restore" && n.what.startsWith("its list"))).toEqual([]);
+    });
+
+    it("names no list for a card whose list the export does not hold", () => {
+      const board = copy();
+      finish(board, "Search by label", { ...finished, idList: "000000000000000000000000" });
+      expect(bundleOf(board).bundle.notes!.filter((n) => n.what.startsWith("its list"))).toEqual([]);
+      expect(named(bundleOf(board).bundle.tasks, "Search by label").status).toBe("Done");
+    });
+
+    it("stays in its list when only a date is set, or the flag is not true", () => {
+      const board = copy();
+      finish(board, "Search by label", { dueComplete: false, dateCompleted: "2026-11-01T17:41:47.543Z" });
+      finish(board, "Offline drafts", { dueComplete: "true" });
+      const { bundle } = bundleOf(board);
+      expect(named(bundle.tasks, "Search by label").status).toBe("Doing");
+      expect(named(bundle.tasks, "Offline drafts").status).toBe("Backlog");
+    });
+  });
+
+  it("reads a file's name as a person would, and keeps one that cannot be decoded", () => {
+    const board = copy();
+    const card = board.cards.find((c) => c.name === "Audit log filter")!;
+    card.attachments[0].name = "2%20Email,%20Slack.jpg";
+    card.attachments[1].name = "100%.png";
+    expect(bundleOf(board).bundle.notes).toContainEqual({ id: "Audit log filter", what: "2 uploaded files: 2 Email, Slack.jpg, 100%.png" });
+  });
+
   it("leaves a task with no creation time when the id is not Trello's", () => {
     const board = copy();
     board.cards[0].id = "not-a-trello-id";

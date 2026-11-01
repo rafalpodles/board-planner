@@ -5,6 +5,7 @@ import { EXTERNAL_ID_MAX_LENGTH, IMPORT_NOTE_MAX_LENGTH } from "./limits";
 type Json = Record<string, unknown>;
 
 const NAMES_LISTED = 5;
+const FINISHED_STATUS = "Done";
 
 const isRecord = (v: unknown): v is Json => typeof v === "object" && v !== null && !Array.isArray(v);
 const records = (v: unknown): Json[] => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -30,6 +31,14 @@ const note = (id: string, what: string): ImportNote => ({
 function namedUpTo(names: string[]): string {
   const shown = names.slice(0, NAMES_LISTED).join(", ");
   return names.length > NAMES_LISTED ? `${shown} and ${names.length - NAMES_LISTED} more` : shown;
+}
+
+function readable(fileName: string): string {
+  try {
+    return decodeURIComponent(fileName);
+  } catch {
+    return fileName;
+  }
 }
 
 function linkLine(attachment: Json): string {
@@ -134,9 +143,12 @@ export function trelloToTable(board: Json): CsvTable {
     const people = onCard.flatMap((m) => members.get(text(m)) || []);
     const itsChecklists = (checklists.get(id) ?? []).filter((c) => itemsOf(c).length > 0);
     const said = comments.get(id) ?? [];
+    const list = text(lists.get(text(card.idList))?.name);
+    const finished = card.dueComplete === true;
 
-    if (uploads.length) noteOn(card, `${plural(uploads.length, "uploaded file")}: ${namedUpTo(uploads.map((u) => text(u.name)))}`);
-    if (unlinked.length) noteOn(card, `${plural(unlinked.length, "attachment")} with no web address: ${namedUpTo(unlinked.map((a) => text(a.name)))}`);
+    if (finished && list && list.trim().toLowerCase() !== FINISHED_STATUS.toLowerCase()) noteOn(card, `its list “${list}”: a finished card goes under ${FINISHED_STATUS}`);
+    if (uploads.length) noteOn(card, `${plural(uploads.length, "uploaded file")}: ${namedUpTo(uploads.map((u) => readable(text(u.name))))}`);
+    if (unlinked.length) noteOn(card, `${plural(unlinked.length, "attachment")} with no web address: ${namedUpTo(unlinked.map((a) => readable(text(a.name))))}`);
     if (onCard.length > people.length) noteOn(card, `${plural(onCard.length - people.length, "member")} the export does not name`);
     if (people.length > 1) noteOn(card, `its other members, as a task has one assignee: ${namedUpTo(people.slice(1))}`);
     if (itsChecklists.length > 1) noteOn(card, `the split into ${itsChecklists.length} checklists: each criterion starts with its checklist's name`);
@@ -146,7 +158,7 @@ export function trelloToTable(board: Json): CsvTable {
       cells: [
         text(card.shortLink) || id,
         text(card.name),
-        text(lists.get(text(card.idList))?.name),
+        finished ? FINISHED_STATUS : list,
         people.join(", "),
         text(card.due),
         madeAt(id),

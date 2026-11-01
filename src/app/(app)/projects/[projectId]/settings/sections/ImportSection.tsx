@@ -97,6 +97,7 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
   const [fileError, setFileError] = useState("");
   const [report, setReport] = useState<ImportReport | null>(null);
   const [checked, setChecked] = useState(false);
+  const [checkedBefore, setCheckedBefore] = useState(false);
   const [busy, setBusy] = useState<"checking" | "importing" | null>(null);
   const seq = useRef(0);
   const [error, setError] = useState("");
@@ -110,6 +111,7 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
     setTable(null);
     setReport(null);
     setChecked(false);
+    setCheckedBefore(false);
     setError("");
     setFileError("");
     if (!file) return;
@@ -179,6 +181,7 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
       if (mine !== seq.current || (dryRun && !current)) return;
       setReport(answer);
       setChecked(dryRun && !answer.error && current);
+      if (dryRun) setCheckedBefore(true);
       if (dryRun && current && table && remembered.current) rememberCsvMapping(projectId, table.rows.headers, remembered.current);
     } catch (e) {
       if (mine === seq.current) setError(e instanceof Error ? e.message : "The import could not run");
@@ -231,6 +234,9 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
             {busy === "importing" ? "Importing…" : "Import"}
           </Button>
         </div>
+        {payload && !checked && !report && !error && busy === null && (
+          <p className="text-sm text-text-muted">{checkedBefore ? "The mapping changed. Check again to import." : "Check first. Import opens once the check has passed."}</p>
+        )}
         {error && (
           <p role="alert" className="text-sm text-danger">
             {error}

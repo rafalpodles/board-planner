@@ -107,9 +107,12 @@ function comeWithIt(noun: string, perRow: unknown[][] | undefined): string {
   return n > 0 ? ` Its ${n} ${noun}${n === 1 ? " comes" : "s come"} with it.` : "";
 }
 
+const meansDone = (value: string) => value.trim().toLowerCase() === "done";
+
 function columnFor(columns: ApiProjectColumn[], value: string): string {
   const wanted = value.trim().toLowerCase();
-  return columns.find((c) => c.id.toLowerCase() === wanted || c.label.trim().toLowerCase() === wanted)?.id ?? AUTOMATIC;
+  const named = columns.find((c) => c.id.toLowerCase() === wanted || c.label.trim().toLowerCase() === wanted);
+  return (named ?? (meansDone(value) ? columns.find((c) => c.role === "done") : undefined))?.id ?? AUTOMATIC;
 }
 
 export function CsvMapping({
@@ -189,6 +192,7 @@ export function CsvMapping({
     const chosen = users[value];
     return chosen === null || members?.some((m) => m.username === chosen) ? chosen : undefined;
   };
+  const kindOf = (value: string): ColumnRole => roles[value] ?? (meansDone(value) ? "done" : "active");
   const columnsKey = columns.map((c) => `${c.id}\u0001${c.label}`).join("\u0002");
   const fieldsKey = fieldShapes.map((f) => `${f.name}\u0001${f.fieldType}`).join("\u0002");
   const membersKey = members?.map((m) => m.username).join("\u0001") ?? "";
@@ -229,7 +233,7 @@ export function CsvMapping({
     try {
       const next: ApiProjectColumn[] = await api.post(`/api/projects/${projectId}/columns`, {
         label: value.trim().slice(0, MAX_COLUMN_LABEL),
-        role: roles[value] ?? "active",
+        role: kindOf(value),
       });
       onColumns(next);
       const made = next.find((c) => !columns.some((old) => old.id === c.id));
@@ -326,7 +330,7 @@ export function CsvMapping({
                 <div className="flex items-end gap-2">
                   <Select
                     aria-label={`Kind of column for “${value}”`}
-                    value={roles[value] ?? "active"}
+                    value={kindOf(value)}
                     options={COLUMN_ROLES.map((r) => ({ value: r, label: `Kind: ${ROLE_LABELS[r].label}` }))}
                     onChange={(e) => setRoles((r) => ({ ...r, [value]: e.target.value as ColumnRole }))}
                   />

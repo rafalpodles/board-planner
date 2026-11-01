@@ -192,6 +192,78 @@ test("a Trello export imports through the mapping step, reports what it left beh
   expect(done!.checklist[3]).toMatchObject({ text: "Definition of done: Step 4", done: true });
 });
 
+test("a finished card reaches a done column with its time, and a disabled Import says why", async ({ page }) => {
+  await signIn(page, "owner");
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
+
+  const FINISHED_AT = "2026-11-01T17:41:47.543Z";
+  const board = JSON.parse(BOARD);
+  Object.assign(board.cards.find((c: { name: string }) => c.name === "Search by label"), { dueComplete: true, dateCompleted: FINISHED_AT, due: null });
+  board.cards.find((c: { name: string }) => c.name === "Audit log filter").attachments[0].name = "first%20shot.png";
+  await upload(page, JSON.stringify(board));
+
+  const mapping = page.getByTestId("csv-mapping");
+  await expect(mapping.getByLabel("Status “Done”")).toHaveValue("done");
+  await mapping.getByLabel("Status “Doing”").selectOption("in_progress");
+
+  const importButton = card(page).getByRole("button", { name: "Import", exact: true });
+  const firstCheck = card(page).getByText("Check first. Import opens once the check has passed.");
+  const secondCheck = card(page).getByText("The mapping changed. Check again to import.");
+  await expect(importButton).toBeDisabled();
+  await expect(firstCheck).toBeVisible();
+
+  await press(page, "Check");
+  const report = page.getByTestId("import-report");
+  await expect(importButton).toBeEnabled();
+  await expect(firstCheck).toHaveCount(0);
+  await expect(secondCheck).toHaveCount(0);
+  await expect(report.locator("details", { hasText: "Values left out" })).toHaveCount(0);
+  const left = report.locator("details", { hasText: "Not imported" });
+  await expect(left).toContainText("Search by label: its list “Doing”: a finished card goes under Done");
+  await expect(left).toContainText("Audit log filter: 2 uploaded files: first shot.png, screenshot-3-1.png");
+
+  await mapping.getByLabel("Status “Backlog”").selectOption("todo");
+  await expect(importButton).toBeDisabled();
+  await expect(secondCheck).toBeVisible();
+  await expect(report).toHaveCount(0);
+
+  await press(page, "Check");
+  await expect(secondCheck).toHaveCount(0);
+  await press(page, "Import");
+  await expect(report).toContainText("Created 9 and updated 0 of 9 tasks from Trello");
+  await expect(firstCheck).toHaveCount(0);
+  await expect(secondCheck).toHaveCount(0);
+
+  const task = (await imported()).find((t) => t.title === "Search by label")!;
+  expect(task.status).toBe("done");
+  expect(task.updatedAt).toEqual(new Date(FINISHED_AT));
+  const moved = await (await db()).collection("activitylogs").findOne({ task: task._id, action: "status_changed" });
+  expect(moved).toMatchObject({ newValue: "done", createdAt: new Date(FINISHED_AT) });
+});
+
+test("a card finished after its first import moves to done on the next one", async ({ page }) => {
+  await signIn(page, "owner");
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
+  await upload(page, BOARD);
+  const mapping = page.getByTestId("csv-mapping");
+  await mapping.getByLabel("Status “Doing”").selectOption("in_progress");
+  await press(page, "Check");
+  await press(page, "Import");
+  const before = (await imported()).find((t) => t.title === "Search by label")!;
+  expect(before.status).toBe("in_progress");
+
+  const later = JSON.parse(BOARD);
+  Object.assign(later.cards.find((c: { name: string }) => c.name === "Search by label"), { dueComplete: true, dateCompleted: "2026-11-01T17:41:47.543Z" });
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
+  await upload(page, JSON.stringify(later), "sample-board (1).json");
+  await press(page, "Check");
+  await press(page, "Import");
+
+  const after = (await imported()).find((t) => t.title === "Search by label")!;
+  expect(String(after._id)).toBe(String(before._id));
+  expect(after.status).toBe("done");
+});
+
 test("a report longer than a page can be read to its last line", async ({ page }) => {
   await signIn(page, "owner");
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
