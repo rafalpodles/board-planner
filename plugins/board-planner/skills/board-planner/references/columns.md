@@ -35,6 +35,6 @@ Moving a task into a flagged column can start the board's PM agent on it, when t
 
 ## Moves the board makes itself
 
-- With a GitHub or GitLab repository connected, a pull request whose branch or title carries the task key is linked to the task. One that does several tasks lists their keys in brackets at the end of its title, `fix: … (ABC-12, ABC-13)`. On GitHub the task also shows its CI.
+- With a GitHub or GitLab repository connected, a pull request whose branch, or else whose title, carries the task key is linked to the task. One that does several tasks lists their keys in round brackets at the end of its title, `fix: … (ABC-12, ABC-13)`. On GitHub the task also shows its CI.
 - On a board that still has the default `in_review` and `ready_to_test` columns and a GitHub repository, a sync run by a person or a connection (`sync_repository`) moves a task from `in_review` to `ready_to_test` once its pull request has merged. The sync never moves a task to `done`. Read the status before moving a task yourself.
 - A task with a repetition creates its next occurrence when it reaches `done`.

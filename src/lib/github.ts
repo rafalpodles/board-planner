@@ -93,10 +93,10 @@ function projectKeyPattern(keys: string[]): RegExp {
   return new RegExp(`(?<![A-Za-z0-9])(?:${keys.map(escapeRegex).join("|")})[- ](\\d+)`, "i");
 }
 
-/** `fix: a sync round (BP-628, BP-631)`: keys in brackets closing a title, and nothing else in them. */
+/** `fix: a sync round (BP-628, BP-631)`: two or more keys in round brackets closing a title, and nothing else in them. */
 function closingKeyList(keys: string[]): RegExp {
   const key = `(?:${keys.map(escapeRegex).join("|")})-\\d+`;
-  return new RegExp(`\\((${key}(?:(?:\\s*[,&]\\s*|\\s+and\\s+)${key})*)\\)\\s*$`, "i");
+  return new RegExp(`\\((${key}(?:(?:\\s*[,&]\\s*|\\s+(?:and\\s+)?)${key})+)\\)\\s*$`, "i");
 }
 
 /**
@@ -104,9 +104,9 @@ function closingKeyList(keys: string[]): RegExp {
  * and every key in a list closing the title (BP-635).
  *
  * A branch is written once, by whoever started the work, while a title is edited freely afterwards
- * (BP-611). So a title adds tasks only by listing them on purpose, and a key it merely mentions
- * adds nothing: `follow-up to BP-12`, a version, and the task titles the worker copies into its
- * pull requests all carry keys nobody meant as a link, and a link moves a task when it merges.
+ * (BP-611). So once a branch names a task, a title adds another only by listing it on purpose:
+ * `follow-up to BP-12`, a version, and a task title the worker copies that ends in `(BP-293)` all
+ * carry keys nobody meant as a link, and a link cannot be taken off by hand.
  */
 export function taskNumbersIn(keys: string[], branch: string, title: string): number[] {
   const pattern = projectKeyPattern(keys);

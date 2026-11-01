@@ -149,14 +149,20 @@ describe("matchPRsToTasks", () => {
     ["fix: a thing (BP-5, see BP-20)"],
     ["fix: a thing (BP-5, BP-20) and more"],
     ["fix: a cut-off title (BP-5, BP-20"],
+    ["revert: broke the board (BP-20)"],
   ])("takes no key from %j when the branch names the task", (title) => {
     const [matched] = matchPRsToTasks([pr({ ref: "bp-5/x", title })], "BP");
     expect(matched.matchedTaskNumbers).toEqual([5]);
   });
 
-  it("keeps the branch's key when the title's list names only another", () => {
-    const [matched] = matchPRsToTasks([pr({ ref: "bp-5/x", title: "retitled (BP-6)" })], "BP");
-    expect(matched.matchedTaskNumbers).toEqual([5, 6]);
+  it("keeps the branch's key when the title's list leaves it out", () => {
+    const [matched] = matchPRsToTasks([pr({ ref: "bp-5/x", title: "retitled (BP-6, BP-7)" })], "BP");
+    expect(matched.matchedTaskNumbers).toEqual([5, 6, 7]);
+  });
+
+  it("reads a list joined by spaces", () => {
+    const [matched] = matchPRsToTasks([pr({ ref: "bp-5/x", title: "fix (BP-5 BP-6  BP-7)" })], "BP");
+    expect(matched.matchedTaskNumbers).toEqual([5, 6, 7]);
   });
 
   it("does not read a word or a version as a further key", () => {
@@ -164,11 +170,6 @@ describe("matchPRsToTasks", () => {
     const [version] = matchPRsToTasks([pr({ ref: "bp-5/x", title: "bump BP-1.2.3" })], "BP");
     expect(word.matchedTaskNumbers).toEqual([12]);
     expect(version.matchedTaskNumbers).toEqual([5]);
-  });
-
-  it("holds the boundary inside a closing list", () => {
-    const [matched] = matchPRsToTasks([pr({ ref: "bp-5/x", title: "fix (BP-5, websubp-99)" })], "BP");
-    expect(matched.matchedTaskNumbers).toEqual([5]);
   });
 
   it("still matches the key after a separator, which is every branch anyone writes", () => {
