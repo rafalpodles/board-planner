@@ -209,6 +209,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
 
   it("removes the node_modules the step's own npm install left, and the Build gate installs its own", async () => {
     let leftForBuild: boolean | undefined;
+    let installedForTest: string | undefined;
     const h = run(
       [IMPLEMENT, BUILD, TEST, PUSH],
       { implement: (path) => write(path, "node_modules/pkg/index.js", "module.exports = 'the step's';\n") },
@@ -217,13 +218,16 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
           leftForBuild = existsSync(join(path, "node_modules", "pkg", "index.js"));
           write(path, "node_modules/pkg/index.js", "module.exports = 'the install's';\n");
         },
-        "test-run": (path) => expect(readFileSync(join(path, "node_modules", "pkg", "index.js"), "utf8")).toContain("install"),
+        "test-run": (path) => {
+          installedForTest = readFileSync(join(path, "node_modules", "pkg", "index.js"), "utf8");
+        },
       },
     );
     await h.done;
 
     expect(h.reporter.failed).not.toHaveBeenCalled();
     expect(leftForBuild).toBe(false);
+    expect(installedForTest).toContain("install");
     expect(h.ran).toEqual(["build", "test-run"]);
     expect(h.delivery.push).toHaveBeenCalled();
     expect(noted(h)).toHaveLength(1);
@@ -535,13 +539,14 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
 
     it("removes a file a step added inside one that was there before the run", async () => {
       let seen: boolean | undefined;
+      let depKept: boolean | undefined;
       const h = run(
         [IMPLEMENT, TEST, PUSH],
         { implement: (path) => write(path, "node_modules/dep/lib/evil.test.js", "it('runs', () => {});\n") },
         {
           "test-run": (path) => {
             seen = existsSync(join(path, "node_modules", "dep", "lib", "evil.test.js"));
-            expect(existsSync(join(path, "node_modules", "dep", "index.js"))).toBe(true);
+            depKept = existsSync(join(path, "node_modules", "dep", "index.js"));
           },
         },
         nestedDep,
@@ -550,6 +555,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
 
       expect(h.reporter.failed).not.toHaveBeenCalled();
       expect(seen).toBe(false);
+      expect(depKept).toBe(true);
       expect(noted(h)[0]).toMatch(/removed 1 ignored entry .*node_modules\/dep\/lib\/evil\.test\.js \(new; /);
     });
 
