@@ -489,10 +489,11 @@ test("the machine settles a refusal with an error, over its own PATCH, and the p
  * reloads, which is what the panel is for: a reload would prove only that the record moved.
  */
 test("a panel left open learns the machine pushed, from its own poll", async ({ page, request }) => {
-  await request.post(`/api/workers/${WORKER_ID}/decisions`, {
+  const created = await request.post(`/api/workers/${WORKER_ID}/decisions`, {
     headers: workerHeaders(),
     data: record(),
   });
+  expect(created.status(), await created.text()).toBe(201);
 
   await signIn(page, "owner");
   await openTheTask(page);
@@ -506,21 +507,21 @@ test("a panel left open learns the machine pushed, from its own poll", async ({ 
   expect((await answered).status()).toBe(200);
   await expect(page.getByTestId("decision-headline")).toContainText("waiting for the machine to push it");
 
-  const polled: number[] = [];
-  page.on("response", (response) => {
-    if (response.url().includes(`/tasks/${HELD_TASK_ID}/decision`) && response.request().method() === "GET") {
-      polled.push(response.status());
-    }
-  });
+  const polled = page.waitForResponse(
+    async (response) =>
+      response.url().includes(`/tasks/${HELD_TASK_ID}/decision`) &&
+      response.request().method() === "GET" &&
+      (await response.json()).decision?.state === "delivered",
+    { timeout: 25_000 }
+  );
   const settled = await request.patch(`/api/workers/${WORKER_ID}/decisions`, {
     headers: workerHeaders(),
     data: { taskId: String(HELD_TASK_ID), state: "delivered", prUrl: "https://github.com/owner/repo/pull/42" },
   });
   expect(settled.status(), await settled.text()).toBe(200);
 
-  await expect(page.getByTestId("decision-headline")).toContainText("pull request is open", { timeout: 25_000 });
-  expect(polled.length).toBeGreaterThan(0);
-  expect(new Set(polled)).toEqual(new Set([200]));
+  expect((await polled).status()).toBe(200);
+  await expect(page.getByTestId("decision-headline")).toContainText("pull request is open");
 });
 
 /**

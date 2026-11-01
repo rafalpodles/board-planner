@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "crypto";
 import mongoose from "mongoose";
 import { DEFAULT_ORGANISATION_ID } from "@/lib/organisation-field";
 import { OIDC_STUB_LABEL, OIDC_STUB_URL } from "../playwright.config";
-import { SAME_ORIGIN } from "./api";
+import { ADMIN_AUTH, SAME_ORIGIN } from "./api";
 import { boardWithHistory } from "./insights-board";
 import {
   ADMIN_ID,
@@ -15,6 +15,7 @@ import {
   PROJECT_ID,
   PROJECT_KEY,
   PROJECT_NAME,
+  SIBLING_TASK_ID,
   SIBLING_TASK_NUMBER,
   SIBLING_TASK_TITLE,
   WORKER_NAME,
@@ -36,9 +37,9 @@ import { signIn } from "./session";
  * Each screen waits for something only its loaded state can show, because a spinner has nothing
  * on it to violate.
  *
- * Every screen is swept again in dark for contrast alone (BP-1090): the other rules read the
- * markup, which the theme does not touch. `dark-theme.spec.ts` keeps the assertions axe cannot
- * make, such as a surface that should be dark and a colour that is project data.
+ * Every screen is swept again in dark for the two rules that compare colours (BP-1090); the rest
+ * read the markup, which the theme does not touch. `dark-theme.spec.ts` keeps the assertions axe
+ * cannot make, such as a surface that should be dark and a colour that is project data.
  */
 
 const WCAG_A_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -70,6 +71,16 @@ async function seedCatalog() {
   const { seedAgents } = await import("@/lib/agent-seed");
   const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
   await withDb(() => seedAgents(scopedToDefaultOrganisation()));
+}
+
+const COMMENT_LINK = "the guide";
+
+async function seedCommentWithLink(request: APIRequestContext) {
+  const posted = await request.post(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}/comments`, {
+    headers: ADMIN_AUTH,
+    data: { body: `Start from [${COMMENT_LINK}](https://example.com/guide) before anything else.` },
+  });
+  expect(posted.status(), await posted.text()).toBe(201);
 }
 
 const INSIGHTS_KEY = "AXE";
@@ -123,6 +134,9 @@ async function nextProviderSignIn() {
   });
   expect(answer.ok, "the OIDC stub refused its script").toBe(true);
 }
+
+// Disabled until the terms have answered, and axe skips a disabled control's contrast
+const accountForm = (page: Page) => button(page, "Create my account").and(page.locator(":enabled"));
 
 async function machineAsksToEnrol(page: Page) {
   const asked = await page.request.post("/api/workers/enrolment/device", {
@@ -200,7 +214,7 @@ const SCREENS: Screen[] = [
     name: "invitation",
     signedOut: true,
     open: async (page) => page.goto(`/invite?token=${await plantInvitation("invited@sweep.example.com")}`),
-    ready: (page) => page.getByRole("heading", { name: /^Join / }),
+    ready: (page) => button(page, `Accept with ${OIDC_STUB_LABEL}`),
   },
   {
     name: "invitation through a provider",
@@ -210,7 +224,7 @@ const SCREENS: Screen[] = [
       await page.goto(`/invite?token=${await plantInvitation(PROVIDER_ADDRESS)}`);
       await button(page, `Accept with ${OIDC_STUB_LABEL}`).click();
     },
-    ready: (page) => page.getByText(`${OIDC_STUB_LABEL} confirmed ${PROVIDER_ADDRESS}`),
+    ready: accountForm,
   },
   {
     name: "sign-up through a provider",
@@ -226,7 +240,7 @@ const SCREENS: Screen[] = [
       await page.goto("/login");
       await button(page, `Continue with ${OIDC_STUB_LABEL}`).click();
     },
-    ready: (page) => page.getByText(`${OIDC_STUB_LABEL} confirmed ${PROVIDER_ADDRESS}`),
+    ready: accountForm,
   },
   {
     name: "connecting a machine",
@@ -294,6 +308,12 @@ const SCREENS: Screen[] = [
     ready: (page) => statusPicker(page).filter({ visible: true }).first(),
   },
   {
+    name: "a comment with a link",
+    prepare: seedCommentWithLink,
+    open: at(`${BOARD}/tasks/${SIBLING_TASK_NUMBER}`),
+    ready: (page) => page.getByRole("main").getByRole("link", { name: COMMENT_LINK, exact: true }).first(),
+  },
+  {
     name: "sprints",
     prepare: seedSprintPlanning,
     open: at(`${BOARD}/sprints`),
@@ -319,7 +339,8 @@ const SCREENS: Screen[] = [
     name: "insights with data",
     prepare: seedInsights,
     open: at(`/projects/${INSIGHTS_KEY}/insights`),
-    ready: (page) => page.getByTestId("insights-tiles"),
+    // The upsell draws tiles too, over sample data: a plotted task is what only a live board has
+    ready: (page) => page.getByTestId("insights-live").getByTestId("insights-scatter").locator("circle").first(),
   },
   ...(
     [
@@ -413,7 +434,7 @@ async function arrive(page: Page, request: APIRequestContext, screen: Screen) {
 
 const inDark = (page: Page) => page.addInitScript(() => localStorage.setItem("theme", "dark"));
 
-const contrast = (page: Page) => violations(page, new AxeBuilder({ page }).withRules(["color-contrast"]));
+const contrast = (page: Page) => violations(page, new AxeBuilder({ page }).withRules(["color-contrast", "link-in-text-block"]));
 
 for (const screen of SCREENS) {
   test(`${screen.name} has no WCAG A or AA violations`, async ({ page, request }) => {

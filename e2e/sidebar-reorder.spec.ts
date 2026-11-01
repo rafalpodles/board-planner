@@ -3,6 +3,7 @@ import {
   NEWEST_PROJECT_ID,
   PROJECT_ID,
   NEWEST_PROJECT_KEY,
+  NEWEST_PROJECT_NAME,
   PROJECT_KEY,
   PROJECT_NAME,
   SECOND_PROJECT_ID,
@@ -152,6 +153,8 @@ test("a board dragged down the sidebar stays there, for everybody, after a reloa
   await dragFirstRowDown(page, NEWEST_PROJECT_ID, PROJECT_ID);
 
   expect((await saved).status()).toBe(200);
+  // The row moved in the DOM, which drops focus unless the handle is the activator dnd-kit restores it to
+  await expect(page.getByRole("button", { name: `Reorder ${NEWEST_PROJECT_NAME}`, exact: true })).toBeFocused();
 
   // Polled: the list is reordered optimistically, so a one-shot read races the render rather than
   // the request it is gated on

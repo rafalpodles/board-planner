@@ -151,7 +151,7 @@ function SubItem({ href, icon, label, active, dot, pill }: SubItemProps) {
  * Carries useSortable for one project. A pointer drags the whole row, so its listener goes on
  * the row while the sortable element is the wrapper that also holds the expanded sub-items —
  * otherwise the sub-items would not travel with it. The keyboard gets a handle of its own: the
- * row is full of links, and dnd-kit takes Space and Enter from anything inside the element
+ * row holds a link and a button, and dnd-kit takes Space and Enter from anything inside the element
  * carrying its key listener unless an activator is named.
  */
 function SortableProject({
@@ -212,7 +212,7 @@ export function ProjectTree({
 
   const canReorder = !!onReorder && projects.length > 1;
   const sensors = useSensors(
-    // The whole row drags and it is full of links, so a drag only begins once the
+    // The whole row drags and it holds a link, so a drag only begins once the
     // pointer has actually travelled — a plain click still navigates
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
