@@ -265,7 +265,7 @@ export function createExecutor(
       const spawn = confineTool(agent.tool, agent.path, agentArgs, {
         writable: [...(agent.worktreeWritable(brief.capability) ? worktrees : []), ...run.writable],
         ...(usesOwnCommands(gateCommandsOf(config))
-          ? { sealedHomes: { ...sealedHomesFor([...agent.sessionReadable(), ...checkoutGitDirs]), keychain: true } }
+          ? { sealedHomes: { ...sealedHomesFor([...agent.sessionReadable(), ...worktrees.map((dir) => (typeof dir === "string" ? dir : dir.path)), ...checkoutGitDirs]), keychain: true } }
           : {}),
       });
 

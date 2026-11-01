@@ -2,6 +2,8 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
+import { NO_RUN } from "./agents/agent.js";
+import { claudeAgent } from "./agents/claude.js";
 import { createExecutor } from "./executor.js";
 import { SANDBOX_COMMAND } from "./sandbox.js";
 import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
@@ -218,6 +220,18 @@ describe("createExecutor", () => {
     expect(argv(0)).toContain("/Library/Keychains");
     expect(argv(0)).not.toContain("com.apple.SecurityServer");
     expect(argv(1)).not.toContain("(deny file-read* (with errno ENOENT)");
+  });
+
+  it("keeps a worktree readable under a shut home for a step that may not write it", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+    const reader = { ...claudeAgent(CLAUDE_PATH), worktreeWritable: () => false, prepare: async () => ({ ...NO_RUN, writable: [tmpdir()] }) };
+
+    await createExecutor(workerConfig({ testCommand: "go test ./..." }), runner, reader).execute({ ...options, brief: { ...options.brief, capability: "read-only" } });
+
+    const argv = run.mock.calls[0][1] as string[];
+    const named = (prefix: string) => argv.filter((arg) => arg.startsWith(prefix)).map((arg) => arg.slice(arg.indexOf("=") + 1));
+    expect(named("R")).toContain(options.worktreeDir.path);
+    expect(named("W")).not.toContain(options.worktreeDir.path);
   });
 
   // An agent told to commit and unable to would report itself blocked
