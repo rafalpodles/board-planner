@@ -74,6 +74,7 @@ import {
   SANDBOX_CHECK,
 } from "./preflight.js";
 import { createReporter, ReleaseMemory } from "./reporter.js";
+import { createSettingsHolds } from "./settings-hold.js";
 import { abortableSleep } from "./sleep.js";
 import { HeartbeatDeps, loadIdentity, PROTOCOL_VERSION, startHeartbeat } from "./registration.js";
 import { bindRepository, createAllowlistReader, repoInventory } from "./repos.js";
@@ -217,6 +218,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // once-per-binding log below: a machine parked next to a repository it cannot resolve a base in
   // would otherwise write the same board comment, and fire the same notification, every poll.
   const releaseComments: ReleaseMemory = new Map();
+  // Outlives the run for the same reason. In memory, because a restart costing one more failed task
+  // and no attempt is also the way out for a fix that lands in the repository.
+  const settingsHolds = createSettingsHolds(deps.logError);
   const readAllowlist = createAllowlistReader(bootstrap.stateDir);
 
   // Everything below is worker-wide policy and the assignment list, both server-controlled and
@@ -810,6 +814,11 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const remoteUrl = bound.get(task.projectId)?.remote;
     const several = bound.get(task.projectId)?.repositories ?? [];
 
+    const holdOnSettingsFault = (disposition: RunDisposition): RunDisposition => {
+      if (disposition === "settings-fault") settingsHolds.hold(task, taskConfig);
+      return disposition;
+    };
+
     currentRun = { taskId: task.taskId, runId: task.runId };
     try {
       if (several.length > 1) {
@@ -834,7 +843,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
               createDelivery(runner, gitPath, ghPath, baseBranch, githubToken),
           };
         });
-        return await runs.under((signal) => {
+        return holdOnSettingsFault(await runs.under((signal) => {
           const pipeline: SeveralRepositoriesDeps = {
             config: taskConfig,
             api,
@@ -855,9 +864,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             telemetry,
           };
           return runTaskInRepositories(pipeline, task);
-        });
+        }));
       }
-      return await runs.under((signal) => {
+      return holdOnSettingsFault(await runs.under((signal) => {
         const pipeline: PipelineDeps = {
           config: taskConfig,
           api,
@@ -886,7 +895,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           telemetry,
         };
         return runTask(pipeline, task);
-      });
+      }));
     } finally {
       currentRun = null;
     }
@@ -979,6 +988,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       ),
     api,
     execute,
+    heldAgents: (projectId) => {
+      const settings = configFor(projectId);
+      return settings ? settingsHolds.heldAgents(projectId, settings) : [];
+    },
     sleep: deps.sleep,
     drain,
     claimBlocked,

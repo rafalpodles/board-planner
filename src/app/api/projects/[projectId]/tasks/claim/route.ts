@@ -7,6 +7,7 @@ import { ownerReachableProjectIds, verdictFor } from "@/lib/worker-service";
 import { capabilitiesOf } from "@/lib/worker-capabilities";
 import { snapshotFor } from "@/lib/agent-snapshot";
 import { agentsBeyond, lackedBy } from "@/lib/agent-providers";
+import { agentsStillHeld, heldAgentsFrom } from "@/lib/held-agents";
 import { releaseTask } from "@/lib/task-service";
 import { claimingMachineIds, HELD_BY_PLAN_ON_THE_MACHINE, isHeldByPlan } from "@/lib/machine-limit";
 
@@ -60,7 +61,7 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
     return NextResponse.json({ error: HELD_BY_PLAN_ON_THE_MACHINE }, { status: 409 });
   }
 
-  const { runId } = (await request.json().catch(() => ({}))) ?? {};
+  const { runId, heldAgents } = (await request.json().catch(() => ({}))) ?? {};
   if (typeof runId !== "string" || !runId.trim()) {
     return NextResponse.json({ error: "runId is required" }, { status: 400 });
   }
@@ -71,6 +72,11 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
       { error: "runId must be 1-64 characters of letters, digits, hyphen or underscore" },
       { status: 400 }
     );
+  }
+
+  const held = heldAgentsFrom(heldAgents);
+  if (!held) {
+    return NextResponse.json({ error: "heldAgents must list agent ids with their gates" }, { status: 400 });
   }
 
   const machineOwnerId = ownerIdOf(worker.owner);
@@ -85,8 +91,9 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
       runId,
       machineOwnerId,
       identityOf(worker),
-      // What this machine says it can run, read from this request and never from a stored heartbeat
-      await agentsBeyond(db, capabilities)
+      // What this machine says it can run, read from this request and never from a stored heartbeat,
+      // and what a project's own commands stopped it running
+      [...(await agentsBeyond(db, capabilities)), ...(await agentsStillHeld(db, projectId, held, machineOwnerId))]
     );
   } catch (error) {
     // 409 with the reason, never 204: 204 is what an empty queue answers, and a board with no

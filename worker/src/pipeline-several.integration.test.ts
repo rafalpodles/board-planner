@@ -96,6 +96,7 @@ describe("a run across several repositories", () => {
       merged: vi.fn<Reporter["merged"]>(async () => {}),
       delivered: vi.fn<Reporter["delivered"]>(async () => {}),
       failed: vi.fn<Reporter["failed"]>(async () => {}),
+      settingsFault: vi.fn<Reporter["settingsFault"]>(async () => {}),
       noted: vi.fn<Reporter["noted"]>(async () => {}),
     };
     const api = {
@@ -213,14 +214,14 @@ describe("a run across several repositories", () => {
     expect(run.reporter.failed).not.toHaveBeenCalled();
   });
 
-  it("fails the task before any step on commands that cannot pass, and ends the pass", async () => {
+  it("reports the fault before any step on commands that cannot pass, and ends the pass", async () => {
     const run = build({ commands: { buildCommand: "sh b" } });
 
     const disposition = await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, TESTS, PUSH));
 
     expect(disposition).toBe("settings-fault");
     expect(run.seen).toHaveLength(0);
-    expect(run.reporter.failed).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("no test command"));
+    expect(run.reporter.settingsFault).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("no test command"));
     expect(run.reporter.released).not.toHaveBeenCalled();
   });
 

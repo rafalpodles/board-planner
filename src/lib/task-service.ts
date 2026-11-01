@@ -129,6 +129,8 @@ export const CLEAR_WORKER_ASSIGNEE = {
 // spend an attempt for a move somebody made deliberately.
 const STILL_HELD = { "execution.runId": { $nin: ["", null] } };
 
+const ATTEMPT_REFUND = { "execution.attempts": { $max: [0, { $add: [{ $ifNull: ["$execution.attempts", 0] }, -1] }] } };
+
 export { EXECUTION_LEASE_MS };
 
 // Named rather than inlined so the board, both forms, MCP and the PM agent all refuse in the same
@@ -816,6 +818,12 @@ export interface StatusChangeOptions {
    * sat in the active column until the two-hour lease expired with its work already merged (BP-335).
    */
   workerId?: string;
+  /**
+   * The attempt the claim spent is given back in the same write, for a run stopped by settings
+   * rather than by the task (BP-1117). Honoured only for the worker holding the run, on the move
+   * that ends it, so a report replayed from the outbox cannot give back an attempt twice.
+   */
+  refundAttempt?: boolean;
 }
 
 export async function changeStatus(
@@ -827,7 +835,7 @@ export async function changeStatus(
   options: StatusChangeOptions | boolean = {}
 ): Promise<TaskServiceResult> {
   // The boolean form is the old signature; kept so a caller passing `true` still means force
-  const { force = false, workerId: callerWorkerId } =
+  const { force = false, workerId: callerWorkerId, refundAttempt = false } =
     typeof options === "boolean" ? { force: options, workerId: undefined } : options;
 
   await connectDB();
@@ -856,19 +864,18 @@ export async function changeStatus(
   // worker — no force needed, so the machine-credential refusal never fired either (BP-320).
   // updateTask has had the conditional shape all along; this is the same rule, finally matching.
   const leavesColumn = oldTask.status !== status;
+  const conflict = runHolding(oldTask);
+  // The holder is exempt: reporting the outcome of your own run is the run ending, not somebody
+  // taking the task off you. Everyone else — another worker, the PM agent, a person without
+  // force — is still refused (BP-335).
+  const byItsHolder = !!conflict && !!callerWorkerId && conflict.workerId === callerWorkerId;
 
-  if (!force && leavesColumn) {
-    const conflict = runHolding(oldTask);
-    // The holder is exempt: reporting the outcome of your own run is the run ending, not somebody
-    // taking the task off you. Everyone else — another worker, the PM agent, a person without
-    // force — is still refused (BP-335).
-    const byItsHolder = !!conflict && !!callerWorkerId && conflict.workerId === callerWorkerId;
-    if (conflict && !byItsHolder) {
-      const key = taskKeyOf(projectColumns?.key, oldTask.taskNumber);
-      return refuseHeldRun(db, conflict, key);
-    }
+  if (!force && leavesColumn && conflict && !byItsHolder) {
+    const key = taskKeyOf(projectColumns?.key, oldTask.taskNumber);
+    return refuseHeldRun(db, conflict, key);
   }
 
+  const refund = refundAttempt && byItsHolder && leavesColumn ? ATTEMPT_REFUND : {};
 
   const task = await Task.findOneAndUpdate(
     // Guarded on the status just read, whenever the write means to leave it: two overlapping
@@ -878,7 +885,7 @@ export async function changeStatus(
     // mints a recurring task's next occurrence (BP-489).
     { _id: taskId, organisation: db.organisation, project: projectId, ...(leavesColumn ? { status: oldTask.status } : {}) },
     leavesColumn
-      ? [{ $set: { status, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }]
+      ? [{ $set: { status, ...CLEAR_WORKER_ASSIGNEE, ...refund } }, { $unset: RUN_FIELDS }]
       : [{ $set: { status } }],
     { returnDocument: "after", updatePipeline: true }
   // The board reconciles the row it moved from this answer (BP-558), so anything this leaves as a

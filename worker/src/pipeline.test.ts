@@ -180,6 +180,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     merged: vi.fn<Reporter["merged"]>().mockResolvedValue(undefined),
     delivered: vi.fn<Reporter["delivered"]>().mockResolvedValue(undefined),
     failed: vi.fn<Reporter["failed"]>().mockResolvedValue(undefined),
+    settingsFault: vi.fn<Reporter["settingsFault"]>().mockResolvedValue(undefined),
     noted: vi.fn<Reporter["noted"]>().mockResolvedValue(undefined),
   };
   const createReporter = vi.fn<PipelineDeps["createReporter"]>(() => reporter);
@@ -267,16 +268,15 @@ describe("gateCapFor", () => {
 });
 
 describe("a project whose commands cannot pass, known before the step anybody pays for", () => {
-  // A refund would keep this task at the head of the queue for ever, so it fails; ending the pass is
-  // what keeps one setting from taking the whole queue with it
-  it("fails the task before the first step, naming the setting, and ends the pass", async () => {
+  it("reports the fault before the first step, naming the setting, and ends the pass", async () => {
     const h = harness({ config: { ...config, buildCommand: "sh b" } });
 
     const disposition = await runTask(h.deps, running("implement", "test-run"));
 
     expect(disposition).toBe("settings-fault");
     expect(h.executor.execute).not.toHaveBeenCalled();
-    expect(h.reporter.failed).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("no test command"));
+    expect(h.reporter.settingsFault).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("no test command"));
+    expect(h.reporter.failed).not.toHaveBeenCalled();
     expect(h.reporter.released).not.toHaveBeenCalled();
     expect(h.reporter.requeued).not.toHaveBeenCalled();
     expect(h.deps.quarantineProject).not.toHaveBeenCalled();

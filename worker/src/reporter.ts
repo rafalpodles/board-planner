@@ -24,6 +24,8 @@ export interface Reporter {
   merged(task: ClaimedTask, prUrl: string, summary: string): Promise<void>;
   delivered(task: ClaimedTask, prUrl: string, summary: string): Promise<void>;
   failed(task: ClaimedTask, reason: string): Promise<void>;
+  /** A project's own commands stopped the run before any step: not the task's doing, so no attempt is spent. */
+  settingsFault(task: ClaimedTask, reason: string): Promise<void>;
   noted(task: ClaimedTask, note: string): Promise<void>;
 }
 
@@ -88,13 +90,15 @@ export function createReporter(
     }
   }
 
-  async function move(task: ClaimedTask, status: string): Promise<void> {
+  async function move(task: ClaimedTask, status: string, options?: { refundAttempt: boolean }): Promise<void> {
     try {
-      await api.setStatus(task.projectId, task.taskId, status);
+      await (options
+        ? api.setStatus(task.projectId, task.taskId, status, options)
+        : api.setStatus(task.projectId, task.taskId, status));
     } catch (error) {
       queue(
         task,
-        { kind: "status", projectId: task.projectId, taskId: task.taskId, status },
+        { kind: "status", projectId: task.projectId, taskId: task.taskId, status, ...options },
         `move the task to ${status}`,
         error
       );
@@ -187,6 +191,18 @@ export function createReporter(
     async failed(task, reason) {
       const attempt = task.attempts > 0 ? ` on attempt ${task.attempts}` : "";
       await report(task, statusIds.review, `The execution worker gave up${attempt}.\n\n${safeText(reason)}`);
+    },
+
+    async settingsFault(task, reason) {
+      lastRelease.delete(task.taskId);
+      await comment(
+        task,
+        `The execution worker stopped before any step, and this run did not spend an attempt.\n\n${safeText(reason)}\n\n` +
+          `This machine now leaves the project's other tasks on this agent in their column, because each would stop the same way. ` +
+          `It takes them again once the project's commands or base branch change, or the agent's gates do. ` +
+          `If the fix lands in the repository instead, restart the worker.`
+      );
+      await move(task, statusIds.review, { refundAttempt: true });
     },
 
     async noted(task, note) {

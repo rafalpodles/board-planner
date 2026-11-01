@@ -40,6 +40,16 @@ describe("createOutbox", () => {
     expect(outbox.pending()).toBe(0);
   });
 
+  it("keeps a refund on a status it could not deliver the first time", async () => {
+    const store = memoryStore();
+    createOutbox(store, vi.fn()).add({ kind: "status", projectId: "CP", taskId: "t1", status: "review", refundAttempt: true });
+    const api = apiSpy();
+
+    await createOutbox(store, vi.fn()).flush(api);
+
+    expect(api.setStatus).toHaveBeenCalledWith("CP", "t1", "review", { refundAttempt: true });
+  });
+
   // The whole reason this exists: the process can die between the merge and the report
   it("survives a restart, because a new instance reads the same store", async () => {
     const store = memoryStore();

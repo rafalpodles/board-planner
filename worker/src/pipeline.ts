@@ -378,8 +378,9 @@ export async function releaseIfAborted(
  * the machine, not the task, that an operator has to be told about.
  *
  * "settings-fault" ends the pass the same way for a project's own commands that cannot run here, and the
- * task is failed rather than handed back: nothing on this machine changes until a person edits them, so
- * a task handed back would be claimed again on every poll.
+ * task goes to review rather than back to the queue: nothing on this machine changes until a person
+ * edits them, so a task handed back would be claimed again on every poll. Its attempt is refunded, and
+ * the agent is held from later claims (settings-hold.ts).
  */
 export type RunDisposition = void | "machine-fault" | "settings-fault";
 
@@ -683,13 +684,13 @@ export async function runTask(
     let ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, worktree.path);
 
     const onOwnCommands = usesOwnCommands(gateCommandsOf(config));
-    // Here and not at the gate, which is after the step somebody pays for. Failed and not released: a
-    // refund would hold this task at the head of the queue for ever, with the tasks of agents the fault
-    // does not touch behind it. The pass ends, so one wrong setting takes a task a poll, not the queue
+    // Here and not at the gate, which is after the step somebody pays for. Not released: this task
+    // would stay at the head of the queue for ever, with the tasks of agents the fault does not touch
+    // behind it. The agent is held after this, so one wrong setting takes one task, not the queue
     const configFault = gateConfigFault(task.agent.sequence, gateCommandsOf(config), worktree.path);
     if (configFault) {
       settle("failed", configFault);
-      await reporter.failed(task, `this run stopped before any step: ${configFault}`);
+      await reporter.settingsFault(task, configFault);
       return "settings-fault";
     }
 

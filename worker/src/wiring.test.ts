@@ -947,6 +947,39 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     });
   });
 
+  // BP-1117, at the join nothing else sees: the fault a run reports is what the next claim steps over
+  describe("a settings fault, across polls", () => {
+    const GATES = ["protected-paths", "diff-size", "test-presence", "build", "test-run", "review"];
+    const heldInClaim = (api: { claim: { mock: { calls: unknown[][] } } }, nth: number) => api.claim.mock.calls[nth][2];
+
+    it("holds the agent from the next claim, and lets go on the poll after the setting is corrected", async () => {
+      const policy: Record<string, unknown> = { buildCommand: "sh --version" };
+      const { api } = await runOneTask(undefined, policy, {
+        tasks: [CLAIMED],
+        passes: 3,
+        clockJumpOnSleepMs: 60_000,
+        readFile: (path) => (!path.endsWith("package.json") && !path.endsWith("package-lock.json") && existsSync(path) ? readFileSync(path, "utf8") : null),
+        path: "/usr/bin:/bin",
+        onSleep: (_stateDir, sleepIndex) => {
+          if (sleepIndex === 1) policy.testCommand = "sh --version";
+        },
+      });
+
+      expect(api.claim).toHaveBeenCalledTimes(3);
+      expect(heldInClaim(api, 0)).toEqual([]);
+      expect(heldInClaim(api, 1)).toEqual([{ agentId: "a1", gates: GATES }]);
+      expect(heldInClaim(api, 2)).toEqual([]);
+      expect(api.setStatus).toHaveBeenCalledWith("p1", "t1", "in_review", { refundAttempt: true });
+    });
+
+    it("holds nothing after a run that ended any other way", async () => {
+      const { api } = await runOneTask(undefined, undefined, { tasks: [CLAIMED], passes: 2, clockJumpOnSleepMs: 60_000 });
+
+      expect(api.claim.mock.calls.length).toBeGreaterThan(1);
+      expect(api.claim.mock.calls.every(([, , held]) => held?.length === 0)).toBe(true);
+    });
+  });
+
   it("keeps one project's commands from another's on the same machine", async () => {
     const run = await runOneTask(undefined, undefined, {
       repos: [REPO, OTHER_REPO],
