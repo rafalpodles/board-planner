@@ -394,6 +394,7 @@ async function syncGithubRepository(
   const seen = new Set(seenList);
 
   const linked = new Set<string>();
+  const tasksLinked = new Set<number>();
   let written = 0;
   let unlinked = 0;
   let unlinkedTasks = 0;
@@ -441,6 +442,7 @@ async function syncGithubRepository(
       written++;
     }
     for (const pr of prs) linked.add(pr.url);
+    tasksLinked.add(taskNumber);
 
     // Auto-transition: merged PR + task in_review → ready_to_test.
     // Keyed to the seeded column ids; projects that removed either column opt out.
@@ -510,8 +512,8 @@ async function syncGithubRepository(
   return {
     ok: true,
     prsFound: matchedPRs.length,
-    tasksLinked: prsByTask.size,
-    taskNumbers: [...prsByTask.keys()],
+    tasksLinked: tasksLinked.size,
+    taskNumbers: [...tasksLinked],
     prsLinked: linked.size,
     tasksWritten: written,
     prsUnlinked: unlinked,

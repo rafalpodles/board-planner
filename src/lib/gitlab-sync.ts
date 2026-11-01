@@ -123,6 +123,7 @@ async function syncGitlabRepository(db: ScopedDb, project: GitlabSyncProject, re
   const seen = new Set(seenList);
 
   const linked = new Set<string>();
+  const tasksLinked = new Set<number>();
   let unlinked = 0;
   let autoTransitioned = 0;
 
@@ -155,6 +156,7 @@ async function syncGitlabRepository(db: ScopedDb, project: GitlabSyncProject, re
     await recordLinkChanges(db, project._id, task._id, actor, added, removed);
     unlinked += removed.length;
     for (const mr of mrs) linked.add(mr.url);
+    tasksLinked.add(taskNumber);
 
     const hasMerged = mrs.some((mr) => mr.state === "merged");
     const destination = hasMerged ? mergedReviewDestination(project as never, task.status) : undefined;
@@ -195,8 +197,8 @@ async function syncGitlabRepository(db: ScopedDb, project: GitlabSyncProject, re
   return {
     ok: true,
     prsFound: matchedMRs.length,
-    tasksLinked: mrsByTask.size,
-    taskNumbers: [...mrsByTask.keys()],
+    tasksLinked: tasksLinked.size,
+    taskNumbers: [...tasksLinked],
     prsLinked: linked.size,
     prsUnlinked: unlinked,
     autoTransitioned,

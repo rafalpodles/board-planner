@@ -848,7 +848,7 @@ describe("a pull request that names several tasks (BP-635)", () => {
     const result = await syncGithubPullRequests(db, project(), "u1");
 
     expect(linkArgs().map((write) => write.id).sort()).toEqual(["t5", "t7"]);
-    expect(result).toMatchObject({ prsLinked: 1 });
+    expect(result).toMatchObject({ prsLinked: 1, tasksLinked: 2 });
   });
 
   it("unlinks only the task whose key left the title", async () => {

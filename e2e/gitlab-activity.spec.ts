@@ -3,6 +3,8 @@ import { GITLAB_STUB_URL } from "../playwright.config";
 import {
   GITLAB_PROJECT_KEY,
   GITLAB_REPO,
+  GITLAB_SIBLING_TASK_NUMBER,
+  GITLAB_SIBLING_TASK_TITLE,
   GITLAB_TASK_KEY,
   GITLAB_TASK_NUMBER,
   GITLAB_TASK_TITLE,
@@ -71,6 +73,26 @@ async function openTask(page: Page) {
   const response = await activity;
   await expect(page.getByRole("textbox", { name: "Task title" })).toHaveValue(GITLAB_TASK_TITLE);
   return response;
+}
+
+async function syncMergeRequests(page: Page) {
+  await page.goto(`/projects/${GITLAB_PROJECT_KEY}/settings?section=integrations`);
+  const picker = page.getByRole("button", { name: /Add integration/ });
+  const row = page.getByRole("button", { name: /^GitLab/ });
+  await expect(picker.or(row).first()).toBeVisible();
+  const syncButton = page.getByRole("button", { name: "Sync merge requests now" });
+  await expect(async () => {
+    if ((await row.first().getAttribute("aria-expanded")) !== "true") await row.first().click();
+    await expect(syncButton).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+
+  const synced = page.waitForResponse(
+    (r) => r.url().endsWith("/gitlab/sync") && r.request().method() === "POST"
+  );
+  await syncButton.click();
+  const response = await synced;
+  expect(response.status(), await response.text()).toBe(200);
+  return response.json();
 }
 
 const section = (page: Page) =>
@@ -191,23 +213,7 @@ test.describe("the merge-request sync", () => {
     await openTask(page);
     await expect(page.getByRole("link", { name: /#12/ })).toHaveCount(0);
 
-    await page.goto(`/projects/${GITLAB_PROJECT_KEY}/settings?section=integrations`);
-    const picker = page.getByRole("button", { name: /Add integration/ });
-    const row = page.getByRole("button", { name: /^GitLab/ });
-    await expect(picker.or(row).first()).toBeVisible();
-    const syncButton = page.getByRole("button", { name: "Sync merge requests now" });
-    await expect(async () => {
-      if ((await row.first().getAttribute("aria-expanded")) !== "true") await row.first().click();
-      await expect(syncButton).toBeVisible({ timeout: 2_000 });
-    }).toPass({ timeout: 20_000 });
-
-    const synced = page.waitForResponse(
-      (r) => r.url().endsWith("/gitlab/sync") && r.request().method() === "POST"
-    );
-    await syncButton.click();
-    const response = await synced;
-    expect(response.status(), await response.text()).toBe(200);
-    expect(await response.json()).toMatchObject({ prsFound: 1, tasksLinked: 1, prsLinked: 1 });
+    expect(await syncMergeRequests(page)).toMatchObject({ prsFound: 1, tasksLinked: 1, prsLinked: 1 });
     await expect(page.getByTestId("toast").last()).toContainText("Synced: 1 MRs linked to 1 tasks");
 
     await openTask(page);
@@ -219,5 +225,32 @@ test.describe("the merge-request sync", () => {
     await expect(page.getByRole("link", { name: /#13/ })).toHaveCount(0);
 
     expect((await asked(request)).some((r) => r.path.endsWith("/merge_requests"))).toBe(true);
+  });
+
+  // BP-635. The GitHub side is pr-link-several-tasks.spec.ts; this sync groups on its own.
+  test("links a merge request to every task its title names, and counts it once", async ({
+    page,
+    request,
+  }) => {
+    const mergeRequest = {
+      iid: 14,
+      title: `Mirror both fixes (${GITLAB_TASK_KEY}, ${GITLAB_PROJECT_KEY}-${GITLAB_SIBLING_TASK_NUMBER})`,
+      state: "opened",
+      web_url: `${WEB}/-/merge_requests/14`,
+      merged_at: null,
+      source_branch: BRANCH.name,
+      updated_at: "2026-08-01T10:00:00Z",
+    };
+    await stub(request, { mergeRequests: [mergeRequest] });
+    await signIn(page);
+
+    expect(await syncMergeRequests(page)).toMatchObject({ prsFound: 1, tasksLinked: 2, prsLinked: 1 });
+    await expect(page.getByTestId("toast").last()).toContainText("Synced: 1 MRs linked to 2 tasks");
+
+    await openTask(page);
+    await expect(page.getByRole("link", { name: /#14/ })).toBeVisible();
+    await page.goto(`/projects/${GITLAB_PROJECT_KEY}/tasks/${GITLAB_SIBLING_TASK_NUMBER}`);
+    await expect(page.getByRole("textbox", { name: "Task title" })).toHaveValue(GITLAB_SIBLING_TASK_TITLE);
+    await expect(page.getByRole("link", { name: /#14/ })).toBeVisible();
   });
 });
