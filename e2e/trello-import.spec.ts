@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { E2E_MONGODB_URI, MEMBER_USERNAME, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
@@ -11,7 +12,7 @@ import { signIn } from "./session";
  */
 
 const FILE_LABEL = "Import file (CSV, Excel, Jira XML or JSON)";
-const BOARD = readFileSync(new URL("../src/lib/import/__fixtures__/trello-board.json", import.meta.url), "utf8");
+const BOARD = readFileSync(path.join(__dirname, "../src/lib/import/__fixtures__/trello-board.json"), "utf8");
 const LABELS_FIELD = new mongoose.Types.ObjectId("e2e00000000000000000f866");
 
 async function db() {

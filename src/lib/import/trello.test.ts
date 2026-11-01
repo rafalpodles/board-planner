@@ -100,6 +100,12 @@ describe("trelloToTable", () => {
     expect(task.dueDate).toBe("2017-04-12");
   });
 
+  it("keeps the time a card was marked complete", () => {
+    const board = copy();
+    (board.cards.find((c) => c.name === "Backup restore") as Record<string, unknown>).dateCompleted = "2026-03-01T10:00:00.000Z";
+    expect(named(bundleOf(board).bundle.tasks, "Backup restore").completedAt).toBe("2026-03-01T10:00:00.000Z");
+  });
+
   it("leaves a task with no creation time when the id is not Trello's", () => {
     const board = copy();
     board.cards[0].id = "not-a-trello-id";
