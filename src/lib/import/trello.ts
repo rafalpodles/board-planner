@@ -28,7 +28,7 @@ const note = (id: string, what: string): ImportNote => ({
 });
 
 function namedUpTo(names: string[]): string {
-  const shown = names.slice(0, NAMES_LISTED).map((n) => n.slice(0, 60)).join(", ");
+  const shown = names.slice(0, NAMES_LISTED).join(", ");
   return names.length > NAMES_LISTED ? `${shown} and ${names.length - NAMES_LISTED} more` : shown;
 }
 
