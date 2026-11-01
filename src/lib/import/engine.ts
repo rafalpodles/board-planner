@@ -362,8 +362,8 @@ function mergedChecklist(report: ImportReport, t: Resolved, held: IChecklistItem
   const all = [...merged, ...unmatched] as IChecklistItem[];
   const cut = Math.max(0, all.length - MAX_CHECKLIST_ITEMS);
   const stayed = unmatched.length - cut;
-  if (stayed > 0) report.notImported.push({ id: t.ref, what: `${stayed} ${stayed === 1 ? "criterion" : "criteria"} on the task that the file does not have, left in place` });
-  if (cut > 0) report.notImported.push({ id: t.ref, what: `${cut} ${cut === 1 ? "criterion" : "criteria"} removed from the task, as it holds ${MAX_CHECKLIST_ITEMS} and the file comes first` });
+  if (stayed > 0) report.notImported.push({ id: t.title, what: `${stayed} ${stayed === 1 ? "criterion" : "criteria"} on the task that the file does not have, left in place` });
+  if (cut > 0) report.notImported.push({ id: t.title, what: `${cut} ${cut === 1 ? "criterion" : "criteria"} removed from the task, as it holds ${MAX_CHECKLIST_ITEMS} and the file comes first` });
   return all.slice(0, MAX_CHECKLIST_ITEMS);
 }
 

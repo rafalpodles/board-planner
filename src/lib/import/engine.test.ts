@@ -191,7 +191,7 @@ describe("runImport", () => {
     const checked = await run(fakeDb({ existing: [{ id: "1", checklist }] }).db, tasks, {}, true);
     const { db, writes } = fakeDb({ existing: [{ id: "1", checklist }] });
     const report = await run(db, tasks);
-    const said = [{ id: "1", what: "2 criteria on the task that the file does not have, left in place" }];
+    const said = [{ id: "a", what: "2 criteria on the task that the file does not have, left in place" }];
     expect(checked.notImported).toEqual(said);
     expect(report.notImported).toEqual(said);
     expect((writes.updates[0].update.$set.checklist as { text: string }[]).map((i) => i.text)).toEqual(["New", "Old one", "Old two"]);
@@ -219,8 +219,8 @@ describe("runImport", () => {
     expect(written).toHaveLength(MAX_CHECKLIST_ITEMS);
     expect(written[0].text).toBe("from the file");
     const said = [
-      { id: "1", what: "199 criteria on the task that the file does not have, left in place" },
-      { id: "1", what: "1 criterion removed from the task, as it holds 200 and the file comes first" },
+      { id: "a", what: "199 criteria on the task that the file does not have, left in place" },
+      { id: "a", what: "1 criterion removed from the task, as it holds 200 and the file comes first" },
     ];
     expect(report.notImported).toEqual(said);
     expect(checked.notImported).toEqual(said);

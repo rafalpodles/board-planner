@@ -155,7 +155,7 @@ test("a Trello export imports through the mapping step, reports what it left beh
   await expect(mapping.getByLabel("Status “Backlog”")).toHaveValue("todo");
   await press(page, "Check");
   await expect(report).toContainText("Would create 0 and would update 9 of 9 tasks from Trello, with 2 comments.");
-  await expect(left).toContainText("1 criterion on the task that the file does not have, left in place");
+  await expect(left).toContainText("Invoice export: 1 criterion on the task that the file does not have, left in place");
   await press(page, "Import");
   await expect(report).toContainText("Created 0 and updated 9 of 9 tasks from Trello");
 
