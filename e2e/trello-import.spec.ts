@@ -151,6 +151,30 @@ test("a Trello export imports through the mapping step, reports what it left beh
   expect(await (await db()).collection("comments").countDocuments({ task: signOn._id })).toBe(2);
 });
 
+test("a report longer than a page can be read to its last line", async ({ page }) => {
+  await signIn(page, "owner");
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);
+
+  const board = JSON.parse(BOARD);
+  const template = board.cards.find((c: { name: string }) => c.name === "Offline drafts");
+  for (let i = 1; i <= 60; i++) board.cards.push({ ...template, id: `5914b279${String(i).padStart(16, "0")}`, name: `Archived ${i}`, closed: true, pos: 1_000_000 + i });
+  await upload(page, JSON.stringify(board));
+  await press(page, "Check");
+
+  const left = page.getByTestId("import-report").locator("details", { hasText: "Not imported" });
+  await left.locator("summary").click();
+  await expect(left.getByRole("listitem").first()).toBeVisible();
+  await expect(left.getByRole("listitem")).toHaveCount(50);
+  await expect(left).not.toContainText("Archived 60: an archived card");
+
+  const total = Number(/\((\d+)\)/.exec(await left.locator("summary").innerText())![1]);
+  expect(total).toBeGreaterThan(60);
+  await left.getByRole("button", { name: `Show the other ${total - 50}` }).click();
+  await expect(left.getByRole("listitem")).toHaveCount(total);
+  await expect(left).toContainText("Archived 60: an archived card");
+  await expect(left.getByRole("button", { name: /Show the other/ })).toHaveCount(0);
+});
+
 test("a Trello export with nothing open says so, and a bundle in JSON is still read as a bundle", async ({ page }) => {
   await signIn(page, "owner");
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=import`);

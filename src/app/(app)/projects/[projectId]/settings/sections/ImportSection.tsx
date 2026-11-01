@@ -28,6 +28,7 @@ function payloadOf(parsed: unknown): Payload | null {
 }
 
 function Listed<T>({ title, items, line }: { title: string; items: T[]; line: (item: T) => string }) {
+  const [everything, setEverything] = useState(false);
   if (items.length === 0) return null;
   return (
     <details className="text-sm" open={items.length <= 5}>
@@ -35,13 +36,17 @@ function Listed<T>({ title, items, line }: { title: string; items: T[]; line: (i
         {title} ({items.length})
       </summary>
       <ul className="mt-1 list-disc space-y-0.5 pl-5 text-text-muted">
-        {items.slice(0, LISTED).map((item, i) => (
+        {(everything ? items : items.slice(0, LISTED)).map((item, i) => (
           <li key={i} className="break-words">
             {line(item)}
           </li>
         ))}
-        {items.length > LISTED && <li>and {items.length - LISTED} more</li>}
       </ul>
+      {items.length > LISTED && !everything && (
+        <Button variant="secondary" size="sm" className="mt-2" onClick={() => setEverything(true)}>
+          Show the other {items.length - LISTED}
+        </Button>
+      )}
     </details>
   );
 }

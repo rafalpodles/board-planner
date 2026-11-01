@@ -1,6 +1,6 @@
 # trello-board.json
 
-A real Trello board export, the JSON behind *Print, export and share → Export as JSON*, taken from a
+A real Trello board export, the JSON behind *Print, export, and share → Export as JSON*, taken from a
 public board on 2026-11-01 and cut down to eleven cards. Every key Trello wrote is kept.
 
 Anonymised: all text, names, URLs and ids were replaced. An id keeps its first eight hex digits,
@@ -18,6 +18,7 @@ What the real file showed, against what its ticket assumed:
 - `actions` holds the board's newest 1,000 actions and no more: the board counted 7,155 comments in
   `badges.comments` and 3 of them were in the file
 - a card has no creation date; the first eight hex digits of `id` are its Unix time
+- `dateCompleted` is null on every card, including those in a Done list and those with `dueComplete`, so no real value of it has been seen
 - members carry a `username` and no e-mail
 - an uploaded attachment has `isUpload: true` and a URL behind Trello's sign-in, a link has `isUpload: false`
 - archived lists keep their cards, and those cards do not have `closed` set
