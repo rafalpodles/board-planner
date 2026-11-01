@@ -153,7 +153,7 @@ test("a board dragged down the sidebar stays there, for everybody, after a reloa
   await dragFirstRowDown(page, NEWEST_PROJECT_ID, PROJECT_ID);
 
   expect((await saved).status()).toBe(200);
-  // The row moved in the DOM, which drops focus unless the handle is the activator dnd-kit restores it to
+  // A keyboard user carries on from the row they just moved
   await expect(page.getByRole("button", { name: `Reorder ${NEWEST_PROJECT_NAME}`, exact: true })).toBeFocused();
 
   // Polled: the list is reordered optimistically, so a one-shot read races the render rather than
