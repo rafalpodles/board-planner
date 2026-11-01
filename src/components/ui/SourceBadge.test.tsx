@@ -35,6 +35,6 @@ describe("SourceBadge", () => {
     const { rerender } = render(<SourceBadge source="web-ui" />);
     expect(screen.getByTestId("source-badge").className).not.toContain("text-primary");
     rerender(<SourceBadge source="worker" />);
-    expect(screen.getByTestId("source-badge").className).toContain("text-primary");
+    expect(screen.getByTestId("source-badge").className).toContain("text-primary-on-tint");
   });
 });
