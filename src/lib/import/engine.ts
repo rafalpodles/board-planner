@@ -14,7 +14,7 @@ import {
   rendersBlank,
   stripControlCharacters,
 } from "@/lib/identifiers";
-import { mergeCriteria } from "@/lib/checklist";
+import { matchCriteria } from "@/lib/checklist";
 import { logActivities } from "@/lib/activity";
 import { actingThrough } from "@/lib/activity-source";
 import { logProjectAudit } from "@/lib/projectAudit";
@@ -358,10 +358,12 @@ async function storedTasks(db: ScopedDb, projectId: string, source: string, refs
 // A criterion the file also has keeps its id and takes the file's tick; one only the board has stays
 function mergedChecklist(report: ImportReport, t: Resolved, held: IChecklistItem[]): IChecklistItem[] {
   const markdown = t.checklist.map((item) => `- [${item.done ? "x" : " "}] ${item.text}`).join("\n");
-  const merged = mergeCriteria(markdown, held) as IChecklistItem[];
-  const matched = new Set(merged.map((item) => String(item._id)));
-  const all = [...merged, ...held.filter((item) => !matched.has(String(item._id)))];
-  if (all.length > MAX_CHECKLIST_ITEMS) report.truncated.push({ id: t.ref, field: "checklist" });
+  const { merged, unmatched } = matchCriteria(markdown, held);
+  const all = [...merged, ...unmatched] as IChecklistItem[];
+  const cut = Math.max(0, all.length - MAX_CHECKLIST_ITEMS);
+  const stayed = unmatched.length - cut;
+  if (stayed > 0) report.notImported.push({ id: t.ref, what: `${stayed} ${stayed === 1 ? "criterion" : "criteria"} on the task that the file does not have, left in place` });
+  if (cut > 0) report.notImported.push({ id: t.ref, what: `${cut} ${cut === 1 ? "criterion" : "criteria"} removed from the task, as it holds ${MAX_CHECKLIST_ITEMS} and the file comes first` });
   return all.slice(0, MAX_CHECKLIST_ITEMS);
 }
 
@@ -575,6 +577,7 @@ export async function runImport(
     for (const t of resolved) {
       const before = stored.get(t.ref);
       if (before) noteHeld(report, t, before);
+      if (before && t.checklist.length > 0) mergedChecklist(report, t, before.checklist);
       for (const c of t.comments) {
         if (before && comments.has(`${before._id}:${c.ref}`)) report.comments.updated += 1;
         else report.comments.created += 1;

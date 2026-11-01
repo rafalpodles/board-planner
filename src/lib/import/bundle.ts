@@ -124,7 +124,7 @@ export function parseBundle(raw: unknown): Parsed<ImportBundle> {
     ) {
       return { ok: false, error: `${at}.blockedBy must be a list of at most ${MAX_BLOCKERS} ids` };
     }
-    if (task.order !== undefined && (!Number.isSafeInteger(task.order) || (task.order as number) < 0)) {
+    if (task.order !== undefined && task.order !== null && (!Number.isSafeInteger(task.order) || (task.order as number) < 0)) {
       return { ok: false, error: `${at}.order must be a whole number, 0 or more` };
     }
     if (task.checklist !== undefined) {

@@ -39,6 +39,10 @@ describe("parseBundle", () => {
     expect(parseBundle({ source: "x", tasks: [task({ checklist })], notes })).toEqual({ ok: true, value: { source: "x", tasks: [task({ checklist })], notes } });
   });
 
+  it("reads an order of null as none, as it reads the other optional fields", () => {
+    expect(parseBundle({ source: "x", tasks: [task({ order: null })] }).ok).toBe(true);
+  });
+
   it("refuses more notes than one import takes", () => {
     const notes = Array.from({ length: MAX_IMPORT_NOTES + 1 }, () => ({ id: "a", what: "b" }));
     expect(parseBundle({ source: "x", tasks: [], notes })).toEqual({ ok: false, error: "notes must be a list of at most 50,000" });

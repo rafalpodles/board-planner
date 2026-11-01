@@ -185,20 +185,45 @@ describe("runImport", () => {
     ]);
   });
 
+  it("keeps a criterion with no id that the file does not name, and says what stayed, on a check and on the run", async () => {
+    const checklist = [{ text: "Old one", done: true }, { text: "Old two", done: false }] as never;
+    const tasks = [{ id: "1", title: "a", checklist: [{ text: "New" }] }];
+    const checked = await run(fakeDb({ existing: [{ id: "1", checklist }] }).db, tasks, {}, true);
+    const { db, writes } = fakeDb({ existing: [{ id: "1", checklist }] });
+    const report = await run(db, tasks);
+    const said = [{ id: "1", what: "2 criteria on the task that the file does not have, left in place" }];
+    expect(checked.notImported).toEqual(said);
+    expect(report.notImported).toEqual(said);
+    expect((writes.updates[0].update.$set.checklist as { text: string }[]).map((i) => i.text)).toEqual(["New", "Old one", "Old two"]);
+  });
+
+  it("says nothing about a checklist the file matches in full", async () => {
+    const checklist = [{ _id: new Types.ObjectId(), text: "One", done: false }];
+    const report = await run(fakeDb({ existing: [{ id: "1", checklist }] }).db, [{ id: "1", title: "a", checklist: [{ text: "One" }] }]);
+    expect(report.notImported).toEqual([]);
+  });
+
   it("leaves a task's checklist alone when the file has none for it", async () => {
     const { db, writes } = fakeDb({ existing: [{ id: "1", checklist: [{ _id: new Types.ObjectId(), text: "Kept", done: false }] }] });
     await run(db, [{ id: "1", title: "a", checklist: [] }]);
     expect(writes.updates[0].update.$set).not.toHaveProperty("checklist");
   });
 
-  it("keeps the file's criteria first when the two together are more than a task holds, and says so", async () => {
+  it("keeps the file's criteria first when the two together are more than a task holds, and a check says what will go", async () => {
     const held = Array.from({ length: MAX_CHECKLIST_ITEMS }, (_, i) => ({ _id: new Types.ObjectId(), text: `board ${i}`, done: false }));
+    const tasks = [{ id: "1", title: "a", checklist: [{ text: "from the file" }] }];
+    const checked = await run(fakeDb({ existing: [{ id: "1", checklist: held }] }).db, tasks, {}, true);
     const { db, writes } = fakeDb({ existing: [{ id: "1", checklist: held }] });
-    const report = await run(db, [{ id: "1", title: "a", checklist: [{ text: "from the file" }] }]);
+    const report = await run(db, tasks);
     const written = writes.updates[0].update.$set.checklist as { text: string }[];
     expect(written).toHaveLength(MAX_CHECKLIST_ITEMS);
     expect(written[0].text).toBe("from the file");
-    expect(report.truncated).toEqual([{ id: "1", field: "checklist" }]);
+    const said = [
+      { id: "1", what: "199 criteria on the task that the file does not have, left in place" },
+      { id: "1", what: "1 criterion removed from the task, as it holds 200 and the file comes first" },
+    ];
+    expect(report.notImported).toEqual(said);
+    expect(checked.notImported).toEqual(said);
   });
 
   it("writes a new task's place, and never moves a task imported before", async () => {
