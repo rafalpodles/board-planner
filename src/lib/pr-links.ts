@@ -4,6 +4,19 @@ import { Task } from "@/models/task";
 import type { ILinkedPR } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
 
+/** One entry per task, with a pull request that names several tasks under each of them. */
+export function requestsByTask<Request extends { matchedTaskNumbers: number[] }>(
+  requests: Request[]
+): Map<number, Request[]> {
+  const byTask = new Map<number, Request[]>();
+  for (const request of requests) {
+    for (const taskNumber of request.matchedTaskNumbers) {
+      byTask.set(taskNumber, [...(byTask.get(taskNumber) ?? []), request]);
+    }
+  }
+  return byTask;
+}
+
 /** A stored link's provider. Written since the field existed; absent means GitHub. */
 export function providerOf(link: { provider?: string | null }): string {
   return link.provider ?? "github";

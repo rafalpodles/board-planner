@@ -22,7 +22,7 @@ const pr = (over: Partial<ParsedPR> = {}): ParsedPR => ({
   url: "https://github.com/o/r/pull/1",
   mergedAt: null,
   updatedAt: new Date("2026-09-01T00:00:00Z"),
-  matchedTaskNumber: 5,
+  matchedTaskNumbers: [5],
   headSha: "sha1",
   ...over,
 });
@@ -134,7 +134,7 @@ describe("how many pull requests one sync asks about", () => {
     const { asked } = githubCounting();
     // The stalest of the lot, so the cap would certainly drop it
     const prs = many(MAX_CHECKED_PULL_REQUESTS + 5);
-    prs[0].matchedTaskNumber = 99;
+    prs[0].matchedTaskNumbers = [99];
 
     await withChecks(prs, "o", "r", "t", 99);
 
@@ -149,7 +149,7 @@ describe("how many pull requests one sync asks about", () => {
   it("caps the named task's pull requests too", async () => {
     const { asked } = githubCounting();
     const prs = many(MAX_CHECKED_PULL_REQUESTS * 3);
-    for (const pr of prs) pr.matchedTaskNumber = 99;
+    for (const pr of prs) pr.matchedTaskNumbers = [99];
 
     await withChecks(prs, "o", "r", "t", 99);
 
@@ -162,11 +162,34 @@ describe("how many pull requests one sync asks about", () => {
   it("does not let that widen the cap for everybody else", async () => {
     const { asked } = githubCounting();
     const prs = many(MAX_CHECKED_PULL_REQUESTS + 5);
-    prs[0].matchedTaskNumber = 99;
+    prs[0].matchedTaskNumbers = [99];
 
     await withChecks(prs, "o", "r", "t", 99);
 
     expect(shasAsked(asked)).toHaveLength(MAX_CHECKED_PULL_REQUESTS + 1);
+  });
+
+  // BP-635. Linking one pull request to four tasks must cost what linking it to one costs, or the
+  // cap and the requests-per-tick arithmetic stop being true.
+  it("asks once about a pull request that names several tasks", async () => {
+    const { asked } = githubCounting();
+    const prs = many(1);
+    prs[0].matchedTaskNumbers = [5, 6, 7];
+
+    const answered = await withChecks(prs, "o", "r", "t");
+
+    expect(shasAsked(asked)).toHaveLength(1);
+    expect(answered).toHaveLength(1);
+  });
+
+  it("forces a look at a pull request when the named task is any of the ones it names", async () => {
+    const { asked } = githubCounting();
+    const prs = many(MAX_CHECKED_PULL_REQUESTS + 5);
+    prs[0].matchedTaskNumbers = [5, 99];
+
+    await withChecks(prs, "o", "r", "t", 99);
+
+    expect(shasAsked(asked)).toContain(prs[0].headSha);
   });
 
   it("asks about nothing at all when every pull request has finished", async () => {

@@ -74,12 +74,12 @@ describe("matchPRsToTasks", () => {
       [pr({ number: 1, ref: "bp-250/history" }), pr({ number: 2, title: "BP-9 fix", ref: "x" })],
       "BP"
     );
-    expect(matched.map((m) => [m.number, m.matchedTaskNumber])).toEqual([[1, 250], [2, 9]]);
+    expect(matched.map((m) => [m.number, ...m.matchedTaskNumbers])).toEqual([[1, 250], [2, 9]]);
   });
 
   it("still matches pull requests opened under a key the project has since left", () => {
     const matched = matchPRsToTasks([pr({ ref: "cp-250/field-activity-history" })], "BP", ["CP"]);
-    expect(matched.map((m) => m.matchedTaskNumber)).toEqual([250]);
+    expect(matched.flatMap((m) => m.matchedTaskNumbers)).toEqual([250]);
   });
 
   it("loses that history when the former key is not carried", () => {
@@ -92,7 +92,7 @@ describe("matchPRsToTasks", () => {
       "BP",
       ["CP", "OLD"]
     );
-    expect(matched.map((m) => m.matchedTaskNumber).sort()).toEqual([1, 2, 3]);
+    expect(matched.flatMap((m) => m.matchedTaskNumbers).sort()).toEqual([1, 2, 3]);
   });
 
   it("does not match a project it never was", () => {
@@ -112,7 +112,37 @@ describe("matchPRsToTasks", () => {
       [pr({ ref: "feat/websubp-99", title: "BP-5 real work" })],
       "BP"
     );
-    expect(matched.map((m) => m.matchedTaskNumber)).toEqual([5]);
+    expect(matched.flatMap((m) => m.matchedTaskNumbers)).toEqual([5]);
+  });
+
+  // BP-635. Branch `bp-628/…`, title listing four keys: the real shape of PR #391, which linked
+  // one task of the four.
+  it("links every key in the title even when the branch already names one", () => {
+    const [matched] = matchPRsToTasks(
+      [pr({ ref: "bp-628/a-link-change-leaves-a-trace", title: "fix: a round (BP-628, BP-631, BP-632, BP-634)" })],
+      "BP"
+    );
+    expect(matched.matchedTaskNumbers).toEqual([628, 631, 632, 634]);
+  });
+
+  it("keeps the branch's key when the title names only another", () => {
+    const [matched] = matchPRsToTasks([pr({ ref: "bp-5/x", title: "BP-6 retitled" })], "BP");
+    expect(matched.matchedTaskNumbers).toEqual([5, 6]);
+  });
+
+  it("reads every key of a title when the branch has none", () => {
+    const [matched] = matchPRsToTasks([pr({ ref: "family/tidy", title: "BP-8, bp-9 and BP 10" })], "BP");
+    expect(matched.matchedTaskNumbers).toEqual([8, 9, 10]);
+  });
+
+  it("names a task once, however many times and under whichever key", () => {
+    const [matched] = matchPRsToTasks([pr({ ref: "bp-5/x", title: "BP-5 and CP-5, then bp-5" })], "BP", ["CP"]);
+    expect(matched.matchedTaskNumbers).toEqual([5]);
+  });
+
+  it("holds the boundary for every key it reads, not only the first", () => {
+    const [matched] = matchPRsToTasks([pr({ ref: "bp-5/x", title: "BP-5 bumps websubp-99" })], "BP");
+    expect(matched.matchedTaskNumbers).toEqual([5]);
   });
 
   it("still matches the key after a separator, which is every branch anyone writes", () => {
@@ -125,7 +155,7 @@ describe("matchPRsToTasks", () => {
       ],
       "BP"
     );
-    expect(matched.map((m) => m.matchedTaskNumber)).toEqual([7, 8, 9, 10]);
+    expect(matched.flatMap((m) => m.matchedTaskNumbers)).toEqual([7, 8, 9, 10]);
   });
 
   it("holds the boundary against a former key too", () => {

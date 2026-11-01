@@ -801,6 +801,82 @@ describe("a sync that learned nothing", () => {
  * in `e2e/pr-link-replacement.spec.ts`. What is pinned here is the decision this module takes: who
  * is written, who is visited, and what the operator is told.
  */
+describe("a pull request that names several tasks (BP-635)", () => {
+  const family = { ...openPR, head: { ref: "bp-5/family", sha: "abc123" }, title: "fix: a family (BP-5, BP-6, BP-7)" };
+  const task = (taskNumber: number, over: Record<string, unknown> = {}) => ({
+    _id: `t${taskNumber}`,
+    taskNumber,
+    status: "todo",
+    linkedPRs: [],
+    ...over,
+  });
+  const link = {
+    provider: "github",
+    number: 1,
+    title: family.title,
+    state: "open",
+    url: prUrl(1),
+    mergedAt: null,
+    updatedAt: new Date(family.updated_at),
+    ci: "none",
+    ciLabel: null,
+    headSha: "abc123",
+  };
+
+  beforeEach(() => {
+    fetchPullRequests.mockResolvedValue([family]);
+    taskFindOne.mockImplementation(async ({ taskNumber }: { taskNumber: number }) => task(taskNumber));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ state: "pending", statuses: [] }), { status: 200 }))
+    );
+  });
+
+  it("links it to each of them and counts it once", async () => {
+    const result = await syncGithubPullRequests(db, project(), "u1");
+
+    expect(linkArgs().map((write) => write.id).sort()).toEqual(["t5", "t6", "t7"]);
+    expect(linkArgs().every((write) => write.written.length === 1 && write.written[0] === 1)).toBe(true);
+    expect(result).toMatchObject({ prsFound: 1, prsLinked: 1, tasksLinked: 3, tasksWritten: 3 });
+  });
+
+  it("links the tasks that exist when a key names one that does not", async () => {
+    taskFindOne.mockImplementation(async ({ taskNumber }: { taskNumber: number }) =>
+      taskNumber === 6 ? null : task(taskNumber)
+    );
+
+    const result = await syncGithubPullRequests(db, project(), "u1");
+
+    expect(linkArgs().map((write) => write.id).sort()).toEqual(["t5", "t7"]);
+    expect(result).toMatchObject({ prsLinked: 1 });
+  });
+
+  it("unlinks only the task whose key left the title", async () => {
+    fetchPullRequests.mockResolvedValue([{ ...family, title: "fix: a family (BP-5)" }]);
+    taskFindOne.mockImplementation(async ({ taskNumber }: { taskNumber: number }) =>
+      task(taskNumber, { linkedPRs: [{ ...link, title: "fix: a family (BP-5)" }] })
+    );
+    taskFind.mockResolvedValue([task(6, { linkedPRs: [link] }), task(5, { linkedPRs: [link] })]);
+
+    const result = await syncGithubPullRequests(db, project(), "u1");
+
+    expect(linkArgs()).toHaveLength(1);
+    expect(linkArgs()[0]).toMatchObject({ id: "t6", written: [] });
+    expect(result).toMatchObject({ prsUnlinked: 1, tasksUnlinked: 1 });
+  });
+
+  it("moves every task it names out of review once merged", async () => {
+    fetchPullRequests.mockResolvedValue([{ ...family, state: "closed", merged_at: "2026-08-02T00:00:00Z" }]);
+    taskFindOne.mockImplementation(async ({ taskNumber }: { taskNumber: number }) =>
+      task(taskNumber, { status: taskNumber === 7 ? "done" : "in_review" })
+    );
+
+    const result = await syncGithubPullRequests(db, project(), "u1");
+
+    expect(result).toMatchObject({ autoTransitioned: 2 });
+  });
+});
+
 describe("what a round of the window may say about a link", () => {
   beforeEach(() => {
     fetchPullRequests.mockResolvedValue([openPR]);
