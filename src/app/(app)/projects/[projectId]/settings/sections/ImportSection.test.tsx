@@ -4,9 +4,10 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { ImportSection } from "./ImportSection";
 import type { ApiProject } from "@/types";
 
-const { api } = vi.hoisted(() => ({ api: { get: vi.fn(), post: vi.fn() } }));
+const { api, toast } = vi.hoisted(() => ({ api: { get: vi.fn(), post: vi.fn() }, toast: vi.fn() }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
+vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 
 const BUNDLE = JSON.stringify({ source: "Script", tasks: [{ id: "1", title: "One" }] });
 const CHECKED = {
@@ -35,7 +36,23 @@ async function choose() {
 
 const press = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
 
-beforeEach(() => api.post.mockReset());
+beforeEach(() => {
+  api.post.mockReset();
+  toast.mockReset();
+});
+
+async function importing(answer: Record<string, unknown>) {
+  await choose();
+  api.post.mockResolvedValueOnce(CHECKED);
+  press("Check");
+  await screen.findByText(/Would create/);
+  expect(toast).not.toHaveBeenCalled();
+  expect(screen.queryByText(/^Imported/)).toBeNull();
+  api.post.mockResolvedValueOnce({ ...CHECKED, dryRun: false, ...answer });
+  press("Import");
+  await screen.findByTestId("import-report");
+  await screen.findAllByText(/^(Created|The import stopped)/);
+}
 afterEach(cleanup);
 
 describe("ImportSection", () => {
@@ -57,6 +74,26 @@ describe("ImportSection", () => {
     press("Import");
     expect((await screen.findByRole("alert")).textContent).toBe("The import could not run");
     expect(screen.getByText("Check again to import.")).toBeTruthy();
+  });
+
+  it("says the import worked, counting what it made and what it updated, and the line stays", async () => {
+    await importing({ created: 9, updated: 1200 });
+    expect(screen.getByText("Imported 1,209 tasks.")).toBeTruthy();
+    expect(toast).toHaveBeenCalledExactlyOnceWith("Imported 1,209 tasks.", "success");
+  });
+
+  it("counts one task in the singular", async () => {
+    await importing({ created: 0, updated: 1 });
+    expect(toast).toHaveBeenCalledExactlyOnceWith("Imported 1 task.", "success");
+  });
+
+  it.each([
+    ["nothing came in", { created: 0, updated: 0 }],
+    ["it stopped part way", { created: 3, error: "the database went away" }],
+  ])("does not call it a success when %s", async (_, answer) => {
+    await importing(answer);
+    expect(toast).not.toHaveBeenCalled();
+    expect(screen.queryByText(/^Imported/)).toBeNull();
   });
 
   it("offers nothing more once the import is done", async () => {

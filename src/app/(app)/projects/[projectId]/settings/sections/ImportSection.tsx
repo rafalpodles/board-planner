@@ -3,6 +3,7 @@
 import { ChangeEvent, useCallback, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { Button } from "@/components/ui/Button";
+import { useToast } from "@/components/ui/Toast";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import type { ImportReport } from "@/lib/import/engine";
 import { MAX_IMPORT_BYTES } from "@/lib/import/limits";
@@ -51,10 +52,18 @@ function Listed<T>({ title, items, line }: { title: string; items: T[]; line: (i
   );
 }
 
+function importedLine(report: ImportReport): string | null {
+  const count = report.created + report.updated;
+  if (report.dryRun || report.error || count === 0) return null;
+  return `Imported ${count.toLocaleString("en-US")} ${count === 1 ? "task" : "tasks"}.`;
+}
+
 function Report({ report }: { report: ImportReport }) {
   const verb = report.dryRun ? "Would create" : "Created";
+  const imported = importedLine(report);
   return (
     <div data-testid="import-report" className="space-y-3">
+      {imported && <p className="font-medium text-success">{imported}</p>}
       {report.error && (
         <p role="alert" className="text-sm text-danger">
           The import stopped after {report.processed} tasks: {report.error}. What was written before that stays; running the same file again picks up where it left off.
@@ -89,6 +98,7 @@ function parsedJson(text: string): unknown {
 
 export function ImportSection({ projectId, project, patchProject }: Pick<SectionProps, "projectId" | "project" | "patchProject">) {
   const api = useApi();
+  const { toast } = useToast();
   // The key travels with the payload, so a check is recorded against exactly what it sent
   const [{ payload, key }, setPayload] = useState<{ payload: Payload | null; key: string }>({ payload: null, key: "" });
   const [table, setTable] = useState<{ rows: CsvTable; fileName: string } | null>(null);
@@ -182,6 +192,8 @@ export function ImportSection({ projectId, project, patchProject }: Pick<Section
       if (mine !== seq.current || (dryRun && !current)) return;
       setReport(answer);
       setChecked(dryRun && !answer.error && current);
+      const imported = importedLine(answer);
+      if (imported) toast(imported, "success");
       if (dryRun && current && table && remembered.current) rememberCsvMapping(projectId, table.rows.headers, remembered.current);
     } catch (e) {
       if (mine === seq.current) setError((e instanceof Error && e.message) || "The import could not run");
