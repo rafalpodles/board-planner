@@ -196,7 +196,7 @@ const stored = () =>
   }));
 const putSettings = (page: Page, body: unknown) =>
   page.evaluate(async (data) => {
-    const response = await fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+    const response = await fetch("/api/settings", { method: "PUT", headers: { "x-e2e-direct": "1", "content-type": "application/json" }, body: JSON.stringify(data) });
     return { status: response.status, body: await response.json() };
   }, body);
 

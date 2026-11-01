@@ -20,7 +20,8 @@ import { GROUP_NAMES } from "../e2e/groups.ts";
 import { computeAffectedGroups } from "../e2e/affected-groups.ts";
 
 function changedFiles(): string[] {
-  const out = execFileSync("git", ["diff", "--name-only", "origin/main...HEAD"], {
+  // --no-renames: a moved route file keeps the groups e2e/route-groups.json measured under its old path
+  const out = execFileSync("git", ["diff", "--name-only", "--no-renames", "origin/main...HEAD"], {
     encoding: "utf8",
   });
   return out

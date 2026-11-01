@@ -61,7 +61,7 @@ const monthlyLimit = async (who: OrganisationFixture) => {
 const post = (page: Page, path: string, body: unknown) =>
   page.evaluate(
     async ({ path, body }) => {
-      const res = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const res = await fetch(path, { method: "POST", headers: { "x-e2e-direct": "1", "content-type": "application/json" }, body: JSON.stringify(body) });
       return { status: res.status, body: await res.json().catch(() => null) };
     },
     { path, body }

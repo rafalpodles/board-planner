@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { GROUP_NAMES } from "./groups.ts";
 import { computeAffectedGroups } from "./affected-groups.ts";
+
+// These pin the hand-kept table; route-groups.test.ts pins what the measured map adds to it
+vi.mock("./route-groups.json", () => ({ default: {} }));
 
 describe("computeAffectedGroups", () => {
   it("returns nothing for an empty diff", () => {

@@ -278,9 +278,9 @@ test.describe("exporting one project (BP-1011)", () => {
     // The control: the administrator through a browser session is answered
     await signInOn(page.context(), ACME);
     await page.goto(`${originOf(ACME)}/projects`);
-    const own = await page.evaluate((path) => fetch(path).then((response) => response.status), check);
+    const own = await page.evaluate((path) => fetch(path, { headers: { "x-e2e-direct": "1" } }).then((response) => response.status), check);
     expect(own).toBe(204);
-    const foreign = await page.evaluate((path) => fetch(path).then((response) => response.status), `/api/projects/${GLOBEX.projectId}/export?check=1`);
+    const foreign = await page.evaluate((path) => fetch(path, { headers: { "x-e2e-direct": "1" } }).then((response) => response.status), `/api/projects/${GLOBEX.projectId}/export?check=1`);
     expect(foreign).toBe(404);
   });
 });
