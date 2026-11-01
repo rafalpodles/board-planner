@@ -1118,13 +1118,16 @@ would run npm and report that as the project's check.
   project unusable here, with the reason. `gateConfigFault` fails the task before the first step, for a
   gate with no command, or a `./path` that is missing or not executable as the first command the
   sequence runs: only that one, since an install makes what a later one names. In a run across several
-  repositories it takes all of them, because a gate runs only where something changed. Failed and not
-  released: the fault depends on the task's agent, and a refund would keep the task at the head of the
-  queue for ever with the tasks behind it waiting. The pass ends, so one wrong setting takes a task a
-  poll, each with its comment and its move to review, until a person corrects it: at the default 30 s,
-  120 tasks an hour per machine. A working directory the checkout lacks is left to the gate: the task may be the one that
-  creates it. A project on the npm
-  gates is not claimed from without npm; the worker itself no longer needs it.
+  repositories it takes all of them, because a gate runs only where something changed. The task goes
+  to review rather than back to the queue, where it would stay at the head with the tasks behind it
+  waiting, and `PATCH .../status` gives its attempt back in the write that moves it (`refundAttempt`,
+  a worker's own run only). The machine then holds the agent (`settings-hold.ts`): each claim names it
+  in `heldAgents`, and the server steps over it while its gates are the ones the machine saw, so the
+  rest of the project's work flows. The hold goes when the project's commands, repositories or base
+  branch change, or the agent's gates do. It is kept in memory and lasts a day, because a commit that
+  adds the program changes no setting: a wrong setting left standing costs a task a day per machine. A
+  working directory the checkout lacks is left to the gate: the task may be the one that creates it. A
+  project on the npm gates is not claimed from without npm; the worker itself no longer needs it.
 - **Test-presence** recognises other ecosystems' test files on these projects only: on the npm gates a
   `foo_test.py` is a file `npm test` never runs. Rust tests inline in `src/` are not recognised.
 - **Whose command it is.** It runs on the machine of whoever the task is assigned to, chosen by the

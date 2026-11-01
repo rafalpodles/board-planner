@@ -13,7 +13,7 @@ export interface HeldAgent {
   gates: string[];
 }
 
-// Past this an agent is simply offered again, and costs one failed task and no attempt
+// Past this an agent is offered as if it were not held: a task a poll, spending no attempt
 const MAX_HELD_AGENTS = 50;
 
 export function heldAgentsFrom(value: unknown): HeldAgent[] | null {

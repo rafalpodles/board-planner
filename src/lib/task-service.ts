@@ -129,7 +129,7 @@ export const CLEAR_WORKER_ASSIGNEE = {
 // spend an attempt for a move somebody made deliberately.
 const STILL_HELD = { "execution.runId": { $nin: ["", null] } };
 
-const ATTEMPT_REFUND = { "execution.attempts": { $max: [0, { $add: [{ $ifNull: ["$execution.attempts", 0] }, -1] }] } };
+const ATTEMPT_REFUND = { "execution.attempts": { $add: ["$execution.attempts", -1] } };
 
 export { EXECUTION_LEASE_MS };
 
@@ -820,8 +820,8 @@ export interface StatusChangeOptions {
   workerId?: string;
   /**
    * The attempt the claim spent is given back in the same write, for a run stopped by settings
-   * rather than by the task (BP-1117). Honoured only for the worker holding the run, on the move
-   * that ends it, so a report replayed from the outbox cannot give back an attempt twice.
+   * rather than by the task (BP-1117). Honoured only for the worker holding a run on the task, so a
+   * report replayed after that run ended gives nothing back.
    */
   refundAttempt?: boolean;
 }
@@ -1887,7 +1887,8 @@ export async function claimNextTask(
   // Who the claim's History row is written as: the machine's own identity, which is who its status
   // changes and comments are already authored by (BP-1045)
   actorId?: string | null,
-  // Agents this machine cannot run (agentsBeyond): a task naming one is not offered to it
+  // Agents this machine cannot run (agentsBeyond) or holds (agentsStillHeld): a task naming one is
+  // not offered to it
   excludedAgents: string[] = []
   // A document, not a plain ITask: the caller has to know, because spreading one silently yields
   // Mongoose internals with every real field a level down.

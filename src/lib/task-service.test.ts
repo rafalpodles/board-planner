@@ -1471,9 +1471,13 @@ describe("clearing the phase on every exit from the active column", () => {
       expect(setOf()).not.toHaveProperty("execution.attempts");
     });
 
-    it("stays spent for a machine that is not holding the run", async () => {
-      await changeStatus(db, "p1", "t1", "checking", "actor", { workerId: "w2", refundAttempt: true, force: true });
+    it("stays spent for a report that lands after the run ended, on a task somebody has since moved", async () => {
+      const ended = { _id: "t1", taskNumber: 1, status: "ready", title: "x", execution: { workerId: "w1", attempts: 2 } };
+      findOne.mockReturnValue({ lean: () => Promise.resolve(ended) });
 
+      await changeStatus(db, "p1", "t1", "checking", "actor", { workerId: "w1", refundAttempt: true });
+
+      expect(setOf()).toMatchObject({ status: "checking" });
       expect(setOf()).not.toHaveProperty("execution.attempts");
     });
 

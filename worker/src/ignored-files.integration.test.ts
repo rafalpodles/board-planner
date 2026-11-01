@@ -84,6 +84,7 @@ describe("an ignored file a step wrote, before a gate runs it", () => {
       merged: vi.fn<Reporter["merged"]>(async () => {}),
       delivered: vi.fn<Reporter["delivered"]>(async () => {}),
       failed: vi.fn<Reporter["failed"]>(async () => {}),
+      settingsFault: vi.fn<Reporter["settingsFault"]>(async () => {}),
       noted: vi.fn<Reporter["noted"]>(async () => {}),
     };
     const delivery = {

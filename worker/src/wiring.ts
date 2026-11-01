@@ -814,11 +814,6 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const remoteUrl = bound.get(task.projectId)?.remote;
     const several = bound.get(task.projectId)?.repositories ?? [];
 
-    const holdOnSettingsFault = (disposition: RunDisposition): RunDisposition => {
-      if (disposition === "settings-fault") settingsHolds.hold(task, taskConfig);
-      return disposition;
-    };
-
     currentRun = { taskId: task.taskId, runId: task.runId };
     try {
       if (several.length > 1) {
@@ -843,7 +838,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
               createDelivery(runner, gitPath, ghPath, baseBranch, githubToken),
           };
         });
-        return holdOnSettingsFault(await runs.under((signal) => {
+        return await runs.under((signal) => {
           const pipeline: SeveralRepositoriesDeps = {
             config: taskConfig,
             api,
@@ -864,9 +859,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             telemetry,
           };
           return runTaskInRepositories(pipeline, task);
-        }));
+        });
       }
-      return holdOnSettingsFault(await runs.under((signal) => {
+      return await runs.under((signal) => {
         const pipeline: PipelineDeps = {
           config: taskConfig,
           api,
@@ -895,10 +890,23 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           telemetry,
         };
         return runTask(pipeline, task);
-      }));
+      });
     } finally {
       currentRun = null;
     }
+  }
+
+  function gateSettingsOf(projectId: string) {
+    const config = configFor(projectId);
+    return config && { ...config, remotes: bound.get(projectId)?.repositories.map((repository) => repository.remote) ?? [] };
+  }
+
+  async function executeHolding(task: ClaimedTask): Promise<RunDisposition> {
+    // Before the run, so that the hold is on the settings the run read
+    const settings = gateSettingsOf(task.projectId);
+    const disposition = await execute(task);
+    if (disposition === "settings-fault" && settings) settingsHolds.hold(task, settings);
+    return disposition;
   }
 
   /**
@@ -987,9 +995,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         (projectId) => !unusable.has(projectId) && !quarantineReasonFor(projectId)
       ),
     api,
-    execute,
+    execute: executeHolding,
     heldAgents: (projectId) => {
-      const settings = configFor(projectId);
+      const settings = gateSettingsOf(projectId);
       return settings ? settingsHolds.heldAgents(projectId, settings) : [];
     },
     sleep: deps.sleep,

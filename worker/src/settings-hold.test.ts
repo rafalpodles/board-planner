@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { claimedTask } from "./__fixtures__/task.js";
-import { createSettingsHolds } from "./settings-hold.js";
+import { createSettingsHolds, HOLD_MS } from "./settings-hold.js";
 import type { ClaimedTask } from "./types.js";
 
 const SETTINGS = { baseBranch: "main", testCommand: "./bin/tst" };
@@ -13,7 +13,8 @@ const onAgent = (agentId: string, projectId = "P1"): ClaimedTask => ({
     name: "An agent",
     sequence: [
       { key: "implement", kind: "step", name: "Implement", prompt: "", capability: "edit", model: "", fallbackModel: "", deterministic: false, gateKind: "", params: {} },
-      { key: "build", kind: "gate", name: "Builds", prompt: "", capability: "read-only", model: "", fallbackModel: "", deterministic: false, gateKind: "build", params: {} },
+      { key: "our-build", kind: "gate", name: "Builds", prompt: "", capability: "read-only", model: "", fallbackModel: "", deterministic: false, gateKind: "build", params: {} },
+      { key: "security-review", kind: "gate", name: "Security review", prompt: "", capability: "read-only", model: "", fallbackModel: "", deterministic: false, gateKind: "review", params: {} },
       { key: "test-run", kind: "gate", name: "Tests pass", prompt: "", capability: "read-only", model: "", fallbackModel: "", deterministic: false, gateKind: "test-run", params: {} },
     ],
   },
@@ -28,7 +29,7 @@ describe("what a settings fault holds", () => {
     const holds = createSettingsHolds(vi.fn());
     holds.hold(onAgent("a1"), SETTINGS);
 
-    const held = [{ agentId: "a1", gates: ["build", "test-run"] }];
+    const held = [{ agentId: "a1", gates: ["build", "review", "test-run"] }];
     expect(holds.heldAgents("P1", { ...SETTINGS })).toEqual(held);
     expect(holds.heldAgents("P1", SETTINGS)).toEqual(held);
   });
@@ -38,6 +39,7 @@ describe("what a settings fault holds", () => {
     ["a command that was empty", { installCommand: "npm ci" }],
     ["the working directory", { workingDirectory: "apps/web" }],
     ["the base branch", { baseBranch: "develop" }],
+    ["the list of repositories", { remotes: ["git@github.com:acme/new.git"] }],
   ])("lets go once %s changes, and stays gone if it is changed back", (_what, change) => {
     const log = vi.fn();
     const holds = createSettingsHolds(log);
@@ -45,6 +47,18 @@ describe("what a settings fault holds", () => {
 
     expect(holds.heldAgents("P1", { ...SETTINGS, ...change })).toEqual([]);
     expect(log).toHaveBeenCalledWith(expect.stringContaining("claiming for agent a1 again"));
+    expect(holds.heldAgents("P1", SETTINGS)).toEqual([]);
+  });
+
+  it("lasts a day and no longer, for a fix that lands in the repository and changes no setting", () => {
+    let clock = 1_000;
+    const holds = createSettingsHolds(vi.fn(), () => clock);
+    holds.hold(onAgent("a1"), SETTINGS);
+
+    clock += HOLD_MS - 1;
+    expect(holds.heldAgents("P1", SETTINGS)).toHaveLength(1);
+
+    clock += 1;
     expect(holds.heldAgents("P1", SETTINGS)).toEqual([]);
   });
 

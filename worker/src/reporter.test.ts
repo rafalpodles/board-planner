@@ -315,9 +315,24 @@ describe("createReporter", () => {
       expect(body).toContain(fault);
       expect(body).toMatch(/did not spend an attempt/);
       expect(body).toMatch(/other tasks on this agent in their column/);
-      expect(body).toMatch(/commands or base branch change, or the agent's gates do/);
-      expect(body).toMatch(/restart the worker/);
+      expect(body).toMatch(/commands, repositories or base branch change, or the agent's gates do/);
+      expect(body).toMatch(/within a day, or at once if the worker is restarted/);
       expect(body).not.toMatch(/on attempt/);
+    });
+
+    it("says so on the task before it moves it", async () => {
+      const api = apiSpy();
+      await createReporter(api, statuses).settingsFault(task, fault);
+
+      expect(api.comment.mock.invocationCallOrder[0]).toBeLessThan(api.setStatus.mock.invocationCallOrder[0]);
+    });
+
+    it("forgets the release comment the task last had, as every other ending does", async () => {
+      const api = apiSpy();
+      const memory: ReleaseMemory = new Map([["t1", "an earlier reason"]]);
+      await createReporter(api, statuses, vi.fn(), undefined, memory).settingsFault(task, fault);
+
+      expect(memory.has("t1")).toBe(false);
     });
 
     it("keeps the refund when the status has to wait in the outbox", async () => {

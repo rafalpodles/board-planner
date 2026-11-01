@@ -125,10 +125,10 @@ export function createReporter(
     }
   }
 
-  async function report(task: ClaimedTask, status: string, body: string): Promise<void> {
+  async function report(task: ClaimedTask, status: string, body: string, options?: { refundAttempt: boolean }): Promise<void> {
     lastRelease.delete(task.taskId);
     await comment(task, body);
-    await move(task, status);
+    await move(task, status, options);
   }
 
   return {
@@ -194,15 +194,15 @@ export function createReporter(
     },
 
     async settingsFault(task, reason) {
-      lastRelease.delete(task.taskId);
-      await comment(
+      await report(
         task,
+        statusIds.review,
         `The execution worker stopped before any step, and this run did not spend an attempt.\n\n${safeText(reason)}\n\n` +
           `This machine now leaves the project's other tasks on this agent in their column, because each would stop the same way. ` +
-          `It takes them again once the project's commands or base branch change, or the agent's gates do. ` +
-          `If the fix lands in the repository instead, restart the worker.`
+          `It takes them again once the project's commands, repositories or base branch change, or the agent's gates do. ` +
+          `A fix in the repository itself is picked up within a day, or at once if the worker is restarted.`,
+        { refundAttempt: true }
       );
-      await move(task, statusIds.review, { refundAttempt: true });
     },
 
     async noted(task, note) {

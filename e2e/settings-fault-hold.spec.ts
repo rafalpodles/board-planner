@@ -95,8 +95,8 @@ const claim = (request: APIRequestContext, heldAgents?: unknown) =>
 
 const holding = () => [{ agentId: String(HELD_AGENT), gates: GATES }];
 
-const report = (request: APIRequestContext, taskId: mongoose.Types.ObjectId, data: unknown, headers: Record<string, string> = asWorker) =>
-  request.patch(`/api/projects/${PROJECT_ID}/tasks/${taskId}/status`, { headers, data });
+const report = (request: APIRequestContext, taskId: mongoose.Types.ObjectId, data: unknown) =>
+  request.patch(`/api/projects/${PROJECT_ID}/tasks/${taskId}/status`, { headers: asWorker, data });
 
 test.describe("a project's own commands that cannot run", () => {
   test.beforeEach(seedHold);
@@ -149,25 +149,35 @@ test.describe("a project's own commands that cannot run", () => {
     expect((await answer.json())._id).toBe(String(_id));
   });
 
-  test("a report replayed after the run ended gives nothing back a second time", async ({ request }) => {
+  test("a report replayed after the run ended gives nothing back, even when it moves the task again", async ({ request }) => {
     const { _id } = await addTask(HELD_AGENT, 1);
-    await claim(request);
+    expect((await claim(request)).status()).toBe(200);
+    expect((await stored(_id))?.execution.attempts).toBe(2);
 
     expect((await report(request, _id, { status: REVIEW, refundAttempt: true })).status()).toBe(200);
-    expect((await report(request, _id, { status: REVIEW, refundAttempt: true })).status()).toBe(200);
-
     expect((await stored(_id))?.execution.attempts).toBe(1);
+
+    expect((await report(request, _id, { status: REVIEW, refundAttempt: true })).status()).toBe(200);
+    expect((await stored(_id))?.execution.attempts).toBe(1);
+
+    const moved = await request.patch(`/api/projects/${PROJECT_ID}/tasks/${_id}/status`, { headers: ADMIN_AUTH, data: { status: "in_review" } });
+    expect(moved.status(), await moved.text()).toBe(200);
+    expect((await report(request, _id, { status: REVIEW, refundAttempt: true })).status()).toBe(200);
+
+    const replayed = await stored(_id);
+    expect(replayed?.status).toBe(REVIEW);
+    expect(replayed?.execution.attempts).toBe(1);
   });
 
-  test("only the worker holding the run gets the attempt back", async ({ request }) => {
+  test("a credential that is no worker cannot ask for the attempt back", async ({ request }) => {
     const { _id } = await addTask(HELD_AGENT, 1);
-    await claim(request);
+    expect((await claim(request)).status()).toBe(200);
 
-    const asPerson = await request.patch(`/api/projects/${PROJECT_ID}/tasks/${_id}/status`, {
+    const asToken = await request.patch(`/api/projects/${PROJECT_ID}/tasks/${_id}/status`, {
       headers: ADMIN_AUTH,
       data: { status: REVIEW, refundAttempt: true },
     });
-    expect(asPerson.status()).toBe(403);
+    expect(asToken.status()).toBe(403);
 
     const held = await stored(_id);
     expect(held?.status).toBe(ACTIVE);

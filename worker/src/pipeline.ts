@@ -686,7 +686,7 @@ export async function runTask(
     const onOwnCommands = usesOwnCommands(gateCommandsOf(config));
     // Here and not at the gate, which is after the step somebody pays for. Not released: this task
     // would stay at the head of the queue for ever, with the tasks of agents the fault does not touch
-    // behind it. The agent is held after this, so one wrong setting takes one task, not the queue
+    // behind it. The agent is held after this, so one wrong setting takes a task a day, not the queue
     const configFault = gateConfigFault(task.agent.sequence, gateCommandsOf(config), worktree.path);
     if (configFault) {
       settle("failed", configFault);

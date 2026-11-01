@@ -607,7 +607,7 @@ describe("a machine that must not take work", () => {
     expect(log).not.toHaveBeenCalledWith(expect.stringContaining("machine fault"));
   });
 
-  it("reads what is held for each project afresh, right before claiming from it", async () => {
+  it("hands each project's claim what is held on that project", async () => {
     const api = apiStub(queue());
     const asked: string[] = [];
     const held = (projectId: string) => [{ agentId: `held-on-${projectId}`, gates: [] }];

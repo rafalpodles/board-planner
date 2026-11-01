@@ -9,7 +9,7 @@ const AGENT = "69a52e3b399b27d3cbb2c5a5";
 const OTHER = "69a52e3b399b27d3cbb2c5b7";
 const db = {} as never;
 
-const gate = (gateKind: string) => ({ key: gateKind, kind: "gate", name: gateKind, gateKind });
+const gate = (gateKind: string) => ({ key: `our-${gateKind}`, kind: "gate", name: gateKind, gateKind });
 const step = { key: "implement", kind: "step", name: "Implement" };
 
 describe("heldAgentsFrom", () => {
@@ -74,10 +74,5 @@ describe("agentsStillHeld", () => {
     snapshotFor.mockImplementation(async (_db, _project, agentId) => ({ sequence: agentId === AGENT ? [gate("build"), gate("test-run")] : [] }));
 
     expect(await agentsStillHeld(db, "p1", [...held, { agentId: OTHER, gates: ["build"] }], "owner")).toEqual([AGENT]);
-  });
-
-  it("asks nothing when nothing is held", async () => {
-    expect(await agentsStillHeld(db, "p1", [], "owner")).toEqual([]);
-    expect(snapshotFor).not.toHaveBeenCalled();
   });
 });

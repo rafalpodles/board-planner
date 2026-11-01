@@ -972,6 +972,25 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(api.setStatus).toHaveBeenCalledWith("p1", "t1", "in_review", { refundAttempt: true });
     });
 
+    it("lets go when the project moves to another repository", async () => {
+      const assignments = [{ project: "p1", remote: REMOTE }];
+      const { api } = await runOneTask(undefined, { buildCommand: "sh --version" }, {
+        repos: [REPO, OTHER_REPO],
+        assignments,
+        tasks: [CLAIMED],
+        passes: 3,
+        clockJumpOnSleepMs: 60_000,
+        readFile: (path) => (!path.endsWith("package.json") && !path.endsWith("package-lock.json") && existsSync(path) ? readFileSync(path, "utf8") : null),
+        path: "/usr/bin:/bin",
+        onSleep: (_stateDir, sleepIndex) => {
+          if (sleepIndex === 1) assignments[0].remote = OTHER_REMOTE;
+        },
+      });
+
+      expect(heldInClaim(api, 1)).toEqual([{ agentId: "a1", gates: GATES }]);
+      expect(heldInClaim(api, 2)).toEqual([]);
+    });
+
     it("holds nothing after a run that ended any other way", async () => {
       const { api } = await runOneTask(undefined, undefined, { tasks: [CLAIMED], passes: 2, clockJumpOnSleepMs: 60_000 });
 
