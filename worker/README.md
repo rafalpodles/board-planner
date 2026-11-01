@@ -296,14 +296,15 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   blocked means either; such a board is refused at the claim (next bullet) rather than having the
   gate skipped on it.
 - **A machine with no claude login claims nothing.** Preflight's `claude` row reads red when `claude
-  auth status` says so. A session can also end under a running worker, and that first shows as a
-  run ending on `Not logged in · Please run /login`, or `Login expired`, `OAuth token revoked` or
-  `Invalid API key`, with stderr empty: the task goes back with its attempt refunded, the same as a
-  step or review that cannot run. Either way the machine asks `auth status` once per poll, so
-  `claude auth login` clears it with no restart. `auth status` reads the stored token and never asks
-  the server, so when it calls good a login a run was just refused, the row goes red anyway and
-  claims are held for 15 minutes, then one run finds out, and a restart lifts it at once. Like a
-  missing `claude`, this stops Codex tasks too: a machine needs Claude Code to claim anything (**BP-1077**).
+  auth status` says so, the machine asks again once per poll, and `claude auth login` clears it with
+  no restart. A login can also end under a running worker. That first shows as a run ending on
+  `Not logged in · Please run /login` or `Failed to authenticate…`, with stderr empty, and the task
+  goes back with its attempt refunded. `auth status` reads the stored token and never asks the
+  server, so it can still call good a login a run was just refused. The row then goes red with a
+  wording of its own and claims are held for 15 minutes, whatever `auth status` says, after which
+  one run finds out; a restart lifts the hold at once. A run that had already spent money is an
+  ordinary failure and charges its attempt. Like a missing `claude`, this stops Codex tasks too: a
+  machine needs Claude Code to claim anything (**BP-1077**, BP-1125).
 - **A board that cannot claim says so.** A run needs four roles — `approved` to take work from,
   `active` to move it into, `review` and `done` to deliver it to. A board missing any of them is
   refused at the claim with a 409 naming the role, rather than the 204 an empty queue gets; the

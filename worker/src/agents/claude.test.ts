@@ -107,10 +107,9 @@ describe("the claude adapter reading a finished step", () => {
     });
 
     it.each([
-      "Login expired · Please run /login",
-      "OAuth token revoked · Please run /login",
-      "Invalid API key · Please run /login",
-      "API Error: 401 Invalid API key · Please run /login",
+      "Failed to authenticate: OAuth session expired and could not be refreshed",
+      "Failed to authenticate: OAuth token revoked. Please log in again or contact your administrator.",
+      "Failed to authenticate. API Error: 401 Invalid authentication credentials",
     ])("reads %s the same way", (sentence) => {
       expect(agent.sessionFault(run({ stdout: ended(sentence), code: 1 }))).toBe(CLAUDE_SIGNED_OUT);
     });
@@ -130,10 +129,13 @@ describe("the claude adapter reading a finished step", () => {
 
     it("does not take a refusal the model ended on the sentence for it", () => {
       const quoted = ended(`I will not do that. ${SENTENCE}`, { stop_reason: "refusal" });
+      const continued = ended(`${SENTENCE} is what I would say`, { stop_reason: "refusal" });
       const paid = ended(SENTENCE, { stop_reason: "refusal", total_cost_usd: 0.42 });
+      const notAnError = ended(SENTENCE, { is_error: false });
 
-      expect(agent.sessionFault(run({ stdout: quoted, code: 1 }))).toBeNull();
-      expect(agent.sessionFault(run({ stdout: paid, code: 1 }))).toBeNull();
+      for (const stdout of [quoted, continued, paid, notAnError]) {
+        expect(agent.sessionFault(run({ stdout, code: 1 }))).toBeNull();
+      }
     });
   });
 

@@ -11,7 +11,7 @@ import { ControlDeps } from "./control.js";
 import { CommandResult, Runner, RunOpts } from "./exec.js";
 import { LocalConfigView, LocalServer, LocalServerDeps } from "./local-server.js";
 import { Store } from "./outbox.js";
-import { PreflightReport, runPreflight } from "./preflight.js";
+import { CLAUDE_LOGIN_REFUSED, PreflightReport, runPreflight } from "./preflight.js";
 import { Heartbeat, HeartbeatDeps } from "./registration.js";
 import { createTelemetry } from "./telemetry.js";
 import { ClaimedTask } from "./types.js";
@@ -608,7 +608,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       preflightRejection?: unknown;
       // What `claude auth status` answers, and what the agent's spawn does in place of its usual run
       claudeAuth?: (nth: number) => CommandResult;
-      agentResult?: CommandResult;
+      agentResult?: () => CommandResult | undefined;
       // Run between passes, after the clock jump — the one hook point available to change what is
       // on disk mid-run, for a test about recovering from a failure and then repeating it.
       onSleep?: (stateDir: string, sleepIndex: number) => void;
@@ -706,9 +706,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           if (opts.claudeAuth && command.endsWith("/claude") && args[0] === "auth") {
             return Promise.resolve(opts.claudeAuth(claudeAsked++));
           }
-          if (opts.agentResult && isAgentSpawn(command, args) && !isPreflightAsking(command, args)) {
-            return Promise.resolve(opts.agentResult);
-          }
+          const answer = isAgentSpawn(command, args) && !isPreflightAsking(command, args) ? opts.agentResult?.() : undefined;
+          if (answer) return Promise.resolve(answer);
           return opts.gateNode && command === opts.gateNode.path && args[0] === "--version"
             ? Promise.resolve({
                 code: opts.gateNode.code ?? 0,
@@ -965,7 +964,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       const { api, claims, logError, heartbeatDeps } = await runOneTask(undefined, undefined, {
         // Green at startup; signed out by the time the run has failed
         claudeAuth: (nth) => (nth === 0 ? SIGNED_IN : SIGNED_OUT),
-        agentResult: { code: 1, stdout, stderr: "", timedOut: false },
+        agentResult: () => ({ code: 1, stdout, stderr: "", timedOut: false }),
         tasks: [CLAIMED, CLAIMED],
         passes: 3,
       });
@@ -985,22 +984,63 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     describe("a login that `auth status` still calls good", () => {
       const REFUSED = {
         code: 1,
-        stdout: JSON.stringify({ type: "result", is_error: true, total_cost_usd: 0, result: "Login expired · Please run /login" }),
+        stdout: JSON.stringify({
+          type: "result",
+          is_error: true,
+          total_cost_usd: 0,
+          result: "Failed to authenticate: OAuth session expired and could not be refreshed",
+        }),
         stderr: "",
         timedOut: false,
       };
-      const twoTasks = { claudeAuth: () => SIGNED_IN, agentResult: REFUSED, tasks: [CLAIMED, CLAIMED], passes: 4 };
+      const twoTasks = { claudeAuth: () => SIGNED_IN, agentResult: () => REFUSED, tasks: [CLAIMED, CLAIMED], passes: 4 };
+      const AFTER_THE_HOLD = 16 * 60_000;
 
       it("holds claims though claude says it is signed in, and says why", async () => {
-        const { api, heartbeatDeps, logError } = await runOneTask(undefined, undefined, twoTasks);
+        const { api, heartbeatDeps, logError, log } = await runOneTask(undefined, undefined, twoTasks);
 
         expect(api.release).toHaveBeenCalledTimes(1);
-        expect(logError).toHaveBeenCalledWith(`not claiming any work: ${CLAUDE_SIGNED_OUT}`);
-        expect(row(heartbeatDeps?.preflight?.())).toMatchObject({ ok: false, stopsClaims: true });
+        expect(logError).toHaveBeenCalledWith(`not claiming any work: ${CLAUDE_LOGIN_REFUSED}`);
+        expect(row(heartbeatDeps?.preflight?.())).toMatchObject({ ok: false, stopsClaims: true, detail: CLAUDE_LOGIN_REFUSED });
+        expect(log).not.toHaveBeenCalledWith("claude is signed in again");
       });
 
-      it("lets one run through per hold, so a new login is found without a restart", async () => {
-        const { api } = await runOneTask(undefined, undefined, { ...twoTasks, clockJumpOnSleepMs: 16 * 60_000 });
+      it("lets one run through once the hold is up, and takes work again when that run is not refused", async () => {
+        let runs = 0;
+        const { api, heartbeatDeps } = await runOneTask(undefined, undefined, {
+          ...twoTasks,
+          agentResult: () => (runs++ === 0 ? REFUSED : undefined),
+          clockJumpOnSleepMs: AFTER_THE_HOLD,
+        });
+
+        expect(runs).toBe(2);
+        expect(api.release).toHaveBeenCalledTimes(1);
+        expect(row(heartbeatDeps?.preflight?.())).toMatchObject({ ok: true });
+      });
+
+      it("holds again when that run is refused too", async () => {
+        const { api, heartbeatDeps } = await runOneTask(undefined, undefined, {
+          ...twoTasks,
+          tasks: [CLAIMED, CLAIMED, CLAIMED],
+          clockJumpOnSleepMs: AFTER_THE_HOLD,
+          passes: 2,
+        });
+
+        expect(api.release).toHaveBeenCalledTimes(2);
+        expect(row(heartbeatDeps?.preflight?.())).toMatchObject({ ok: false, detail: CLAUDE_LOGIN_REFUSED });
+      });
+
+      // Preflight's row is green on "could not determine" for a CLI that gives no parseable answer,
+      // and a run can still be refused. Waiting for an answer would hold that machine for ever.
+      it("lifts the hold whatever `auth status` answers", async () => {
+        const NO_ANSWER = { code: 0, stdout: "A new version is available\n", stderr: "", timedOut: false };
+        const { api } = await runOneTask(undefined, undefined, {
+          claudeAuth: () => NO_ANSWER,
+          agentResult: () => REFUSED,
+          tasks: [CLAIMED, CLAIMED],
+          clockJumpOnSleepMs: AFTER_THE_HOLD,
+          passes: 3,
+        });
 
         expect(api.release).toHaveBeenCalledTimes(2);
       });
@@ -1009,7 +1049,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     it("goes on claiming after a machine fault that was not the session", async () => {
       const { api } = await runOneTask(undefined, undefined, {
         claudeAuth: () => SIGNED_IN,
-        agentResult: { code: 0, stdout: "", stderr: "", timedOut: false, machineFault: "a process survived its step" },
+        agentResult: () => ({ code: 0, stdout: "", stderr: "", timedOut: false, machineFault: "a process survived its step" }),
         tasks: [CLAIMED, CLAIMED],
         passes: 3,
       });

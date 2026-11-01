@@ -13,7 +13,8 @@ import {
   npmCacheCheck,
   pathWithTools,
   PreflightReport,
-  markClaudeSignedOut,
+  CLAUDE_LOGIN_REFUSED,
+  markClaudeLoginRefused,
   refreshClaudeSession,
   runPreflight,
   SANDBOX_CHECK,
@@ -284,8 +285,14 @@ describe("runPreflight", () => {
       expect(await refreshClaudeSession(deps, REPORT)).toEqual(SIGNED_OUT);
     });
 
-    it("reads the same when a run is what found out", () => {
-      expect(markClaudeSignedOut(REPORT)).toEqual(SIGNED_OUT);
+    it("says otherwise when a run is what found out, and promises no fix `auth status` could see", () => {
+      const held = markClaudeLoginRefused(REPORT);
+
+      expect(held).toEqual({
+        ...SIGNED_OUT,
+        checks: [{ name: "claude", ok: false, stopsClaims: true, detail: CLAUDE_LOGIN_REFUSED }, REPORT.checks[1]],
+      });
+      expect(CLAUDE_LOGIN_REFUSED).toMatch(/within 15 minutes.*restarted/);
     });
 
     it("puts it back once it is signed in", async () => {
@@ -325,6 +332,15 @@ describe("runPreflight", () => {
     expect(report.ok).toBe(true);
     expect(check(report, "claude").ok).toBe(true);
     expect(check(report, "claude").detail).toMatch(/API key/i);
+  });
+
+  it("tells the server a missing claude stops the machine's claims, and a missing gh does not", async () => {
+    const claudeless = await runPreflight(depsFor(machine({ has: ["git", "npm", "gh"] })));
+    const ghless = await runPreflight(depsFor(machine({ has: ["git", "npm", "claude"] })));
+
+    expect(check(claudeless, "claude")).toMatchObject({ ok: false, stopsClaims: true });
+    expect(check(ghless, "gh")).toMatchObject({ ok: false });
+    expect(check(ghless, "gh")).not.toHaveProperty("stopsClaims");
   });
 
   it("does not fail a worker whose claude is too old to answer auth status", async () => {

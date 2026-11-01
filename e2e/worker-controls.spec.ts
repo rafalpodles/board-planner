@@ -1272,12 +1272,6 @@ test("the fleet screen says whether a machine confines the agent it runs", async
   await expect(page.locator("table")).not.toContainText("nothing confining its writes");
 });
 
-/**
- * BP-793. A worker whose preflight threw claims nothing, and used to send no report at all — which
- * the heartbeat route reads as a worker too old to report one, so it kept the green report from an
- * earlier boot and the fleet screen said `ready` about a machine taking no work. It now sends a
- * failing sandbox row naming the reason, exactly as worker/src/wiring.ts composes it.
- */
 // BP-1077. The worker takes no work with claude signed out, so a screen that reads it as running leaves
 // its owner nothing to go on: a handed-over task simply sits there, with no comment and no notice.
 test("a machine that says a failed check stops its claims is not taken for running, and another failed check is", async ({
@@ -1291,6 +1285,7 @@ test("a machine that says a failed check stops its claims is not taken for runni
     checks: [{ name: "sandbox", ok: true, detail: "confined" }, { name: "claude", ok: false, detail: SIGNED_OUT, ...over }],
   });
 
+  await setWorker({ owner: ADMIN_ID });
   await heartbeat(request, { preflight: failing({}) });
   await signIn(page);
   await page.goto("/settings/machines");
@@ -1302,6 +1297,12 @@ test("a machine that says a failed check stops its claims is not taken for runni
   await expect(state).toHaveText(/^Not taking work: a check is failing/);
 });
 
+/**
+ * BP-793. A worker whose preflight threw claims nothing, and used to send no report at all — which
+ * the heartbeat route reads as a worker too old to report one, so it kept the green report from an
+ * earlier boot and the fleet screen said `ready` about a machine taking no work. It now sends a
+ * failing sandbox row naming the reason, exactly as worker/src/wiring.ts composes it.
+ */
 test("a machine whose preflight could not run says why on the fleet screen, not its last green report", async ({
   page,
   request,

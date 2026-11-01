@@ -12,7 +12,8 @@ export interface LoopDeps {
   // "machine-fault" says the run failed for a reason that has nothing to do with the task and will
   // repeat on the next one — an unreachable remote, say. Claiming onward would walk the whole
   // approved queue through a failure none of those tasks caused, so the pass ends and the worker
-  // waits out its poll interval instead. "settings-fault" is the same for a project's own commands.
+  // waits out its poll interval instead. "settings-fault" is the same for a project's own commands,
+  // and "session-fault" for a claude with no login.
   execute: (task: ClaimedTask) => Promise<RunDisposition>;
   // What a project's own commands stopped this machine running, read before each claim so that a
   // corrected setting is claimable on the next poll
@@ -51,8 +52,9 @@ export interface LoopDeps {
    * network blip into an outage nothing on the machine can lift, which is the reasoning pipeline.ts
    * already carries for an unreadable git config. The per-pass `break` is the brake for those; this
    * gate is for what a machine is, not for what one run met. A run that found claude with no login is
-   * the exception (BP-1077): it is no transient, a login can end at any time, and `auth status` cannot
-   * always see it. That hold lifts by itself, so nothing here is an outage nobody can end.
+   * the exception (BP-1077): it repeats on every task, a login can end at any time, and `auth status`
+   * cannot see every way it ends. That hold expires whatever `auth status` says, so nothing here is an
+   * outage nobody can end.
    */
   claimBlocked?: () => string;
   log?: (message: string) => void;

@@ -182,7 +182,7 @@ type ServingMachine = Pick<IWorker, "enabled" | "lastSeenAt" | "repos"> &
     >
   >;
 
-// The name the worker gives the check that stops it claiming (worker/src/preflight.ts)
+// The name the worker gives the check that always stops it claiming (worker/src/preflight.ts)
 const SANDBOX_CHECK = "sandbox";
 
 // Proven only by the machine's acknowledgement, the way the fleet console reads it: a command

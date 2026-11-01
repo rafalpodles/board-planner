@@ -1241,7 +1241,7 @@ describe("the hand-over notice, with the board judged too", () => {
     expect(screen.getByRole("link", { name: "Upgrade to Pro" }).getAttribute("href")).toBe("/settings/organisation");
   });
 
-  // The sandbox check is the one that stops the claim itself
+  // A failed check that stops the claim itself, such as the sandbox's
   it("says a machine whose sandbox check failed is not taking work", () => {
     withBoard({ machine: "failing" });
 

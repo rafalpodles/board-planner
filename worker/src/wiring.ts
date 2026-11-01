@@ -66,15 +66,18 @@ import { PipelineDeps, RunDisposition, runTask } from "./pipeline.js";
 import {
   checkGateCommands,
   checkRepo,
+  CLAUDE_LOGIN_REFUSED,
   npmMissingForProject,
   pathWithTools,
   PreflightCheck,
   PreflightDeps,
   PreflightReport,
-  markClaudeSignedOut,
+  markClaudeLoginRefused,
   refreshClaudeSession,
   runPreflight,
   SANDBOX_CHECK,
+  SESSION_HOLD_MS,
+  withClaudeSession,
 } from "./preflight.js";
 import { createReporter, ReleaseMemory } from "./reporter.js";
 import { createSettingsHolds } from "./settings-hold.js";
@@ -99,9 +102,6 @@ import { createWorkspace, reapOrphans } from "./workspace.js";
 import { entryDirectory, workerVersion } from "./version.js";
 
 const MIN_REFRESH_INTERVAL_MS = 30_000;
-// How long a run refused a login holds claims when `auth status` still calls that login good. A run
-// this finds nothing costs a second and no tokens, so four an hour is the price of noticing a new login.
-const SESSION_HOLD_MS = 15 * 60_000;
 
 // Every ambient thing the wiring used to reach for directly. main.ts is the one place that supplies
 // none of them; a test supplies whichever it needs to watch. The point of the split is that the
@@ -269,7 +269,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   let preflightError = "";
   let leftovers = "";
   let probedSandboxRow: PreflightCheck | undefined;
-  let sessionHeldUntil = 0;
+  let sessionHold: { until: number; row: PreflightCheck; account: string } | null = null;
 
   function showLeftovers(): void {
     if (!preflight) return;
@@ -458,12 +458,16 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     );
   }
 
-  function claudeSignedOut(): boolean {
-    return preflight?.checks.some((check) => check.name === "claude" && check.detail === CLAUDE_SIGNED_OUT) ?? false;
+  function claudeRow(): PreflightCheck | undefined {
+    return preflight?.checks.find((check) => check.name === "claude");
   }
 
-  // Once per poll while claude is signed out, and after a run found it so, which is how a session
-  // that ended under a running worker first shows: `claude auth login` needs no restart to clear it
+  function claudeSignedOut(): boolean {
+    return claudeRow()?.detail === CLAUDE_SIGNED_OUT;
+  }
+
+  // Once per poll while claude says it is signed out, and after a run found it so, which is how a
+  // session that ended under a running worker first shows: `claude auth login` needs no restart
   async function askClaudeAgain(): Promise<void> {
     if (!preflight) return;
     const wasSignedOut = claudeSignedOut();
@@ -478,13 +482,28 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   }
 
   // `auth status` reads the stored token and never asks the server, so an expired or revoked one reads
-  // as signed in while every run is refused. Only a run can tell, so one is let through per hold.
+  // as signed in while every run is refused. Only a run can tell, so one is let through per hold, and
+  // the row goes back to what it was first: a CLI that cannot answer must not keep a machine held.
   async function holdClaimsForSession(): Promise<void> {
     await askClaudeAgain();
-    if (!preflight || claudeSignedOut()) return;
-    preflight = markClaudeSignedOut(preflight);
+    const row = claudeRow();
+    if (!preflight || !row || claudeSignedOut()) return;
+    sessionHold = { until: Date.now() + SESSION_HOLD_MS, row, account: preflight.account };
+    preflight = markClaudeLoginRefused(preflight);
     reportRunnableAgents(preflight);
-    sessionHeldUntil = Date.now() + SESSION_HOLD_MS;
+  }
+
+  async function retryClaudeSession(): Promise<void> {
+    if (sessionHold) {
+      if (Date.now() < sessionHold.until || !preflight) return;
+      preflight = withClaudeSession(preflight, sessionHold.row, sessionHold.account);
+      reportRunnableAgents(preflight);
+      sessionHold = null;
+      deps.log("trying claude's login again: the next run will tell");
+      await askClaudeAgain();
+    } else if (claudeSignedOut()) {
+      await askClaudeAgain();
+    }
   }
 
   // Once per poll while preflight could not run, like retryLeftovers: the machine claims nothing
@@ -975,7 +994,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   async function drain(): Promise<void> {
     await retryLeftovers().catch((error) => deps.logError(`reaping what an earlier run left failed: ${String(error)}`));
     await retryPreflight();
-    if (claudeSignedOut() && Date.now() >= sessionHeldUntil) await askClaudeAgain();
+    await retryClaudeSession();
     await refreshServerState();
     // Before the flush, so a settlement this pass produces goes out with it rather than waiting a
     // whole poll interval. Drained here rather than in the claim loop because `drain` runs even
@@ -1025,7 +1044,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     if (leftovers) return leftovers;
     const row = preflight?.checks.find((check) => check.name === SANDBOX_CHECK);
     if (row && !row.ok) return row.detail;
-    if (claudeSignedOut()) return CLAUDE_SIGNED_OUT;
+    if (claudeSignedOut() || sessionHold) return claudeRow()?.detail ?? CLAUDE_LOGIN_REFUSED;
     if (!preflight) return preflightFailed ? `preflight could not run: ${preflightError}` : "";
     return isAbsolute(preflight.paths.claude ?? "") ? "" : "claude could not be found on this machine, and every task needs it";
   }

@@ -2176,7 +2176,7 @@ export interface ApiMyMachine {
   checkouts: number;
 }
 
-export type FleetState = "running" | "quiet" | "idle" | "paused" | "offline" | "off";
+export type FleetState = "running" | "quiet" | "idle" | "paused" | "failing" | "offline" | "off";
 
 /** A machine as the sidebar shows it; `task` names nothing when the reader cannot see its project */
 export interface ApiFleetMachine {

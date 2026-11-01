@@ -30,10 +30,11 @@ const USAGE_LIMIT_SENTINEL = /^Claude(?: AI)? usage limit reached\|\d+$/;
 export const CLAUDE_SIGNED_OUT =
   "claude is not signed in on this machine: run `claude auth login` as the user the worker runs as";
 
-// The sentences 2.1.314 ends a run on when it has no login it can use. Whole sentences, because on a
-// refusal `result` is model text; "Not logged in" measured in both output formats, the rest from the
-// binary.
-const LOGIN_SENTINEL = /^(?:Not logged in|Login expired|OAuth token revoked|(?:API Error: 401 )?Invalid API key) · Please run \/login$/;
+// How 2.1.314 ends a run with `-p` when it has no login it can use. Anchored, because on a refusal
+// `result` is model text. "Not logged in" is measured, in both output formats. An expired or revoked
+// login is read from the binary, whose headless branch says "Failed to authenticate: …" or ". …";
+// `Login expired · Please run /login` and its like are the interactive branch and never reach a worker.
+const LOGIN_SENTINEL = /^(?:Not logged in · Please run \/login$|Failed to authenticate[.:] )/;
 
 function signedOut(result: CommandResult, final: ResultEvent | undefined): boolean {
   return (

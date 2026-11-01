@@ -36,6 +36,14 @@ describe("FleetPanel", () => {
     expect(screen.getByText("1 working")).toBeTruthy();
   });
 
+  it("does not show a machine that takes no work as idle", async () => {
+    await showing([machine({ state: "failing", task: null })]);
+    const row = screen.getByTestId("fleet-machine");
+    expect(row.getAttribute("data-state")).toBe("failing");
+    expect(row.textContent).toContain("Not taking work");
+    expect(row.querySelector(".bg-danger")).toBeTruthy();
+  });
+
   it("says a run has gone quiet", async () => {
     await showing([machine({ state: "quiet", task: { key: "BP-7", title: "t", projectKey: "BP", taskNumber: 7 } })]);
     expect(screen.getByTestId("fleet-machine").getAttribute("data-state")).toBe("quiet");

@@ -164,6 +164,10 @@ async function runs(
 
 const SIGNED_OUT_ROW: PreflightCheck = { name: "claude", ok: false, stopsClaims: true, detail: CLAUDE_SIGNED_OUT };
 
+export const SESSION_HOLD_MS = 15 * 60_000;
+
+export const CLAUDE_LOGIN_REFUSED = `claude refused this machine's login: run \`claude auth login\` as the user the worker runs as. The worker tries again within ${SESSION_HOLD_MS / 60_000} minutes, or at once if it is restarted`;
+
 interface ClaudeAuth {
   loggedIn?: unknown;
   authMethod?: unknown;
@@ -260,11 +264,11 @@ export async function refreshClaudeSession(
 }
 
 /** For a run refused a login `auth status` still calls good, which only the server can know */
-export function markClaudeSignedOut(report: PreflightReport): PreflightReport {
-  return withClaudeSession(report, SIGNED_OUT_ROW, "");
+export function markClaudeLoginRefused(report: PreflightReport): PreflightReport {
+  return withClaudeSession(report, { name: "claude", ok: false, stopsClaims: true, detail: CLAUDE_LOGIN_REFUSED }, "");
 }
 
-function withClaudeSession(report: PreflightReport, row: PreflightCheck, account: string): PreflightReport {
+export function withClaudeSession(report: PreflightReport, row: PreflightCheck, account: string): PreflightReport {
   const checks = report.checks.map((check) => (check.name === "claude" ? row : check));
   return {
     ...report,
