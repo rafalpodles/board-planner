@@ -112,8 +112,11 @@ test("a Trello export imports through the mapping step, reports what it left beh
   await expect(report.locator("details", { hasText: "Statuses with no column" })).toContainText("Ideas");
   expect(await imported()).toHaveLength(0);
 
+  await expect(report.getByText("Imported 9 tasks.")).toHaveCount(0);
   await press(page, "Import");
   await expect(report).toContainText("Created 9 and updated 0 of 9 tasks from Trello");
+  await expect(report.getByText("Imported 9 tasks.")).toBeVisible();
+  await expect(page.getByTestId("toast-tray")).toContainText("Imported 9 tasks.");
   const tasks = await imported();
   expect(tasks).toHaveLength(9);
   expect(tasks.map((t) => t.title)).not.toContain("Mobile menu");
