@@ -79,7 +79,7 @@ function criteriaOf(checklists: Json[]): ImportChecklistItem[] {
 function missedComments(card: Json, carried: number): string | null {
   const counted = isRecord(card.badges) ? Number(card.badges.comments) || 0 : 0;
   if (counted <= carried) return null;
-  return `${counted - carried} of its ${plural(counted, "comment")}: the export holds only the board's newest 1,000 actions`;
+  return `${(counted - carried).toLocaleString("en-US")} of its ${plural(counted, "comment")}: the export holds only the board's newest 1,000 actions`;
 }
 
 function boardNotes(board: Json, open: Json[]): ImportNote[] {

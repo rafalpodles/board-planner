@@ -81,7 +81,7 @@ describe("trelloToTable", () => {
 
   it("says how many comments the export's limit of 1,000 actions left out", () => {
     const { bundle } = bundleOf(fixture);
-    expect(bundle.notes).toContainEqual({ id: "Audit log filter", what: "2294 of its 2,294 comments: the export holds only the board's newest 1,000 actions" });
+    expect(bundle.notes).toContainEqual({ id: "Audit log filter", what: "2,294 of its 2,294 comments: the export holds only the board's newest 1,000 actions" });
     expect(bundle.notes?.some((n) => n.id === "Single sign-on" && n.what.includes("comment"))).toBe(false);
   });
 
