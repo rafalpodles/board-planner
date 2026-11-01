@@ -821,7 +821,7 @@ export interface StatusChangeOptions {
   /**
    * The attempt the claim spent is given back in the same write, for a run stopped by settings
    * rather than by the task (BP-1117). Honoured only for the worker holding a run on the task, so a
-   * report replayed after that run ended gives nothing back.
+   * report replayed when no run holds it gives nothing back.
    */
   refundAttempt?: boolean;
 }

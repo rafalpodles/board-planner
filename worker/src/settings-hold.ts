@@ -5,7 +5,7 @@ import type { ClaimedTask } from "./types.js";
 type GateSettings = Partial<GateCommands> & { baseBranch?: string; remotes?: string[] };
 
 // A commit that adds the program a command names changes no setting, so no hold outlasts this
-export const HOLD_MS = 24 * 60 * 60_000;
+const HOLD_MS = 24 * 60 * 60_000;
 
 // Nothing about the next task is different until a person edits one of these, so a run that faulted
 // on them says the same for every task of that agent. The repositories and the base branch are here
@@ -37,7 +37,7 @@ export function createSettingsHolds(log: (message: string) => void, now: () => n
       const ofProject = held.get(task.projectId) ?? new Map<string, Hold>();
       ofProject.set(agentId, { fingerprint: fingerprintOf(settings), gates, since: now() });
       held.set(task.projectId, ofProject);
-      log(`holding agent ${agentId} on project ${task.projectId} until its settings change`);
+      log(`holding agent ${agentId} on project ${task.projectId} until its settings change, for a day at most`);
     },
 
     heldAgents(projectId, settings) {

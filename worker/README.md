@@ -1125,9 +1125,10 @@ would run npm and report that as the project's check.
   in `heldAgents`, and the server steps over it while its gates are the ones the machine saw, so the
   rest of the project's work flows. The hold goes when the project's commands, repositories or base
   branch change, or the agent's gates do. It is kept in memory and lasts a day, because a commit that
-  adds the program changes no setting: a wrong setting left standing costs a task a day per machine. A
-  working directory the checkout lacks is left to the gate: the task may be the one that creates it. A
-  project on the npm gates is not claimed from without npm; the worker itself no longer needs it.
+  adds the program changes no setting: a wrong setting left standing costs a task a day per agent and
+  machine. A working directory the checkout lacks is left to the gate: the task may be the one that
+  creates it. A project on the npm gates is not claimed from without npm; the worker itself no longer
+  needs it.
 - **Test-presence** recognises other ecosystems' test files on these projects only: on the npm gates a
   `foo_test.py` is a file `npm test` never runs. Rust tests inline in `src/` are not recognised.
 - **Whose command it is.** It runs on the machine of whoever the task is assigned to, chosen by the

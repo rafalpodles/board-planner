@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { claimedTask } from "./__fixtures__/task.js";
-import { createSettingsHolds, HOLD_MS } from "./settings-hold.js";
+import { createSettingsHolds } from "./settings-hold.js";
 import type { ClaimedTask } from "./types.js";
 
 const SETTINGS = { baseBranch: "main", testCommand: "./bin/tst" };
@@ -55,7 +55,7 @@ describe("what a settings fault holds", () => {
     const holds = createSettingsHolds(vi.fn(), () => clock);
     holds.hold(onAgent("a1"), SETTINGS);
 
-    clock += HOLD_MS - 1;
+    clock += 24 * 60 * 60_000 - 1;
     expect(holds.heldAgents("P1", SETTINGS)).toHaveLength(1);
 
     clock += 1;
