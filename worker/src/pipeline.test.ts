@@ -361,7 +361,7 @@ describe("runTask", () => {
 
     expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA);
     expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", merging, "did it", expect.any(Array));
-    expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7");
+    expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7", IMPLEMENT_COMMIT_SHA);
     expect(h.reporter.merged).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it");
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
@@ -369,7 +369,7 @@ describe("runTask", () => {
   // BP-1127: the base branch still requires its checks, so nothing has landed yet
   it("reports a merge left to GitHub's auto-merge as delivered with auto-merge armed, not as done", async () => {
     const h = harness();
-    h.delivery.merge.mockResolvedValue("queued");
+    vi.mocked(h.delivery.merge).mockResolvedValue("queued");
     await runTask(h.deps, merging);
 
     expect(h.reporter.delivered).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it", true);
@@ -2174,6 +2174,27 @@ describe("runTask", () => {
     await runTask(h.deps, merging);
 
     expect(h.reporter.merged).toHaveBeenCalled();
+    expect(h.reporter.released).not.toHaveBeenCalled();
+    expect(h.reporter.requeued).not.toHaveBeenCalled();
+  });
+
+  // BP-1127: GitHub merges an armed pull request on its own, so releasing it would run the work twice
+  it("does not release a run whose merge was left armed when the stop landed", async () => {
+    const controller = new AbortController();
+    const delivery = deliverySpy({
+      merge: vi.fn<Delivery["merge"]>(async () => {
+        controller.abort();
+        return "queued";
+      }),
+    });
+    const h = harness({
+      createDelivery: vi.fn<PipelineDeps["createDelivery"]>(() => delivery),
+      signal: controller.signal,
+    });
+
+    await runTask(h.deps, merging);
+
+    expect(h.reporter.delivered).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it", true);
     expect(h.reporter.released).not.toHaveBeenCalled();
     expect(h.reporter.requeued).not.toHaveBeenCalled();
   });

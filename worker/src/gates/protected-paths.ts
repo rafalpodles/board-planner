@@ -157,6 +157,29 @@ export function escapingSymlinks(
   });
 }
 
+/**
+ * What no agent may push, whatever it is composed of (BP-1127). The Protected files gate is optional
+ * now; these three are not. A workflow or action runs in Actions with the repository's secrets on
+ * the push itself, before anyone reads it; a submodule pointer and an escaping symlink have no
+ * reading anybody could do.
+ */
+export function refusedAtPush(diff: Pick<DiffStats, "changedFiles" | "gitlinks" | "symlinks">): string | null {
+  const workflows = workflowPaths(diff.changedFiles);
+  if (workflows.length > 0) {
+    return `the change edits CI workflows or actions (${workflows.join(", ")}), which GitHub runs with the repository's secrets as soon as they are pushed. A human has to make that change.`;
+  }
+  if (diff.gitlinks.length > 0) {
+    return `the change moves a submodule pointer (${diff.gitlinks.join(", ")}), which nothing here can read. A human has to look at this.`;
+  }
+  const escaping = escapingSymlinks(diff.symlinks);
+  if (escaping.length > 0) {
+    return `the change adds a symlink pointing out of the checkout (${escaping
+      .map(({ path, target }) => `${path} → ${target}`)
+      .join(", ")}). A human has to look at this.`;
+  }
+  return null;
+}
+
 export function protectedPathsGate(commands: GateCommands = NPM_GATES): Gate {
   return {
     name: "protected-paths",

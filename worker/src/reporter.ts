@@ -182,7 +182,7 @@ export function createReporter(
     // the base branch yet, so review, not done.
     async delivered(task, prUrl, summary, mergeQueued = false) {
       const what = mergeQueued
-        ? `Opened ${scrub(prUrl)} with auto-merge armed: GitHub merges it once the base branch's required checks and reviews pass.`
+        ? `Opened ${scrub(prUrl)} with auto-merge armed: GitHub merges what is still open once the base branch's required checks and reviews pass. The task stays here until somebody moves it.`
         : `Opened ${scrub(prUrl)} for review. The worker did not merge it.`;
       await report(task, statusIds.review, `${what}\n\n${safeText(summary)}`);
     },

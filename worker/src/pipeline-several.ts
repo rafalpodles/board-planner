@@ -1,5 +1,6 @@
 import { dirname } from "path";
 import { gateCommandsOf, gateConfigFault, usesOwnCommands } from "./gates/gate-commands.js";
+import { refusedAtPush } from "./gates/protected-paths.js";
 import { createBudget } from "./budget.js";
 import { commitAll, TamperedCheckoutError } from "./commit.js";
 import { branchFor, WORKER_BRANCH_SLUG } from "./decisions.js";
@@ -245,7 +246,7 @@ export async function runTaskInRepositories(
 
   try {
     for (const leg of legs) leg.ignoredBeforeSteps = await ignoredFiles(runner, deps.gitPath, leg.worktree.path);
-    const anyMerged = (): boolean => legs.some((leg) => leg.state.merged);
+    const anyMerged = (): boolean => legs.some((leg) => leg.state.merged || leg.state.mergeQueued);
 
     // Every repository or none: a gate runs only where the agent changes something, so a `./gradlew` one
     // of them lacks says nothing about this task
@@ -448,6 +449,8 @@ export async function runTaskInRepositories(
           for (const leg of active) {
             const wrong = await unexpectedHistory(runner, deps.gitPath, leg.worktree.path, leg.worktree.baseSha, leg.state.commits);
             if (wrong) refusals.push(`${leg.label}: ${wrong}`);
+            const refused = wrong ? null : refusedAtPush(await deps.collectDiff(runner, leg.worktree.path, leg.worktree.baseSha));
+            if (refused) refusals.push(`${leg.label}: ${refused}`);
           }
           if (refusals.length > 0) {
             return { kind: "error", message: `refusing to push anything: ${refusals.join("; ")}` };
@@ -490,16 +493,19 @@ export async function runTaskInRepositories(
           }
           for (const leg of open) {
             try {
-              if ((await leg.delivery.merge(leg.worktree.path, leg.state.prUrl)) === "queued") {
+              const pushed = leg.state.commits[leg.state.commits.length - 1] ?? "";
+              if ((await leg.delivery.merge(leg.worktree.path, leg.state.prUrl, pushed)) === "queued") {
                 leg.state.mergeQueued = true;
                 continue;
               }
             } catch (error) {
               const done = open.filter((each) => each.state.merged).map((each) => each.label);
-              const left = open.filter((each) => !each.state.merged).map((each) => each.label);
+              const queued = open.filter((each) => each.state.mergeQueued).map((each) => each.label);
+              const left = open.filter((each) => !each.state.merged && !each.state.mergeQueued).map((each) => each.label);
+              const armed = queued.length > 0 ? ` Auto-merge armed: ${queued.join(", ")}.` : "";
               return {
                 kind: "error",
-                message: `${leg.label}: ${String(error)}\n\nMerged: ${done.join(", ") || "none"}. Not merged: ${left.join(", ")}. Merging stopped at the first refusal and nothing was rolled back.`,
+                message: `${leg.label}: ${String(error)}\n\nMerged: ${done.join(", ") || "none"}.${armed} Not merged: ${left.join(", ")}. Merging stopped at the first refusal and nothing was rolled back.`,
               };
             }
             leg.state.merged = true;

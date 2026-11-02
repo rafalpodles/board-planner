@@ -125,6 +125,7 @@ describe.skipIf(process.platform !== "darwin")("a worktree a confined process re
       baseSha: worktree.baseSha,
       runner: recording,
       gitPath,
+      refusedAtPush: async () => null,
     };
   }
 

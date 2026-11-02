@@ -188,7 +188,8 @@ export async function seedAgents(db: ScopedDb) {
     const row = await db.Agent.findOne({ scope: "global", name, builtIn: true }).lean();
     if (!row) continue;
     if (JSON.stringify(normaliseComposition(row.composition)) !== JSON.stringify(from)) continue;
-    await db.Agent.updateOne({ _id: row._id }, { $set: { composition: to } });
+    // On what was read, so an edit saved since is not overwritten
+    await db.Agent.updateOne({ _id: row._id, composition: row.composition }, { $set: { composition: to } });
   }
 }
 

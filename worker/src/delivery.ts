@@ -30,7 +30,8 @@ export interface Delivery {
     // The gates the run passed before this pull request, listed under the summary (BP-780)
     checks?: PassedCheck[],
   ): Promise<string>;
-  merge(worktreePath: string, prUrl: string): Promise<MergeOutcome>;
+  /** `headSha` is the commit the run pushed: GitHub merges that commit or nothing. */
+  merge(worktreePath: string, prUrl: string, headSha: string): Promise<MergeOutcome>;
   /**
    * Whether the repository the server names by `remote` is private, asked before any pull request
    * exists. The remote is the server's word for the repository, never the checkout's own config,
@@ -179,14 +180,15 @@ type MergeState = "merged" | "unmerged" | "unknown";
 /** Merged now, or left with GitHub's auto-merge armed until its required checks and reviews pass. */
 export type MergeOutcome = "merged" | "queued";
 
-const MERGE_METHOD_FLAGS: Record<string, string> = {
-  MERGE: "--merge",
-  SQUASH: "--squash",
-  REBASE: "--rebase",
-};
+// In this order of preference, so a repository that allows a merge commit gets one, as it always did
+const MERGE_METHODS = [
+  ["mergeCommitAllowed", "--merge"],
+  ["squashMergeAllowed", "--squash"],
+  ["rebaseMergeAllowed", "--rebase"],
+] as const;
 
 const MERGE_SETTINGS_QUERY =
-  "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){viewerDefaultMergeMethod autoMergeAllowed}}";
+  "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed autoMergeAllowed}}";
 
 // Order matters for credential.helper: the empty value clears whatever the repository or a global
 // file configured, and the entry after it names the one helper we trust. Clearing alone would be a
@@ -394,9 +396,7 @@ export function createDelivery(
         ? parsed.data.repository
         : null;
       if (!settings) return fallback;
-      const method = typeof settings.viewerDefaultMergeMethod === "string"
-        ? MERGE_METHOD_FLAGS[settings.viewerDefaultMergeMethod]
-        : undefined;
+      const method = MERGE_METHODS.find(([allowed]) => settings[allowed] === true)?.[1];
       return { method: method ?? fallback.method, auto: settings.autoMergeAllowed === true };
     } catch {
       return fallback;
@@ -533,7 +533,7 @@ export function createDelivery(
       if (result.code !== 0) throw failure("gh pr edit", result);
     },
 
-    async merge(worktreePath, prUrl) {
+    async merge(worktreePath, prUrl, headSha) {
       // --repo keeps gh out of the local checkout: --delete-branch otherwise switches the worktree
       // to the base branch first, which git refuses while the main clone has it checked out — and
       // which checks the base out through whatever the worktree's path now is (BP-804)
@@ -541,27 +541,42 @@ export function createDelivery(
       if (repo.length === 0) {
         throw new Error(`refusing to merge ${prUrl}: it names no repository, so gh would check the base branch out in the worktree`);
       }
+      if (!headSha || headSha.startsWith("-")) throw new Error(`refusing to merge ${prUrl}: no pushed commit was named`);
       const settings = await mergeSettings(worktreePath, prUrl);
-      // With --auto, gh merges at once when nothing is pending and otherwise leaves GitHub to merge
-      // once the base branch's required checks and reviews pass
-      const result = await run(
-        requireToolPath("gh", ghPath),
-        [
-          "pr",
-          "merge",
-          prUrl,
-          settings.method,
-          ...(settings.auto ? ["--auto"] : []),
-          "--delete-branch",
-          ...repo,
-        ],
-        worktreePath,
-      );
-      if (result.code === 0 && !settings.auto) return "merged";
+      // --match-head-commit: whatever moved the branch since the push, it is not what gets merged
+      const attempt = (auto: boolean) =>
+        run(
+          requireToolPath("gh", ghPath),
+          [
+            "pr",
+            "merge",
+            prUrl,
+            settings.method,
+            ...(auto ? ["--auto"] : []),
+            "--match-head-commit",
+            headSha,
+            "--delete-branch",
+            ...repo,
+          ],
+          worktreePath,
+        );
 
-      const state = await mergeState(worktreePath, prUrl);
+      // With --auto, gh merges at once a pull request it reads as ready and otherwise leaves GitHub
+      // to merge it once the base branch's required checks and reviews pass
+      let result = await attempt(settings.auto);
+      if (result.code === 0 && !settings.auto) return "merged";
+      let state = await mergeState(worktreePath, prUrl);
       if (state === "merged") return "merged";
       if (result.code === 0) return "queued";
+
+      // GitHub refuses to arm auto-merge where nothing is left to wait for: a base branch with no
+      // protection, or a pull request gh read as pending a moment before GitHub found it clean
+      if (settings.auto && state === "unmerged") {
+        result = await attempt(false);
+        if (result.code === 0) return "merged";
+        state = await mergeState(worktreePath, prUrl);
+        if (state === "merged") return "merged";
+      }
       throw failure(
         "gh pr merge",
         result,

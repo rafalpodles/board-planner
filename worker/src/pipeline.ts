@@ -5,6 +5,7 @@ import { createBudget } from "./budget.js";
 import { commitAll, MissingIdentityError, TamperedCheckoutError } from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { GateFallbacks } from "./gates/from-entry.js";
+import { refusedAtPush } from "./gates/protected-paths.js";
 import { gateCommandsOf, gateConfigFault, usesOwnCommands } from "./gates/gate-commands.js";
 import { unexpectedHistory } from "./provenance.js";
 import { RunState, runStep } from "./steps.js";
@@ -263,6 +264,8 @@ function unpushedWork(state: RunState, worktreePath: string): string {
 // only place that says so.
 export function whatLanded(state: RunState, branch: string): string {
   if (state.merged) return "";
+  if (state.mergeQueued)
+    return `: \`${branch}\` is pushed and ${state.prUrl} is open with auto-merge armed`;
   if (state.prUrl)
     return `: \`${branch}\` is pushed and ${state.prUrl} is open, but it was not merged`;
   if (state.pushed)
@@ -752,6 +755,7 @@ export async function runTask(
           runner,
           gitPath: deps.gitPath,
           position,
+          refusedAtPush: async () => refusedAtPush(await deps.collectDiff(runner, worktree.path, worktree.baseSha)),
         });
         // Before the abort check, not after it. An earlier step may already have committed, and
         // exiting without keeping the worktree destroys the only copy of that work: nothing is
@@ -771,6 +775,7 @@ export async function runTask(
         // branch, and releasing there queues a second full run over work that has already landed.
         if (
           !state.merged &&
+          !state.mergeQueued &&
           (await releaseIfAborted(
             deps,
             reporter,
@@ -1066,6 +1071,7 @@ export async function runTask(
     // is already on the base branch back in the queue for another full run.
     if (
       !state.merged &&
+      !state.mergeQueued &&
       (await releaseIfAborted(deps, reporter, task, whatLanded(state, branch)))
     ) {
       return;

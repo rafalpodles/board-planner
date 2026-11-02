@@ -54,6 +54,7 @@ function ctx(over: Partial<StepContext> = {}) {
     },
     commit: vi.fn(async () => "sha1"),
     tampering: vi.fn(async () => null),
+    refusedAtPush: vi.fn(async (): Promise<string | null> => null),
     state,
     timeoutMs: 1000,
     onEvent: vi.fn(),
@@ -326,6 +327,18 @@ describe("runStep — a worker action", () => {
 
     expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha1");
     expect(c.executor.execute).not.toHaveBeenCalled();
+  });
+
+  // BP-1127: no agent may push a workflow, whether or not it carries a Protected files gate
+  it("refuses to push what no agent may push, and says why", async () => {
+    const c = ctx({ state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, mergeQueued: false, summary: "", checks: [], lastResult: completed } });
+    vi.mocked(c.refusedAtPush).mockResolvedValue("the change edits CI workflows or actions (.github/workflows/ci.yml)");
+
+    const outcome = await runStep(entry({ key: "push", deterministic: true }), c);
+
+    expect(outcome).toEqual({ kind: "error", message: expect.stringMatching(/^refusing to push: .*ci\.yml/) });
+    expect(c.delivery.push).not.toHaveBeenCalled();
+    expect(c.state.pushed).toBe(false);
   });
 
   it("refuses nothing itself when no commit was recorded, leaving delivery to say so", async () => {
