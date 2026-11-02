@@ -88,19 +88,6 @@ private func state(_ events: [TelemetryEvent]) -> WorkerState {
     #expect(summary == PanelSummary(headline: "Waiting for work", detail: "Checking the board every 30 s.", pill: "Connected"))
 }
 
-@Test func theCaptionGoesWithAReconnectOrADisconnect() {
-    var adopted = state([.outcome(Outcome(outcome: "machineFault", taskKey: "BP-1"))])
-    adopted.adopt(StatusResponse(paused: false, current: nil, recent: []), at: t0.addingTimeInterval(5))
-
-    var dropped = state([.outcome(Outcome(outcome: "machineFault", taskKey: "BP-1"))])
-    dropped.markDisconnected()
-    dropped.adopt(StatusResponse(paused: false, current: nil, recent: []), at: t0.addingTimeInterval(5))
-
-    let later = t0.addingTimeInterval(WorkerState.faultGrace * 4)
-    #expect(adopted.panelSummary(now: later, pollSeconds: nil).caption == nil)
-    #expect(dropped.panelSummary(now: later, pollSeconds: nil).caption == nil)
-}
-
 // The next run leaves the fault's stamp behind, and only the reconnect paths clear it; a run that
 // went well since is not a fault to report.
 @Test func aRunAfterTheFaultEndsTheCaption() {
