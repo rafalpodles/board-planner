@@ -1272,6 +1272,31 @@ test("the fleet screen says whether a machine confines the agent it runs", async
   await expect(page.locator("table")).not.toContainText("nothing confining its writes");
 });
 
+// BP-1077. The worker takes no work with claude signed out, so a screen that reads it as running leaves
+// its owner nothing to go on: a handed-over task simply sits there, with no comment and no notice.
+test("a machine that says a failed check stops its claims is not taken for running, and another failed check is", async ({
+  page,
+  request,
+}) => {
+  const SIGNED_OUT = "claude is not signed in on this machine: run `claude auth login` as the user the worker runs as";
+  const failing = (over: Record<string, unknown>) => ({
+    ok: false,
+    account: "",
+    checks: [{ name: "sandbox", ok: true, detail: "confined" }, { name: "claude", ok: false, detail: SIGNED_OUT, ...over }],
+  });
+
+  await setWorker({ owner: ADMIN_ID });
+  await heartbeat(request, { preflight: failing({}) });
+  await signIn(page);
+  await page.goto("/settings/machines");
+  const state = page.getByTestId("my-machine").filter({ hasText: WORKER_NAME }).getByTestId("my-machine-state");
+  await expect(state).toHaveText(/^Running/);
+
+  await heartbeat(request, { preflight: failing({ stopsClaims: true }) });
+  await page.reload();
+  await expect(state).toHaveText(/^Not taking work: a check is failing/);
+});
+
 /**
  * BP-793. A worker whose preflight threw claims nothing, and used to send no report at all — which
  * the heartbeat route reads as a worker too old to report one, so it kept the green report from an

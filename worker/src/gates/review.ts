@@ -309,6 +309,8 @@ export function reviewGate(
             reason: `the review could not be completed: it timed out after ${timeoutMs}ms`,
           };
         }
+        const sessionFault = agent.sessionFault(result);
+        if (sessionFault) return { ok: false, reason: sessionFault, machineFault: true };
         if (result.code !== 0) {
           return {
             ok: false,

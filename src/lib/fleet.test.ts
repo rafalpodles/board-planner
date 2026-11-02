@@ -115,5 +115,6 @@ describe("fleetState", () => {
     expect(fleetState("stale", held() as never)).toBe("offline");
     expect(fleetState("paused", undefined)).toBe("paused");
     expect(fleetState("live", undefined)).toBe("idle");
+    expect(fleetState("failing", undefined)).toBe("failing");
   });
 });

@@ -265,7 +265,7 @@ test.describe("a member's own task, as the board changes under it", () => {
     await expect(notice(page)).toHaveCount(0);
   });
 
-  // Only the sandbox check stops a claim; another failed check may be another project's checkout
+  // Only a check that stops the claim counts; another failed check may be another project's checkout
   test("a failed sandbox check is a reason, and any other failed check is not", async ({ page }) => {
     await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
     await seedMachine("git@github.com:e2e/handover-board.git", {
@@ -281,7 +281,7 @@ test.describe("a member's own task, as the board changes under it", () => {
     await openAs(page, "member");
 
     await expect(notice(page)).toHaveAttribute("data-reason", "machine-failing");
-    await expect(notice(page)).toContainText("its sandbox check failed");
+    await expect(notice(page)).toContainText("a check it needs is failing");
   });
 
   // No advice about the board could make it run, so none is listed beside it

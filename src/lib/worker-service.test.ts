@@ -909,7 +909,7 @@ describe("machineStateFor", () => {
   const acked = new Date(NOW.getTime() - 30_000);
   const commanded = (command: string, over: Record<string, unknown> = {}) =>
     machine({ command, commandIssuedAt: issued, commandAckedAt: acked, ...over });
-  const preflight = (checks: { name: string; ok: boolean }[], ok = checks.every((c) => c.ok)) => ({
+  const preflight = (checks: { name: string; ok: boolean; stopsClaims?: boolean }[], ok = checks.every((c) => c.ok)) => ({
     ok,
     account: "",
     checks: checks.map((c) => ({ ...c, detail: "/Users/ada/private path" })),
@@ -1038,6 +1038,14 @@ describe("machineStateFor", () => {
         }),
       ])
     ).toBe("live");
+  });
+
+  it("is failing when the worker says a failed check stops its claims", () => {
+    expect(state([machine({ preflight: preflight([{ name: "claude", ok: false, stopsClaims: true }]) })])).toBe("failing");
+  });
+
+  it("is live when that flag sits on a check that passed", () => {
+    expect(state([machine({ preflight: preflight([{ name: "claude", ok: true, stopsClaims: true }]) })])).toBe("live");
   });
 
   it("is live when the report is not ok but names no failing check", () => {

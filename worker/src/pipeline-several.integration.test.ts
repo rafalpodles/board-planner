@@ -1,3 +1,4 @@
+import { CLAUDE_SIGNED_OUT } from "./agents/claude.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -480,6 +481,23 @@ describe("a run across several repositories", () => {
     await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, GATE, SECOND));
 
     expect(run.gateRuns.map((g) => g.gate)).toEqual(["diff-size", "diff-size", "test-presence", "test-presence"]);
+  });
+
+  // BP-1077. The disposition is what tells the wiring to hold claims
+  it("says when a step's fault was claude with no login", async () => {
+    const run = build();
+    run.deps.executor.execute = vi.fn(async () => ({ kind: "machine_fault" as const, message: CLAUDE_SIGNED_OUT }));
+
+    expect(await runTaskInRepositories(run.deps, taskWith(IMPLEMENT))).toBe("session-fault");
+  });
+
+  it("says when a gate's fault was claude with no login", async () => {
+    const run = build({
+      write: (w) => { write(w.api, "api.txt", "a\n"); write(w.web, "web.txt", "w\n"); },
+      gates: { [GATE.key]: async () => ({ ok: false, reason: CLAUDE_SIGNED_OUT, machineFault: true }) },
+    });
+
+    expect(await runTaskInRepositories(run.deps, taskWith(IMPLEMENT, GATE))).toBe("session-fault");
   });
 
   it("rolls back every worktree and quarantines the checkout that failed when one cannot be made", async () => {

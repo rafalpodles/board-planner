@@ -1,4 +1,5 @@
 import { capabilityHeaders, reportAgents } from "./capabilities.js";
+import { CLAUDE_SIGNED_OUT } from "./agents/claude.js";
 import { codexUsable, sweepRunHomes } from "./agents/codex.js";
 import {
   accessSync,
@@ -65,13 +66,18 @@ import { PipelineDeps, RunDisposition, runTask } from "./pipeline.js";
 import {
   checkGateCommands,
   checkRepo,
+  CLAUDE_LOGIN_REFUSED,
   npmMissingForProject,
   pathWithTools,
   PreflightCheck,
   PreflightDeps,
   PreflightReport,
+  markClaudeLoginRefused,
+  refreshClaudeSession,
   runPreflight,
   SANDBOX_CHECK,
+  SESSION_HOLD_MS,
+  withClaudeSession,
 } from "./preflight.js";
 import { createReporter, ReleaseMemory } from "./reporter.js";
 import { createSettingsHolds } from "./settings-hold.js";
@@ -256,13 +262,15 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   >();
   const reapedProjects = new Set<string>();
 
-  // What this machine can actually do, established once at startup. Null until then, and reported
-  // as undefined while it is, so a worker mid-startup never claims to be broken.
+  // What this machine can actually do, established at startup, with only claude's row asked again
+  // later. Null until then, and reported as undefined while it is, so a worker mid-startup never
+  // claims to be broken.
   let preflight: PreflightReport | null = null;
   let preflightFailed = false;
   let preflightError = "";
   let leftovers = "";
   let probedSandboxRow: PreflightCheck | undefined;
+  let sessionHold: { until: number; row: PreflightCheck; account: string } | null = null;
 
   function showLeftovers(): void {
     if (!preflight) return;
@@ -433,17 +441,69 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
     showLeftovers();
 
-    // What this machine can run, said to the server on every request from here on
-    const found = preflight.paths;
-    reportAgents(preflight.agents ?? [], (agent) =>
-      // Asked on every request: signing out of Codex, or removing it, takes it back at once
-      agent !== "codex" || codexUsable(found.codex, codexSourceHome(deps.env))
-    );
+    reportRunnableAgents(preflight);
     // A Codex run home carries the login; one a killed worker left behind goes before the next run
     sweepRunHomes(undefined, deps.logError);
 
     for (const check of preflight.checks) {
       if (!check.ok) deps.logError(`preflight: ${check.name} — ${check.detail}`);
+    }
+  }
+
+  // What this machine can run, said to the server on every request from here on
+  function reportRunnableAgents(report: PreflightReport): void {
+    const found = report.paths;
+    reportAgents(report.agents ?? [], (agent) =>
+      // Asked on every request: signing out of Codex, or removing it, takes it back at once
+      agent !== "codex" || codexUsable(found.codex, codexSourceHome(deps.env))
+    );
+  }
+
+  function claudeRow(): PreflightCheck | undefined {
+    return preflight?.checks.find((check) => check.name === "claude");
+  }
+
+  function claudeSignedOut(): boolean {
+    return claudeRow()?.detail === CLAUDE_SIGNED_OUT;
+  }
+
+  // Once per poll while claude says it is signed out, and after a run found it so, which is how a
+  // session that ended under a running worker first shows: `claude auth login` needs no restart
+  async function askClaudeAgain(): Promise<void> {
+    if (!preflight) return;
+    const wasSignedOut = claudeSignedOut();
+    try {
+      preflight = await refreshClaudeSession({ runner: deps.runner, env: deps.env }, preflight);
+    } catch (error) {
+      deps.logError(`could not ask claude whether it is signed in: ${String(error)}`);
+      return;
+    }
+    reportRunnableAgents(preflight);
+    if (wasSignedOut && !claudeSignedOut()) deps.log("claude is signed in again");
+  }
+
+  // `auth status` reads the stored token and never asks the server, so an expired or revoked one reads
+  // as signed in while every run is refused. Only a run can tell, so one is let through per hold, and
+  // the row goes back to what it was first: a CLI that cannot answer must not keep a machine held.
+  async function holdClaimsForSession(): Promise<void> {
+    await askClaudeAgain();
+    const row = claudeRow();
+    if (!preflight || !row || claudeSignedOut()) return;
+    sessionHold = { until: Date.now() + SESSION_HOLD_MS, row, account: preflight.account };
+    preflight = markClaudeLoginRefused(preflight);
+    reportRunnableAgents(preflight);
+  }
+
+  async function retryClaudeSession(): Promise<void> {
+    if (sessionHold) {
+      if (Date.now() < sessionHold.until || !preflight) return;
+      preflight = withClaudeSession(preflight, sessionHold.row, sessionHold.account);
+      reportRunnableAgents(preflight);
+      sessionHold = null;
+      deps.log("the hold on claude's login is up");
+      await askClaudeAgain();
+    } else if (claudeSignedOut()) {
+      await askClaudeAgain();
     }
   }
 
@@ -906,6 +966,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const settings = gateSettingsOf(task.projectId);
     const disposition = await execute(task);
     if (disposition === "settings-fault" && settings) settingsHolds.hold(task, settings);
+    if (disposition === "session-fault") await holdClaimsForSession();
     return disposition;
   }
 
@@ -934,6 +995,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   async function drain(): Promise<void> {
     await retryLeftovers().catch((error) => deps.logError(`reaping what an earlier run left failed: ${String(error)}`));
     await retryPreflight();
+    await retryClaudeSession();
     await refreshServerState();
     // Before the flush, so a settlement this pass produces goes out with it rather than waiting a
     // whole poll interval. Drained here rather than in the claim loop because `drain` runs even
@@ -973,8 +1035,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
    * Read off the preflight row rather than asking the platform, because the row is the answer for
    * this machine — it confined a probe and watched it fail to escape.
    *
-   * So is claude, if preflight never resolved it (BP-733): the step is refused as a machine fault
-   * with the attempt refunded, so without this every poll would claim the same task again. gh is
+   * So is claude, if preflight never resolved it (BP-733) or it is not signed in (BP-1077): the step
+   * is refused as a machine fault with the attempt refunded, so without this every poll would claim
+   * the same task again. gh is
    * not here: without it delivery fails through the ordinary, charged path, so it ends. npm is a
    * project's need and not the machine's, which `gateChecks` holds it to.
    */
@@ -982,6 +1045,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     if (leftovers) return leftovers;
     const row = preflight?.checks.find((check) => check.name === SANDBOX_CHECK);
     if (row && !row.ok) return row.detail;
+    if (claudeSignedOut() || sessionHold) return claudeRow()?.detail ?? CLAUDE_LOGIN_REFUSED;
     if (!preflight) return preflightFailed ? `preflight could not run: ${preflightError}` : "";
     return isAbsolute(preflight.paths.claude ?? "") ? "" : "claude could not be found on this machine, and every task needs it";
   }
