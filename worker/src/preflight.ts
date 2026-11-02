@@ -279,6 +279,22 @@ export function withClaudeSession(report: PreflightReport, row: PreflightCheck, 
   };
 }
 
+export const CLAUDE_MISSING = "claude could not be found on this machine";
+
+/**
+ * The checks as the board and the app read them. A machine that can run Codex works without claude,
+ * offered only what runs on Codex (BP-1125), so there a claude that cannot run is a warning, as a
+ * missing Codex is on a machine with claude.
+ */
+export function asReported(checks: PreflightCheck[], codexRunnable: boolean): PreflightCheck[] {
+  if (!codexRunnable) return checks;
+  return checks.map((check) =>
+    check.name === "claude" && !check.ok
+      ? { name: check.name, ok: true, warn: true, detail: `${check.detail} — this machine takes no task whose agent runs on Claude Code` }
+      : check
+  );
+}
+
 // Codex is optional, so none of its answers fails the machine: a machine without it simply is not
 // offered a task whose agent runs on it. The row says which of the three it is, because "why does my
 // Codex task never start" is otherwise unanswerable from the board.
@@ -660,7 +676,7 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
   for (const tool of TOOLS) {
     const path = paths[tool];
     if (!path) {
-      checks.push(tool === "claude" ? { ...missing(tool), stopsClaims: true } : missing(tool));
+      checks.push(tool === "claude" ? { name: tool, ok: false, stopsClaims: true, detail: CLAUDE_MISSING } : missing(tool));
       continue;
     }
 
@@ -689,7 +705,8 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
   const codex = await codexSession(deps, env);
   checks.push(codex.check);
   if (codex.path) paths.codex = codex.path;
-  // Claude Code counts only when its own row passed: a machine that could not run it claims nothing
+  // Claude Code counts only when its own row passed: a machine that cannot run it is offered only
+  // what runs on Codex, and with no Codex either it claims nothing
   const claudeUsable = checks.some((c) => c.name === "claude" && c.ok);
   const agents = [...(claudeUsable ? ["claude"] : []), ...(codex.path ? ["codex"] : [])];
 
