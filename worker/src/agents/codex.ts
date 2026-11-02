@@ -324,6 +324,11 @@ export function codexAgent(path: string, options: CodexOptions = {}): CodingAgen
       };
     },
 
+    // TODO(BP-1095): what a login that expired mid-life looks like has not been observed yet
+    sessionFault(): string | null {
+      return null;
+    },
+
     parseVerdict(stdout: string): Verdict | null {
       try {
         const events = parseStream(stdout);

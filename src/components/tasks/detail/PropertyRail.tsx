@@ -275,7 +275,7 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
     case "machine-failing":
       return (
         <>
-          Your machine is connected but not taking work: its sandbox check failed. The menubar app,
+          Your machine is connected but not taking work: a check it needs is failing. The menubar app,
           or the worker&apos;s log on that machine, says what to fix.
         </>
       );

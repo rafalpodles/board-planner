@@ -27,6 +27,28 @@ function isUsageLimit(text: string): boolean {
 // there; only the CLI's exact sentinel counts. stderr stays on the loose match — the CLI owns it.
 const USAGE_LIMIT_SENTINEL = /^Claude(?: AI)? usage limit reached\|\d+$/;
 
+export const CLAUDE_SIGNED_OUT =
+  "claude is not signed in on this machine: run `claude auth login` as the user the worker runs as";
+
+// How 2.1.314 ends a run with `-p` when it has no login it can use, with the start anchored because on
+// a refusal `result` is model text. "Not logged in" is measured, in both output formats. The rest is
+// read from the binary's headless branch: `Login expired · Please run /login` and its like are the
+// interactive one and never reach a worker, and the same 401 sentence also carries a 403, which a new
+// login does not fix.
+const LOGIN_SENTINEL =
+  /^(?:Not logged in · Please run \/login$|Failed to authenticate: OAuth (?:session expired|token revoked)|Failed to authenticate\. API Error: 401\b)/;
+
+function signedOut(result: CommandResult, final: ResultEvent | undefined): boolean {
+  return (
+    result.code !== 0 &&
+    final?.is_error === true &&
+    // Nothing reached a model, which is also what rules out a model having written the sentence
+    final.total_cost_usd === 0 &&
+    typeof final.result === "string" &&
+    LOGIN_SENTINEL.test(final.result.trim())
+  );
+}
+
 function wasRateLimited(events: StreamEvent[]): boolean {
   return events.some((event) => isRateLimitEvent(event) && event.rate_limit_info?.status === "rejected");
 }
@@ -160,6 +182,8 @@ export function claudeAgent(path: string): CodingAgent {
         return { kind: "usage_limit" };
       }
 
+      if (signedOut(result, final)) return { kind: "machine_fault", message: CLAUDE_SIGNED_OUT };
+
       if (result.code === 0) return parsed;
       // "the agent", not "claude": the exit code now belongs to whichever process died, and since
       // BP-349 that may be the sandbox wrapper rather than the CLI. stderr rides along whatever
@@ -173,6 +197,10 @@ export function claudeAgent(path: string): CodingAgent {
         kind: "error",
         message: `the agent exited ${result.code}${ended ? ` (${ended})` : ""}${result.stderr ? `\n${result.stderr}` : ""}`,
       };
+    },
+
+    sessionFault(result: CommandResult): string | null {
+      return signedOut(result, lastResultEvent(parseStream(result.stdout))) ? CLAUDE_SIGNED_OUT : null;
     },
 
     parseVerdict(stdout: string): Verdict | null {

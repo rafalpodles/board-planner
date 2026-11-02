@@ -227,7 +227,7 @@ describe("machines offering this repository", () => {
     await listed([worker({ condition: { state: "failing", haltedBy: null } })]);
 
     const state = screen.getByTestId("offering-machine-state");
-    expect(state.textContent).toBe("failing its sandbox check");
+    expect(state.textContent).toBe("not taking work: a check is failing");
     expect(state.className).toContain("text-danger");
   });
 

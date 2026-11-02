@@ -776,6 +776,9 @@ export interface WorkerPreflightCheck {
    * hover to find — and the admin looking at the fleet is not the person who accepted that (BP-606).
    */
   warn?: boolean;
+  // Failed, and the worker claims nothing until it passes (BP-1077). The sandbox check always has
+  // this effect, and an older worker does not say so.
+  stopsClaims?: boolean;
   detail: string;
 }
 
@@ -2173,7 +2176,7 @@ export interface ApiMyMachine {
   checkouts: number;
 }
 
-export type FleetState = "running" | "quiet" | "idle" | "paused" | "offline" | "off";
+export type FleetState = "running" | "quiet" | "idle" | "paused" | "failing" | "offline" | "off";
 
 /** A machine as the sidebar shows it; `task` names nothing when the reader cannot see its project */
 export interface ApiFleetMachine {

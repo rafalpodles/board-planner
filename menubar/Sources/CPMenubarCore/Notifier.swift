@@ -106,9 +106,10 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
  * What scoping costs is that one machine-wide fault announces itself once per project. That is a
  * count, not a rate, which is the whole of the win — the alternative was never "one", it was one
  * per pass for ever. And a fault ends the pass, so N projects arrive as N notifications over N
- * polls rather than a burst. N stays small in practice: the two genuinely machine-wide faults are
- * the confinement refusals, and preflight's `claimBlocked` stops such a machine claiming anything
- * at all, so what reaches here machine-wide is a sandbox that broke after boot.
+ * polls rather than a burst. N stays small in practice: the genuinely machine-wide faults are the
+ * confinement refusals and a claude with no login, and `claimBlocked` stops such a machine claiming
+ * anything at all, so what reaches here machine-wide is a sandbox that broke after boot or a session
+ * that ended under a run.
  *
  * Also cleared when the socket drops. Restarting the worker is what an operator does to fix a
  * machine, and it emits no outcome — so without this the first fault after the restart, which is

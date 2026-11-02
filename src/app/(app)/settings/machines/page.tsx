@@ -25,7 +25,7 @@ function describeState(machine: ApiMyMachine): { text: string; tone: string } {
         : { text: "Running, no checkouts yet", tone: "text-text-muted" };
     case "failing":
       return {
-        text: "Sandbox check failing — the menubar app or the worker's log says what to fix",
+        text: "Not taking work: a check is failing — the menubar app or the worker's log says what to fix",
         tone: "text-danger",
       };
     case "stale":

@@ -1,3 +1,4 @@
+import { CLAUDE_SIGNED_OUT } from "./agents/claude.js";
 import { gateCommandsOf } from "./gates/gate-commands.js";
 import { describe, it, expect, vi } from "vitest";
 import { ApiClient, StatusIds } from "./api.js";
@@ -673,6 +674,30 @@ describe("runTask", () => {
     expect(h.reporter.failed).not.toHaveBeenCalled();
     // the operator has to learn which machine and what to do, from the board
     expect(h.reporter.released.mock.calls[0][1]).toMatch(/no sandbox/);
+  });
+
+  // BP-1077. The disposition is what tells the wiring to hold claims: a plain machine fault would go on
+  // claiming the same task on every poll
+  it("says when a step's fault was claude with no login", async () => {
+    const execute = vi
+      .fn<Executor["execute"]>()
+      .mockResolvedValue({ kind: "machine_fault", message: CLAUDE_SIGNED_OUT });
+    const h = harness({ executor: { execute } });
+
+    expect(await runTask(h.deps, task)).toBe("session-fault");
+    expect(h.reporter.released).toHaveBeenCalled();
+  });
+
+  it("says when a gate's fault was claude with no login", async () => {
+    const h = harness({
+      gateFor: () => ({
+        name: "review",
+        run: async () => ({ ok: false, reason: CLAUDE_SIGNED_OUT, machineFault: true }),
+      }),
+    });
+
+    expect(await runTask(h.deps, task)).toBe("session-fault");
+    expect(h.reporter.released).toHaveBeenCalled();
   });
 
   /**

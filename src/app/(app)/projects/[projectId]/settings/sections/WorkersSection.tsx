@@ -291,7 +291,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                               ? "waiting: the Free plan runs one machine"
                               : halted ||
                               (state === "failing"
-                                ? "failing its sandbox check"
+                                ? "not taking work: a check is failing"
                                 : refused
                                   ? "cannot use its checkout"
                                   : "live");

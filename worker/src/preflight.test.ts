@@ -6,7 +6,19 @@ import { CommandResult, createRunner, Runner } from "./exec.js";
 import { SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
 import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
 import { answerSandboxProbe, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
-import { checkGateCommands, checkRepo, npmCacheCheck, pathWithTools, runPreflight, SANDBOX_CHECK } from "./preflight.js";
+import { CLAUDE_SIGNED_OUT } from "./agents/claude.js";
+import {
+  checkGateCommands,
+  checkRepo,
+  npmCacheCheck,
+  pathWithTools,
+  PreflightReport,
+  CLAUDE_LOGIN_REFUSED,
+  markClaudeLoginRefused,
+  refreshClaudeSession,
+  runPreflight,
+  SANDBOX_CHECK,
+} from "./preflight.js";
 
 const LOGGED_IN = JSON.stringify({
   loggedIn: true,
@@ -229,14 +241,83 @@ describe("runPreflight", () => {
     expect(check(report, "git").ok).toBe(false);
   });
 
+  // Measured on 2.1.314: signed out it exits 1 and prints the JSON all the same (BP-1077)
   it("fails when claude is installed but not logged in", async () => {
-    const m = machine({ claudeAuth: ok(JSON.stringify({ loggedIn: false })) });
+    const m = machine({ claudeAuth: { ...fail(), stdout: JSON.stringify({ loggedIn: false, authMethod: "none" }) } });
 
     const report = await runPreflight(depsFor(m));
 
     expect(report.ok).toBe(false);
-    expect(check(report, "claude").ok).toBe(false);
+    expect(report.agents).not.toContain("claude");
+    expect(check(report, "claude")).toMatchObject({ ok: false, stopsClaims: true });
     expect(check(report, "claude").detail).toMatch(/claude auth login/);
+  });
+
+  describe("asking claude again under a running worker", () => {
+    const REPORT: PreflightReport = {
+      ok: true,
+      agents: ["claude", "codex"],
+      account: "someone@example.com",
+      checks: [
+        { name: "claude", ok: true, detail: "signed in as someone@example.com on max" },
+        { name: "gh", ok: true, detail: "signed in as someone" },
+      ],
+      paths: { claude: "/opt/bin/claude" },
+      githubAccounts: [],
+      githubAccount: "someone",
+      githubPinned: false,
+    };
+    const SIGNED_OUT: PreflightReport = {
+      ...REPORT,
+      ok: false,
+      agents: ["codex"],
+      account: "",
+      checks: [{ name: "claude", ok: false, stopsClaims: true, detail: CLAUDE_SIGNED_OUT }, REPORT.checks[1]],
+    };
+    const answering = (result: CommandResult) => {
+      const run = vi.fn<Runner["run"]>().mockResolvedValue(result);
+      return { run, deps: { runner: { run }, env: {} } };
+    };
+
+    it("takes claude off the report when its session has ended", async () => {
+      const { deps } = answering({ ...fail(), stdout: JSON.stringify({ loggedIn: false }) });
+
+      expect(await refreshClaudeSession(deps, REPORT)).toEqual(SIGNED_OUT);
+    });
+
+    it("says otherwise when a run is what found out, and promises no fix `auth status` could see", () => {
+      const held = markClaudeLoginRefused(REPORT);
+
+      expect(held).toEqual({
+        ...SIGNED_OUT,
+        checks: [{ name: "claude", ok: false, stopsClaims: true, detail: CLAUDE_LOGIN_REFUSED }, REPORT.checks[1]],
+      });
+      expect(CLAUDE_LOGIN_REFUSED).toMatch(/within 15 minutes.*restarted/);
+    });
+
+    it("puts it back once it is signed in", async () => {
+      const { deps } = answering(ok(LOGGED_IN));
+
+      expect(await refreshClaudeSession(deps, SIGNED_OUT)).toEqual(REPORT);
+    });
+
+    it("keeps the row it had when claude gives no answer, rather than clearing a signed-out machine", async () => {
+      const { deps } = answering(fail("timed out"));
+
+      expect(await refreshClaudeSession(deps, SIGNED_OUT)).toBe(SIGNED_OUT);
+    });
+
+    it("does not ask a claude that is red for another reason, which no answer here could clear", async () => {
+      const { deps, run } = answering(ok(LOGGED_IN));
+      const broken = {
+        ...REPORT,
+        ok: false,
+        checks: [{ name: "claude", ok: false, detail: "/opt/bin/claude is present but will not run: killed" }],
+      };
+
+      expect(await refreshClaudeSession(deps, broken)).toBe(broken);
+      expect(run).not.toHaveBeenCalled();
+    });
   });
 
   // An API key can do the work — it just bills per token instead of drawing on the subscription,
@@ -251,6 +332,15 @@ describe("runPreflight", () => {
     expect(report.ok).toBe(true);
     expect(check(report, "claude").ok).toBe(true);
     expect(check(report, "claude").detail).toMatch(/API key/i);
+  });
+
+  it("tells the server a missing claude stops the machine's claims, and a missing gh does not", async () => {
+    const claudeless = await runPreflight(depsFor(machine({ has: ["git", "npm", "gh"] })));
+    const ghless = await runPreflight(depsFor(machine({ has: ["git", "npm", "claude"] })));
+
+    expect(check(claudeless, "claude")).toMatchObject({ ok: false, stopsClaims: true });
+    expect(check(ghless, "gh")).toMatchObject({ ok: false });
+    expect(check(ghless, "gh")).not.toHaveProperty("stopsClaims");
   });
 
   it("does not fail a worker whose claude is too old to answer auth status", async () => {

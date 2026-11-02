@@ -54,7 +54,7 @@ describe("Settings → Machines", () => {
 
   it.each([
     [{ checkouts: 0 }, "Running, no checkouts yet"],
-    [{ state: "failing" }, "Sandbox check failing — the menubar app or the worker's log says what to fix"],
+    [{ state: "failing" }, "Not taking work: a check is failing — the menubar app or the worker's log says what to fix"],
     [{ state: "stale" }, "Not reporting"],
     [{ state: "disabled" }, "Switched off by an admin"],
     [{ state: "paused", haltedBy: "machine" }, "Paused on the machine"],

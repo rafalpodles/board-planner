@@ -1,4 +1,5 @@
 import { dirname } from "path";
+import { CLAUDE_SIGNED_OUT } from "./agents/claude.js";
 import { ApiClient, BoardColumnRole, StatusIds } from "./api.js";
 import { createBudget } from "./budget.js";
 import { commitAll, MissingIdentityError, TamperedCheckoutError } from "./commit.js";
@@ -382,7 +383,16 @@ export async function releaseIfAborted(
  * edits them, so a task handed back would be claimed again on every poll. Its attempt is refunded, and
  * the agent is held from later claims (settings-hold.ts).
  */
-export type RunDisposition = void | "machine-fault" | "settings-fault";
+export type RunDisposition = void | "machine-fault" | "settings-fault" | "session-fault";
+
+/**
+ * "session-fault" is a machine fault that says which one: a run found claude with no login. The loop
+ * treats the two alike, and the wiring goes on to hold claims, because this one repeats on every task
+ * until somebody signs in.
+ */
+export function faultOf(message: string): "machine-fault" | "session-fault" {
+  return message === CLAUDE_SIGNED_OUT ? "session-fault" : "machine-fault";
+}
 
 /**
  * What a run owes the board and the machine when it could not make its worktree. Shared by the run in
@@ -789,7 +799,7 @@ export async function runTask(
             task,
             `${outcome.message}${unpushedWork(state, worktree.path)}`,
           );
-          return "machine-fault";
+          return faultOf(outcome.message);
         }
         if (outcome.kind === "timeout") {
           settle("requeued", `${entry.name} timed out`);
@@ -944,7 +954,7 @@ export async function runTask(
               task,
               `the ${gate.name} gate could not run: ${verdict.reason}${unpushedWork(state, worktree.path)}`,
             );
-            return "machine-fault";
+            return faultOf(verdict.reason);
           }
           if (hitUsageLimit(verdict)) {
             settle("released", `the ${gate.name} gate could not run`);

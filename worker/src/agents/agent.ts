@@ -74,6 +74,8 @@ export interface CodingAgent {
   parseEvents(text: string): StreamEvent[];
   /** A finished edit or read-only step, once the worker has ruled out a machine fault and a timeout */
   interpretEdit(result: CommandResult): RunOutcome;
+  /** Why a run that failed never reached the model for want of a login, or null when that is not what happened */
+  sessionFault(result: CommandResult): string | null;
   /** The reviewer's finished run, or null when what came back is not a verdict */
   parseVerdict(stdout: string): Verdict | null;
 }

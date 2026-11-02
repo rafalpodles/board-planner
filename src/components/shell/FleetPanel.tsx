@@ -16,6 +16,7 @@ const LABELS: Record<FleetState, string> = {
   quiet: "Quiet",
   idle: "Idle",
   paused: "Paused",
+  failing: "Not taking work",
   offline: "Offline",
   off: "Switched off",
 };
@@ -23,6 +24,7 @@ const LABELS: Record<FleetState, string> = {
 const AT_REST_DOT: Record<Exclude<FleetState, "running" | "quiet">, string> = {
   idle: "bg-success",
   paused: "bg-warning",
+  failing: "bg-danger",
   offline: "bg-text-muted/50",
   off: "bg-text-muted/50",
 };

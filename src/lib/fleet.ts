@@ -19,6 +19,7 @@ const AT_REST: Partial<Record<MachineState, FleetState>> = {
   stale: "offline",
   paused: "paused",
   stopped: "paused",
+  failing: "failing",
 };
 
 export function fleetState(machine: MachineState, held: HeldTask | undefined): FleetState {
