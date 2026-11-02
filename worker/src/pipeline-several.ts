@@ -199,6 +199,7 @@ export async function runTaskInRepositories(
       pushed: false,
       prUrl: "",
       merged: false,
+      mergeQueued: false,
       summary: "",
       checks: [],
       lastResult: EMPTY_RESULT,
@@ -319,7 +320,8 @@ export async function runTaskInRepositories(
       await reporter.merged(task, urls, summary);
     } else {
       settle("delivered", urls);
-      await reporter.delivered(task, urls, summary);
+      const queued = delivered.length > 0 && delivered.every((leg) => leg.state.merged || leg.state.mergeQueued);
+      await reporter.delivered(task, urls, summary, queued);
     }
   } catch (error) {
     const keeping = legs.some((leg) => leg.state.committed || leg.state.uncommittedWork);
@@ -488,7 +490,10 @@ export async function runTaskInRepositories(
           }
           for (const leg of open) {
             try {
-              await leg.delivery.merge(leg.worktree.path, leg.state.prUrl);
+              if ((await leg.delivery.merge(leg.worktree.path, leg.state.prUrl)) === "queued") {
+                leg.state.mergeQueued = true;
+                continue;
+              }
             } catch (error) {
               const done = open.filter((each) => each.state.merged).map((each) => each.label);
               const left = open.filter((each) => !each.state.merged).map((each) => each.label);

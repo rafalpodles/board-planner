@@ -131,7 +131,7 @@ describe("a run across several repositories", () => {
       const delivery: Delivery = {
         push: vi.fn(async () => {}),
         openPr: vi.fn(async () => `https://github.com/acme/${name}/pull/${name === "api" ? 3 : 9}`),
-        merge: vi.fn(async () => {}),
+        merge: vi.fn(async () => "merged" as const),
         isPrivate: vi.fn(async () => false),
         linkRelated: vi.fn(async () => {}),
         ...over.delivery?.[name],

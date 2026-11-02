@@ -42,6 +42,8 @@ export interface RunState {
   pushed: boolean;
   prUrl: string;
   merged: boolean;
+  /** The Merge step armed GitHub's auto-merge: the pull request merges once its required checks pass. */
+  mergeQueued: boolean;
   summary: string;
   /** Every gate this run has passed so far, in order, for the pull request to list (BP-780). */
   checks: PassedCheck[];
@@ -133,8 +135,11 @@ async function deliver(
           message: "the merge step ran with no pull request to merge",
         };
       }
-      await ctx.delivery.merge(ctx.worktreePath, ctx.state.prUrl);
-      ctx.state.merged = true;
+      if ((await ctx.delivery.merge(ctx.worktreePath, ctx.state.prUrl)) === "queued") {
+        ctx.state.mergeQueued = true;
+      } else {
+        ctx.state.merged = true;
+      }
       return { kind: "ok" };
 
     default:

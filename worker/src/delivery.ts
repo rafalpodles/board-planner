@@ -30,7 +30,7 @@ export interface Delivery {
     // The gates the run passed before this pull request, listed under the summary (BP-780)
     checks?: PassedCheck[],
   ): Promise<string>;
-  merge(worktreePath: string, prUrl: string): Promise<void>;
+  merge(worktreePath: string, prUrl: string): Promise<MergeOutcome>;
   /**
    * Whether the repository the server names by `remote` is private, asked before any pull request
    * exists. The remote is the server's word for the repository, never the checkout's own config,
@@ -155,20 +155,38 @@ export function repositoryOf(remote: string): string | null {
   return host.toLowerCase() === "github.com" ? `${owner}/${repo}` : `${host.toLowerCase()}/${owner}/${repo}`;
 }
 
-function repoArgs(prUrl: string): string[] {
+function pullRequestRepository(prUrl: string): { host: string; owner: string; repo: string } | null {
   let url: URL;
   try {
     url = new URL(prUrl);
   } catch {
-    return [];
+    return null;
   }
   const [owner, repo, pull] = url.pathname.split("/").filter(Boolean);
-  if (!owner || !repo || pull !== "pull") return [];
-  const host = url.host === "github.com" ? "" : `${url.host}/`;
-  return ["--repo", `${host}${owner}/${repo}`];
+  if (!owner || !repo || pull !== "pull") return null;
+  return { host: url.host, owner, repo };
+}
+
+function repoArgs(prUrl: string): string[] {
+  const repository = pullRequestRepository(prUrl);
+  if (!repository) return [];
+  const host = repository.host === "github.com" ? "" : `${repository.host}/`;
+  return ["--repo", `${host}${repository.owner}/${repository.repo}`];
 }
 
 type MergeState = "merged" | "unmerged" | "unknown";
+
+/** Merged now, or left with GitHub's auto-merge armed until its required checks and reviews pass. */
+export type MergeOutcome = "merged" | "queued";
+
+const MERGE_METHOD_FLAGS: Record<string, string> = {
+  MERGE: "--merge",
+  SQUASH: "--squash",
+  REBASE: "--rebase",
+};
+
+const MERGE_SETTINGS_QUERY =
+  "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){viewerDefaultMergeMethod autoMergeAllowed}}";
 
 // Order matters for credential.helper: the empty value clears whatever the repository or a global
 // file configured, and the entry after it names the one helper we trust. Clearing alone would be a
@@ -344,6 +362,47 @@ export function createDelivery(
     }
   }
 
+  // The repository decides how it may be merged; a flag picked here is refused wherever that method
+  // is switched off. Unanswered, the old `--merge` without `--auto` is what is left to try.
+  async function mergeSettings(
+    worktreePath: string,
+    prUrl: string,
+  ): Promise<{ method: string; auto: boolean }> {
+    const fallback = { method: "--merge", auto: false };
+    const repository = pullRequestRepository(prUrl);
+    if (!repository) return fallback;
+    const result = await run(
+      requireToolPath("gh", ghPath),
+      [
+        "api",
+        "graphql",
+        "--hostname",
+        repository.host,
+        "-f",
+        `query=${MERGE_SETTINGS_QUERY}`,
+        "-f",
+        `owner=${repository.owner}`,
+        "-f",
+        `name=${repository.repo}`,
+      ],
+      worktreePath,
+    );
+    if (result.code !== 0) return fallback;
+    try {
+      const parsed: unknown = JSON.parse(result.stdout);
+      const settings = isRecord(parsed) && isRecord(parsed.data) && isRecord(parsed.data.repository)
+        ? parsed.data.repository
+        : null;
+      if (!settings) return fallback;
+      const method = typeof settings.viewerDefaultMergeMethod === "string"
+        ? MERGE_METHOD_FLAGS[settings.viewerDefaultMergeMethod]
+        : undefined;
+      return { method: method ?? fallback.method, auto: settings.autoMergeAllowed === true };
+    } catch {
+      return fallback;
+    }
+  }
+
   return {
     async push(worktreePath, branch, commit) {
       // Refused rather than falling back to the branch name: the worktree's ref store is exactly
@@ -482,22 +541,27 @@ export function createDelivery(
       if (repo.length === 0) {
         throw new Error(`refusing to merge ${prUrl}: it names no repository, so gh would check the base branch out in the worktree`);
       }
+      const settings = await mergeSettings(worktreePath, prUrl);
+      // With --auto, gh merges at once when nothing is pending and otherwise leaves GitHub to merge
+      // once the base branch's required checks and reviews pass
       const result = await run(
         requireToolPath("gh", ghPath),
         [
           "pr",
           "merge",
           prUrl,
-          "--merge",
+          settings.method,
+          ...(settings.auto ? ["--auto"] : []),
           "--delete-branch",
           ...repo,
         ],
         worktreePath,
       );
-      if (result.code === 0) return;
+      if (result.code === 0 && !settings.auto) return "merged";
 
       const state = await mergeState(worktreePath, prUrl);
-      if (state === "merged") return;
+      if (state === "merged") return "merged";
+      if (result.code === 0) return "queued";
       throw failure(
         "gh pr merge",
         result,

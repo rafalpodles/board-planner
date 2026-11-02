@@ -684,6 +684,7 @@ export async function runTask(
     pushed: false,
     prUrl: "",
     merged: false,
+    mergeQueued: false,
     summary: "",
     checks: [],
     lastResult: EMPTY_RESULT,
@@ -1078,7 +1079,7 @@ export async function runTask(
       await reporter.merged(task, state.prUrl, state.summary);
     } else {
       settle("delivered", state.prUrl);
-      await reporter.delivered(task, state.prUrl, state.summary);
+      await reporter.delivered(task, state.prUrl, state.summary, state.mergeQueued);
     }
   } catch (error) {
     // Whatever threw, the work is still in the tree: a `git diff` that timed out and a gate that

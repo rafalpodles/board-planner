@@ -152,7 +152,7 @@ function deliverySpy(overrides: Partial<Delivery> = {}) {
   return {
     push: vi.fn<Delivery["push"]>().mockResolvedValue(undefined),
     openPr: vi.fn<Delivery["openPr"]>().mockResolvedValue("https://x/pull/7"),
-    merge: vi.fn<Delivery["merge"]>().mockResolvedValue(undefined),
+    merge: vi.fn<Delivery["merge"]>().mockResolvedValue("merged"),
     isPrivate: vi.fn<Delivery["isPrivate"]>().mockResolvedValue(null),
     linkRelated: vi.fn<Delivery["linkRelated"]>().mockResolvedValue(undefined),
     ...overrides,
@@ -364,6 +364,16 @@ describe("runTask", () => {
     expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7");
     expect(h.reporter.merged).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it");
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
+  });
+
+  // BP-1127: the base branch still requires its checks, so nothing has landed yet
+  it("reports a merge left to GitHub's auto-merge as delivered with auto-merge armed, not as done", async () => {
+    const h = harness();
+    h.delivery.merge.mockResolvedValue("queued");
+    await runTask(h.deps, merging);
+
+    expect(h.reporter.delivered).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it", true);
+    expect(h.reporter.merged).not.toHaveBeenCalled();
   });
 
   // The pipeline's own calls — commit, the hidden-file check and the clean-tree check — as well
@@ -2153,6 +2163,7 @@ describe("runTask", () => {
     const delivery = deliverySpy({
       merge: vi.fn<Delivery["merge"]>(async () => {
         controller.abort();
+        return "merged";
       }),
     });
     const h = harness({
@@ -2391,7 +2402,7 @@ describe("whether a run merges", () => {
 
     await runTask(h.deps, task);
 
-    expect(h.reporter.delivered).toHaveBeenCalledWith(task, "https://x/pull/7", "did it");
+    expect(h.reporter.delivered).toHaveBeenCalledWith(task, "https://x/pull/7", "did it", false);
     expect(h.reporter.merged).not.toHaveBeenCalled();
   });
 
