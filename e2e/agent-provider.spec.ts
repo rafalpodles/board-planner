@@ -16,6 +16,7 @@ const APPROVED = "todo";
 const CLAUDE_AGENT = new mongoose.Types.ObjectId();
 const CODEX_AGENT = new mongoose.Types.ObjectId();
 const CODEX_REVIEW_AGENT = new mongoose.Types.ObjectId();
+const CODEX_UNNAMED_REVIEW_AGENT = new mongoose.Types.ObjectId();
 const REPO = "https://github.com/e2e-owner/provider";
 
 async function db() {
@@ -35,15 +36,17 @@ async function seedProviders() {
   await seed();
   const handle = await db();
   const base = { description: "", builtIn: false, gateKind: "", params: {}, createdAt: new Date(), updatedAt: new Date() };
-  await handle.collection("agentblocks").deleteMany({ key: { $in: ["claude-step", "codex-step", "plain-review", "codex-review", "push"] } });
+  await handle.collection("agentblocks").deleteMany({ key: { $in: ["claude-step", "codex-step", "plain-review", "codex-review", "unnamed-review", "push"] } });
   await handle.collection("agentblocks").insertMany([
     { ...base, key: "claude-step", kind: "step", name: "Claude step", prompt: "make the change", capability: "edit", provider: "claude", model: "opus", fallbackModel: "sonnet", deterministic: false },
     { ...base, key: "push", kind: "step", name: "Push", prompt: "", capability: "read-only", provider: "claude", model: "", fallbackModel: "", deterministic: true },
     { ...base, key: "codex-step", kind: "step", name: "Codex step", prompt: "make the change", capability: "edit", provider: "codex", model: "gpt-5", fallbackModel: "", deterministic: false },
     { ...base, key: "codex-review", kind: "gate", name: "Codex review", gateKind: "review", params: { focus: "general", provider: "codex", model: "gpt-5" }, capability: "read-only", provider: "claude", model: "", fallbackModel: "", deterministic: false },
+    // As a review gate stored before BP-987 is, naming no reviewer: Claude Code
+    { ...base, key: "unnamed-review", kind: "gate", name: "Unnamed review", gateKind: "review", params: { focus: "general" }, capability: "read-only", provider: "claude", model: "", fallbackModel: "", deterministic: false },
     { ...base, key: "plain-review", kind: "gate", name: "Plain review", gateKind: "review", params: { focus: "general", provider: "claude", model: "opus" }, capability: "read-only", provider: "claude", model: "", fallbackModel: "", deterministic: false },
   ]);
-  await handle.collection("agents").deleteMany({ _id: { $in: [CLAUDE_AGENT, CODEX_AGENT, CODEX_REVIEW_AGENT] } });
+  await handle.collection("agents").deleteMany({ _id: { $in: [CLAUDE_AGENT, CODEX_AGENT, CODEX_REVIEW_AGENT, CODEX_UNNAMED_REVIEW_AGENT] } });
   const agent = (_id: mongoose.Types.ObjectId, name: string, composition: unknown) => ({
     _id, name, description: "", scope: "user", owner: ADMIN_ID, project: null, composition, builtIn: false,
   });
@@ -52,6 +55,7 @@ async function seedProviders() {
     agent(CODEX_AGENT, "On Codex", compose([{ key: "codex-step" }])),
     // Claude writes the change and Codex reads it: the provider is the gate's own, set by an admin on the block
     agent(CODEX_REVIEW_AGENT, "Reviewed on Codex", compose([{ key: "claude-step" }], [{ key: "codex-review" }])),
+    agent(CODEX_UNNAMED_REVIEW_AGENT, "On Codex, reviewed on Claude", compose([{ key: "codex-step" }], [{ key: "unnamed-review" }])),
   ]);
   await handle.collection("tasks").deleteMany({ project: PROJECT_ID, status: APPROVED });
   await handle.collection("projects").updateOne(
@@ -134,7 +138,7 @@ test.describe("which machine a task on a coding CLI is given to", () => {
     await addTask(CODEX_REVIEW_AGENT);
 
     expect((await claim(request, "agent-claude")).status()).toBe(204);
-    const taken = await claim(request, "agent-codex");
+    const taken = await claim(request, "agent-claude,agent-codex");
     expect(taken.status(), await taken.text()).toBe(200);
     expect((await taken.json()).agent.sequence[1].params).toMatchObject({ provider: "codex", model: "gpt-5" });
   });
@@ -153,6 +157,30 @@ test.describe("which machine a task on a coding CLI is given to", () => {
 
     expect(answer.status(), await answer.text()).toBe(200);
     expect((await answer.json()).agent.sequence[1].params.provider).toBe("claude");
+  });
+
+  // BP-1125. Push is a step the worker runs itself, stored on Claude Code by the schema's default,
+  // so only a real claim shows that it does not keep a machine with Codex alone from the task.
+  test("a machine that names Codex alone takes the Codex task, push and all, stepping over the Claude one", async ({ request }) => {
+    const claude = await addTask(CLAUDE_AGENT);
+    const codex = await addTask(CODEX_AGENT);
+
+    const answer = await claim(request, "agent-codex");
+
+    expect(answer.status(), await answer.text()).toBe(200);
+    expect((await answer.json())._id).toBe(String(codex._id));
+    expect((await (await db()).collection("tasks").findOne({ _id: claude._id }))?.status).toBe(APPROVED);
+  });
+
+  test("a machine that names Codex alone is given no task with a step or a review on Claude Code", async ({ request }) => {
+    await addTask(CLAUDE_AGENT);
+    await addTask(CODEX_REVIEW_AGENT);
+    const { _id } = await addTask(CODEX_UNNAMED_REVIEW_AGENT);
+
+    expect((await claim(request, "agent-codex")).status()).toBe(204);
+    expect((await (await db()).collection("tasks").findOne({ _id }))?.status).toBe(APPROVED);
+    const taken = await claim(request, "agent-claude,agent-codex");
+    expect(taken.status(), await taken.text()).toBe(200);
   });
 
   // The control: a worker built before this said nothing about agents and ran Claude Code only

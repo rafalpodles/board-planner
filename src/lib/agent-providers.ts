@@ -1,18 +1,25 @@
-import { AGENT_BUCKETS } from "@/types";
+import type { QueryFilter } from "mongoose";
+import { AGENT_BUCKETS, IAgentBlock } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
 import { DEFAULT_PROVIDER, isProvider, PROVIDER_IDS, providerCapability, ProviderId } from "./agent-kinds";
 import type { SnapshotEntry } from "./agent-snapshot";
 
 /**
  * Which coding CLIs a machine can run is its own report (X-CP-Capabilities), and a task is only
- * claimed by a machine that can run every step and gate of its agent. Claude Code needs no report:
- * every worker that ever existed runs it, and one built before BP-987 says nothing about it.
+ * claimed by a machine that can run every step and gate of its agent. A machine that names no CLI at
+ * all is taken to run Claude Code: one built before BP-987 says nothing about it. One that names any
+ * runs Claude Code only if it names that too, so a machine signed in only to Codex is offered only
+ * what runs on Codex (BP-1125).
  */
 export function canRun(capabilities: readonly string[], provider: ProviderId): boolean {
-  return provider === DEFAULT_PROVIDER || capabilities.includes(providerCapability(provider));
+  if (capabilities.includes(providerCapability(provider))) return true;
+  return provider === DEFAULT_PROVIDER && !PROVIDER_IDS.some((named) => capabilities.includes(providerCapability(named)));
 }
 
-/** The provider a gate runs on: only the review gate names one, and it defaults to Claude Code */
+// The one gate that runs a coding CLI; the others run git and the project's own commands
+const REVIEW_GATE = "review";
+
+/** The provider a review gate runs on: Claude Code unless it names another */
 export function gateProvider(params: Record<string, string> | undefined): ProviderId {
   const named = params?.provider;
   return isProvider(named) ? named : DEFAULT_PROVIDER;
@@ -21,8 +28,9 @@ export function gateProvider(params: Record<string, string> | undefined): Provid
 export function providersOf(sequence: readonly SnapshotEntry[]): ProviderId[] {
   const used = new Set<ProviderId>();
   for (const entry of sequence) {
-    if (entry.kind === "step") used.add(entry.provider && isProvider(entry.provider) ? entry.provider : DEFAULT_PROVIDER);
-    else used.add(gateProvider(entry.params));
+    if (entry.kind === "step") {
+      if (!entry.deterministic) used.add(entry.provider && isProvider(entry.provider) ? entry.provider : DEFAULT_PROVIDER);
+    } else if (entry.gateKind === REVIEW_GATE) used.add(gateProvider(entry.params));
   }
   return [...used];
 }
@@ -48,6 +56,17 @@ export function agentsNamingAny(keys: readonly string[]) {
   };
 }
 
+// Push, Pull request, Merge and every gate store the schema's default provider too, which says
+// nothing: the worker runs those itself. Only a model step's own and a review gate's reviewer count.
+// A step stored before BP-987, or a review naming no reviewer, is on Claude Code: `null` and "" find it.
+function blocksOn(provider: ProviderId): QueryFilter<IAgentBlock>[] {
+  const byDefault = provider === DEFAULT_PROVIDER;
+  return [
+    { kind: "step", deterministic: { $ne: true }, provider: byDefault ? { $in: [provider, null] } : provider },
+    { kind: "gate", gateKind: REVIEW_GATE, "params.provider": byDefault ? { $in: [provider, null, ""] } : provider },
+  ];
+}
+
 /**
  * The ids of the agents a machine with these capabilities cannot run, for the claim to step over: a
  * task whose agent is in the list is not offered to it. A list of what is excluded rather than of
@@ -61,10 +80,7 @@ export async function agentsBeyond(db: ScopedDb, capabilities: readonly string[]
   const beyond = PROVIDER_IDS.filter((provider) => !canRun(capabilities, provider));
   if (beyond.length === 0) return [];
 
-  const blocks = await db.AgentBlock.find(
-    { $or: beyond.flatMap((provider) => [{ provider }, { "params.provider": provider }]) },
-    "key"
-  ).lean();
+  const blocks = await db.AgentBlock.find({ $or: beyond.flatMap(blocksOn) }, "key").lean();
   if (blocks.length === 0) return [];
 
   const agents = await db.Agent.find(agentsNamingAny(blocks.map((block) => block.key)), "_id").lean();
