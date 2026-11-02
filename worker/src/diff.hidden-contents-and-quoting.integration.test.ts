@@ -293,6 +293,34 @@ describe("a path git would rather quote", () => {
     expect(workflowPaths(diff.changedFiles)).toEqual([path]);
   });
 
+  // BP-1127: numstat printed this new file exactly like a rename, and it was read back as `r.yml`
+  it("reads a workflow whose name carries an arrow as the workflow it is", async () => {
+    const path = ".github/workflows/q => r.yml";
+    mkdirSync(join(work, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(work, path), "on: push\n");
+    git(work, "add", "-A");
+    git(work, "commit", "--quiet", "-m", "plant an arrow");
+
+    const diff = await collectDiff(createRunner(), gitPath, work, baseSha);
+
+    expect(diff.changedFiles).toEqual([path]);
+    expect(workflowPaths(diff.changedFiles)).toEqual([path]);
+  });
+
+  it("lists both sides of a rename out of the workflows directory", async () => {
+    mkdirSync(join(work, ".github", "workflows"), { recursive: true });
+    writeFileSync(join(work, ".github", "workflows", "ci.yml"), "on: push\njobs: {}\n");
+    git(work, "add", "-A");
+    git(work, "commit", "--quiet", "-m", "a workflow");
+    const before = git(work, "rev-parse", "HEAD").trim();
+    git(work, "mv", ".github/workflows/ci.yml", "ci.yml");
+    git(work, "commit", "--quiet", "-m", "move it out");
+
+    const diff = await collectDiff(createRunner(), gitPath, work, before);
+
+    expect(diff.changedFiles.sort()).toEqual([".github/workflows/ci.yml", "ci.yml"]);
+  });
+
   /**
    * `core.quotePath=false` covers the non-ASCII case and nothing else: a name carrying a quote, a
    * backslash, a tab or a newline is still quoted, and there is no spelling of it the rules would

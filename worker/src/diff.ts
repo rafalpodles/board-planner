@@ -29,18 +29,6 @@ async function git(
   return result.stdout;
 }
 
-function resolveRenamedPath(rawPath: string): string {
-  const braceMatch = /^(.*)\{.* => (.*)\}(.*)$/.exec(rawPath);
-  if (braceMatch) {
-    const [, prefix, renamedTo, suffix] = braceMatch;
-    return `${prefix}${renamedTo}${suffix}`;
-  }
-  const arrowIndex = rawPath.indexOf(" => ");
-  return arrowIndex === -1
-    ? rawPath
-    : rawPath.slice(arrowIndex + " => ".length);
-}
-
 /**
  * `core.quotePath=false` stops git quoting a non-ASCII path, which is the common case. It does not
  * stop it quoting one that carries a quote, a backslash, a tab or a newline — and a quoted name is
@@ -70,7 +58,7 @@ function parseNumstat(
     const [added, removed, rawPath] = line.split("\t");
     if (!rawPath) continue;
 
-    const path = refuseQuotedPath(resolveRenamedPath(rawPath.trim()));
+    const path = refuseQuotedPath(rawPath);
     changedFiles.push(path);
     if (added !== "-" && removed !== "-") {
       changedLines += Number(added) + Number(removed);
@@ -137,6 +125,10 @@ export async function collectDiff(
       "--no-ext-diff",
       "--no-textconv",
       "--numstat",
+      // A rename is printed as `old => new`, which is also a name a file may have: a new
+      // `.github/workflows/q => r.yml` read back as `r.yml` (BP-1127). Without rename detection
+      // every path is literal, and a rename is its deletion and its addition, both listed.
+      "--no-renames",
       baseSha,
       headSha,
       "--",
@@ -162,7 +154,7 @@ export async function collectDiff(
   const rawOutput = await git(
     runner,
     gitPath,
-    ["diff", "--no-ext-diff", "--no-textconv", "--raw", baseSha, headSha, "--"],
+    ["diff", "--no-ext-diff", "--no-textconv", "--raw", "--no-renames", baseSha, headSha, "--"],
     opts,
   );
   const symlinks: DiffStats["symlinks"] = [];
