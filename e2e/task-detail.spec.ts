@@ -12,6 +12,7 @@ import {
   FINISHED_TASK_NUMBER,
   FINISHED_TASK_TITLE,
   MEMBER_ID,
+  MEMBER_USERNAME,
   mentionsStoredFor,
   PROJECT_ID,
   PROJECT_KEY,
@@ -20,6 +21,7 @@ import {
   SIBLING_TASK_NUMBER,
   SIBLING_TASK_TITLE,
   storedActivity,
+  TARGET_COLUMN,
   seed,
   seedDottedUser,
 } from "./seed";
@@ -566,6 +568,79 @@ test("a read of the task that was in flight when someone unwatches does not put 
   await expect(page.getByRole("combobox", { name: "Status" })).toContainText("In Progress");
   await expect(page.getByRole("button", { name: /^Watch(?!ing)/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Watching/ })).toHaveCount(0);
+});
+
+/**
+ * BP-1122. A REST or MCP client that reads a task and PUTs the whole object back resends its
+ * assignee. That echo used to tell the holder "assigned to you" again and put them back on the
+ * watch list they had just left.
+ */
+test("an edit that resends the holder neither tells them again nor re-watches them", async ({ page, request }) => {
+  const assigned = `${PROJECT_KEY}-${SIBLING_TASK_NUMBER} assigned to you`;
+  const memberFeed = async () => {
+    const res = await request.get("/api/notifications", { headers: MEMBER_AUTH });
+    expect(res.status()).toBe(200);
+    return ((await res.json()) as { type: string; title: string }[]).filter((n) =>
+      n.title.includes(`${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`)
+    );
+  };
+  const ofType = async (type: string) => (await memberFeed()).filter((n) => n.type === type).length;
+
+  await test.step("a real hand-over tells the member once and watches for them", async () => {
+    const handed = await request.put(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`, {
+      headers: ADMIN_AUTH,
+      data: { assignee: MEMBER_USERNAME },
+    });
+    expect(handed.status(), await handed.text()).toBe(200);
+    await expect.poll(() => ofType("task_assigned")).toBe(1);
+    expect((await readTask(request, SIBLING_TASK_NUMBER)).watchers).toEqual([String(MEMBER_ID)]);
+  });
+
+  await test.step("the member stops watching it", async () => {
+    await arriveSignedIn(page, "member");
+    await page.goto(taskUrl(SIBLING_TASK_NUMBER));
+    const unwatched = taskWrite(page, "POST", `/tasks/${SIBLING_TASK_ID}/watch`);
+    await page.getByRole("button", { name: /Watching\s*\(1\)/ }).click();
+    await expect((await unwatched).json()).resolves.toMatchObject({ watching: false });
+    await expect(page.getByRole("button", { name: /^Watch(?!ing)/ })).toBeVisible();
+  });
+
+  await test.step("a client sends the whole task back, renamed and moved, holder included", async () => {
+    const read = await readTask(request, SIBLING_TASK_NUMBER);
+    const resent = await request.put(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`, {
+      headers: ADMIN_AUTH,
+      data: {
+        title: `${read.title} (renamed)`,
+        description: read.description,
+        priority: read.priority,
+        status: TARGET_COLUMN.id,
+        assignee: read.assignee.username,
+      },
+    });
+    expect(resent.status(), await resent.text()).toBe(200);
+    const after = await resent.json();
+    expect(after.assignee?.username).toBe(MEMBER_USERNAME);
+    expect(after.status).toBe(TARGET_COLUMN.id);
+  });
+
+  await test.step("the member's feed and watch list are as they left them", async () => {
+    // Notifications are written after the answer; a later one landing proves the earlier have
+    const mention = await request.post(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}/comments`, {
+      headers: ADMIN_AUTH,
+      data: { body: `@${MEMBER_USERNAME} renamed it` },
+    });
+    expect(mention.status(), await mention.text()).toBe(201);
+    await expect.poll(() => ofType("mentioned")).toBe(1);
+
+    expect(await ofType("task_assigned")).toBe(1);
+    expect((await readTask(request, SIBLING_TASK_NUMBER)).watchers).not.toContain(String(MEMBER_ID));
+
+    await page.reload();
+    await expect(page.getByRole("button", { name: /^Watch(?!ing)/ })).toBeVisible();
+    await page.goto("/notifications");
+    await expect(page.getByText(/mentioned you in/).first()).toBeVisible();
+    await expect(page.getByText(assigned, { exact: true })).toHaveCount(1);
+  });
 });
 
 test("acceptance criteria tick, count, persist and reach the card", async ({ page, request }) => {
