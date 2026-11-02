@@ -127,6 +127,14 @@ describe("the claude adapter reading a finished step", () => {
       expect(agent.sessionFault(run({ stdout: ended("API Error: 500"), code: 1 }))).toBeNull();
     });
 
+    it.each([
+      "Failed to authenticate. API Error: 403 Your organisation does not allow this",
+      "Failed to refresh OAuth token: the network is down",
+      "Failed to authenticate through the broker: no broker",
+    ])("does not read %s as a lost login, which signing in again would not fix", (sentence) => {
+      expect(agent.sessionFault(run({ stdout: ended(sentence), code: 1 }))).toBeNull();
+    });
+
     it("does not take a refusal the model ended on the sentence for it", () => {
       const quoted = ended(`I will not do that. ${SENTENCE}`, { stop_reason: "refusal" });
       const continued = ended(`${SENTENCE} is what I would say`, { stop_reason: "refusal" });

@@ -298,8 +298,9 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
 - **A machine with no claude login claims nothing.** Preflight's `claude` row reads red when `claude
   auth status` says so, the machine asks again once per poll, and `claude auth login` clears it with
   no restart. A login can also end under a running worker. That first shows as a run ending on
-  `Not logged in · Please run /login` or `Failed to authenticate…`, with stderr empty, and the task
-  goes back with its attempt refunded. `auth status` reads the stored token and never asks the
+  `Not logged in · Please run /login` or `Failed to authenticate…`, on an expired or revoked login or
+  a 401 (a 403 is an ordinary failure, since a new login would not fix it), and the task goes back
+  with its attempt refunded. `auth status` reads the stored token and never asks the
   server, so it can still call good a login a run was just refused. The row then goes red with a
   wording of its own and claims are held for 15 minutes, whatever `auth status` says, after which
   one run finds out; a restart lifts the hold at once. A run that had already spent money is an

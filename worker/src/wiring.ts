@@ -262,8 +262,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   >();
   const reapedProjects = new Set<string>();
 
-  // What this machine can actually do, established once at startup. Null until then, and reported
-  // as undefined while it is, so a worker mid-startup never claims to be broken.
+  // What this machine can actually do, established at startup, with only claude's row asked again
+  // later. Null until then, and reported as undefined while it is, so a worker mid-startup never claims to be broken.
   let preflight: PreflightReport | null = null;
   let preflightFailed = false;
   let preflightError = "";
@@ -499,7 +499,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       preflight = withClaudeSession(preflight, sessionHold.row, sessionHold.account);
       reportRunnableAgents(preflight);
       sessionHold = null;
-      deps.log("trying claude's login again: the next run will tell");
+      deps.log("the hold on claude's login is up");
       await askClaudeAgain();
     } else if (claudeSignedOut()) {
       await askClaudeAgain();
