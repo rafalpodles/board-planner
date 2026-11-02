@@ -26,6 +26,9 @@ struct PanelView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(summary.headline).font(.system(size: 17, weight: .semibold))
                 Text(summary.detail).font(.callout).foregroundStyle(.secondary)
+                if let caption = summary.caption {
+                    Text(caption).font(.caption).foregroundStyle(.secondary)
+                }
             }
             .padding(.top, 14)
 

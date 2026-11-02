@@ -32,6 +32,7 @@ final class SurfaceSnapshots: XCTestCase {
         for (name, state) in [
             ("panel-idle", Fixtures.idle), ("panel-working", Fixtures.working),
             ("panel-needs-human", Fixtures.needsHuman), ("panel-fault", Fixtures.faulted),
+            ("panel-fault-aged-out", Fixtures.faultAgedOut),
             ("panel-offline", Fixtures.disconnected), ("panel-paused", Fixtures.paused),
             ("panel-paused-running", Fixtures.pausedWhileRunning),
         ] {
