@@ -92,9 +92,11 @@ const STRICT_VERIFICATION = [
   { key: "review" },
 ];
 
+const EDITED_AT = new Date("2026-10-01T00:00:00Z");
+
 function storedAgent(name: string, composition: unknown) {
   agentFindOne.mockImplementation((filter: { name: string }) => ({
-    lean: async () => (filter.name === name ? { _id: `${name}-id`, composition } : null),
+    lean: async () => (filter.name === name ? { _id: `${name}-id`, composition, updatedAt: EDITED_AT } : null),
   }));
 }
 
@@ -137,7 +139,7 @@ describe("moving the shipped agents off the composition they were seeded with", 
 
     const writes = compositionWrites();
     expect(writes).toHaveLength(1);
-    expect(writes[0][0]).toMatchObject({ _id: `${MERGING_AGENT_NAME}-id` });
+    expect(writes[0][0]).toMatchObject({ _id: `${MERGING_AGENT_NAME}-id`, updatedAt: EDITED_AT });
     expect(writes[0][1]).toEqual({ $set: { composition: MERGING_COMPOSITION } });
   });
 

@@ -1581,6 +1581,18 @@ describe("runTask", () => {
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
+  // BP-1127: without a Protected files gate a workflow reaches the later gates, and the branch pushed
+  // as evidence of their refusal would run in Actions with the repository's secrets
+  it("does not push a rejected branch that carries a workflow, whichever gate refused it", async () => {
+    const h = harness({ gateFor: () => rejectingGate("diff-size", "too big") });
+    h.collectDiff.mockResolvedValue({ ...diff, changedFiles: ["a.ts", ".github/workflows/x.yml"] });
+    await runTask(h.deps, running("implement", "diff-size"));
+
+    expect(h.delivery.push).not.toHaveBeenCalled();
+    expect(h.reporter.gateRejected.mock.calls[0][2]).toMatch(/not pushed.*CI workflows/s);
+    expect(h.reporter.gateRejected.mock.calls[0][3]).toBe("");
+  });
+
   // Every other test in this file runs a single writing step, where commits[0] and the last commit
   // are the same value — so none of them can tell a correct index from a stale one. Two writing
   // steps is the smallest arrangement where the difference exists at all.

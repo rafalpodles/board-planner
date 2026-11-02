@@ -971,9 +971,12 @@ export async function runTask(
             return;
           }
 
-          // The one refusal that must not push: a pushed branch carrying .github/workflows/*.yml
-          // runs in Actions with the repository's secrets, whatever this verdict said.
-          const withholdsPush = entry.gateKind === "protected-paths";
+          // The refusals that must not push: a pushed branch carrying .github/workflows/*.yml
+          // runs in Actions with the repository's secrets, whatever this verdict said — and since
+          // BP-1127 an agent without a Protected files gate can reach here carrying one.
+          const opensDecision = entry.gateKind === "protected-paths";
+          const withheldAtPush = refusedAtPush(diff);
+          const withholdsPush = opensDecision || withheldAtPush !== null;
 
           // Before the report, and that ordering is the entitlement rather than a nicety: the
           // comment below moves the task out of the active column, and a person reading it there
@@ -982,7 +985,7 @@ export async function runTask(
           //
           // A failure here is logged and nothing else: the comment still carries the patch, which
           // is what the board had before any of this existed.
-          if (withholdsPush && deps.openDecision) {
+          if (opensDecision && deps.openDecision) {
             try {
               await deps.openDecision({
                 task,
@@ -1031,7 +1034,9 @@ export async function runTask(
             task,
             gate.name,
             withholdsPush
-              ? `${reasonForPerson}\n\n**The branch was not pushed**, on purpose: what it carries is exactly what this gate refused. The work is in the worktree at \`${worktree.path}\` on the worker host.`
+              ? `${reasonForPerson}\n\n**The branch was not pushed**, on purpose: ${
+                  opensDecision ? "what it carries is exactly what this gate refused." : withheldAtPush
+                } The work is in the worktree at \`${worktree.path}\` on the worker host.`
               : pushFailed
                 ? `${reasonForPerson}\n\n**The branch was not pushed**: ${pushFailed}. \`${branch}\` is not on the remote — this work exists only in the worktree at \`${worktree.path}\` on the worker host.`
                 : reasonForPerson,
