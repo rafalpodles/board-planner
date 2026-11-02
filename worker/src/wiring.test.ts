@@ -11,7 +11,7 @@ import { ControlDeps } from "./control.js";
 import { CommandResult, Runner, RunOpts } from "./exec.js";
 import { LocalConfigView, LocalServer, LocalServerDeps } from "./local-server.js";
 import { Store } from "./outbox.js";
-import { CLAUDE_LOGIN_REFUSED, PreflightReport, runPreflight } from "./preflight.js";
+import { CLAUDE_LOGIN_REFUSED, CLAUDE_MISSING, PreflightReport, runPreflight } from "./preflight.js";
 import { Heartbeat, HeartbeatDeps } from "./registration.js";
 import { createTelemetry } from "./telemetry.js";
 import { ClaimedTask } from "./types.js";
@@ -609,6 +609,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // What `claude auth status` answers, and what the agent's spawn does in place of its usual run
       claudeAuth?: (nth: number) => CommandResult;
       agentResult?: () => CommandResult | undefined;
+      // A Codex installed and signed in, on disk, since whether it still is is asked of the disk
+      codexHome?: string;
+      // What `codex login status` answers, when not signed in
+      codexLogin?: (nth: number) => CommandResult;
       // Run between passes, after the clock jump — the one hook point available to change what is
       // on disk mid-run, for a test about recovering from a failure and then repeating it.
       onSleep?: (stateDir: string, sleepIndex: number) => void;
@@ -618,6 +622,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const reportsBeforePreflight: ReturnType<NonNullable<HeartbeatDeps["preflight"]>>[] = [];
     let preflightFailures = opts.preflightThrows === true ? Infinity : Number(opts.preflightThrows ?? 0);
     let claudeAsked = 0;
+    let codexAsked = 0;
     const stateDir = mkdtempSync(join(tmpdir(), "cp-wiring-run-"));
     writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: opts.repos ?? [REPO] }), {
       mode: 0o600,
@@ -690,7 +695,13 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     let stop = (): void => {};
     const worker = createWorker({
-      env: { ...ENV, CP_STATE_DIR: stateDir, ...(opts.path ? { PATH: opts.path } : {}), ...(opts.gateNode ? { PATH: `${dirname(opts.gateNode.path)}:/usr/bin` } : {}) },
+      env: {
+        ...ENV,
+        CP_STATE_DIR: stateDir,
+        ...(opts.path ? { PATH: opts.path } : {}),
+        ...(opts.gateNode ? { PATH: `${dirname(opts.gateNode.path)}:/usr/bin` } : {}),
+        ...(opts.codexHome ? { CODEX_HOME: opts.codexHome } : {}),
+      },
       runner: {
         ...(opts.leftovers
           ? {
@@ -705,6 +716,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         run: (command: string, args: string[], runOpts: RunOpts) => {
           if (opts.claudeAuth && command.endsWith("/claude") && args[0] === "auth") {
             return Promise.resolve(opts.claudeAuth(claudeAsked++));
+          }
+          if (opts.codexHome && args[0] === "-lc" && args[1] === "command -v codex") {
+            return Promise.resolve({ code: 0, stdout: `${join(opts.codexHome, "codex")}\n`, stderr: "", timedOut: false });
+          }
+          if (opts.codexLogin && opts.codexHome && command === join(opts.codexHome, "codex") && args[0] === "login") {
+            return Promise.resolve(opts.codexLogin(codexAsked++));
           }
           const answer = isAgentSpawn(command, args) && !isPreflightAsking(command, args) ? opts.agentResult?.() : undefined;
           if (answer) return Promise.resolve(answer);
@@ -923,7 +940,136 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(claims).toBe(0);
     expect(claimed).toBe(false);
     expect(claudeArgs).toEqual([]);
-    expect(logError).toHaveBeenCalledWith("not claiming any work: claude could not be found on this machine, and every task needs it");
+    expect(logError).toHaveBeenCalledWith(
+      "not claiming any work: claude could not be found on this machine, and no task can run without it or a signed-in Codex"
+    );
+  });
+
+  // BP-1125. A step on Codex never runs claude, so a machine signed in to Codex alone takes work, and
+  // the server, told only Codex, offers it nothing that would need claude.
+  describe("a machine with a signed-in Codex and no claude it can run", () => {
+    const SIGNED_OUT = { code: 1, stdout: JSON.stringify({ loggedIn: false }), stderr: "", timedOut: false };
+    const SIGNED_IN = { code: 0, stdout: JSON.stringify({ loggedIn: true, email: "a@b.c" }), stderr: "", timedOut: false };
+    const row = (report: ReturnType<NonNullable<HeartbeatDeps["preflight"]>>) =>
+      report?.checks.find((check) => check.name === "claude");
+    const codexHomes: string[] = [];
+    afterAll(() => codexHomes.forEach((home) => rmSync(home, { recursive: true, force: true })));
+    const signedInCodex = () => {
+      const home = mkdtempSync(join(tmpdir(), "cp-wiring-codex-"));
+      codexHomes.push(home);
+      writeFileSync(join(home, "codex"), "", { mode: 0o755 });
+      writeFileSync(join(home, "auth.json"), "{}");
+      return home;
+    };
+
+    it("claims with claude missing, telling the server it runs Codex and not Claude Code", async () => {
+      const { claims, logError, heartbeatDeps } = await runOneTask(undefined, undefined, {
+        unresolvedTools: ["claude"],
+        codexHome: signedInCodex(),
+        tasks: [],
+      });
+
+      expect(claims).toBeGreaterThan(0);
+      expect(logError).not.toHaveBeenCalledWith(expect.stringContaining("not claiming any work"));
+      expect(capabilities()).toContain("agent-codex");
+      expect(capabilities()).not.toContain("agent-claude");
+      const report = heartbeatDeps?.preflight?.();
+      expect(row(report)).toEqual({
+        name: "claude",
+        ok: true,
+        warn: true,
+        detail: `${CLAUDE_MISSING} — this machine takes no task whose agent runs on Claude Code`,
+      });
+    });
+
+    it("claims with claude signed out, and offers Claude Code again once it signs in", async () => {
+      const { claims, logError, log } = await runOneTask(undefined, undefined, {
+        claudeAuth: (nth) => (nth < 2 ? SIGNED_OUT : SIGNED_IN),
+        codexHome: signedInCodex(),
+        tasks: [],
+        passes: 3,
+      });
+
+      expect(claims).toBeGreaterThanOrEqual(3);
+      expect(logError).not.toHaveBeenCalledWith(expect.stringContaining("not claiming any work"));
+      expect(log).toHaveBeenCalledWith("claude is signed in again");
+      expect(capabilities()).toEqual(expect.arrayContaining(["agent-claude", "agent-codex"]));
+    });
+
+    it("goes on claiming after a run finds claude's session gone, offered Codex alone", async () => {
+      const stdout = JSON.stringify({ type: "result", is_error: true, total_cost_usd: 0, result: "Not logged in · Please run /login" });
+      const { api, claims } = await runOneTask(undefined, undefined, {
+        claudeAuth: (nth) => (nth === 0 ? SIGNED_IN : SIGNED_OUT),
+        agentResult: () => ({ code: 1, stdout, stderr: "", timedOut: false }),
+        codexHome: signedInCodex(),
+        tasks: [CLAIMED],
+        passes: 3,
+      });
+
+      expect(api.release).toHaveBeenCalledTimes(1);
+      expect(claims).toBeGreaterThan(1);
+      expect(capabilities()).toContain("agent-codex");
+      expect(capabilities()).not.toContain("agent-claude");
+    });
+
+    it("takes work once Codex is signed in, with no restart", async () => {
+      const { claims, logError, log } = await runOneTask(undefined, undefined, {
+        unresolvedTools: ["claude"],
+        codexHome: signedInCodex(),
+        // Preflight's answer, then the first pass's
+        codexLogin: (nth) => (nth < 2 ? { code: 1, stdout: "", stderr: "Not logged in", timedOut: false } : { code: 0, stdout: "Logged in using ChatGPT", stderr: "", timedOut: false }),
+        tasks: [],
+        passes: 3,
+      });
+
+      expect(logError).toHaveBeenCalledWith(
+        "not claiming any work: claude could not be found on this machine, and no task can run without it or a signed-in Codex"
+      );
+      expect(log).toHaveBeenCalledWith("codex is signed in: taking the tasks that run on Codex");
+      expect(claims).toBeGreaterThan(0);
+      expect(capabilities()).toContain("agent-codex");
+    });
+
+    // The hold BP-1077 puts on a login `auth status` still calls good, which only a run can see
+    it("goes on claiming through the hold on a login claude's own status still calls good, offered Codex alone", async () => {
+      const refused = JSON.stringify({ type: "result", is_error: true, total_cost_usd: 0, result: "Not logged in · Please run /login" });
+      const { api, claims, logError, heartbeatDeps } = await runOneTask(undefined, undefined, {
+        claudeAuth: () => SIGNED_IN,
+        agentResult: () => ({ code: 1, stdout: refused, stderr: "", timedOut: false }),
+        codexHome: signedInCodex(),
+        tasks: [CLAIMED],
+        passes: 3,
+      });
+
+      expect(api.release).toHaveBeenCalledTimes(1);
+      expect(claims).toBeGreaterThan(1);
+      expect(logError).not.toHaveBeenCalledWith(expect.stringContaining("not claiming any work"));
+      expect(capabilities()).toContain("agent-codex");
+      expect(capabilities()).not.toContain("agent-claude");
+      expect(row(heartbeatDeps?.preflight?.())).toEqual({
+        name: "claude",
+        ok: true,
+        warn: true,
+        detail: `${CLAUDE_LOGIN_REFUSED} — this machine takes no task whose agent runs on Claude Code`,
+      });
+    });
+
+    it("stops claiming once Codex is signed out as well, and says claude is why", async () => {
+      const home = signedInCodex();
+      const { claims, logError, heartbeatDeps } = await runOneTask(undefined, undefined, {
+        unresolvedTools: ["claude"],
+        codexHome: home,
+        tasks: [],
+        passes: 3,
+        onSleep: () => rmSync(join(home, "auth.json"), { force: true }),
+      });
+
+      expect(claims).toBe(1);
+      expect(logError).toHaveBeenCalledWith(
+        "not claiming any work: claude could not be found on this machine, and no task can run without it or a signed-in Codex"
+      );
+      expect(row(heartbeatDeps?.preflight?.())).toEqual({ name: "claude", ok: false, stopsClaims: true, detail: CLAUDE_MISSING });
+    });
   });
 
   // BP-1077. Each attempt is refunded, so a worker still claiming would take the same task on every
@@ -1251,7 +1397,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const { claims, logError } = await runOneTask(undefined, undefined, { unresolvedTools: ["claude", "npm"] });
 
     expect(claims).toBe(0);
-    expect(logError).toHaveBeenCalledWith("not claiming any work: claude could not be found on this machine, and every task needs it");
+    expect(logError).toHaveBeenCalledWith(
+      "not claiming any work: claude could not be found on this machine, and no task can run without it or a signed-in Codex"
+    );
   });
 
   // A preflight that could not run resolved no tool at all, so every step would be refused the same

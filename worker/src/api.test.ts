@@ -60,6 +60,7 @@ describe("createApiClient", () => {
       name: "Implement",
       prompt: "do it",
       capability: "edit",
+      provider: "claude",
       model: "",
       fallbackModel: "",
       deterministic: false,
@@ -79,6 +80,20 @@ describe("createApiClient", () => {
       previousRejectionReason: "",
       runId: "run-on-the-task",
     });
+  });
+
+  // BP-1125. Dropped here, every step the board put on Codex ran on Claude Code
+  it("keeps the coding CLI a step runs on", async () => {
+    const onCodex = { ...agent, sequence: [{ ...agent.sequence[0], provider: "codex", model: "gpt-5" }] };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ _id: "t1", agent: onCodex, project: "CP", taskNumber: 158, title: "t", description: "", checklist: [] }),
+    });
+
+    const task = await createApiClient(config, fetchMock as never, identityStore).claim("CP", "run-1");
+
+    expect(task?.agent.sequence[0]).toMatchObject({ provider: "codex", model: "gpt-5" });
   });
 
   // BP-289: a claim response with no previousRejectionReason at all — an older server, or a first

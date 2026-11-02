@@ -64,9 +64,11 @@ import { createLoop } from "./loop.js";
 import { createOutbox, Store } from "./outbox.js";
 import { PipelineDeps, RunDisposition, runTask } from "./pipeline.js";
 import {
+  asReported,
   checkGateCommands,
   checkRepo,
   CLAUDE_LOGIN_REFUSED,
+  CLAUDE_MISSING,
   npmMissingForProject,
   pathWithTools,
   PreflightCheck,
@@ -74,6 +76,7 @@ import {
   PreflightReport,
   markClaudeLoginRefused,
   refreshClaudeSession,
+  refreshCodexSession,
   runPreflight,
   SANDBOX_CHECK,
   SESSION_HOLD_MS,
@@ -459,6 +462,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     );
   }
 
+  function codexRunnable(): boolean {
+    return !!preflight?.agents.includes("codex") && codexUsable(preflight.paths.codex, codexSourceHome(deps.env));
+  }
+
   function claudeRow(): PreflightCheck | undefined {
     return preflight?.checks.find((check) => check.name === "claude");
   }
@@ -492,6 +499,23 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     sessionHold = { until: Date.now() + SESSION_HOLD_MS, row, account: preflight.account };
     preflight = markClaudeLoginRefused(preflight);
     reportRunnableAgents(preflight);
+  }
+
+  // Once per poll while claude cannot run and Codex is not usable either, so that `codex login`, like
+  // `claude auth login`, needs no restart
+  async function askCodexAgain(): Promise<void> {
+    if (!preflight || !claudeUnusable() || codexRunnable()) return;
+    try {
+      preflight = await refreshCodexSession({ runner: deps.runner, env: deps.env, isExecutable: deps.isExecutable }, preflight);
+    } catch (error) {
+      deps.logError(`could not ask codex whether it is signed in: ${String(error)}`);
+      return;
+    }
+    reportRunnableAgents(preflight);
+    // An npm-installed codex is `env node`, so a directory found only now goes on the PATH as at boot
+    const repaired = pathWithTools(preflight.paths, deps.env.PATH ?? "");
+    if (repaired !== deps.env.PATH) deps.setPath(repaired);
+    if (codexRunnable()) deps.log("codex is signed in: taking the tasks that run on Codex");
   }
 
   async function retryClaudeSession(): Promise<void> {
@@ -996,6 +1020,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     await retryLeftovers().catch((error) => deps.logError(`reaping what an earlier run left failed: ${String(error)}`));
     await retryPreflight();
     await retryClaudeSession();
+    await askCodexAgain();
     await refreshServerState();
     // Before the flush, so a settlement this pass produces goes out with it rather than waiting a
     // whole poll interval. Drained here rather than in the claim loop because `drain` runs even
@@ -1035,9 +1060,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
    * Read off the preflight row rather than asking the platform, because the row is the answer for
    * this machine — it confined a probe and watched it fail to escape.
    *
-   * So is claude, if preflight never resolved it (BP-733) or it is not signed in (BP-1077): the step
-   * is refused as a machine fault with the attempt refunded, so without this every poll would claim
-   * the same task again. gh is
+   * So is claude, if preflight never resolved it (BP-733) or it is not signed in (BP-1077), unless
+   * Codex can run: the server is then told only Codex, and offers nothing else (BP-1125). Otherwise
+   * the step is refused as a machine fault with the attempt refunded, so without this every poll would
+   * claim the same task again. gh is
    * not here: without it delivery fails through the ordinary, charged path, so it ends. npm is a
    * project's need and not the machine's, which `gateChecks` holds it to.
    */
@@ -1045,9 +1071,14 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     if (leftovers) return leftovers;
     const row = preflight?.checks.find((check) => check.name === SANDBOX_CHECK);
     if (row && !row.ok) return row.detail;
-    if (claudeSignedOut() || sessionHold) return claudeRow()?.detail ?? CLAUDE_LOGIN_REFUSED;
     if (!preflight) return preflightFailed ? `preflight could not run: ${preflightError}` : "";
-    return isAbsolute(preflight.paths.claude ?? "") ? "" : "claude could not be found on this machine, and every task needs it";
+    const claude = claudeUnusable();
+    return claude && !codexRunnable() ? claude : "";
+  }
+
+  function claudeUnusable(): string {
+    if (claudeSignedOut() || sessionHold) return claudeRow()?.detail ?? CLAUDE_LOGIN_REFUSED;
+    return isAbsolute(preflight?.paths.claude ?? "") ? "" : `${CLAUDE_MISSING}, and no task can run without it or a signed-in Codex`;
   }
 
   const loop = createLoop({
@@ -1090,7 +1121,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     // this machine taking no work (BP-793)
     preflight: () => {
       if (!preflight && !preflightFailed) return undefined;
-      const own = preflight?.checks ?? [{ name: SANDBOX_CHECK, ok: false, detail: claimBlocked() }];
+      const own = preflight ? asReported(preflight.checks, codexRunnable()) : [{ name: SANDBOX_CHECK, ok: false, detail: claimBlocked() }];
       const checks = [...own, ...repoChecks, ...quarantineChecks()];
       return { ok: checks.every((c) => c.ok), account: preflight?.account ?? "", checks };
     },

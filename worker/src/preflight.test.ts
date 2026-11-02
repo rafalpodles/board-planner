@@ -8,6 +8,8 @@ import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
 import { answerSandboxProbe, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
 import { CLAUDE_SIGNED_OUT } from "./agents/claude.js";
 import {
+  asReported,
+  CLAUDE_MISSING,
   checkGateCommands,
   checkRepo,
   npmCacheCheck,
@@ -1102,5 +1104,25 @@ describe("preflight and the Codex CLI", () => {
     await runPreflight(depsFor(m));
 
     expect(m.envs.codex).not.toHaveProperty("CODEX_HOME");
+  });
+});
+
+// BP-1125. What a machine with Codex says about a claude it cannot run: it still works, on Codex alone
+describe("asReported", () => {
+  const signedOut = { name: "claude", ok: false, stopsClaims: true, detail: CLAUDE_SIGNED_OUT };
+  const sandbox = { name: SANDBOX_CHECK, ok: false, detail: "no seatbelt" };
+
+  it("turns a failing claude row into a warning naming what the machine will not take, while Codex can run", () => {
+    expect(asReported([signedOut, sandbox], true)).toEqual([
+      { name: "claude", ok: true, warn: true, detail: `${CLAUDE_SIGNED_OUT} — this machine takes no task whose agent runs on Claude Code` },
+      sandbox,
+    ]);
+  });
+
+  it("leaves every row as it is while Codex cannot run, and a passing claude row either way", () => {
+    const missing = { name: "claude", ok: false, stopsClaims: true, detail: CLAUDE_MISSING };
+    const signedIn = { name: "claude", ok: true, detail: "signed in as someone@example.com" };
+    expect(asReported([missing, sandbox], false)).toEqual([missing, sandbox]);
+    expect(asReported([signedIn], true)).toEqual([signedIn]);
   });
 });
