@@ -1386,8 +1386,11 @@ export async function updateTask(
     }
   }
 
+  // A whole-object PUT resends the stored assignee; that echo assigns nobody (BP-1122)
+  const assigneeMoved = refId(task.assignee) !== storedAssignee;
+
   // Auto-watch on assign
-  if (updates.assignee && task.assignee) {
+  if (updates.assignee && task.assignee && assigneeMoved) {
     const assigneeId = typeof task.assignee === "object" && "_id" in task.assignee
       ? task.assignee._id
       : task.assignee;
@@ -1414,7 +1417,7 @@ export async function updateTask(
   }
 
   // In-app notification: assignee changed
-  if (updates.assignee !== undefined && task.assignee) {
+  if (updates.assignee !== undefined && task.assignee && assigneeMoved) {
     const newAssigneeId = typeof task.assignee === "object" && "_id" in task.assignee
       ? String(task.assignee._id)
       : String(task.assignee);
