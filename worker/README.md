@@ -295,8 +295,8 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   A board with no `done`-role column at all cannot say what finished means, so it cannot say what
   blocked means either; such a board is refused at the claim (next bullet) rather than having the
   gate skipped on it.
-- **A machine with no claude login claims nothing.** Preflight's `claude` row reads red when `claude
-  auth status` says so, the machine asks again once per poll, and `claude auth login` clears it with
+- **A machine with no claude login claims nothing, unless Codex is signed in.** Preflight's `claude`
+  row reads red when `claude auth status` says so, the machine asks again once per poll, and `claude auth login` clears it with
   no restart. A login can also end under a running worker. That first shows as a run ending on
   `Not logged in · Please run /login` or `Failed to authenticate…`, on an expired or revoked login or
   a 401 (any other 403 is an ordinary failure, which a new login would not fix), and the task goes back
@@ -304,8 +304,11 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   server, so it can still call good a login a run was just refused. The row then goes red with a
   wording of its own and claims are held for 15 minutes, whatever `auth status` says, after which
   one run finds out; a restart lifts the hold at once. A run that had already spent money is an
-  ordinary failure and charges its attempt. Like a missing `claude`, this stops Codex tasks too: a
-  machine needs Claude Code to claim anything (**BP-1077**, BP-1125).
+  ordinary failure and charges its attempt (**BP-1077**). A machine with a signed-in Codex goes on
+  claiming through all of this, and through a missing `claude`: it tells the server `agent-codex`
+  alone, so it is offered only tasks whose every model step and review runs on Codex. Push, Pull
+  request, Merge and the other gates run no coding CLI. The `claude` row is a warning there, and turns
+  red again if Codex is signed out (**BP-1125**).
 - **A board that cannot claim says so.** A run needs four roles — `approved` to take work from,
   `active` to move it into, `review` and `done` to deliver it to. A board missing any of them is
   refused at the claim with a 409 naming the role, rather than the 204 an empty queue gets; the

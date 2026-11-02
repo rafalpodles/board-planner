@@ -112,6 +112,24 @@ JS
 echo '{"type":"result","subtype":"success","is_error":false,"result":"{\\"status\\":\\"completed\\",\\"summary\\":\\"Added a greeting\\",\\"filesChanged\\":[\\"src/greet.js\\"],\\"testsAdded\\":[\\"test/greet.test.js\\"],\\"blockedReason\\":\\"\\"}"}'
 `;
 
+// Codex's `exec --json` stream, cut to what the adapter reads: the final agent message and the turn's end
+const CODEX_STUB = `#!/bin/sh
+case "$1" in
+  --version) echo "codex-cli 0.999.0 (stub)"; exit 0 ;;
+  login) echo "Logged in using ChatGPT"; exit 0 ;;
+esac
+mkdir -p src test
+printf '%s\\n' 'module.exports = (name) => "Hello, " + name;' > src/greet.js
+cat > test/greet.test.js <<'JS'
+const test = require("node:test");
+const assert = require("node:assert");
+const greet = require("../src/greet.js");
+test("greets by name", () => assert.strictEqual(greet("Ada"), "Hello, Ada"));
+JS
+echo '{"type":"item.completed","item":{"type":"agent_message","text":"{\\"status\\":\\"completed\\",\\"summary\\":\\"Added a greeting on Codex\\",\\"filesChanged\\":[\\"src/greet.js\\"],\\"testsAdded\\":[\\"test/greet.test.js\\"],\\"blockedReason\\":\\"\\"}"}}'
+echo '{"type":"turn.completed"}'
+`;
+
 const GH_STUB = `#!/bin/sh
 printf '%s\\n' "$*" >> '${GH_LOG}'
 case "$1 $2" in
@@ -489,6 +507,63 @@ test("the real worker hands a task back unspent when claude signs out, shows why
   expect(log).toContain("claude is signed in again");
   expect(log.match(/machine fault on /g)).toHaveLength(1);
   await expect.poll(stateOfMachine, { timeout: 90_000, intervals: [2_000] }).toBe("live");
+});
+
+// BP-1125. A step on Codex never runs claude, so a machine signed in to Codex alone takes that task. Push
+// and Pull request are steps the worker runs itself, stored on Claude Code by the seeded catalog's
+// default, so only the real catalog and a real claim show that they do not hold the task back.
+test("the real worker with no claude takes a task on Codex to its pull request, and leaves the one on Claude Code", async ({ request }) => {
+  layDownRepository();
+  const port = await freePort();
+  daemon = await startDaemon(port);
+  cloneCheckout(port);
+  write(join(STATE, "repos.json"), JSON.stringify({ repos: [CHECKOUT] }) + "\n", 0o600);
+  rmSync(join(BIN, "claude"));
+  write(join(BIN, "codex"), CODEX_STUB, 0o755);
+  write(join(HOME, ".codex", "auth.json"), "{}\n", 0o600);
+  const onCodex = new mongoose.Types.ObjectId();
+  await withDb(async (db) => {
+    const now = new Date();
+    await db.collection("agentblocks").insertOne({
+      key: "implement-on-codex", kind: "step", name: "Implement on Codex", description: "", builtIn: false, gateKind: "", params: {},
+      prompt: "Make the change the task describes, with a test.", capability: "edit", provider: "codex", model: "gpt-5",
+      fallbackModel: "", deterministic: false, createdAt: now, updatedAt: now,
+    });
+    const smoke = await db.collection("agents").findOne({ _id: AGENT_ID });
+    await db.collection("agents").insertOne({
+      ...smoke,
+      _id: onCodex,
+      name: "Smoke on Codex",
+      composition: { ...smoke!.composition, implementation: [{ key: "implement-on-codex" }] },
+    });
+    await db.collection("tasks").updateOne({ _id: DELIVERED.id }, { $set: { agent: onCodex } });
+    // First in the queue, so the claim has to step over it
+    await db.collection("tasks").updateOne({ _id: STOPPED.id }, { $set: { order: -1 } });
+  });
+
+  worker = startWorker(await mintEnrolmentToken(request));
+
+  const deliveredKey = `${PROJECT_KEY}-${DELIVERED.number}`;
+  await expect
+    .poll(async () => (await storedTask(DELIVERED.id))?.status, {
+      message: `${deliveredKey} should reach the escalation review column on Codex; see worker.log`,
+      timeout: 4 * 60_000,
+      intervals: [2_000],
+    })
+    .toBe("needs_human_review");
+  expect((await storedTask(DELIVERED.id))?.execution?.attempts).toBe(1);
+  expect(await commentsOn(DELIVERED.id)).toContainEqual(expect.stringContaining(`Opened ${PR_URL} for review`));
+
+  const onClaude = await storedTask(STOPPED.id);
+  expect(onClaude?.status).toBe("todo");
+  expect(onClaude?.execution?.runId).toBeUndefined();
+  expect(onClaude?.execution?.attempts ?? 0).toBe(0);
+
+  const machines = await (await request.get("/api/users/me/machines", { headers: SESSION })).json();
+  expect(machines.find((machine: { name: string }) => machine.name === WORKER_NAME)?.state).toBe("live");
+  const log = readFileSync(WORKER_LOG, "utf8");
+  expect(log).not.toContain("not claiming any work");
+  expect(log).not.toContain("machine fault on ");
 });
 
 // BP-1073. One task, one project that lists two repositories: the worker takes it only with a checkout of
