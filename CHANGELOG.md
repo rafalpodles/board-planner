@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.11.0](https://github.com/rafalpodles/board-planner/compare/v1.10.0...v1.11.0) (2026-11-02)
+
+
+### Features
+
+* a list closing a title links the pull request to every task it names (BP-635) ([#758](https://github.com/rafalpodles/board-planner/issues/758)) ([f238489](https://github.com/rafalpodles/board-planner/commit/f2384892917a025e0f6f6d376340829926495f3a))
+* import a Trello board from its JSON export (BP-866) ([#755](https://github.com/rafalpodles/board-planner/issues/755)) ([5c4ce81](https://github.com/rafalpodles/board-planner/commit/5c4ce81abb0f5396255b541858d91de64c8c9f86))
+* **worker:** a settings fault fails one task and holds its agent instead of failing the queue (BP-1117) ([#753](https://github.com/rafalpodles/board-planner/issues/753)) ([ab540c1](https://github.com/rafalpodles/board-planner/commit/ab540c12610fea53374e6c07a82a73c93cbd9a02))
+
+
+### Bug Fixes
+
+* a finished import says so, with how many tasks came in (BP-1121) ([#760](https://github.com/rafalpodles/board-planner/issues/760)) ([dcb82e7](https://github.com/rafalpodles/board-planner/commit/dcb82e775332a1dc7552313311d3f48122ecf395))
+* a finished Trello card reaches a done column, and a disabled Import says why (BP-1120) ([#759](https://github.com/rafalpodles/board-planner/issues/759)) ([ea64af4](https://github.com/rafalpodles/board-planner/commit/ea64af4edfa69fe4786e1e45bddfcf8ae93df3ab))
+* a machine signed in only to Codex takes the tasks that run on Codex, and a Codex step runs on Codex (BP-1125) ([#764](https://github.com/rafalpodles/board-planner/issues/764)) ([0e882e7](https://github.com/rafalpodles/board-planner/commit/0e882e719959634e7a8763b2d423f37655b79c13))
+* an assignee a board cannot take gets one answer, whether or not the account exists (BP-513) ([#761](https://github.com/rafalpodles/board-planner/issues/761)) ([273ddbe](https://github.com/rafalpodles/board-planner/commit/273ddbedc2c40529837040176650c64b53433d31))
+* resending a task's assignee neither notifies nor re-watches them (BP-1122) ([#763](https://github.com/rafalpodles/board-planner/issues/763)) ([e137970](https://github.com/rafalpodles/board-planner/commit/e137970bcec7e0624e2314ac2acc30e18da1db87))
+* the sidebar's keyboard reaches a project row's links, and e2e covers the BP-1075 leftovers (BP-1090) ([#754](https://github.com/rafalpodles/board-planner/issues/754)) ([7ee933f](https://github.com/rafalpodles/board-planner/commit/7ee933fbcf751e605f7231efa110efd61cb8838c))
+* **worker:** a claude with no login stops the machine's claims instead of spending attempts (BP-1077) ([#762](https://github.com/rafalpodles/board-planner/issues/762)) ([303e8ab](https://github.com/rafalpodles/board-planner/commit/303e8ab745a3af5aea0b3ca6c27a2e2a4c372001))
+
 ## [1.10.0](https://github.com/rafalpodles/board-planner/compare/v1.9.0...v1.10.0) (2026-11-01)
 
 
