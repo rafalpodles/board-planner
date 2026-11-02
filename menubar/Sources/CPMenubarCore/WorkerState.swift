@@ -137,6 +137,14 @@ public struct WorkerState: Equatable, Sendable {
         return now.timeIntervalSince(since) >= Self.faultGrace ? .idle : .faulted
     }
 
+    /// How long ago a fault that `effectiveHealth` has aged out happened, while nothing has
+    /// happened since — the one trace of it left once the icon and the notification are gone (BP-633).
+    public func agedOutFaultAge(now: Date) -> TimeInterval? {
+        guard health == .faulted, let since = faultedAt else { return nil }
+        let age = now.timeIntervalSince(since)
+        return age >= Self.faultGrace ? age : nil
+    }
+
     public func title(now: Date) -> String? {
         guard let phase = currentPhase, let since = phaseSince else { return nil }
         let seconds = max(0, Int(now.timeIntervalSince(since)))

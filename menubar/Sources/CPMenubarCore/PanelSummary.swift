@@ -4,6 +4,7 @@ public struct PanelSummary: Equatable, Sendable {
     public let headline: String
     public let detail: String
     public let pill: String
+    public var caption: String? = nil
 }
 
 extension WorkerState {
@@ -13,7 +14,8 @@ extension WorkerState {
         switch effectiveHealth(now: now) {
         case .idle:
             let detail = pollSeconds.map { "Checking the board every \(max(1, $0)) s." } ?? "Checking the board for approved tasks."
-            return PanelSummary(headline: "Waiting for work", detail: detail, pill: "Connected")
+            let caption = agedOutFaultAge(now: now).map { "The last task couldn't run here · \(Self.ago($0))" }
+            return PanelSummary(headline: "Waiting for work", detail: detail, pill: "Connected", caption: caption)
         case .working:
             let sentence = stageIndex.map { Self.stageSentences[$0] } ?? currentPhase.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? "Working"
             let detail = elapsed(now: now).map { "\(sentence) · \(Self.clock($0))" } ?? sentence
@@ -35,6 +37,13 @@ extension WorkerState {
             }
             return PanelSummary(headline: "Can't reach the worker", detail: "Retrying every few seconds.", pill: "Offline")
         }
+    }
+
+    static func ago(_ interval: TimeInterval) -> String {
+        let minutes = Int(interval) / 60
+        if minutes < 60 { return "\(minutes) min ago" }
+        if minutes < 24 * 60 { return "\(minutes / 60) h ago" }
+        return "\(minutes / (24 * 60)) d ago"
     }
 
     static func clock(_ interval: TimeInterval) -> String {

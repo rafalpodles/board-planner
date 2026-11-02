@@ -61,6 +61,58 @@ private func state(_ events: [TelemetryEvent]) -> WorkerState {
     #expect(faulted.panelSummary(now: later, pollSeconds: nil).headline == "Waiting for work")
 }
 
+// BP-633. Once the icon and the notification have let go, the panel is the only place left to learn
+// that the last run could not run here.
+@Test func aFaultThatAgedOutLeavesACaptionSayingWhen() {
+    let faulted = state([.outcome(Outcome(outcome: "machineFault", taskKey: "BP-1"))])
+
+    func caption(after seconds: TimeInterval) -> String? {
+        faulted.panelSummary(now: t0.addingTimeInterval(seconds), pollSeconds: 30).caption
+    }
+
+    #expect(caption(after: WorkerState.faultGrace) == "The last task couldn't run here · 15 min ago")
+    #expect(caption(after: 40 * 60 + 59) == "The last task couldn't run here · 40 min ago")
+    #expect(caption(after: 9 * 3600) == "The last task couldn't run here · 9 h ago")
+    #expect(caption(after: 50 * 3600) == "The last task couldn't run here · 2 d ago")
+}
+
+@Test func aFaultStillOnScreenNeedsNoCaption() {
+    let faulted = state([.outcome(Outcome(outcome: "machineFault", taskKey: "BP-1"))])
+
+    #expect(faulted.panelSummary(now: t0.addingTimeInterval(WorkerState.faultGrace - 1), pollSeconds: nil).caption == nil)
+}
+
+@Test func aMachineThatNeverFaultedLooksAsItDidBefore() {
+    let summary = WorkerState().panelSummary(now: t0.addingTimeInterval(WorkerState.faultGrace * 4), pollSeconds: 30)
+
+    #expect(summary == PanelSummary(headline: "Waiting for work", detail: "Checking the board every 30 s.", pill: "Connected"))
+}
+
+@Test func theCaptionGoesWithAReconnectOrADisconnect() {
+    var adopted = state([.outcome(Outcome(outcome: "machineFault", taskKey: "BP-1"))])
+    adopted.adopt(StatusResponse(paused: false, current: nil, recent: []), at: t0.addingTimeInterval(5))
+
+    var dropped = state([.outcome(Outcome(outcome: "machineFault", taskKey: "BP-1"))])
+    dropped.markDisconnected()
+    dropped.adopt(StatusResponse(paused: false, current: nil, recent: []), at: t0.addingTimeInterval(5))
+
+    let later = t0.addingTimeInterval(WorkerState.faultGrace * 4)
+    #expect(adopted.panelSummary(now: later, pollSeconds: nil).caption == nil)
+    #expect(dropped.panelSummary(now: later, pollSeconds: nil).caption == nil)
+}
+
+// The next run leaves the fault's stamp behind, and only the reconnect paths clear it; a run that
+// went well since is not a fault to report.
+@Test func aRunAfterTheFaultEndsTheCaption() {
+    let recovered = state([
+        .outcome(Outcome(outcome: "machineFault", taskKey: "BP-1")),
+        .progress(Progress(phase: "claiming")),
+        .outcome(Outcome(outcome: "merged", taskKey: "BP-2")),
+    ])
+
+    #expect(recovered.panelSummary(now: t0.addingTimeInterval(WorkerState.faultGrace * 4), pollSeconds: nil).caption == nil)
+}
+
 @Test func aRefusedSocketSaysWhyInsteadOfRetrying() {
     var offline = WorkerState()
     offline.markDisconnected(reason: "the directory is not yours")

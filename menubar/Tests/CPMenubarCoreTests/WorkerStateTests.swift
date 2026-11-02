@@ -301,3 +301,28 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
             state.effectiveHealth(now: t0.addingTimeInterval(WorkerState.faultGrace * 10)) == health)
     }
 }
+
+// BP-633. The age is reported only for a fault the icon has already let go of.
+@Test func aFaultHasAnAgeOnlyOnceItHasAgedOut() {
+    var state = WorkerState()
+    state.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")), at: t0)
+
+    #expect(state.agedOutFaultAge(now: t0.addingTimeInterval(WorkerState.faultGrace - 1)) == nil)
+    #expect(state.agedOutFaultAge(now: t0.addingTimeInterval(WorkerState.faultGrace)) == WorkerState.faultGrace)
+}
+
+@Test func aReconnectOrADisconnectLeavesNoFaultAge() {
+    var adopted = WorkerState()
+    adopted.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")), at: t0)
+    adopted.adopt(StatusResponse(paused: false, current: nil, recent: []), at: t0.addingTimeInterval(5))
+    adopted.forceHealth(.faulted)
+
+    var dropped = WorkerState()
+    dropped.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")), at: t0)
+    dropped.markDisconnected()
+    dropped.forceHealth(.faulted)
+
+    let later = t0.addingTimeInterval(WorkerState.faultGrace * 4)
+    #expect(adopted.agedOutFaultAge(now: later) == nil)
+    #expect(dropped.agedOutFaultAge(now: later) == nil)
+}
