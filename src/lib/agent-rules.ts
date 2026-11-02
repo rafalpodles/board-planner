@@ -134,12 +134,17 @@ export function agentProblems(composition: AgentComposition, lookup: Lookup): Pr
   // Nothing may execute what a step wrote before protected-paths has read it. This was the reason
   // the old pipeline hardcoded its gate order; composing the order is what put it at risk.
   //
+  // Asked only of an agent that carries the gate. Since BP-1127 the shipped agents leave it out and
+  // the sandbox alone confines what build and test-run execute — as it always did for the tests the
+  // agent writes, which no protected path covers. A gate placed where it reads nothing is still a
+  // mistake worth refusing; an agent without one was composed that way on purpose.
+  //
   // Per write, not once for the first: an agent that writes again after its Protected files gate
   // leaves that second write unread, and the rule would still pass because one gate stood after
   // one write. And by kind, not by key — a Protected files block created from the catalog gets a
   // key derived from its name, and the worker itself keys this on gateKind.
   const guardsTheTree = (key: string) => kindOf(key) === "protected-paths";
-  const unguarded = sequence.some(
+  const unguarded = sequence.some(guardsTheTree) && sequence.some(
     (key, i) =>
       EXECUTES_THE_TREE.has(kindOf(key) ?? "") &&
       // some write happened before this gate, and no protected-paths gate stands between them

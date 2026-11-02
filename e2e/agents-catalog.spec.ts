@@ -421,16 +421,9 @@ test.describe("editing what an agent does", () => {
     await expect(page.getByRole("heading", { name: DEFAULT_AGENT, level: 1 })).toBeVisible();
 
     // Two gates in the middle of Verification, chosen because no rule constrains their order:
-    // moving Protected files, Push or Pull request would make this a test about the rules, and the
+    // moving Reviewed, Push or Pull request would make this a test about the rules, and the
     // save would be refused for a reason that has nothing to do with the keyboard.
-    await expect(rowsIn(page, "Verification")).toHaveText([
-      /^Protected files/,
-      /^Size/,
-      /^Test written/,
-      /^Builds/,
-      /^Tests pass/,
-      /^Reviewed/,
-    ]);
+    await expect(rowsIn(page, "Verification")).toHaveText([/^Size/, /^Builds/, /^Tests pass/, /^Reviewed/]);
 
     // A beat between the keys: dnd-kit recomputes collisions on an animation frame, and three
     // presses in the same tick are picked up and dropped exactly where they started.
@@ -441,14 +434,7 @@ test.describe("editing what an agent does", () => {
     await page.waitForTimeout(250);
     await page.keyboard.press("Space");
 
-    await expect(rowsIn(page, "Verification")).toHaveText([
-      /^Protected files/,
-      /^Test written/,
-      /^Size/,
-      /^Builds/,
-      /^Tests pass/,
-      /^Reviewed/,
-    ]);
+    await expect(rowsIn(page, "Verification")).toHaveText([/^Size/, /^Tests pass/, /^Builds/, /^Reviewed/]);
 
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByRole("button", { name: "Saved" })).toBeVisible();
@@ -456,14 +442,7 @@ test.describe("editing what an agent does", () => {
     await expect
       .poll(async () => (await storedAgent(DEFAULT_AGENT))?.composition)
       .toMatchObject({
-        verification: [
-          { key: "protected-paths" },
-          { key: "test-presence" },
-          { key: "diff-size" },
-          { key: "build" },
-          { key: "test-run" },
-          { key: "review" },
-        ],
+        verification: [{ key: "diff-size" }, { key: "test-run" }, { key: "build" }, { key: "review" }],
       });
   });
 

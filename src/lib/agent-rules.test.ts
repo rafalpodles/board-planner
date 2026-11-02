@@ -249,6 +249,19 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
     expect(problems.some((p) => p.severity === "broken" && /protected/i.test(p.message))).toBe(true);
   });
 
+  // BP-1127: the shipped agents leave the gate out, and the sandbox confines the build
+  it("asks nothing of an agent that carries no protected-paths gate at all", () => {
+    const problems = agentProblems(
+      composition({
+        implementation: ["implement"],
+        verification: ["build", "test-run", "review"],
+        delivery: ["push", "pull-request", "merge"],
+      }),
+      lookup
+    );
+    expect(problems).toEqual([]);
+  });
+
   it("accepts a second protected-paths gate after the second write", () => {
     const problems = agentProblems(
       composition({

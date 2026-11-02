@@ -18,7 +18,17 @@ vi.mock("@/models/project", () => ({
   Project: { updateMany: (...a: unknown[]) => projectUpdateMany(...a) },
 }));
 
-const { seedAgents, MERGING_AGENT_NAME } = await import("./agent-seed");
+const {
+  seedAgents,
+  MERGING_AGENT_NAME,
+  SEEDED_DEFAULT_NAME,
+  BUILT_IN_BLOCKS,
+  SECURITY_REVIEW_BLOCK,
+  DEFAULT_COMPOSITION,
+  MERGING_COMPOSITION,
+  CAREFUL_COMPOSITION,
+} = await import("./agent-seed");
+const { agentProblems } = await import("./agent-rules");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 beforeEach(() => {
@@ -70,5 +80,105 @@ describe("seeding and the project's default agent", () => {
     await seedAgents(scopedToDefaultOrganisation());
 
     expect(projectUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+const STRICT_VERIFICATION = [
+  { key: "protected-paths" },
+  { key: "diff-size" },
+  { key: "test-presence" },
+  { key: "build" },
+  { key: "test-run" },
+  { key: "review" },
+];
+
+function storedAgent(name: string, composition: unknown) {
+  agentFindOne.mockImplementation((filter: { name: string }) => ({
+    lean: async () => (filter.name === name ? { _id: `${name}-id`, composition } : null),
+  }));
+}
+
+function compositionWrites() {
+  return agentUpdateOne.mock.calls.filter((call) => "$set" in call[1]);
+}
+
+// BP-1127: the two gates refused work the machine's owner wanted, on the owner's own machine
+describe("the shipped agents", () => {
+  const lookup = (key: string) =>
+    [...BUILT_IN_BLOCKS, SECURITY_REVIEW_BLOCK].find((block) => block.key === key) as never;
+
+  it("leave test-presence and protected-paths to the security-reviewed agent", () => {
+    const keys = (composition: typeof DEFAULT_COMPOSITION) => composition.verification.map((entry) => entry.key);
+
+    for (const composition of [DEFAULT_COMPOSITION, MERGING_COMPOSITION]) {
+      expect(keys(composition)).not.toContain("test-presence");
+      expect(keys(composition)).not.toContain("protected-paths");
+    }
+    expect(keys(CAREFUL_COMPOSITION)).toEqual(expect.arrayContaining(["test-presence", "protected-paths"]));
+  });
+
+  it("break none of the composition rules", () => {
+    for (const composition of [DEFAULT_COMPOSITION, MERGING_COMPOSITION, CAREFUL_COMPOSITION]) {
+      expect(agentProblems(composition, lookup).filter((p) => p.severity === "broken")).toEqual([]);
+    }
+  });
+});
+
+describe("moving the shipped agents off the composition they were seeded with", () => {
+  it("moves an untouched Merges its own work to the new composition", async () => {
+    storedAgent(MERGING_AGENT_NAME, {
+      analysis: [],
+      implementation: [{ key: "implement" }],
+      verification: STRICT_VERIFICATION,
+      delivery: [{ key: "push" }, { key: "pull-request" }, { key: "merge" }],
+    });
+
+    await seedAgents(scopedToDefaultOrganisation());
+
+    const writes = compositionWrites();
+    expect(writes).toHaveLength(1);
+    expect(writes[0][0]).toMatchObject({ _id: `${MERGING_AGENT_NAME}-id` });
+    expect(writes[0][1]).toEqual({ $set: { composition: MERGING_COMPOSITION } });
+  });
+
+  it("reads a row stored as bare keys the same as one stored as entries", async () => {
+    storedAgent(SEEDED_DEFAULT_NAME, {
+      analysis: [],
+      implementation: ["implement"],
+      verification: STRICT_VERIFICATION.map((entry) => entry.key),
+      delivery: ["push", "pull-request"],
+    });
+
+    await seedAgents(scopedToDefaultOrganisation());
+
+    expect(compositionWrites().map((call) => call[1])).toEqual([{ $set: { composition: DEFAULT_COMPOSITION } }]);
+  });
+
+  it("leaves a shipped agent somebody edited exactly as they left it", async () => {
+    storedAgent(MERGING_AGENT_NAME, {
+      analysis: [],
+      implementation: [{ key: "implement" }],
+      verification: [...STRICT_VERIFICATION, { key: "security-review" }],
+      delivery: [{ key: "push" }, { key: "pull-request" }, { key: "merge" }],
+    });
+
+    await seedAgents(scopedToDefaultOrganisation());
+
+    expect(compositionWrites()).toEqual([]);
+  });
+
+  it("leaves a shipped agent whose gate somebody re-tuned", async () => {
+    storedAgent(SEEDED_DEFAULT_NAME, {
+      analysis: [],
+      implementation: [{ key: "implement" }],
+      verification: STRICT_VERIFICATION.map((entry) =>
+        entry.key === "diff-size" ? { key: "diff-size", params: { maxLines: 2000 } } : entry,
+      ),
+      delivery: [{ key: "push" }, { key: "pull-request" }],
+    });
+
+    await seedAgents(scopedToDefaultOrganisation());
+
+    expect(compositionWrites()).toEqual([]);
   });
 });
