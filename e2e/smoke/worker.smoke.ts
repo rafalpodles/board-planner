@@ -19,7 +19,7 @@
  * temp directory: the worker refuses a checkout under /tmp or /private/var.
  */
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
@@ -324,8 +324,8 @@ async function mintEnrolmentToken(request: APIRequestContext): Promise<string> {
   return (await response.json()).token;
 }
 
-function startWorker(enrolmentToken: string): ChildProcess {
-  const env: Record<string, string> = {
+function workerEnv(): Record<string, string> {
+  return {
     HOME,
     USER: process.env.USER ?? "smoke",
     LANG: "en_US.UTF-8",
@@ -335,11 +335,14 @@ function startWorker(enrolmentToken: string): ChildProcess {
     XDG_CONFIG_HOME: join(HOME, ".config"),
     GH_CONFIG_DIR: join(HOME, ".config", "gh"),
     CP_API_URL: BASE_URL,
-    CP_ENROLMENT_TOKEN: enrolmentToken,
     CP_WORKER_NAME: WORKER_NAME,
     CP_STATE_DIR: STATE,
     CP_NPM_CACHE: join(ROOT, "npm-cache"),
   };
+}
+
+function startWorker(enrolmentToken: string): ChildProcess {
+  const env: Record<string, string> = { ...workerEnv(), CP_ENROLMENT_TOKEN: enrolmentToken };
   const log = createWriteStream(WORKER_LOG);
   const worker = spawn(process.execPath, [join(WORKER_DIR, "dist", "main.js")], {
     cwd: ROOT,
@@ -539,6 +542,18 @@ test("the real worker with no claude takes a task on Codex to its pull request, 
     await db.collection("tasks").updateOne({ _id: DELIVERED.id }, { $set: { agent: onCodex } });
     // First in the queue, so the claim has to step over it
     await db.collection("tasks").updateOne({ _id: STOPPED.id }, { $set: { order: -1 } });
+  });
+
+  // What the menubar app reads before it offers Connect, which stops on any failing row
+  const preflight = spawnSync(process.execPath, [join(WORKER_DIR, "dist", "main.js"), "--preflight"], {
+    cwd: ROOT,
+    env: workerEnv() as NodeJS.ProcessEnv,
+    encoding: "utf8",
+  });
+  const checks: { name: string; ok: boolean; detail: string }[] = JSON.parse(preflight.stdout).checks;
+  expect(checks.find((check) => check.name === "claude")).toMatchObject({
+    ok: true,
+    detail: expect.stringContaining("this machine takes no task whose agent runs on Claude Code"),
   });
 
   worker = startWorker(await mintEnrolmentToken(request));
