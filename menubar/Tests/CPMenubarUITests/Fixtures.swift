@@ -32,6 +32,10 @@ enum Fixtures {
         $0.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "BP-1075", detail: "the agent exited 1")), at: t0)
     }
 
+    static let faultAgedOut = state {
+        $0.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "BP-1075", detail: "the agent exited 1")), at: Date().addingTimeInterval(-40 * 60))
+    }
+
     static let disconnected = state { $0.markDisconnected() }
 
     static let paused = state {
