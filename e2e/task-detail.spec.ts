@@ -624,7 +624,7 @@ test("an edit that resends the holder neither tells them again nor re-watches th
   });
 
   await test.step("the member's feed and watch list are as they left them", async () => {
-    // Notifications are written after the answer; a later one landing proves the earlier have
+    // Notifications are written after the answer, so wait for one sent a whole request later
     const mention = await request.post(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}/comments`, {
       headers: ADMIN_AUTH,
       data: { body: `@${MEMBER_USERNAME} renamed it` },
