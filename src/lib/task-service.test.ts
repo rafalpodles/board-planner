@@ -5141,6 +5141,59 @@ describe("what a rewritten updateTask still tells the assignee", () => {
     expect(findOneAndUpdate).not.toHaveBeenCalled();
     expect(createNotificationsMock).not.toHaveBeenCalled();
   });
+
+  function resendsTheHolder(execution: Record<string, unknown> = {}) {
+    const stored = {
+      _id: "t1",
+      taskNumber: 4,
+      status: "doing",
+      title: "Session cookie survives a change",
+      assignee: { _id: "u1", username: "owner" },
+      assignedBy: "u9",
+      execution,
+    };
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored),
+      populate: () => ({ lean: () => Promise.resolve(stored) }),
+    });
+    findOneAndUpdate.mockReturnValue({
+      populate: () => Promise.resolve({ ...stored, title: "Renamed", status: "ready", execution: {} }),
+    });
+    userFindOne.mockResolvedValue({ _id: "u1", username: "owner" });
+  }
+
+  const assignedNotices = () =>
+    createNotificationsMock.mock.calls.filter(([, n]) => n.type === "task_assigned");
+  const watcherWrites = () =>
+    findByIdAndUpdate.mock.calls.filter(([, update]) => update?.$addToSet?.watchers !== undefined);
+
+  it("neither tells nor re-watches the holder an edit merely resends", async () => {
+    resendsTheHolder();
+
+    const result = await updateTask(db, "p1", "t1", { assignee: "owner", title: "Renamed" }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(assignedNotices()).toHaveLength(0);
+    expect(watcherWrites()).toHaveLength(0);
+  });
+
+  it("still writes the resent holder, so leaving a run's column keeps them", async () => {
+    resendsTheHolder({ runId: "r1", workerId: "w1" });
+
+    const result = await updateTask(db, "p1", "t1", { assignee: "owner", status: "ready" }, "actor", true);
+
+    expect(result.ok).toBe(true);
+    expect(String(findOneAndUpdate.mock.calls[0][1].$set.assignee)).toBe("u1");
+    expect(assignedNotices()).toHaveLength(0);
+    expect(watcherWrites()).toHaveLength(0);
+  });
+
+  it("tells and watches whoever a real hand-over gives it to", async () => {
+    await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
+
+    expect(assignedNotices()).toHaveLength(1);
+    expect(watcherWrites().map(([, update]) => update)).toEqual([{ $addToSet: { watchers: "u2" } }]);
+  });
 });
 
 // The status-change mail, which no test on either side fired. The title and the pills both read
