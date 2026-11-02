@@ -76,6 +76,7 @@ import {
   PreflightReport,
   markClaudeLoginRefused,
   refreshClaudeSession,
+  refreshCodexSession,
   runPreflight,
   SANDBOX_CHECK,
   SESSION_HOLD_MS,
@@ -498,6 +499,20 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     sessionHold = { until: Date.now() + SESSION_HOLD_MS, row, account: preflight.account };
     preflight = markClaudeLoginRefused(preflight);
     reportRunnableAgents(preflight);
+  }
+
+  // Once per poll while claude cannot run and Codex is not usable either, so that `codex login`, like
+  // `claude auth login`, needs no restart
+  async function askCodexAgain(): Promise<void> {
+    if (!preflight || !claudeUnusable() || codexRunnable()) return;
+    try {
+      preflight = await refreshCodexSession({ runner: deps.runner, env: deps.env, isExecutable: deps.isExecutable }, preflight);
+    } catch (error) {
+      deps.logError(`could not ask codex whether it is signed in: ${String(error)}`);
+      return;
+    }
+    reportRunnableAgents(preflight);
+    if (codexRunnable()) deps.log("codex is signed in: taking the tasks that run on Codex");
   }
 
   async function retryClaudeSession(): Promise<void> {
@@ -1002,6 +1017,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     await retryLeftovers().catch((error) => deps.logError(`reaping what an earlier run left failed: ${String(error)}`));
     await retryPreflight();
     await retryClaudeSession();
+    await askCodexAgain();
     await refreshServerState();
     // Before the flush, so a settlement this pass produces goes out with it rather than waiting a
     // whole poll interval. Drained here rather than in the claim loop because `drain` runs even

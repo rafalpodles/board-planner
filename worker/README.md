@@ -307,8 +307,9 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   ordinary failure and charges its attempt (**BP-1077**). A machine with a signed-in Codex goes on
   claiming through all of this, and through a missing `claude`: it tells the server `agent-codex`
   alone, so it is offered only tasks whose every model step and review runs on Codex. Push, Pull
-  request, Merge and the other gates run no coding CLI. The `claude` row is a warning there, and turns
-  red again if Codex is signed out (**BP-1125**).
+  request and Merge, and every gate but the review, run no coding CLI. The `claude` row is a warning
+  there, and turns red again if Codex is signed out. A machine held for want of both notices `codex
+  login` on the next poll, as it does `claude auth login` (**BP-1125**).
 - **A board that cannot claim says so.** A run needs four roles — `approved` to take work from,
   `active` to move it into, `review` and `done` to deliver it to. A board missing any of them is
   refused at the claim with a 409 naming the role, rather than the 204 an empty queue gets; the

@@ -19,7 +19,8 @@ import {
 } from "./github-account.js";
 
 // The four binaries the worker shells out to. Each is spawned by the path found here and refused
-// without one (BP-733); a missing claude stops the worker claiming at all, a missing npm stops it
+// without one (BP-733); a missing claude stops the worker claiming unless Codex is signed in (BP-1125),
+// a missing npm stops it
 // claiming from a project on the npm gates, and a missing git or gh fails the task until the attempt
 // cap routes it to a human.
 export const TOOLS = ["git", "npm", "claude", "gh"] as const;
@@ -88,7 +89,7 @@ const CONVENTIONAL_DIRS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/
 // A worker started by launchd has PATH=/usr/bin:/bin:/usr/sbin:/sbin — no Homebrew, no nvm, no
 // ~/.local/bin. A login shell is the only thing that knows where the operator actually installed
 // these, so resolution has to go through one.
-async function resolve(deps: PreflightDeps, tool: string): Promise<string> {
+async function resolve(deps: Pick<PreflightDeps, "runner" | "env" | "isExecutable">, tool: string): Promise<string> {
   const shell = deps.env.SHELL?.trim() || "/bin/sh";
   const result = await deps.runner.run(shell, ["-lc", `command -v ${tool}`], {
     cwd: deps.env.HOME?.trim() || "/",
@@ -279,6 +280,23 @@ export function withClaudeSession(report: PreflightReport, row: PreflightCheck, 
   };
 }
 
+/** Asks Codex again, for a machine that claims nothing without it: `codex login` then needs no restart */
+export async function refreshCodexSession(
+  deps: Pick<PreflightDeps, "runner" | "env" | "isExecutable">,
+  report: PreflightReport
+): Promise<PreflightReport> {
+  const codex = await codexSession(deps, { ...childEnv([], deps.env), PATH: pathWithTools(report.paths, deps.env.PATH ?? "") });
+  const { codex: _previous, ...paths } = report.paths;
+  const checks = report.checks.map((check) => (check.name === CODEX_CHECK ? codex.check : check));
+  return {
+    ...report,
+    paths: codex.path ? { ...paths, codex: codex.path } : paths,
+    checks,
+    ok: checks.every((check) => check.ok),
+    agents: [...report.agents.filter((agent) => agent !== "codex"), ...(codex.path ? ["codex"] : [])],
+  };
+}
+
 export const CLAUDE_MISSING = "claude could not be found on this machine";
 
 /**
@@ -299,7 +317,7 @@ export function asReported(checks: PreflightCheck[], codexRunnable: boolean): Pr
 // offered a task whose agent runs on it. The row says which of the three it is, because "why does my
 // Codex task never start" is otherwise unanswerable from the board.
 async function codexSession(
-  deps: PreflightDeps,
+  deps: Pick<PreflightDeps, "runner" | "env" | "isExecutable">,
   env: NodeJS.ProcessEnv
 ): Promise<{ check: PreflightCheck; path: string }> {
   const name = CODEX_CHECK;
