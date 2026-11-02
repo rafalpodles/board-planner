@@ -19,10 +19,9 @@ import {
 } from "./github-account.js";
 
 // The four binaries the worker shells out to. Each is spawned by the path found here and refused
-// without one (BP-733); a missing claude stops the worker claiming unless Codex is signed in (BP-1125),
-// a missing npm stops it
-// claiming from a project on the npm gates, and a missing git or gh fails the task until the attempt
-// cap routes it to a human.
+// without one (BP-733); a missing claude stops the worker claiming unless Codex is signed in
+// (BP-1125), a missing npm stops it claiming from a project on the npm gates, and a missing git or gh
+// fails the task until the attempt cap routes it to a human.
 export const TOOLS = ["git", "npm", "claude", "gh"] as const;
 export type ToolName = (typeof TOOLS)[number];
 

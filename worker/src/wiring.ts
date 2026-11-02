@@ -512,6 +512,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       return;
     }
     reportRunnableAgents(preflight);
+    // An npm-installed codex is `env node`, so a directory found only now goes on the PATH as at boot
+    const repaired = pathWithTools(preflight.paths, deps.env.PATH ?? "");
+    if (repaired !== deps.env.PATH) deps.setPath(repaired);
     if (codexRunnable()) deps.log("codex is signed in: taking the tasks that run on Codex");
   }
 
