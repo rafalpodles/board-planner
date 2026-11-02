@@ -263,7 +263,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   const reapedProjects = new Set<string>();
 
   // What this machine can actually do, established at startup, with only claude's row asked again
-  // later. Null until then, and reported as undefined while it is, so a worker mid-startup never claims to be broken.
+  // later. Null until then, and reported as undefined while it is, so a worker mid-startup never
+  // claims to be broken.
   let preflight: PreflightReport | null = null;
   let preflightFailed = false;
   let preflightError = "";
