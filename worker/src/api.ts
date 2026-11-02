@@ -127,6 +127,8 @@ function parseEntry(value: unknown): SnapshotEntry | null {
     name: typeof raw.name === "string" ? raw.name : key,
     prompt: typeof raw.prompt === "string" ? raw.prompt : "",
     capability: raw.capability === "edit" ? "edit" : "read-only",
+    // A server older than BP-987 names none, and every step was Claude Code
+    provider: typeof raw.provider === "string" && raw.provider ? raw.provider : "claude",
     model: typeof raw.model === "string" ? raw.model : "",
     fallbackModel: typeof raw.fallbackModel === "string" ? raw.fallbackModel : "",
     deterministic: raw.deterministic === true,
