@@ -7,9 +7,9 @@ import type { SnapshotEntry } from "./agent-snapshot";
 /**
  * Which coding CLIs a machine can run is its own report (X-CP-Capabilities), and a task is only
  * claimed by a machine that can run every step and gate of its agent. A machine that names no CLI at
- * all is taken to run Claude Code: one built before BP-987 says nothing about it. One that names any
- * runs Claude Code only if it names that too, so a machine signed in only to Codex is offered only
- * what runs on Codex (BP-1125).
+ * all is taken to run Claude Code: one built before BP-987 says nothing about it, and a newer one that
+ * found none it can run holds its own claims. One that names any runs Claude Code only if it names
+ * that too, so a machine signed in only to Codex is offered only what runs on Codex (BP-1125).
  */
 export function canRun(capabilities: readonly string[], provider: ProviderId): boolean {
   if (capabilities.includes(providerCapability(provider))) return true;
@@ -56,14 +56,14 @@ export function agentsNamingAny(keys: readonly string[]) {
   };
 }
 
-// Push, Pull request, Merge and every gate store the schema's default provider too, which says
-// nothing: the worker runs those itself. Only a model step's own and a review gate's reviewer count.
-// A step stored before BP-987, or a review naming no reviewer, is on Claude Code: `null` and "" find it.
+// Push, Pull request, Merge and the gates other than a review store the schema's default provider too,
+// which says nothing: the worker runs those itself. A model step's own and a reviewer count, read as
+// providersOf reads them: another provider is itself, and anything else, absent or unknown, Claude Code.
 function blocksOn(provider: ProviderId): QueryFilter<IAgentBlock>[] {
-  const byDefault = provider === DEFAULT_PROVIDER;
+  const runsOn = provider === DEFAULT_PROVIDER ? { $nin: PROVIDER_IDS.filter((id) => id !== DEFAULT_PROVIDER) } : provider;
   return [
-    { kind: "step", deterministic: { $ne: true }, provider: byDefault ? { $in: [provider, null] } : provider },
-    { kind: "gate", gateKind: REVIEW_GATE, "params.provider": byDefault ? { $in: [provider, null, ""] } : provider },
+    { kind: "step", deterministic: { $ne: true }, provider: runsOn },
+    { kind: "gate", gateKind: REVIEW_GATE, "params.provider": runsOn },
   ];
 }
 

@@ -83,14 +83,14 @@ describe("agentsBeyond", () => {
     expect(JSON.stringify(agentFind.mock.calls[0][0])).toContain('"composition.implementation":{"$elemMatch":{"$eq":"on-codex"}}');
   });
 
-  it("looks for Claude Code in a step or reviewer that names nothing, for a machine with Codex alone", async () => {
+  it("looks for Claude Code in every step or reviewer not on Codex, named or not, for a machine with Codex alone", async () => {
     const { db, blockFind } = dbWith([{ key: "on-claude" }], [{ _id: "a1" }]);
 
     expect(await agentsBeyond(db, ["agent-codex"])).toEqual(["a1"]);
     expect(blockFind.mock.calls[0][0]).toEqual({
       $or: [
-        { kind: "step", deterministic: { $ne: true }, provider: { $in: ["claude", null] } },
-        { kind: "gate", gateKind: "review", "params.provider": { $in: ["claude", null, ""] } },
+        { kind: "step", deterministic: { $ne: true }, provider: { $nin: ["codex"] } },
+        { kind: "gate", gateKind: "review", "params.provider": { $nin: ["codex"] } },
       ],
     });
   });
