@@ -39,10 +39,22 @@ for arch in ${CP_ARCHS:-}; do ARCH_FLAGS+=(--arch "$arch"); done
 swift build --package-path "$ROOT" -c "$CONFIG" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"}
 BIN="$(swift build --package-path "$ROOT" -c "$CONFIG" ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} --show-bin-path)/CPMenubar"
 
-APP="$ROOT/.build/CPMenubar.app"
+APP_NAME="Board Planner Worker"
+APP="$ROOT/.build/$APP_NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/CPMenubar"
+
+# AppIcon.png is rendered from AppIcon.svg with `rsvg-convert -w 1024 -h 1024`; sips and iconutil
+# ship with macOS, so the build needs nothing installed for the icon
+ICONSET="$(mktemp -d)/AppIcon.iconset"
+mkdir -p "$ICONSET"
+for size in 16 32 128 256 512; do
+  sips -z "$size" "$size" "$ROOT/Resources/AppIcon.png" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  sips -z $((size * 2)) $((size * 2)) "$ROOT/Resources/AppIcon.png" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+rm -rf "$(dirname "$ICONSET")"
 
 # The worker ships inside the app. A distributed app cannot read one out of the operator's
 # checkout — that checkout is their project, and only a Board Planner clone has worker/ in it.
@@ -80,7 +92,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
   <key>CFBundleExecutable</key><string>CPMenubar</string>
   <key>CFBundleIdentifier</key><string>com.boardplanner.menubar</string>
-  <key>CFBundleName</key><string>Board Planner Worker</string>
+  <key>CFBundleName</key><string>$APP_NAME</string>
+  <key>CFBundleDisplayName</key><string>$APP_NAME</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
@@ -112,7 +126,7 @@ if [ "$IDENTITY" = "-" ]; then
 fi
 
 # Notarisation takes a zip, and the ticket is stapled to the .app afterwards
-ZIP="$ROOT/.build/CPMenubar.zip"
+ZIP="$ROOT/.build/$APP_NAME.zip"
 rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
 
@@ -138,7 +152,7 @@ case "$SUBMISSION_STATUS" in
   Accepted) ;;
   "In Progress"|"")
     echo "error: notarisation of $SUBMISSION_ID had no verdict within $NOTARY_TIMEOUT. Finish it by hand:" >&2
-    echo "       xcrun notarytool wait $SUBMISSION_ID <auth>, then xcrun stapler staple CPMenubar.app" >&2
+    echo "       xcrun notarytool wait $SUBMISSION_ID <auth>, then xcrun stapler staple \"$APP_NAME.app\"" >&2
     exit 1
     ;;
   *)

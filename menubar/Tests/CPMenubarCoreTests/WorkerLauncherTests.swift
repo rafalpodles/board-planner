@@ -149,8 +149,8 @@ final class WorkerLauncherTests: XCTestCase {
 
     func testTheBundledWorkerLivesUnderResources() {
         XCTAssertEqual(
-            WorkerLauncher.bundledEntryPoint(resourcePath: "/Apps/CPMenubar.app/Contents/Resources"),
-            "/Apps/CPMenubar.app/Contents/Resources/worker/main.js")
+            WorkerLauncher.bundledEntryPoint(resourcePath: "/Apps/Board Planner Worker.app/Contents/Resources"),
+            "/Apps/Board Planner Worker.app/Contents/Resources/worker/main.js")
         XCTAssertNil(WorkerLauncher.bundledEntryPoint(resourcePath: nil))
     }
 

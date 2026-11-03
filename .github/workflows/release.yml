@@ -217,18 +217,23 @@ jobs:
       - name: Gatekeeper accepts it as notarised
         if: env.SIGNED == 'true'
         working-directory: menubar
+        env:
+          APP: .build/Board Planner Worker.app
         run: |
-          codesign --verify --strict --deep --verbose=2 .build/CPMenubar.app
-          xcrun stapler validate .build/CPMenubar.app
-          ASSESSMENT="$(spctl --assess --type execute --verbose=4 .build/CPMenubar.app 2>&1 || true)"
+          codesign --verify --strict --deep --verbose=2 "$APP"
+          xcrun stapler validate "$APP"
+          ASSESSMENT="$(spctl --assess --type execute --verbose=4 "$APP" 2>&1 || true)"
           echo "$ASSESSMENT"
           grep -q "source=Notarized Developer ID" <<<"$ASSESSMENT" \
             || { echo "::error::Gatekeeper did not report 'source=Notarized Developer ID'"; exit 1; }
 
       - name: Package
+        env:
+          APP: menubar/.build/Board Planner Worker.app
         run: |
-          test -f menubar/.build/CPMenubar.app/Contents/Resources/worker/main.js
-          test -f menubar/.build/CPMenubar.app/Contents/Resources/LICENSE
+          test -f "$APP/Contents/Resources/worker/main.js"
+          test -f "$APP/Contents/Resources/LICENSE"
+          test -f "$APP/Contents/Resources/AppIcon.icns"
           tar -tzf "$OUT/board-planner-worker-$VERSION.tar.gz" | grep -qx worker/LICENSE
           if [ "$SIGNED" = "true" ]; then
             REAPER="$RUNNER_TEMP/tarball-cp-reap"
@@ -237,8 +242,8 @@ jobs:
             grep -q "^Authority=Developer ID Application" <<<"$SIGNATURE" \
               || { echo "::error::the tarball's process reaper is not signed with a Developer ID"; exit 1; }
           fi
-          lipo menubar/.build/CPMenubar.app/Contents/Resources/worker/bin/cp-reap -verify_arch arm64 x86_64
-          ditto -c -k --keepParent menubar/.build/CPMenubar.app "$OUT/board-planner-menubar-$VERSION.zip"
+          lipo "$APP/Contents/Resources/worker/bin/cp-reap" -verify_arch arm64 x86_64
+          ditto -c -k --keepParent "$APP" "$OUT/board-planner-menubar-$VERSION.zip"
           cd "$OUT"
           shasum -a 256 "board-planner-menubar-$VERSION.zip" "board-planner-worker-$VERSION.tar.gz" > SHA256SUMS
           shasum -a 256 -c SHA256SUMS

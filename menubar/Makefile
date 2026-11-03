@@ -18,4 +18,4 @@ app: test worker
 	./bundle.sh release
 
 clean:
-	rm -rf .build CPMenubar.app
+	rm -rf .build

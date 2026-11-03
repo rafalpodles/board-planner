@@ -228,7 +228,7 @@ the identity:
 
 - **The hardened runtime does not block spawning `node`.** It constrains what *this* process loads
   into itself — library validation, JIT, `DYLD_` variables — and a child process is a separate
-  process with its own signature. `./bundle.sh release && .build/CPMenubar.app/Contents/MacOS/CPMenubar --preflight`
+  process with its own signature. `./bundle.sh release && ".build/Board Planner Worker.app/Contents/MacOS/CPMenubar" --preflight`
   from a stripped environment resolves every tool and reports them green. **No entitlement is
   needed for this**, which is why `Resources/CPMenubar.entitlements` is almost empty.
 - **`SMAppService` works under the hardened runtime.** `--register-login-item` reports
@@ -274,7 +274,7 @@ CP_NOTARY_PROFILE="boardplanner" \
   menubar/bundle.sh release
 ```
 
-That prints the path to `CPMenubar.zip` with the ticket stapled. `bundle.sh` runs
+That prints the path to `Board Planner Worker.zip` with the ticket stapled. `bundle.sh` runs
 `spctl --assess --type execute` at the end, which is the decision another Mac will make on first
 launch — read that line before sending the file anywhere.
 
@@ -285,9 +285,9 @@ and says that too — that build opens on the machine that made it and nowhere e
 ## Sanity checks worth keeping
 
 ```bash
-codesign -d --verbose=2 .build/CPMenubar.app 2>&1 | grep flags   # expect: runtime
-codesign --verify --strict --deep .build/CPMenubar.app
-xcrun stapler validate .build/CPMenubar.app
+codesign -d --verbose=2 ".build/Board Planner Worker.app" 2>&1 | grep flags   # expect: runtime
+codesign --verify --strict --deep ".build/Board Planner Worker.app"
+xcrun stapler validate ".build/Board Planner Worker.app"
 ```
 
 The real test is still a different Mac: copy the zip to one that has never seen the app, unzip, and
