@@ -326,7 +326,7 @@ describe("runPreflight", () => {
   // which is a thing to say out loud, not a thing to refuse
   it("passes but reports the billing when claude is authenticated with an API key", async () => {
     const m = machine({
-      claudeAuth: ok(JSON.stringify({ loggedIn: true, authMethod: "apiKey", apiProvider: "firstParty" })),
+      claudeAuth: ok(JSON.stringify({ loggedIn: true, authMethod: "api_key", apiProvider: "firstParty" })),
     });
 
     const report = await runPreflight(depsFor(m));
@@ -334,6 +334,7 @@ describe("runPreflight", () => {
     expect(report.ok).toBe(true);
     expect(check(report, "claude").ok).toBe(true);
     expect(check(report, "claude").detail).toMatch(/API key/i);
+    expect(check(report, "claude").detail).toMatch(/bills per token/);
   });
 
   it("tells the server a missing claude stops the machine's claims, and a missing gh does not", async () => {
