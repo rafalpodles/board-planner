@@ -28,6 +28,8 @@ export interface LocalProjectView {
   name: string;
   /** Why this project is not being claimed from, or empty when it is. */
   blocked: string;
+  /** Agents whose tasks are left in their column after a settings fault, and the fault. */
+  held: { agent: string; reason: string }[];
   baseBranch: string;
   model: string;
   reviewModel: string;

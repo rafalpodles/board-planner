@@ -84,7 +84,7 @@ import {
   withClaudeSession,
 } from "./preflight.js";
 import { createReporter, ReleaseMemory } from "./reporter.js";
-import { createSettingsHolds } from "./settings-hold.js";
+import { createSettingsHolds, describeHold } from "./settings-hold.js";
 import { abortableSleep } from "./sleep.js";
 import { HeartbeatDeps, loadIdentity, PROTOCOL_VERSION, startHeartbeat } from "./registration.js";
 import { bindRepository, createAllowlistReader, repoInventory } from "./repos.js";
@@ -234,6 +234,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // Outlives the run for the same reason. In memory, because a restart costing one more failed task
   // and no attempt is also the way out for a fix that lands in the repository.
   const settingsHolds = createSettingsHolds(deps.logError);
+  let settingsFaultReason = "";
   const readAllowlist = createAllowlistReader(bootstrap.stateDir);
 
   // Everything below is worker-wide policy and the assignment list, both server-controlled and
@@ -385,6 +386,18 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       ok: false,
       detail,
     }));
+
+  // Passed, since the machine still claims every other agent's tasks, but in amber: otherwise it reads
+  // as idle while that agent's approved tasks wait, to whoever did not see the one task's comment
+  const heldChecks = (): PreflightCheck[] =>
+    [...bound.entries()].flatMap(([projectId, repo]) =>
+      standingHolds(projectId).map((hold) => ({
+        name: "agent held",
+        ok: true,
+        warn: true,
+        detail: describeHold(repo.key || projectId, hold),
+      }))
+    );
 
   // `index` picks which of the project's checkouts the config is about; the primary by default, which
   // is the only one a single-repository project has.
@@ -933,8 +946,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             config: taskConfig,
             api,
             boardColumns: (projectId) => api.boardColumns(projectId),
-            createReporter: (client, statusIds) =>
-              createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments, queuedMerges),
+            createReporter: reporterFor,
             repositories,
             executor: createExecutor(taskConfig, deps.runner, claudePath, codexPath),
             collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
@@ -956,8 +968,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           config: taskConfig,
           api,
           boardColumns: (projectId) => api.boardColumns(projectId),
-          createReporter: (client, statusIds) =>
-            createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments, queuedMerges),
+          createReporter: reporterFor,
           createDelivery: (runner, baseBranch) => createDelivery(runner, gitPath, ghPath, baseBranch, githubToken),
           workspace: createWorkspace(
             taskConfig,
@@ -986,6 +997,22 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
   }
 
+  function reporterFor(...[client, statusIds]: Parameters<PipelineDeps["createReporter"]>) {
+    const reporter = createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments, queuedMerges);
+    return {
+      ...reporter,
+      async settingsFault(task: ClaimedTask, reason: string) {
+        settingsFaultReason = reason;
+        await reporter.settingsFault(task, reason);
+      },
+    };
+  }
+
+  function standingHolds(projectId: string) {
+    const settings = gateSettingsOf(projectId);
+    return settings ? settingsHolds.standing(projectId, settings) : [];
+  }
+
   function gateSettingsOf(projectId: string) {
     const config = configFor(projectId);
     return config && { ...config, remotes: bound.get(projectId)?.repositories.map((repository) => repository.remote) ?? [] };
@@ -994,8 +1021,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   async function executeHolding(task: ClaimedTask): Promise<RunDisposition> {
     // Before the run, so that the hold is on the settings the run read
     const settings = gateSettingsOf(task.projectId);
+    settingsHolds.release(task);
+    settingsFaultReason = "";
     const disposition = await execute(task);
-    if (disposition === "settings-fault" && settings) settingsHolds.hold(task, settings);
+    if (disposition === "settings-fault" && settings) settingsHolds.hold(task, settings, settingsFaultReason);
     if (disposition === "session-fault") await holdClaimsForSession();
     return disposition;
   }
@@ -1142,7 +1171,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     preflight: () => {
       if (!preflight && !preflightFailed) return undefined;
       const own = preflight ? asReported(preflight.checks, codexRunnable()) : [{ name: SANDBOX_CHECK, ok: false, detail: claimBlocked() }];
-      const checks = [...own, ...repoChecks, ...quarantineChecks()];
+      const checks = [...own, ...repoChecks, ...quarantineChecks(), ...heldChecks()];
       return { ok: checks.every((c) => c.ok), account: preflight?.account ?? "", checks };
     },
     forgetEnrolmentToken: bootstrap.enrolmentTokenFile
@@ -1212,6 +1241,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         blocked:
           claimBlocked() ||
           (quarantineReasonFor(project) ?? unusable.get(project) ?? loop.unclaimable(project)),
+        // Not in `blocked`: the project is still claimed from, for every agent but these
+        held: standingHolds(project).map(({ agentName, reason }) => ({ agent: agentName, reason })),
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,
         reviewModel: repo.config.reviewModel,

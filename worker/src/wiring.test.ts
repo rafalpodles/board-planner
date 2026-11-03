@@ -1369,6 +1369,66 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(heldInClaim(api, 2)).toEqual([]);
     });
 
+    const faultingRun = {
+      readFile: (path: string) => (!path.endsWith("package.json") && !path.endsWith("package-lock.json") && existsSync(path) ? readFileSync(path, "utf8") : null),
+      path: "/usr/bin:/bin",
+      clockJumpOnSleepMs: 60_000,
+    };
+    const heldRows = (report: ReturnType<NonNullable<HeartbeatDeps["preflight"]>>) =>
+      report?.checks.filter((check) => check.name === "agent held") ?? [];
+
+    it("says on the machine which agent it holds on which project, and why, while the hold stands", async () => {
+      const { heartbeatDeps, localConfig } = await runOneTask(undefined, { buildCommand: "sh --version" }, {
+        ...faultingRun,
+        tasks: [CLAIMED],
+        passes: 2,
+      });
+
+      const report = heartbeatDeps?.preflight?.();
+      expect(heldRows(report)).toEqual([
+        {
+          name: "agent held",
+          ok: true,
+          warn: true,
+          detail: expect.stringMatching(/^p1: agent "Default" is held, its tasks left in their column — .*no test command.*restarts\.$/),
+        },
+      ]);
+      // Every other agent's tasks are still claimed, so the machine is not failing
+      expect(report?.ok).toBe(true);
+      const [project] = localConfig?.().projects ?? [];
+      expect(project.blocked).toBe("");
+      expect(project.held).toEqual([{ agent: "Default", reason: expect.stringContaining("no test command") }]);
+    });
+
+    it("clears the row once the setting is corrected", async () => {
+      const policy: Record<string, unknown> = { buildCommand: "sh --version" };
+      const { heartbeatDeps, localConfig } = await runOneTask(undefined, policy, {
+        ...faultingRun,
+        tasks: [CLAIMED],
+        passes: 3,
+        onSleep: (_stateDir, sleepIndex) => {
+          if (sleepIndex === 1) policy.testCommand = "sh --version";
+        },
+      });
+
+      expect(heldRows(heartbeatDeps?.preflight?.())).toEqual([]);
+      expect(localConfig?.().projects[0].held).toEqual([]);
+    });
+
+    // The server hands out a held agent's task only once the agent's gates no longer match the hold
+    it("lets go of an agent whose task the server hands out again", async () => {
+      const withoutCommandGates = CLAIMED.agent.sequence.filter((entry) => entry.gateKind !== "build" && entry.gateKind !== "test-run");
+      const { api, heartbeatDeps } = await runOneTask(undefined, { buildCommand: "sh --version" }, {
+        ...faultingRun,
+        tasks: [CLAIMED, { ...NEXT_TASK, agent: { ...CLAIMED.agent, sequence: withoutCommandGates } }],
+        passes: 3,
+      });
+
+      expect(heldInClaim(api, 1)).toEqual([{ agentId: "a1", gates: GATES }]);
+      expect(heldInClaim(api, 2)).toEqual([]);
+      expect(heldRows(heartbeatDeps?.preflight?.())).toEqual([]);
+    });
+
     it("holds nothing after a run that ended any other way", async () => {
       const { api } = await runOneTask(undefined, undefined, { tasks: [CLAIMED], passes: 2, clockJumpOnSleepMs: 60_000 });
 
