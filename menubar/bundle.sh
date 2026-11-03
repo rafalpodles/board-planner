@@ -47,14 +47,15 @@ cp "$BIN" "$APP/Contents/MacOS/CPMenubar"
 
 # AppIcon.png is rendered from AppIcon.svg with `rsvg-convert -w 1024 -h 1024`; sips and iconutil
 # ship with macOS, so the build needs nothing installed for the icon
-ICONSET="$(mktemp -d)/AppIcon.iconset"
+ICONDIR="$(mktemp -d)"
+trap 'rm -rf "$ICONDIR"' EXIT
+ICONSET="$ICONDIR/AppIcon.iconset"
 mkdir -p "$ICONSET"
 for size in 16 32 128 256 512; do
   sips -z "$size" "$size" "$ROOT/Resources/AppIcon.png" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
   sips -z $((size * 2)) $((size * 2)) "$ROOT/Resources/AppIcon.png" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
-rm -rf "$(dirname "$ICONSET")"
 
 # The worker ships inside the app. A distributed app cannot read one out of the operator's
 # checkout — that checkout is their project, and only a Board Planner clone has worker/ in it.
@@ -152,7 +153,7 @@ case "$SUBMISSION_STATUS" in
   Accepted) ;;
   "In Progress"|"")
     echo "error: notarisation of $SUBMISSION_ID had no verdict within $NOTARY_TIMEOUT. Finish it by hand:" >&2
-    echo "       xcrun notarytool wait $SUBMISSION_ID <auth>, then xcrun stapler staple \"$APP_NAME.app\"" >&2
+    echo "       xcrun notarytool wait $SUBMISSION_ID <auth>, then xcrun stapler staple \"$APP\"" >&2
     exit 1
     ;;
   *)
