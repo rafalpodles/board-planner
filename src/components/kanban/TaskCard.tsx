@@ -272,7 +272,7 @@ export function TaskCard({
         </div>
       )}
 
-      <div className="flex items-center gap-3 text-xs text-text-muted">
+      <div className="flex items-center gap-2 text-[11px] text-text-muted">
         {task.category && (
           <span className="flex min-w-0 items-center gap-1.5" data-testid="task-card-type">
             <span
@@ -283,7 +283,7 @@ export function TaskCard({
             <span className="truncate">{task.category}</span>
           </span>
         )}
-        <span className="ml-auto flex shrink-0 items-center gap-3">
+        <span className="ml-auto flex shrink-0 items-center gap-1">
           {task.dueDate && dateOnlyKey(task.dueDate) && (
             <span
               data-testid="task-card-due"
