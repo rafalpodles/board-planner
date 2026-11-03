@@ -4,6 +4,8 @@ import CPMenubarCore
 
 @main
 struct CPMenubarApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     // No default initialiser here: writing `= AppModel()` alongside the assignment below constructs
     // two models, starts the pump on one and renders the other.
     @State private var model: AppModel
