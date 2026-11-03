@@ -24,6 +24,17 @@ describe("the claude adapter's argv", () => {
     expect(args).not.toContain("--allowedTools");
   });
 
+  it.each(["edit", "read-only"] as const)(
+    "loads the checkout's own instructions and none of the operator's personal ones for a %s step",
+    (capability) => {
+      const args = agent.editArgs({ ...EDIT, capability });
+
+      expect(value(args, "--setting-sources")).toBe("project");
+      expect(args).not.toContain("--safe-mode");
+      expect(args).not.toContain("--bare");
+    },
+  );
+
   it("gives a read-only step no tool that writes", () => {
     const args = agent.editArgs({ ...EDIT, capability: "read-only" });
 

@@ -49,6 +49,7 @@ describe("the agent's tool surface", () => {
     "--mcp-config",
     "--strict-mcp-config",
     "--safe-mode",
+    "--setting-sources",
     "--append-system-prompt",
     "--json-schema",
     "--model",

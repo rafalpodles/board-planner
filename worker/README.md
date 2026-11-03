@@ -665,8 +665,12 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   environment; it is never a worker policy field, because policy comes down from the server and the
   agent reaches the server.
 
-  **What it costs.** The implementer step does not pass `--safe-mode`, so it still loads
-  `~/.claude/settings.json` — and every hook there that writes anything now fails. Measured on CLI
+  **What it costs.** The implementer step does not pass `--safe-mode`, which would also close the
+  checkout's own `CLAUDE.md`. It passes `--setting-sources project` instead (**BP-1123**), so your
+  `~/.claude/CLAUDE.md` and `~/.claude/settings.json` stay out of a run: a personal instruction such as
+  the language you chat in no longer reaches another team's pull request, and an `apiKeyHelper` or
+  `env` set there is not used by a run either. Before that, it loaded
+  `~/.claude/settings.json` — and every hook there that writes anything failed. Measured on CLI
   2.1.269: `SessionStart` hooks returning `Failed to run: EPERM … mkdir
   '~/.claude/session-env/<session>'`. They exit 1, which is non-blocking, and the run completed
   normally; a `PreToolUse` hook that exits 2 when its own write fails would instead block every tool
