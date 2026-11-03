@@ -29,9 +29,17 @@ export const POST = withProjectOwner(async (request, { params, db }) => {
     if (!server) {
       return NextResponse.json({ error: `No MCP server named "${body.name}" — provide a token` }, { status: 404 });
     }
-    token = await resolveServerToken(db, projectId, server);
+    let unreadable: string | undefined;
+    try {
+      token = await resolveServerToken(db, projectId, server);
+    } catch (err) {
+      unreadable = err instanceof Error ? err.message : String(err);
+    }
     if (server.authType === "oauth" && !token) {
       return NextResponse.json({ error: "OAuth connection not established — click Connect first" }, { status: 400 });
+    }
+    if (unreadable) {
+      return NextResponse.json({ error: unreadable }, { status: 400 });
     }
     // A credential resolved from storage may only ever be sent to the url it was saved
     // against — never a caller-supplied one, or a stored secret could be redirected anywhere.

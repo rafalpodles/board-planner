@@ -185,6 +185,12 @@ test("a server switched off offers a turn nothing at all", async ({ page, reques
 });
 
 test("an OAuth connection shows whether it is connected or needs signing in again", async ({ page }) => {
+  const mcpTestStatuses: number[] = [];
+  page.on("response", (r) => {
+    if (r.url().endsWith(`/api/projects/${PROJECT_KEY}/pm/mcp-test`)) mcpTestStatuses.push(r.status());
+  });
+  const connectFirst = page.getByText("✗ OAuth connection not established — click Connect first", { exact: true });
+
   await seedServer({ authType: "oauth", oauth: { status: "needs_reauth" } });
   await signIn(page, "admin");
   await openSettings(page);
@@ -193,10 +199,18 @@ test("an OAuth connection shows whether it is connected or needs signing in agai
   await expect(page.getByRole("button", { name: "Connect stubby" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Disconnect stubby" })).toHaveCount(0);
 
+  await page.getByRole("button", { name: "Test connection for stubby" }).click();
+  await expect(connectFirst).toBeVisible();
+
   await seedServer({ authType: "oauth", oauth: { status: "connected", accessToken: "enc:v2:not-real" } });
   await page.reload();
 
   await expect(page.getByText("Connected", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Reconnect stubby" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Disconnect stubby" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Test connection for stubby" }).click();
+  await expect(connectFirst).toBeVisible();
+  expect(mcpTestStatuses.length).toBeGreaterThan(0);
+  expect(mcpTestStatuses).not.toContain(500);
 });
