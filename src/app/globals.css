@@ -2,7 +2,7 @@
 @plugin "@tailwindcss/typography";
 
 @theme {
-  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Accent-as-text; overridden per theme so it stays readable on the background */
@@ -21,7 +21,7 @@
   --color-danger-solid-hover: #b91c1c;
   --color-success-solid: #15803d;
   --color-bg: #141415;
-  --color-bg-card: #1b1b1d;
+  --color-bg-card: #202023;
   --color-bg-input: #26262a;
   --color-bg-hover: #26262a;
   --color-border: rgba(237, 237, 237, 0.1);
@@ -60,14 +60,14 @@ body {
 :root {
   --avatar-0: #1d4ed8;
   --avatar-1: #0f766e;
-  --avatar-2: #15803d;
+  --avatar-2: #166534;
   --avatar-3: #92400e;
-  --avatar-4: #c2410c;
+  --avatar-4: #9a3412;
   --avatar-5: #be123c;
   --avatar-6: #a21caf;
   --avatar-7: #6d28d9;
   --avatar-8: #0e7490;
-  --avatar-9: #4d7c0f;
+  --avatar-9: #3f6212;
 }
 
 /* Light theme overrides */

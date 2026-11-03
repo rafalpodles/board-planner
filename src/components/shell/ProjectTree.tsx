@@ -285,7 +285,7 @@ export function ProjectTree({
               data-reorderable={canReorder || undefined}
               {...(canReorder ? handleProps : {})}
               className={`relative flex w-full items-center gap-1.5 rounded-lg pr-2.5 transition-colors hover:bg-bg-hover ${
-                isRouteProject ? "bg-bg-hover" : ""
+                isRouteProject && !isDragging ? "bg-bg-hover" : ""
               } ${canReorder ? "cursor-grab touch-pan-y active:cursor-grabbing" : ""} ${
                 isDragging ? "bg-bg-card shadow-lg ring-1 ring-border" : ""
               }`}
