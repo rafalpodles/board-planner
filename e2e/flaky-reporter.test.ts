@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestCase, TestResult } from "@playwright/test/reporter";
@@ -17,10 +17,17 @@ function testCase(id: string, file: string, ...titles: string[]): TestCase {
 
 const ended = (status: TestResult["status"]) => ({ status }) as TestResult;
 
-function run(secondPass: boolean, attempts: [TestCase, TestResult["status"][]][]) {
+function run(
+  secondPass: boolean,
+  attempts: [TestCase, TestResult["status"][]][],
+  firstPassFailed: string[] | null = null
+) {
   vi.spyOn(process.stdout, "write").mockReturnValue(true);
-  const summaryFile = join(mkdtempSync(join(tmpdir(), "flaky-")), "summary.md");
-  const reporter = new FlakyReporter({ summaryFile, secondPass });
+  const dir = mkdtempSync(join(tmpdir(), "flaky-"));
+  const summaryFile = join(dir, "summary.md");
+  const firstPassLastRun = join(dir, ".last-run.json");
+  if (firstPassFailed) writeFileSync(firstPassLastRun, JSON.stringify({ status: "failed", failedTests: firstPassFailed }));
+  const reporter = new FlakyReporter({ summaryFile, secondPass, firstPassLastRun });
   for (const [test, statuses] of attempts) for (const status of statuses) reporter.onTestEnd(test, ended(status));
   reporter.onEnd();
   const printed = vi.mocked(process.stdout.write).mock.calls.map(([text]) => String(text)).join("");
@@ -45,16 +52,33 @@ describe("the flake reporter", () => {
     expect(printed).toContain("::warning title=Flaky e2e test::avatar-colours.spec.ts › the colour follows the theme");
   });
 
-  it("lists every test that passed on the second pass, since that pass runs only what failed", () => {
-    const { summary } = run(true, [
-      [avatar, ["failed", "passed"]],
-      [steady, ["passed"]],
-      [broken, ["failed", "failed"]],
-    ]);
+  it("lists every test the first pass failed that passed on the second", () => {
+    const { summary } = run(
+      true,
+      [
+        [avatar, ["failed", "passed"]],
+        [steady, ["passed"]],
+        [broken, ["failed", "failed"]],
+      ],
+      ["a", "b", "c"]
+    );
 
     expect(summary).toContain("`avatar-colours.spec.ts` › the colour follows the theme | on the second pass |");
     expect(summary).toContain("`steady.spec.ts` › always passes | on the second pass |");
     expect(summary).not.toContain("broken.spec.ts");
+  });
+
+  it("lists nothing for a second pass that ran the whole group because the first left no record", () => {
+    const { summary } = run(true, [[steady, ["passed"]]]);
+
+    expect(summary).toBeNull();
+  });
+
+  it("still lists a test that passed only on retry in a second pass, though the first pass never failed it", () => {
+    const { summary } = run(true, [[avatar, ["failed", "passed"]], [steady, ["passed"]]], ["b"]);
+
+    expect(summary).toContain("`avatar-colours.spec.ts` › the colour follows the theme | on retry |");
+    expect(summary).toContain("`steady.spec.ts` › always passes | on the second pass |");
   });
 
   it("writes nothing when nothing flaked", () => {
@@ -69,6 +93,13 @@ describe("the flake reporter", () => {
     const { summary } = run(false, [[piped, ["timedOut", "passed"]]]);
 
     expect(summary).toContain("› a \\| b |");
+  });
+
+  it("keeps a title's line break from breaking the table", () => {
+    const broken = testCase("e", "lines.spec.ts", "first\nsecond");
+    const { summary } = run(false, [[broken, ["failed", "passed"]]]);
+
+    expect(summary).toContain("› first second | on retry |");
   });
 
   it("is one of the suite's reporters", () => {
