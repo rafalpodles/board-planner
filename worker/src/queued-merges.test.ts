@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { PullRequestState } from "./delivery.js";
 import { OutboxOp, Store } from "./outbox.js";
-import { CHECK_INTERVAL_MS, createQueuedMerges, QueuedMerge, watchQueuedMerges, WATCH_LIMIT_MS } from "./queued-merges.js";
+import { anyMergeDue, CHECK_INTERVAL_MS, createQueuedMerges, QueuedMerge, watchQueuedMerges, WATCH_LIMIT_MS } from "./queued-merges.js";
 
 const T0 = Date.parse("2026-11-03T10:00:00Z");
 
@@ -132,6 +132,48 @@ describe("watchQueuedMerges (BP-1128)", () => {
 
     expect(ops).toEqual([expect.objectContaining({ kind: "comment", body: expect.stringMatching(/stopped watching/) })]);
     expect(merges.list()).toEqual([]);
+  });
+
+  it("has written a settled entry away before asking gh about the next, so a stop there reports nothing twice", async () => {
+    const second = queued({ taskId: "t2", prUrls: ["https://github.com/x/y/pull/8"] });
+    const { store, ops, pullRequestState, watch } = rig([queued(), second], { "https://github.com/x/y/pull/7": "merged" });
+    let storeWhenAskedAboutTheSecond = "";
+    pullRequestState.mockImplementation(async (url) => {
+      if (url.endsWith("/8")) storeWhenAskedAboutTheSecond = store.text;
+      return url.endsWith("/7") ? "merged" : "open";
+    });
+
+    await watch();
+
+    expect(ops).toHaveLength(2);
+    expect(JSON.parse(storeWhenAskedAboutTheSecond).map((entry: QueuedMerge) => entry.taskId)).toEqual(["t2"]);
+  });
+
+  it("ends a watch whose start does not parse rather than keeping it for ever", async () => {
+    const { merges, ops, watch } = rig([queued({ queuedAt: "yesterday-ish" })], { "https://github.com/x/y/pull/7": "open" });
+
+    await watch();
+
+    expect(ops).toEqual([expect.objectContaining({ kind: "comment", body: expect.stringMatching(/stopped watching/) })]);
+    expect(merges.list()).toEqual([]);
+  });
+
+  it("says whether any entry is due, so the worker asks nothing of gh on the polls in between", async () => {
+    const { merges, watch } = rig([queued()], { "https://github.com/x/y/pull/7": "open" });
+
+    expect(anyMergeDue(merges, T0)).toBe(true);
+    await watch();
+    expect(anyMergeDue(merges, T0 + CHECK_INTERVAL_MS - 1)).toBe(false);
+    expect(anyMergeDue(merges, T0 + CHECK_INTERVAL_MS)).toBe(true);
+  });
+
+  it("forgets one task's watch and keeps the rest", () => {
+    const merges = createQueuedMerges(memoryStore());
+    merges.add(queued());
+    merges.add(queued({ taskId: "t2" }));
+    merges.remove("t1");
+
+    expect(merges.list().map((entry) => entry.taskId)).toEqual(["t2"]);
   });
 
   it("survives a restart, because a new instance reads the same store", async () => {

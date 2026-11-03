@@ -120,8 +120,11 @@ describe("createReporter", () => {
   // BP-1128: nothing else ever moves this task once the run has ended
   it("watches a queued pull request, and only a queued one, from the review column it reported into", async () => {
     const added: QueuedMerge[] = [];
-    const merges = { add: (entry: QueuedMerge) => added.push(entry), list: () => added, replace: vi.fn() };
-    const reporter = createReporter(apiSpy(), statuses, vi.fn(), undefined, new Map(), merges);
+    const merges = { add: (entry: QueuedMerge) => added.push(entry), list: () => added, replace: vi.fn(), remove: vi.fn() };
+    const api = apiSpy();
+    const watchedBeforeTheComment: number[] = [];
+    api.comment.mockImplementation(async () => void watchedBeforeTheComment.push(added.length));
+    const reporter = createReporter(api, statuses, vi.fn(), undefined, new Map(), merges);
 
     await reporter.delivered(task, "https://github.com/x/y/pull/7, https://github.com/x/z/pull/8", "s", true);
     await reporter.delivered(task, "https://github.com/x/y/pull/9", "s");
@@ -135,6 +138,8 @@ describe("createReporter", () => {
         done: "shipped",
       }),
     ]);
+    // Recorded before the report, so a stop while the board is slow cannot lose it
+    expect(watchedBeforeTheComment[0]).toBe(1);
   });
 
   // The url is not free text and so does not go through safeText, which made it a path around the

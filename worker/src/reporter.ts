@@ -186,7 +186,7 @@ export function createReporter(
       const what = mergeQueued
         ? `Opened ${scrub(prUrl)} with auto-merge armed: GitHub merges what is still open once the base branch's required checks and reviews pass. This worker moves the task to done when it does.`
         : `Opened ${scrub(prUrl)} for review. The worker did not merge it.`;
-      await report(task, statusIds.review, `${what}\n\n${safeText(summary)}`);
+      // Before the report, so a stop while the board is slow cannot lose the watch the comment promises
       if (mergeQueued) {
         queuedMerges?.add({
           projectId: task.projectId,
@@ -199,6 +199,7 @@ export function createReporter(
           queuedAt: new Date().toISOString(),
         });
       }
+      await report(task, statusIds.review, `${what}\n\n${safeText(summary)}`);
     },
 
     async failed(task, reason) {

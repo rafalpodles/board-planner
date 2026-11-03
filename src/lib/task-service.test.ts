@@ -1502,6 +1502,16 @@ describe("clearing the phase on every exit from the active column", () => {
       expect(findOneAndUpdate).toHaveBeenCalledTimes(1);
     });
 
+    it("answers 412, not the held-run 409 the outbox would retry, once another run holds the task", async () => {
+      const held = { _id: "t1", taskNumber: 1, status: "doing", title: "x", execution: { runId: "run-2", workerId: "w2", attempts: 1 } };
+      findOne.mockReturnValue({ lean: () => Promise.resolve(held) });
+
+      const result = await changeStatus(db, "p1", "t1", "ready", "actor", { workerId: "w1", from: "checking" });
+
+      expect(result).toMatchObject({ ok: false, status: 412 });
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
     it("refuses with 412 and writes nothing once a person has moved it elsewhere", async () => {
       const result = await changeStatus(db, "p1", "t1", "doing", "actor", { from: "ready" });
 

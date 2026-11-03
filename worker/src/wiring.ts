@@ -62,7 +62,7 @@ import { createExecutor } from "./executor.js";
 import { LocalServer, LocalServerDeps, startLocalServer } from "./local-server.js";
 import { createLoop } from "./loop.js";
 import { createOutbox, Store } from "./outbox.js";
-import { createQueuedMerges, watchQueuedMerges } from "./queued-merges.js";
+import { anyMergeDue, createQueuedMerges, watchQueuedMerges } from "./queued-merges.js";
 import { PipelineDeps, RunDisposition, runTask } from "./pipeline.js";
 import {
   asReported,
@@ -903,6 +903,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const several = bound.get(task.projectId)?.repositories ?? [];
 
     currentRun = { taskId: task.taskId, runId: task.runId };
+    // A task claimed again is this run's to report; a merge an earlier run queued must not move it
+    queuedMerges.remove(task.taskId);
     try {
       if (several.length > 1) {
         // One run, one worktree in each repository of the project (BP-1072). Each keeps its own
@@ -1022,7 +1024,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   async function watchMerges(): Promise<void> {
     const ghPath = resolvedToolPath("gh");
-    if (!ghPath || queuedMerges.list().length === 0) return;
+    if (!ghPath || !anyMergeDue(queuedMerges, Date.now())) return;
     const delivery = createDelivery(deps.runner, resolvedGitPath(), ghPath, undefined, await githubIdentityToken());
     await watchQueuedMerges({
       merges: queuedMerges,

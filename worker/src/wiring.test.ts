@@ -616,8 +616,13 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // Run between passes, after the clock jump — the one hook point available to change what is
       // on disk mid-run, for a test about recovering from a failure and then repeating it.
       onSleep?: (stateDir: string, sleepIndex: number) => void;
+      // What queued-merges.json holds when the worker starts, and what `gh pr view` answers (BP-1128)
+      queuedMerges?: string;
+      prView?: string;
     } = {}
   ) {
+    const queuedMergesStore = memoryStore(opts.queuedMerges ?? "");
+    const prViews: RunOpts[] = [];
     let seenHeartbeat: HeartbeatDeps | undefined;
     const reportsBeforePreflight: ReturnType<NonNullable<HeartbeatDeps["preflight"]>>[] = [];
     let preflightFailures = opts.preflightThrows === true ? Infinity : Number(opts.preflightThrows ?? 0);
@@ -714,6 +719,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           : {}),
         ...inner,
         run: (command: string, args: string[], runOpts: RunOpts) => {
+          if (opts.prView !== undefined && command.endsWith("/gh") && args[0] === "pr" && args[1] === "view") {
+            prViews.push(runOpts);
+            return Promise.resolve({ code: 0, stdout: opts.prView, stderr: "", timedOut: false });
+          }
           if (opts.claudeAuth && command.endsWith("/claude") && args[0] === "auth") {
             return Promise.resolve(opts.claudeAuth(claudeAsked++));
           }
@@ -789,7 +798,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
             }),
           }))
       )) as unknown as typeof fetch,
-      createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
+      createStore: (path) =>
+        path.endsWith("queued-merges.json") ? queuedMergesStore : memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
       createApi: () => api as unknown as ApiClient,
       createTelemetry: () => telemetry,
       // A checkout with what the gates need, unless a test says otherwise. Left to the real
@@ -849,8 +859,54 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       reportsBeforePreflight,
       rebinds: serverFetch.mock.calls.length,
       stagingEnvs,
+      queuedMerges: () => JSON.parse(queuedMergesStore.read() || "[]") as { taskId: string }[],
+      prViews,
     };
   }
+
+  it("moves a task whose queued pull request GitHub merged to done from review, asking as the pinned account (BP-1128)", async () => {
+    const { api, prViews, queuedMerges } = await runOneTask(undefined, undefined, {
+      queuedMerges: JSON.stringify([
+        {
+          projectId: "p1",
+          taskId: "t9",
+          taskKey: "CP-9",
+          prUrls: ["https://github.com/x/y/pull/7"],
+          review: "in_review",
+          done: "done",
+          queuedAt: new Date().toISOString(),
+        },
+      ]),
+      prView: '{"state":"MERGED"}',
+      stateFiles: { "github.json": JSON.stringify({ account: "owner" }) },
+      gh: { token: "gho_pinned" },
+    });
+
+    expect(api.comment).toHaveBeenCalledWith("p1", "t9", "GitHub merged https://github.com/x/y/pull/7.");
+    expect(api.setStatus).toHaveBeenCalledWith("p1", "t9", "done", { from: "in_review" });
+    expect(prViews[0]?.env?.GH_TOKEN).toBe("gho_pinned");
+    expect(queuedMerges()).toEqual([]);
+  });
+
+  // BP-1128. A merge an earlier run queued must not move the task over what this run reports
+  it("forgets a merge an earlier run queued once the task is claimed again, and keeps the others", async () => {
+    const watch = (taskId: string) => ({
+      projectId: "p1",
+      taskId,
+      taskKey: "CP-1",
+      prUrls: ["https://github.com/x/y/pull/7"],
+      review: "in_review",
+      done: "done",
+      queuedAt: "2026-11-03T10:00:00.000Z",
+      checkedAt: "2999-01-01T00:00:00.000Z",
+    });
+    const { claimed, queuedMerges } = await runOneTask(undefined, undefined, {
+      queuedMerges: JSON.stringify([watch(CLAIMED.taskId), watch("t9")]),
+    });
+
+    expect(claimed).toBe(true);
+    expect(queuedMerges().map((entry) => entry.taskId)).toEqual(["t9"]);
+  });
 
   /**
    * BP-349. The executor refuses an unconfinable step, and that refusal stays where it is — it is

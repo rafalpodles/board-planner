@@ -21,6 +21,7 @@ export interface QueuedMerge {
 
 export interface QueuedMerges {
   add(entry: QueuedMerge): void;
+  remove(taskId: string): void;
   list(): QueuedMerge[];
   replace(entries: QueuedMerge[]): void;
 }
@@ -64,6 +65,11 @@ export function createQueuedMerges(store: Store, log: Log = (m) => console.error
     add(entry) {
       replace([...list().filter((each) => each.taskId !== entry.taskId), entry]);
     },
+    remove(taskId) {
+      const entries = list();
+      const rest = entries.filter((each) => each.taskId !== taskId);
+      if (rest.length !== entries.length) replace(rest);
+    },
     list,
     replace,
   };
@@ -83,14 +89,24 @@ export interface WatchDeps {
  * keeps it where they put it. Closed unmerged: a comment, and the task stays in review. The reports
  * go through the outbox, so a redeploy of the board does not lose them.
  */
+function due(entry: QueuedMerge, now: number): boolean {
+  return !entry.checkedAt || !(now - Date.parse(entry.checkedAt) < CHECK_INTERVAL_MS);
+}
+
+export function anyMergeDue(merges: QueuedMerges, now: number): boolean {
+  return merges.list().some((entry) => due(entry, now));
+}
+
 export async function watchQueuedMerges(deps: WatchDeps): Promise<void> {
   const entries = deps.merges.list();
   if (entries.length === 0) return;
   const now = deps.now();
   const kept: QueuedMerge[] = [];
+  // Written after each settled entry, so a stop during a later entry's gh call cannot report this one twice
+  const settle = (index: number) => deps.merges.replace([...kept, ...entries.slice(index + 1)]);
 
-  for (const entry of entries) {
-    if (entry.checkedAt && now - Date.parse(entry.checkedAt) < CHECK_INTERVAL_MS) {
+  for (const [index, entry] of entries.entries()) {
+    if (!due(entry, now)) {
       kept.push(entry);
       continue;
     }
@@ -107,20 +123,24 @@ export async function watchQueuedMerges(deps: WatchDeps): Promise<void> {
         taskId,
         body: `${closed.join(", ")} ${closed.length > 1 ? "were" : "was"} closed without being merged, so the task stays here.`,
       });
+      settle(index);
       continue;
     }
     if (states.every((state) => state === "merged")) {
       deps.outbox.add({ kind: "comment", projectId, taskId, body: `GitHub merged ${urls}.` });
       deps.outbox.add({ kind: "status", projectId, taskId, status: entry.done, from: entry.review });
+      settle(index);
       continue;
     }
-    if (now - Date.parse(entry.queuedAt) > WATCH_LIMIT_MS) {
+    // A queuedAt that does not parse ends the watch rather than keeping it for ever
+    if (!(now - Date.parse(entry.queuedAt) <= WATCH_LIMIT_MS)) {
       deps.outbox.add({
         kind: "comment",
         projectId,
         taskId,
-        body: `${urls} is still not merged after 30 days, so this worker stopped watching it. The task stays here.`,
+        body: `This worker stopped watching ${urls} after 30 days without seeing it merged. The task stays here.`,
       });
+      settle(index);
       continue;
     }
     kept.push({ ...entry, checkedAt: new Date(now).toISOString() });
