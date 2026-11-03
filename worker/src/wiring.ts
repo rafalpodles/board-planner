@@ -62,6 +62,7 @@ import { createExecutor } from "./executor.js";
 import { LocalServer, LocalServerDeps, startLocalServer } from "./local-server.js";
 import { createLoop } from "./loop.js";
 import { createOutbox, Store } from "./outbox.js";
+import { anyMergeDue, createQueuedMerges, watchQueuedMerges } from "./queued-merges.js";
 import { PipelineDeps, RunDisposition, runTask } from "./pipeline.js";
 import {
   asReported,
@@ -215,6 +216,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   const identityStore = deps.createStore(join(bootstrap.stateDir, "worker.json"));
   const outbox = createOutbox(deps.createStore(join(bootstrap.stateDir, "outbox.jsonl")));
+  // On disk for the outbox's reason: a pull request GitHub merges overnight is reported by the
+  // process running in the morning, whichever one that is (BP-1128).
+  const queuedMerges = createQueuedMerges(deps.createStore(join(bootstrap.stateDir, "queued-merges.json")), deps.logError);
   // Beside the outbox and for the same reason: what a refused change is waiting on has to outlive
   // the process. This one is on disk rather than in memory because the reaper reads it on a pass
   // that may be the first thing a restarted worker does.
@@ -899,6 +903,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const several = bound.get(task.projectId)?.repositories ?? [];
 
     currentRun = { taskId: task.taskId, runId: task.runId };
+    // A task claimed again is this run's to report; a merge an earlier run queued must not move it
+    queuedMerges.remove(task.taskId);
     try {
       if (several.length > 1) {
         // One run, one worktree in each repository of the project (BP-1072). Each keeps its own
@@ -928,7 +934,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             api,
             boardColumns: (projectId) => api.boardColumns(projectId),
             createReporter: (client, statusIds) =>
-              createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments),
+              createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments, queuedMerges),
             repositories,
             executor: createExecutor(taskConfig, deps.runner, claudePath, codexPath),
             collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
@@ -951,7 +957,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           api,
           boardColumns: (projectId) => api.boardColumns(projectId),
           createReporter: (client, statusIds) =>
-            createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments),
+            createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments, queuedMerges),
           createDelivery: (runner, baseBranch) => createDelivery(runner, gitPath, ghPath, baseBranch, githubToken),
           workspace: createWorkspace(
             taskConfig,
@@ -1016,6 +1022,19 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     };
   }
 
+  async function watchMerges(): Promise<void> {
+    const ghPath = resolvedToolPath("gh");
+    if (!ghPath || !anyMergeDue(queuedMerges, Date.now())) return;
+    const delivery = createDelivery(deps.runner, resolvedGitPath(), ghPath, undefined, await githubIdentityToken());
+    await watchQueuedMerges({
+      merges: queuedMerges,
+      pullRequestState: (prUrl) => delivery.pullRequestState(bootstrap.stateDir, prUrl),
+      outbox,
+      now: () => Date.now(),
+      log: deps.logError,
+    });
+  }
+
   async function drain(): Promise<void> {
     await retryLeftovers().catch((error) => deps.logError(`reaping what an earlier run left failed: ${String(error)}`));
     await retryPreflight();
@@ -1047,6 +1066,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       decisions,
       decisionsAsOf
     ).catch((error) => deps.logError(`settling decisions failed: ${String(error)}`));
+    await watchMerges().catch((error) => deps.logError(`watching queued merges failed: ${String(error)}`));
     const { delivered, pending, dropped } = await outbox.flush(api);
     if (delivered || pending || dropped) {
       deps.log(`outbox: delivered ${delivered}, still pending ${pending}, dropped ${dropped}`);

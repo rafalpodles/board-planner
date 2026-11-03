@@ -261,6 +261,7 @@ describe.skipIf(process.platform !== "darwin")("a worktree whose .git file a con
         merge: vi.fn<Delivery["merge"]>(async () => "merged"),
         isPrivate: vi.fn<Delivery["isPrivate"]>(async () => null),
         linkRelated: vi.fn<Delivery["linkRelated"]>(async () => {}),
+        pullRequestState: vi.fn<Delivery["pullRequestState"]>(async () => "open"),
       };
       const gate = { name: "Size", run: vi.fn(async () => ({ ok: true, reason: "" })) };
       const executor: Executor = {

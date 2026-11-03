@@ -34,7 +34,7 @@ export interface HeldAgent {
 
 export interface ApiClient {
   claim(projectId: string, runId: string, heldAgents?: HeldAgent[]): Promise<ClaimedTask | null>;
-  setStatus(projectId: string, taskId: string, status: string, options?: { refundAttempt?: boolean }): Promise<void>;
+  setStatus(projectId: string, taskId: string, status: string, options?: { refundAttempt?: boolean; from?: string; fromRun?: string }): Promise<void>;
   comment(projectId: string, taskId: string, body: string): Promise<void>;
   release(projectId: string, taskId: string, options?: { refund?: boolean }): Promise<void>;
   statusIds(projectId: string): Promise<StatusIds>;
@@ -444,7 +444,12 @@ export function createApiClient(
     },
 
     async setStatus(projectId, taskId, status, options) {
-      await send(projectId, `/tasks/${taskId}/status`, "PATCH", options?.refundAttempt ? { status, refundAttempt: true } : { status });
+      await send(projectId, `/tasks/${taskId}/status`, "PATCH", {
+        status,
+        ...(options?.refundAttempt ? { refundAttempt: true } : {}),
+        ...(options?.from ? { from: options.from } : {}),
+        ...(options?.fromRun ? { fromRun: options.fromRun } : {}),
+      });
     },
 
     async comment(projectId, taskId, body) {

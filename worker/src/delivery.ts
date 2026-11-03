@@ -44,7 +44,11 @@ export interface Delivery {
    * repositories to the end of this one's description (BP-1072).
    */
   linkRelated(worktreePath: string, prUrl: string, related: string[]): Promise<void>;
+  /** What GitHub says of a pull request now; "unknown" when gh could not be asked or did not answer. */
+  pullRequestState(cwd: string, prUrl: string): Promise<PullRequestState>;
 }
+
+export type PullRequestState = "open" | "merged" | "closed" | "unknown";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -344,24 +348,35 @@ export function createDelivery(
     if (nested) throw new Error(`refusing to ${what}: ${nested.detail}`);
   }
 
-  async function mergeState(
-    worktreePath: string,
+  async function pullRequestState(
+    cwd: string,
     prUrl: string,
-  ): Promise<MergeState> {
+  ): Promise<PullRequestState> {
     const result = await run(
       requireToolPath("gh", ghPath),
       ["pr", "view", prUrl, "--json", "state", ...repoArgs(prUrl)],
-      worktreePath,
+      cwd,
     );
     if (result.code !== 0) return "unknown";
     try {
       const parsed: unknown = JSON.parse(result.stdout);
       if (!isRecord(parsed) || typeof parsed.state !== "string")
         return "unknown";
-      return parsed.state === "MERGED" ? "merged" : "unmerged";
+      if (parsed.state === "MERGED") return "merged";
+      if (parsed.state === "CLOSED") return "closed";
+      return parsed.state === "OPEN" ? "open" : "unknown";
     } catch {
       return "unknown";
     }
+  }
+
+  async function mergeState(
+    worktreePath: string,
+    prUrl: string,
+  ): Promise<MergeState> {
+    const state = await pullRequestState(worktreePath, prUrl);
+    if (state === "unknown") return "unknown";
+    return state === "merged" ? "merged" : "unmerged";
   }
 
   // The repository decides how it may be merged; a flag picked here is refused wherever that method
@@ -532,6 +547,8 @@ export function createDelivery(
       const result = await run(gh, ["pr", "edit", prUrl, "--body", edited, ...repo], worktreePath);
       if (result.code !== 0) throw failure("gh pr edit", result);
     },
+
+    pullRequestState,
 
     async merge(worktreePath, prUrl, headSha) {
       // --repo keeps gh out of the local checkout: --delete-branch otherwise switches the worktree

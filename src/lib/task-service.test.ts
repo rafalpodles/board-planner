@@ -1489,6 +1489,47 @@ describe("clearing the phase on every exit from the active column", () => {
     });
   });
 
+  // BP-1128: a worker reporting a merge it queued hours ago moves the task only from review
+  describe("a move that names the column it expects the task in", () => {
+    beforeEach(() => {
+      findOne.mockReturnValue({ lean: () => Promise.resolve({ _id: "t1", taskNumber: 1, status: "checking", title: "x" }) });
+    });
+
+    it("moves a task still in that column", async () => {
+      const result = await changeStatus(db, "p1", "t1", "doing", "actor", { from: "checking" });
+
+      expect(result.ok).toBe(true);
+      expect(findOneAndUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it("answers 412, not the held-run 409 the outbox would retry, once another run holds the task", async () => {
+      const held = { _id: "t1", taskNumber: 1, status: "doing", title: "x", execution: { runId: "run-2", workerId: "w2", attempts: 1 } };
+      findOne.mockReturnValue({ lean: () => Promise.resolve(held) });
+
+      const result = await changeStatus(db, "p1", "t1", "ready", "actor", { workerId: "w1", from: "checking" });
+
+      expect(result).toMatchObject({ ok: false, status: 412 });
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("moves a task whose last run is the one named, and refuses with 412 once another run has claimed it", async () => {
+      findOne.mockReturnValue({
+        lean: () => Promise.resolve({ _id: "t1", taskNumber: 1, status: "checking", title: "x", execution: { lastRunId: "run-2" } }),
+      });
+
+      expect(await changeStatus(db, "p1", "t1", "doing", "actor", { from: "checking", fromRun: "run-1" })).toMatchObject({ ok: false, status: 412 });
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+      expect((await changeStatus(db, "p1", "t1", "doing", "actor", { from: "checking", fromRun: "run-2" })).ok).toBe(true);
+    });
+
+    it("refuses with 412 and writes nothing once a person has moved it elsewhere", async () => {
+      const result = await changeStatus(db, "p1", "t1", "doing", "actor", { from: "ready" });
+
+      expect(result).toMatchObject({ ok: false, status: 412 });
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+    });
+  });
+
   // BP-758: this is the write the worker's outcome record is sent after, and lastRunId is what the
   // record is then matched by
   it("keeps the id the run's record is matched by", async () => {

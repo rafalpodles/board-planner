@@ -811,6 +811,17 @@ export interface StatusChangeOptions {
    * report replayed when no run holds it gives nothing back.
    */
   refundAttempt?: boolean;
+  /**
+   * The column the caller believes the task is in. A task that has left it since is refused with
+   * 412 rather than moved: a worker reporting a merge it queued hours ago must not undo where a
+   * person has put the task in the meantime (BP-1128).
+   */
+  from?: string;
+  /**
+   * The run the caller believes was the task's last. A task claimed again since, by any machine, is
+   * refused with 412: a merge queued by an earlier run says nothing about what the later one did.
+   */
+  fromRun?: string;
 }
 
 export async function changeStatus(
@@ -822,8 +833,8 @@ export async function changeStatus(
   options: StatusChangeOptions | boolean = {}
 ): Promise<TaskServiceResult> {
   // The boolean form is the old signature; kept so a caller passing `true` still means force
-  const { force = false, workerId: callerWorkerId, refundAttempt = false } =
-    typeof options === "boolean" ? { force: options, workerId: undefined } : options;
+  const { force = false, workerId: callerWorkerId, refundAttempt = false, from, fromRun } =
+    typeof options === "boolean" ? { force: options, workerId: undefined, from: undefined, fromRun: undefined } : options;
 
   await connectDB();
 
@@ -840,6 +851,13 @@ export async function changeStatus(
   const oldTask = await db.Task.findOne({ _id: taskId, project: projectId }).lean();
   if (!oldTask) {
     return { ok: false, error: "Task not found", status: 404 };
+  }
+
+  if (from !== undefined && oldTask.status !== from) {
+    return { ok: false, error: `The task is no longer in ${from}: it is in ${oldTask.status}`, status: 412 };
+  }
+  if (fromRun !== undefined && oldTask.execution?.lastRunId !== fromRun) {
+    return { ok: false, error: "The task has been run again since", status: 412 };
   }
 
   // Leaving the column is what releases the run, so that is what has to be refused. Staying put

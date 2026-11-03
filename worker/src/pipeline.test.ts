@@ -155,6 +155,7 @@ function deliverySpy(overrides: Partial<Delivery> = {}) {
     merge: vi.fn<Delivery["merge"]>().mockResolvedValue("merged"),
     isPrivate: vi.fn<Delivery["isPrivate"]>().mockResolvedValue(null),
     linkRelated: vi.fn<Delivery["linkRelated"]>().mockResolvedValue(undefined),
+    pullRequestState: vi.fn<Delivery["pullRequestState"]>().mockResolvedValue("open"),
     ...overrides,
   };
 }

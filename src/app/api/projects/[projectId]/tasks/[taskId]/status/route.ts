@@ -14,7 +14,13 @@ export const PATCH = withProjectAccessOrWorker(async (request, { params, user, w
   // Opt-in per request rather than a setting: the refusal is only useful if it is the default.
   const read = await readAuthenticatedJsonBody(request);
   if (!read.ok) return read.response;
-  const { status, force, refundAttempt } = read.value;
+  const { status, force, refundAttempt, from, fromRun } = read.value;
+  if (from !== undefined && typeof from !== "string") {
+    return NextResponse.json({ error: "from must be a column id" }, { status: 400 });
+  }
+  if (fromRun !== undefined && typeof fromRun !== "string") {
+    return NextResponse.json({ error: "fromRun must be a run id" }, { status: 400 });
+  }
 
   // Never for a machine credential. CLAUDE.md already records that the PM agent gets no force
   // because "an unattended agent must not take work off a machine"; a worker is exactly such an
@@ -33,6 +39,8 @@ export const PATCH = withProjectAccessOrWorker(async (request, { params, user, w
     force: force === true,
     workerId,
     refundAttempt: refundAttempt === true,
+    ...(from !== undefined ? { from } : {}),
+    ...(fromRun !== undefined ? { fromRun } : {}),
   });
   if (!result.ok) {
     return NextResponse.json(

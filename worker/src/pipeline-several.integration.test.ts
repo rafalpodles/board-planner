@@ -134,6 +134,7 @@ describe("a run across several repositories", () => {
         merge: vi.fn(async () => "merged" as const),
         isPrivate: vi.fn(async () => false),
         linkRelated: vi.fn(async () => {}),
+        pullRequestState: vi.fn(async () => "open" as const),
         ...over.delivery?.[name],
       };
       deliveries[name] = delivery;
