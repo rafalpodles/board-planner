@@ -168,12 +168,9 @@ export function TaskCard({
       {shownBadges.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
           {shownBadges.map((badge) => (
-            <span
-              key={badge.key}
-              className={TAG}
-            >
-              {badge.color && <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: badge.color }} />}
-              {badge.label}
+            <span key={badge.key} className={`${TAG} max-w-full min-w-0`} title={badge.label}>
+              {badge.color && <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: badge.color }} />}
+              <span className="truncate">{badge.label}</span>
             </span>
           ))}
           {hiddenBadges > 0 && (

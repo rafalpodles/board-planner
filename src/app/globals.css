@@ -49,7 +49,7 @@
   /* The edge of a column pinned over a scroller (BP-642). A shadow, so it reads as content
      passing underneath rather than as one more column rule — and per theme, because black at a
      readable strength on #0f172a is black at an overbearing one on white. */
-  --pin-edge-shadow: -10px 0 14px -6px rgba(0, 0, 0, 0.6);
+  --pin-edge-shadow: -10px 0 14px -6px rgba(0, 0, 0, 0.85);
 }
 
 body {

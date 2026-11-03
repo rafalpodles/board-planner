@@ -42,6 +42,8 @@ export async function dragTo(
   // x=1357 on a fresh board, so a drag aimed at it lands outside the window, the chain ends at
   // `dragenter:main` with no `drop`, and the spec reads exactly like the product being broken.
   // A person scrolls to see where they are dropping, so the drag does too.
+  // The card first, so the target's scroll has the last word: a press past the fold starts no drag
+  await card.scrollIntoViewIfNeeded();
   await target.scrollIntoViewIfNeeded();
 
   const to = await box(target, "the drop target");
