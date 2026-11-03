@@ -112,13 +112,14 @@ describe("collectDiff", () => {
     expect(calls.map((call) => call[0])).toEqual(["rev-parse", "diff", "diff", "diff"]);
   });
 
-  it("resolves a renamed file to its post-rename path, in both numstat shorthands", async () => {
+  // BP-1127: `old => new` is also a name a file may have, so git is asked for no renames at all
+  it("reads every path literally, a name with an arrow in it included", async () => {
     const run = vi
       .fn()
       .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({
         code: 0,
-        stdout: "0\t0\tsrc/{old => new}/a.ts\n2\t1\told-name.ts => new-name.ts\n",
+        stdout: "1\t0\t.github/workflows/q => r.yml\n0\t2\told-name.ts\n2\t0\tnew-name.ts\n",
         stderr: "",
         timedOut: false,
       })
@@ -127,8 +128,9 @@ describe("collectDiff", () => {
 
     const diff = await collectDiff({ run }, gitPath, "/wt", BASE_SHA);
 
-    expect(diff.changedFiles).toEqual(["src/new/a.ts", "new-name.ts"]);
-    expect(diff.changedLines).toBe(3);
+    expect(diff.changedFiles).toEqual([".github/workflows/q => r.yml", "old-name.ts", "new-name.ts"]);
+    expect(run.mock.calls[1][1]).toContain("--no-renames");
+    expect(run.mock.calls[2][1]).toContain("--no-renames");
   });
 
   it("throws a specific error when the numstat call fails, instead of proceeding with nothing", async () => {

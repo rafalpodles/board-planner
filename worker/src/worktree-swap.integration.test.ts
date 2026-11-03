@@ -104,6 +104,7 @@ describe.skipIf(process.platform !== "darwin")("a worktree a confined process re
       pushed: false,
       prUrl: "",
       merged: false,
+      mergeQueued: false,
       summary: "",
       checks: [],
       lastResult: { status: "completed", summary: "", filesChanged: [], testsAdded: [], blockedReason: "" },
@@ -124,6 +125,7 @@ describe.skipIf(process.platform !== "darwin")("a worktree a confined process re
       baseSha: worktree.baseSha,
       runner: recording,
       gitPath,
+      refusedAtPush: async () => null,
     };
   }
 

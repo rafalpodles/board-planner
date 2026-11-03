@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import type { MergeOutcome } from "./delivery.js";
 import { TamperedCheckoutError } from "./commit.js";
 import { runStep, StepContext } from "./steps.js";
 import { ExecutionResult, SnapshotEntry } from "./types.js";
@@ -21,6 +22,7 @@ function ctx(over: Partial<StepContext> = {}) {
     pushed: false,
     prUrl: "",
     merged: false,
+    mergeQueued: false,
     summary: "",
     checks: [],
     lastResult: completed,
@@ -48,10 +50,11 @@ function ctx(over: Partial<StepContext> = {}) {
     delivery: {
       push: vi.fn(async () => {}),
       openPr: vi.fn(async () => "https://x/pull/7"),
-      merge: vi.fn(async () => {}),
+      merge: vi.fn(async (): Promise<MergeOutcome> => "merged"),
     },
     commit: vi.fn(async () => "sha1"),
     tampering: vi.fn(async () => null),
+    refusedAtPush: vi.fn(async (): Promise<string | null> => null),
     state,
     timeoutMs: 1000,
     onEvent: vi.fn(),
@@ -319,11 +322,23 @@ describe("runStep — a model step", () => {
 
 describe("runStep — a worker action", () => {
   it("pushes on the push step and calls no model", async () => {
-    const c = ctx({ state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", checks: [], lastResult: completed } });
+    const c = ctx({ state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, mergeQueued: false, summary: "", checks: [], lastResult: completed } });
     await runStep(entry({ key: "push", deterministic: true }), c);
 
     expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha1");
     expect(c.executor.execute).not.toHaveBeenCalled();
+  });
+
+  // BP-1127: no agent may push a workflow, whether or not it carries a Protected files gate
+  it("refuses to push what no agent may push, and says why", async () => {
+    const c = ctx({ state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, mergeQueued: false, summary: "", checks: [], lastResult: completed } });
+    vi.mocked(c.refusedAtPush).mockResolvedValue("the change edits CI workflows or actions (.github/workflows/ci.yml)");
+
+    const outcome = await runStep(entry({ key: "push", deterministic: true }), c);
+
+    expect(outcome).toEqual({ kind: "error", message: expect.stringMatching(/^refusing to push: .*ci\.yml/) });
+    expect(c.delivery.push).not.toHaveBeenCalled();
+    expect(c.state.pushed).toBe(false);
   });
 
   it("refuses nothing itself when no commit was recorded, leaving delivery to say so", async () => {
@@ -424,6 +439,17 @@ describe("runStep — a worker action", () => {
     expect(c.state.merged).toBe(true);
   });
 
+  // BP-1127: a pull request waiting on required checks is not merged, and must not be reported so
+  it("remembers a merge left to GitHub's auto-merge as queued, not merged", async () => {
+    const c = ctx();
+    c.delivery.merge.mockResolvedValue("queued");
+    await runStep(entry({ key: "pull-request", deterministic: true }), c);
+    await runStep(entry({ key: "merge", deterministic: true }), c);
+
+    expect(c.state.merged).toBe(false);
+    expect(c.state.mergeQueued).toBe(true);
+  });
+
   // The composition rules refuse this shape on save, but a snapshot may predate them
   it("refuses a merge step with no pull request to merge", async () => {
     const c = ctx();
@@ -445,7 +471,7 @@ describe("runStep — a worker action", () => {
     ["merge", "refusing to merge"],
   ])("refuses to %s a checkout whose .git file changed (BP-794)", async (key, said) => {
     const c = ctx({
-      state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: true, prUrl: "https://x/pull/7", merged: false, summary: "", checks: [], lastResult: completed },
+      state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: true, prUrl: "https://x/pull/7", merged: false, mergeQueued: false, summary: "", checks: [], lastResult: completed },
       tampering: vi.fn(async () => 'its .git file reading "gitdir: /wt/.y"'),
     });
 
@@ -459,7 +485,7 @@ describe("runStep — a worker action", () => {
 
   it("refuses to push a history it did not write", async () => {
     const c = ctx({
-      state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", checks: [], lastResult: completed },
+      state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, mergeQueued: false, summary: "", checks: [], lastResult: completed },
       runner: {
         run: vi.fn(async (_command: string, args: string[]) =>
           args.includes("rev-list")

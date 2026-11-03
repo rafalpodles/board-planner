@@ -49,6 +49,25 @@ function deliveryCalls(run: ReturnType<typeof vi.fn>): unknown[][] {
   );
 }
 
+function mergeArgs(run: ReturnType<typeof vi.fn>): string[] {
+  const call = deliveryCalls(run).find(([, args]) => (args as string[])[1] === "merge");
+  if (!call) throw new Error("gh pr merge was never called");
+  return call[1] as string[];
+}
+
+function mergeSettings(allowed: ("merge" | "squash" | "rebase")[], autoMergeAllowed: boolean): string {
+  return JSON.stringify({
+    data: {
+      repository: {
+        mergeCommitAllowed: allowed.includes("merge"),
+        squashMergeAllowed: allowed.includes("squash"),
+        rebaseMergeAllowed: allowed.includes("rebase"),
+        autoMergeAllowed,
+      },
+    },
+  });
+}
+
 function argsOf(run: ReturnType<typeof vi.fn>, index = 0): string[] {
   return deliveryCalls(run)[index][1] as string[];
 }
@@ -374,47 +393,163 @@ describe("merge", () => {
     const run = vi
       .fn()
       .mockResolvedValue({ code: 1, stdout: "", stderr: "not mergeable", timedOut: false });
-    await expect(createDelivery({ run }, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7")).rejects.toThrow(
+    await expect(createDelivery({ run }, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT)).rejects.toThrow(
       /not mergeable/
     );
   });
 
   it("merges and deletes the branch", async () => {
     const { runner, run } = fakeCli({});
-    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7");
+    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT);
 
-    const args = argsOf(run);
+    const args = mergeArgs(run);
     expect(args.slice(0, 3)).toEqual(["pr", "merge", "https://github.com/x/y/pull/7"]);
-    expect(args).toContain("--merge");
     expect(args).toContain("--delete-branch");
+  });
+
+  // BP-1127: a squash-only repository refused every merge the worker made with --merge
+  it("merges with a method the repository allows", async () => {
+    const { runner, run } = fakeCli({ "gh api graphql": { stdout: mergeSettings(["squash"], false) } });
+
+    await expect(
+      createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT),
+    ).resolves.toBe("merged");
+
+    const args = mergeArgs(run);
+    expect(args).toContain("--squash");
+    expect(args).not.toContain("--merge");
+    expect(args).not.toContain("--auto");
+  });
+
+  it("keeps a merge commit where the repository allows one, as it always did", async () => {
+    const { runner, run } = fakeCli({ "gh api graphql": { stdout: mergeSettings(["squash", "merge", "rebase"], false) } });
+    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT);
+
+    expect(mergeArgs(run)).toContain("--merge");
+  });
+
+  it("merges the commit the run pushed and nothing a later push put on the branch", async () => {
+    const { runner, run } = fakeCli({});
+    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT);
+
+    expect(valueOf(mergeArgs(run), "--match-head-commit")).toBe(COMMIT);
+  });
+
+  it("refuses to merge without the pushed commit to pin it to", async () => {
+    const { runner, run } = fakeCli({});
+
+    await expect(createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", "")).rejects.toThrow(
+      /no pushed commit/,
+    );
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  // GitHub refuses to arm auto-merge on a base branch with nothing to wait for
+  it("merges at once when GitHub will not arm auto-merge on the pull request", async () => {
+    let merges = 0;
+    const run = vi.fn(async (command: string, args: string[]): Promise<CommandResult> => {
+      const line = withoutConfigFlags(args).join(" ");
+      if (line.startsWith("api graphql")) return { ...ok, stdout: mergeSettings(["squash"], true) };
+      if (line.startsWith("pr merge")) {
+        merges += 1;
+        return args.includes("--auto")
+          ? { ...ok, code: 1, stderr: "GraphQL: Pull request Protected branch rules not configured for this branch (enablePullRequestAutoMerge)" }
+          : ok;
+      }
+      if (line.startsWith("pr view")) return { ...ok, stdout: '{"state":"OPEN"}' };
+      return ok;
+    });
+
+    await expect(
+      createDelivery({ run }, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT),
+    ).resolves.toBe("merged");
+    expect(merges).toBe(2);
+  });
+
+  it("surfaces the refusal when the merge without --auto is refused too", async () => {
+    const { runner } = fakeCli({
+      "gh api graphql": { stdout: mergeSettings(["squash"], true) },
+      "gh pr merge": { code: 1, stderr: "Pull request #7 is not mergeable: the merge commit cannot be cleanly created." },
+      "gh pr view": { stdout: '{"state":"OPEN"}' },
+    });
+
+    await expect(
+      createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT),
+    ).rejects.toThrow(/cannot be cleanly created/);
+  });
+
+  it("asks the pull request's own host and repository for its merge settings", async () => {
+    const { runner, run } = fakeCli({});
+    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://ghe.example.com/x/y/pull/7", COMMIT);
+
+    const args = argsOf(run, 0);
+    expect(args.slice(0, 2)).toEqual(["api", "graphql"]);
+    expect(valueOf(args, "--hostname")).toBe("ghe.example.com");
+    expect(args).toContain("owner=x");
+    expect(args).toContain("name=y");
+  });
+
+  // BP-1127: a base branch with required checks refused a merge made "now or never"
+  it("arms auto-merge where the repository allows it, and says the pull request is queued", async () => {
+    const { runner, run } = fakeCli({
+      "gh api graphql": { stdout: mergeSettings(["squash"], true) },
+      "gh pr view": { stdout: '{"state":"OPEN"}' },
+    });
+
+    await expect(
+      createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT),
+    ).resolves.toBe("queued");
+    expect(mergeArgs(run)).toEqual(expect.arrayContaining(["--squash", "--auto"]));
+  });
+
+  it("reports a merge gh made at once under --auto as merged", async () => {
+    const { runner } = fakeCli({
+      "gh api graphql": { stdout: mergeSettings(["squash"], true) },
+      "gh pr view": { stdout: '{"state":"MERGED"}' },
+    });
+
+    await expect(
+      createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT),
+    ).resolves.toBe("merged");
+  });
+
+  it("falls back to a plain merge when the settings cannot be read", async () => {
+    const { runner, run } = fakeCli({ "gh api graphql": { code: 1, stderr: "HTTP 502" } });
+
+    await expect(
+      createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT),
+    ).resolves.toBe("merged");
+    const args = mergeArgs(run);
+    expect(args).toContain("--merge");
+    expect(args).not.toContain("--auto");
   });
 
   it("targets the pull request's own repository so gh leaves the worktree checkout alone", async () => {
     const { runner, run } = fakeCli({});
-    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7");
+    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT);
 
-    expect(valueOf(argsOf(run), "--repo")).toBe("x/y");
+    expect(valueOf(mergeArgs(run), "--repo")).toBe("x/y");
   });
 
   it("keeps the enterprise host in the repository argument", async () => {
     const { runner, run } = fakeCli({});
-    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://ghe.example.com/x/y/pull/7");
+    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://ghe.example.com/x/y/pull/7", COMMIT);
 
-    expect(valueOf(argsOf(run), "--repo")).toBe("ghe.example.com/x/y");
+    expect(valueOf(mergeArgs(run), "--repo")).toBe("ghe.example.com/x/y");
   });
 
   it("keeps a non-default port in the repository argument", async () => {
     const { runner, run } = fakeCli({});
-    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://ghe.example.com:8443/x/y/pull/7");
+    await createDelivery(runner, gitPath, ghPath).merge("/wt", "https://ghe.example.com:8443/x/y/pull/7", COMMIT);
 
-    expect(valueOf(argsOf(run), "--repo")).toBe("ghe.example.com:8443/x/y");
+    expect(valueOf(mergeArgs(run), "--repo")).toBe("ghe.example.com:8443/x/y");
   });
 
   // BP-804: without --repo, --delete-branch checks the base out through the worktree's path
   it("refuses a url it cannot name the repository of, rather than letting gh use the checkout", async () => {
     const { runner, run } = fakeCli({});
 
-    await expect(createDelivery(runner, gitPath, ghPath).merge("/wt", "https://x/pull/7")).rejects.toThrow(
+    await expect(createDelivery(runner, gitPath, ghPath).merge("/wt", "https://x/pull/7", COMMIT)).rejects.toThrow(
       "refusing to merge https://x/pull/7: it names no repository",
     );
     expect(run).not.toHaveBeenCalled();
@@ -430,8 +565,8 @@ describe("merge", () => {
     });
 
     await expect(
-      createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7")
-    ).resolves.toBeUndefined();
+      createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT)
+    ).resolves.toBe("merged");
   });
 
   it("surfaces a blocked merge with the gh output instead of an empty crash", async () => {
@@ -444,7 +579,7 @@ describe("merge", () => {
     });
 
     const error = await createDelivery(runner, gitPath, ghPath)
-      .merge("/wt", "https://github.com/x/y/pull/7")
+      .merge("/wt", "https://github.com/x/y/pull/7", COMMIT)
       .then(() => new Error("merge resolved"))
       .catch((thrown: unknown) => thrown);
 
@@ -459,14 +594,14 @@ describe("merge", () => {
     });
 
     await expect(
-      createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7")
+      createDelivery(runner, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT)
     ).rejects.toThrow(/merge state could not be confirmed/);
   });
 
   it("names the timeout when the merge hangs", async () => {
     const run = vi.fn().mockResolvedValue({ code: -1, stdout: "", stderr: "", timedOut: true });
     await expect(
-      createDelivery({ run }, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7")
+      createDelivery({ run }, gitPath, ghPath).merge("/wt", "https://github.com/x/y/pull/7", COMMIT)
     ).rejects.toThrow(/timed out/);
   });
 });
@@ -540,7 +675,7 @@ describe("the github identity delivery acts as", () => {
     const delivery = createDelivery(runner, gitPath, ghPath, "main", PINNED);
 
     await delivery.openPr("/wt", task as ClaimedTask, "summary");
-    await delivery.merge("/wt", "https://github.com/x/y/pull/9");
+    await delivery.merge("/wt", "https://github.com/x/y/pull/9", COMMIT);
 
     expect(envOf(run, 0).GH_TOKEN).toBe(PINNED);
     expect(envOf(run, 1).GH_TOKEN).toBe(PINNED);
@@ -572,7 +707,7 @@ describe("the github identity delivery acts as", () => {
 describe("the gh that carries the token", () => {
   const PINNED = "gho_pinned_account_token";
 
-  it("is spawned by its resolved absolute path, on pr create, pr merge and pr view", async () => {
+  it("is spawned by its resolved absolute path, on pr create, the merge settings, pr merge and pr view", async () => {
     const { runner, run } = fakeCli({
       "gh pr create": { stdout: "https://github.com/x/y/pull/9" },
       "gh pr merge": { code: 1, stderr: "merge failed" },
@@ -581,7 +716,7 @@ describe("the gh that carries the token", () => {
     const delivery = createDelivery(runner, gitPath, ghPath, "main", PINNED);
 
     await delivery.openPr("/wt", task, "summary");
-    await delivery.merge("/wt", "https://github.com/x/y/pull/9");
+    await delivery.merge("/wt", "https://github.com/x/y/pull/9", COMMIT);
 
     const spawned = deliveryCalls(run).map(([command, args, opts]) => ({
       command,
@@ -590,6 +725,7 @@ describe("the gh that carries the token", () => {
     }));
     expect(spawned).toEqual([
       { command: ghPath, subcommand: "pr create", token: PINNED },
+      { command: ghPath, subcommand: "api graphql", token: PINNED },
       { command: ghPath, subcommand: "pr merge", token: PINNED },
       { command: ghPath, subcommand: "pr view", token: PINNED },
     ]);
@@ -602,7 +738,7 @@ describe("the gh that carries the token", () => {
     await expect(delivery.openPr("/wt", task, "summary")).rejects.toThrow(
       "no absolute gh path was resolved — refusing to run gh by name on PATH",
     );
-    await expect(delivery.merge("/wt", "https://github.com/x/y/pull/9")).rejects.toThrow(
+    await expect(delivery.merge("/wt", "https://github.com/x/y/pull/9", COMMIT)).rejects.toThrow(
       "no absolute gh path was resolved",
     );
     expect(run).not.toHaveBeenCalled();

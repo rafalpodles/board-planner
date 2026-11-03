@@ -5,6 +5,7 @@ import { createBudget } from "./budget.js";
 import { commitAll, MissingIdentityError, TamperedCheckoutError } from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { GateFallbacks } from "./gates/from-entry.js";
+import { refusedAtPush } from "./gates/protected-paths.js";
 import { gateCommandsOf, gateConfigFault, usesOwnCommands } from "./gates/gate-commands.js";
 import { unexpectedHistory } from "./provenance.js";
 import { RunState, runStep } from "./steps.js";
@@ -263,6 +264,8 @@ function unpushedWork(state: RunState, worktreePath: string): string {
 // only place that says so.
 export function whatLanded(state: RunState, branch: string): string {
   if (state.merged) return "";
+  if (state.mergeQueued)
+    return `: \`${branch}\` is pushed and ${state.prUrl} is open with auto-merge armed`;
   if (state.prUrl)
     return `: \`${branch}\` is pushed and ${state.prUrl} is open, but it was not merged`;
   if (state.pushed)
@@ -684,6 +687,7 @@ export async function runTask(
     pushed: false,
     prUrl: "",
     merged: false,
+    mergeQueued: false,
     summary: "",
     checks: [],
     lastResult: EMPTY_RESULT,
@@ -751,6 +755,7 @@ export async function runTask(
           runner,
           gitPath: deps.gitPath,
           position,
+          refusedAtPush: async () => refusedAtPush(await deps.collectDiff(runner, worktree.path, worktree.baseSha)),
         });
         // Before the abort check, not after it. An earlier step may already have committed, and
         // exiting without keeping the worktree destroys the only copy of that work: nothing is
@@ -770,6 +775,7 @@ export async function runTask(
         // branch, and releasing there queues a second full run over work that has already landed.
         if (
           !state.merged &&
+          !state.mergeQueued &&
           (await releaseIfAborted(
             deps,
             reporter,
@@ -965,9 +971,12 @@ export async function runTask(
             return;
           }
 
-          // The one refusal that must not push: a pushed branch carrying .github/workflows/*.yml
-          // runs in Actions with the repository's secrets, whatever this verdict said.
-          const withholdsPush = entry.gateKind === "protected-paths";
+          // The refusals that must not push: a pushed branch carrying .github/workflows/*.yml
+          // runs in Actions with the repository's secrets, whatever this verdict said — and since
+          // BP-1127 an agent without a Protected files gate can reach here carrying one.
+          const opensDecision = entry.gateKind === "protected-paths";
+          const withheldAtPush = refusedAtPush(diff);
+          const withholdsPush = opensDecision || withheldAtPush !== null;
 
           // Before the report, and that ordering is the entitlement rather than a nicety: the
           // comment below moves the task out of the active column, and a person reading it there
@@ -976,7 +985,7 @@ export async function runTask(
           //
           // A failure here is logged and nothing else: the comment still carries the patch, which
           // is what the board had before any of this existed.
-          if (withholdsPush && deps.openDecision) {
+          if (opensDecision && deps.openDecision) {
             try {
               await deps.openDecision({
                 task,
@@ -1025,7 +1034,9 @@ export async function runTask(
             task,
             gate.name,
             withholdsPush
-              ? `${reasonForPerson}\n\n**The branch was not pushed**, on purpose: what it carries is exactly what this gate refused. The work is in the worktree at \`${worktree.path}\` on the worker host.`
+              ? `${reasonForPerson}\n\n**The branch was not pushed**, on purpose: ${
+                  opensDecision ? "what it carries is exactly what this gate refused." : withheldAtPush
+                } The work is in the worktree at \`${worktree.path}\` on the worker host.`
               : pushFailed
                 ? `${reasonForPerson}\n\n**The branch was not pushed**: ${pushFailed}. \`${branch}\` is not on the remote — this work exists only in the worktree at \`${worktree.path}\` on the worker host.`
                 : reasonForPerson,
@@ -1065,6 +1076,7 @@ export async function runTask(
     // is already on the base branch back in the queue for another full run.
     if (
       !state.merged &&
+      !state.mergeQueued &&
       (await releaseIfAborted(deps, reporter, task, whatLanded(state, branch)))
     ) {
       return;
@@ -1078,7 +1090,7 @@ export async function runTask(
       await reporter.merged(task, state.prUrl, state.summary);
     } else {
       settle("delivered", state.prUrl);
-      await reporter.delivered(task, state.prUrl, state.summary);
+      await reporter.delivered(task, state.prUrl, state.summary, state.mergeQueued);
     }
   } catch (error) {
     // Whatever threw, the work is still in the tree: a `git diff` that timed out and a gate that

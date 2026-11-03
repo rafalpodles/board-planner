@@ -152,7 +152,7 @@ function deliverySpy(overrides: Partial<Delivery> = {}) {
   return {
     push: vi.fn<Delivery["push"]>().mockResolvedValue(undefined),
     openPr: vi.fn<Delivery["openPr"]>().mockResolvedValue("https://x/pull/7"),
-    merge: vi.fn<Delivery["merge"]>().mockResolvedValue(undefined),
+    merge: vi.fn<Delivery["merge"]>().mockResolvedValue("merged"),
     isPrivate: vi.fn<Delivery["isPrivate"]>().mockResolvedValue(null),
     linkRelated: vi.fn<Delivery["linkRelated"]>().mockResolvedValue(undefined),
     ...overrides,
@@ -361,9 +361,19 @@ describe("runTask", () => {
 
     expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA);
     expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", merging, "did it", expect.any(Array));
-    expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7");
+    expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7", IMPLEMENT_COMMIT_SHA);
     expect(h.reporter.merged).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it");
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
+  });
+
+  // BP-1127: the base branch still requires its checks, so nothing has landed yet
+  it("reports a merge left to GitHub's auto-merge as delivered with auto-merge armed, not as done", async () => {
+    const h = harness();
+    vi.mocked(h.delivery.merge).mockResolvedValue("queued");
+    await runTask(h.deps, merging);
+
+    expect(h.reporter.delivered).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it", true);
+    expect(h.reporter.merged).not.toHaveBeenCalled();
   });
 
   // The pipeline's own calls — commit, the hidden-file check and the clean-tree check — as well
@@ -1571,6 +1581,18 @@ describe("runTask", () => {
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
+  // BP-1127: without a Protected files gate a workflow reaches the later gates, and the branch pushed
+  // as evidence of their refusal would run in Actions with the repository's secrets
+  it("does not push a rejected branch that carries a workflow, whichever gate refused it", async () => {
+    const h = harness({ gateFor: () => rejectingGate("diff-size", "too big") });
+    h.collectDiff.mockResolvedValue({ ...diff, changedFiles: ["a.ts", ".github/workflows/x.yml"] });
+    await runTask(h.deps, running("implement", "diff-size"));
+
+    expect(h.delivery.push).not.toHaveBeenCalled();
+    expect(h.reporter.gateRejected.mock.calls[0][2]).toMatch(/not pushed.*CI workflows/s);
+    expect(h.reporter.gateRejected.mock.calls[0][3]).toBe("");
+  });
+
   // Every other test in this file runs a single writing step, where commits[0] and the last commit
   // are the same value — so none of them can tell a correct index from a stale one. Two writing
   // steps is the smallest arrangement where the difference exists at all.
@@ -2153,6 +2175,7 @@ describe("runTask", () => {
     const delivery = deliverySpy({
       merge: vi.fn<Delivery["merge"]>(async () => {
         controller.abort();
+        return "merged";
       }),
     });
     const h = harness({
@@ -2163,6 +2186,27 @@ describe("runTask", () => {
     await runTask(h.deps, merging);
 
     expect(h.reporter.merged).toHaveBeenCalled();
+    expect(h.reporter.released).not.toHaveBeenCalled();
+    expect(h.reporter.requeued).not.toHaveBeenCalled();
+  });
+
+  // BP-1127: GitHub merges an armed pull request on its own, so releasing it would run the work twice
+  it("does not release a run whose merge was left armed when the stop landed", async () => {
+    const controller = new AbortController();
+    const delivery = deliverySpy({
+      merge: vi.fn<Delivery["merge"]>(async () => {
+        controller.abort();
+        return "queued";
+      }),
+    });
+    const h = harness({
+      createDelivery: vi.fn<PipelineDeps["createDelivery"]>(() => delivery),
+      signal: controller.signal,
+    });
+
+    await runTask(h.deps, merging);
+
+    expect(h.reporter.delivered).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it", true);
     expect(h.reporter.released).not.toHaveBeenCalled();
     expect(h.reporter.requeued).not.toHaveBeenCalled();
   });
@@ -2391,7 +2435,7 @@ describe("whether a run merges", () => {
 
     await runTask(h.deps, task);
 
-    expect(h.reporter.delivered).toHaveBeenCalledWith(task, "https://x/pull/7", "did it");
+    expect(h.reporter.delivered).toHaveBeenCalledWith(task, "https://x/pull/7", "did it", false);
     expect(h.reporter.merged).not.toHaveBeenCalled();
   });
 

@@ -5,6 +5,7 @@ import {
   protectedPaths,
   protectedPathsGate,
   PROTECTED_PATHS_BRIEF,
+  refusedAtPush,
   workflowPaths,
 } from "./protected-paths.js";
 import { DiffStats, GateContext } from "../types.js";
@@ -432,5 +433,35 @@ describe("what a project's own commands run, wherever it sits", () => {
 
   it.each(["tests/conftest.py", "services/api/gradlew", "Justfile", "noxfile.py", "pytest.ini", ".mvn/maven.config"])("refuses %s", (path) => {
     expect(protectedPaths([path, "docs/x.txt"], commands)).toEqual([path]);
+  });
+});
+
+// BP-1127: the Protected files gate is optional; these three are refused at the push whatever the agent
+describe("what no agent may push", () => {
+  const diff = (changedFiles: string[], symlinks: DiffStats["symlinks"] = [], gitlinks: string[] = []) => ({
+    changedFiles,
+    symlinks,
+    gitlinks,
+  });
+
+  it("lets an ordinary change through, package.json and configs included", () => {
+    expect(refusedAtPush(diff(["src/a.ts", "package.json", "playwright.config.ts", "CLAUDE.md"]))).toBeNull();
+  });
+
+  it("refuses a workflow, which Actions runs with the repository's secrets on the push itself", () => {
+    expect(refusedAtPush(diff(["src/a.ts", ".github/workflows/ci.yml"]))).toMatch(/\.github\/workflows\/ci\.yml/);
+  });
+
+  it("refuses a composite action a workflow already uses", () => {
+    expect(refusedAtPush(diff([".github/actions/setup/action.yml"]))).toMatch(/workflows or actions/);
+  });
+
+  it("refuses a submodule pointer", () => {
+    expect(refusedAtPush(diff(["vendor/lib"], [], ["vendor/lib"]))).toMatch(/submodule pointer \(vendor\/lib\)/);
+  });
+
+  it("refuses a symlink out of the checkout, and not one that stays inside it", () => {
+    expect(refusedAtPush(diff(["x"], [{ path: "x", target: "/etc/passwd" }]))).toMatch(/x → \/etc\/passwd/);
+    expect(refusedAtPush(diff(["docs/x"], [{ path: "docs/x", target: "../README.md" }]))).toBeNull();
   });
 });

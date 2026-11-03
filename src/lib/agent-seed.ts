@@ -1,5 +1,6 @@
 import { AgentComposition, IAgentBlock } from "@/types";
 import { GATE_KINDS } from "./agent-kinds";
+import { normaliseComposition } from "./agent-rules";
 import type { ScopedDb } from "@/lib/db-scope";
 
 // The blocks the worker implements today. Seeding them is what makes the catalog describe the
@@ -62,19 +63,13 @@ export const SEEDED_DEFAULT_NAME = "Default";
 /** The one that carries a Merge step; projects that used to merge automatically adopt it. */
 export const MERGING_AGENT_NAME = "Merges its own work";
 
-// Exactly today's pipeline. Adopting agents has to be a no-op for a project that never touches one,
-// so this is what a project naming no agent of its own runs.
+// A worker runs on its owner's machine, on tasks its owner assigned, in code its owner can reach;
+// the sandbox confines it. The test-presence and protected-paths gates refused work the owner wanted
+// and are left to the security-reviewed agent (BP-1127).
 export const DEFAULT_COMPOSITION: AgentComposition = {
   analysis: [],
   implementation: [{ key: "implement" }],
-  verification: [
-    { key: "protected-paths" },
-    { key: "diff-size" },
-    { key: "test-presence" },
-    { key: "build" },
-    { key: "test-run" },
-    { key: "review" },
-  ],
+  verification: [{ key: "diff-size" }, { key: "build" }, { key: "test-run" }, { key: "review" }],
   delivery: [{ key: "push" }, { key: "pull-request" }],
 };
 
@@ -98,16 +93,33 @@ export const CAREFUL_COMPOSITION: AgentComposition = {
 export const MERGING_COMPOSITION: AgentComposition = {
   analysis: [],
   implementation: [{ key: "implement" }],
-  verification: [
-    { key: "protected-paths" },
-    { key: "diff-size" },
-    { key: "test-presence" },
-    { key: "build" },
-    { key: "test-run" },
-    { key: "review" },
-  ],
+  verification: DEFAULT_COMPOSITION.verification,
   delivery: [{ key: "push" }, { key: "pull-request" }, { key: "merge" }],
 };
+
+const STRICT_VERIFICATION = [
+  { key: "protected-paths" },
+  { key: "diff-size" },
+  { key: "test-presence" },
+  { key: "build" },
+  { key: "test-run" },
+  { key: "review" },
+];
+
+// What the two were seeded with before BP-1127. A row still holding exactly this was never edited,
+// so it moves to the new composition; one somebody changed is theirs and stays as it is.
+const SEEDED_BEFORE_BP_1127: { name: string; from: AgentComposition; to: AgentComposition }[] = [
+  {
+    name: SEEDED_DEFAULT_NAME,
+    from: { ...DEFAULT_COMPOSITION, verification: STRICT_VERIFICATION },
+    to: DEFAULT_COMPOSITION,
+  },
+  {
+    name: MERGING_AGENT_NAME,
+    from: { ...MERGING_COMPOSITION, verification: STRICT_VERIFICATION },
+    to: MERGING_COMPOSITION,
+  },
+];
 
 export const SECURITY_REVIEW_BLOCK: SeedBlock = {
   key: "security-review",
@@ -162,7 +174,8 @@ export async function seedAgents(db: ScopedDb) {
     {
       $setOnInsert: {
         name: "With security review",
-        description: "The same, plus a model reading the change for security before delivery.",
+        description:
+          "The strict set: the default's checks, plus protected files, a required test and a model reading the change for security.",
         scope: "global",
         composition: CAREFUL_COMPOSITION,
         builtIn: true,
@@ -171,6 +184,13 @@ export async function seedAgents(db: ScopedDb) {
     { upsert: true }
   );
 
+  for (const { name, from, to } of SEEDED_BEFORE_BP_1127) {
+    const row = await db.Agent.findOne({ scope: "global", name, builtIn: true }).lean();
+    if (!row) continue;
+    if (JSON.stringify(normaliseComposition(row.composition)) !== JSON.stringify(from)) continue;
+    // On what was read, so an edit saved since is not overwritten
+    await db.Agent.updateOne({ _id: row._id, updatedAt: row.updatedAt }, { $set: { composition: to } });
+  }
 }
 
 /**

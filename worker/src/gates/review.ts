@@ -75,8 +75,9 @@ function capped(reason: string): string {
  * Said rather than refused, for the three that are left here: a binary fixture, an image or a
  * generated asset is ordinary work, and a gate refusing every change that carries one would be
  * switched off. A model told plainly that it cannot see a file can decline for that reason, and
- * says so in a sentence a person reads. The gitlink is the one that IS refused, one gate earlier,
- * because there is no reading of it anybody can do.
+ * says so in a sentence a person reads. The gitlink is the one that IS refused — by Protected files
+ * where the agent has that gate, and at the push whatever it has (BP-1127) — because there is no
+ * reading of it anybody can do.
  */
 function unreadableFiles(context: GateContext): string {
   const hidden = context.diff.suppressedDiffs;

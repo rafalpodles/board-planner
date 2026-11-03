@@ -99,6 +99,23 @@ describe("createReporter", () => {
     expect(api.comment.mock.calls[0][2]).toMatch(/added the thing/);
   });
 
+  it("leaves a delivered task in review, saying the worker did not merge it", async () => {
+    const api = apiSpy();
+    await createReporter(api, statuses).delivered(task, "https://github.com/x/y/pull/7", "added the thing");
+
+    expect(api.setStatus).toHaveBeenCalledWith("CP", "t1", "checking");
+    expect(api.comment.mock.calls[0][2]).toMatch(/did not merge it/);
+  });
+
+  it("says auto-merge is armed when the Merge step queued the pull request (BP-1127)", async () => {
+    const api = apiSpy();
+    await createReporter(api, statuses).delivered(task, "https://github.com/x/y/pull/7", "added the thing", true);
+
+    expect(api.setStatus).toHaveBeenCalledWith("CP", "t1", "checking");
+    expect(api.comment.mock.calls[0][2]).toMatch(/auto-merge armed/);
+    expect(api.comment.mock.calls[0][2]).not.toMatch(/did not merge it/);
+  });
+
   // The url is not free text and so does not go through safeText, which made it a path around the
   // one place everything else is scrubbed. delivery.ts builds it from gh output with a regex that
   // admits userinfo, so a credential-bearing remote publishes its token permanently.

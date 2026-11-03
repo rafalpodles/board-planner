@@ -22,7 +22,7 @@ export interface Reporter {
   released(task: ClaimedTask, reason: string): Promise<void>;
   requeued(task: ClaimedTask, reason: string): Promise<void>;
   merged(task: ClaimedTask, prUrl: string, summary: string): Promise<void>;
-  delivered(task: ClaimedTask, prUrl: string, summary: string): Promise<void>;
+  delivered(task: ClaimedTask, prUrl: string, summary: string, mergeQueued?: boolean): Promise<void>;
   failed(task: ClaimedTask, reason: string): Promise<void>;
   /** A project's own commands stopped the run before any step: not the task's doing, so no attempt is spent. */
   settingsFault(task: ClaimedTask, reason: string): Promise<void>;
@@ -178,14 +178,13 @@ export function createReporter(
       await report(task, statusIds.done, `Merged ${scrub(prUrl)}\n\n${safeText(summary)}`);
     },
 
-    // The agent carried no Merge step: the branch is pushed and a pull request is open, so the
-    // work is safe and a human decides. Review, not done — nothing has landed on the base branch.
-    async delivered(task, prUrl, summary) {
-      await report(
-        task,
-        statusIds.review,
-        `Opened ${scrub(prUrl)} for review. The worker did not merge it.\n\n${safeText(summary)}`
-      );
+    // No Merge step, or one that left GitHub's auto-merge armed: either way nothing has landed on
+    // the base branch yet, so review, not done.
+    async delivered(task, prUrl, summary, mergeQueued = false) {
+      const what = mergeQueued
+        ? `Opened ${scrub(prUrl)} with auto-merge armed: GitHub merges what is still open once the base branch's required checks and reviews pass. The task stays here until somebody moves it.`
+        : `Opened ${scrub(prUrl)} for review. The worker did not merge it.`;
+      await report(task, statusIds.review, `${what}\n\n${safeText(summary)}`);
     },
 
     async failed(task, reason) {

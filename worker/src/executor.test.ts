@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
+import { PROTECTED_PATHS_BRIEF } from "./gates/protected-paths.js";
 import { NO_RUN } from "./agents/agent.js";
 import { claudeAgent } from "./agents/claude.js";
 import { createExecutor } from "./executor.js";
@@ -270,6 +271,31 @@ describe("createExecutor", () => {
 
     const args = run.mock.calls[0][1] as string[];
     expect(args[args.indexOf("--append-system-prompt") + 1]).not.toContain("the worker itself runs");
+  });
+
+  it("tells the agent which files it may not touch when a protected-paths gate follows", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner, CLAUDE_PATH).execute({
+      ...options,
+      brief: { ...options.brief, laterChecks: ["protected-paths", "review"] },
+    });
+
+    const args = run.mock.calls[0][1] as string[];
+    expect(args[args.indexOf("--append-system-prompt") + 1]).toContain(PROTECTED_PATHS_BRIEF);
+  });
+
+  // BP-1127: BP-1086 blocked on one line in playwright.config.ts under an agent with no such gate
+  it("forbids no files to an agent composed without a protected-paths gate", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner, CLAUDE_PATH).execute({
+      ...options,
+      brief: { ...options.brief, laterChecks: ["build", "test-run", "review"] },
+    });
+
+    const args = run.mock.calls[0][1] as string[];
+    expect(args[args.indexOf("--append-system-prompt") + 1]).not.toContain("You may not create, edit or delete files");
   });
 
   it("asks the CLI for a stream, with the --verbose it refuses to stream without", async () => {

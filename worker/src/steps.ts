@@ -42,6 +42,8 @@ export interface RunState {
   pushed: boolean;
   prUrl: string;
   merged: boolean;
+  /** The Merge step armed GitHub's auto-merge: the pull request merges once its required checks pass. */
+  mergeQueued: boolean;
   summary: string;
   /** Every gate this run has passed so far, in order, for the pull request to list (BP-780). */
   checks: PassedCheck[];
@@ -71,6 +73,8 @@ export interface StepContext {
   gitPath: string;
   /** Where this entry sits in the agent's sequence — two identical steps are not the same step */
   position?: number;
+  /** What the change carries that no agent may push, read just before the push. */
+  refusedAtPush: () => Promise<string | null>;
 }
 
 // A push or a merge that throws must not reach the pipeline's outer catch: that requeues and
@@ -106,6 +110,9 @@ async function deliver(
       );
       if (wrong)
         return { kind: "error", message: `refusing to push: ${wrong}` };
+      const refused = await ctx.refusedAtPush();
+      if (refused)
+        return { kind: "error", message: `refusing to push: ${refused}` };
       await ctx.delivery.push(
         ctx.worktreePath,
         ctx.branch,
@@ -133,8 +140,12 @@ async function deliver(
           message: "the merge step ran with no pull request to merge",
         };
       }
-      await ctx.delivery.merge(ctx.worktreePath, ctx.state.prUrl);
-      ctx.state.merged = true;
+      const pushed = ctx.state.commits[ctx.state.commits.length - 1] ?? "";
+      if ((await ctx.delivery.merge(ctx.worktreePath, ctx.state.prUrl, pushed)) === "queued") {
+        ctx.state.mergeQueued = true;
+      } else {
+        ctx.state.merged = true;
+      }
       return { kind: "ok" };
 
     default:
