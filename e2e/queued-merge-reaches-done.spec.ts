@@ -1,10 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
+import { join } from "node:path";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
-import { createApiClient } from "../worker/src/api";
-import { createOutbox, type Store } from "../worker/src/outbox";
-import { createQueuedMerges, watchQueuedMerges, type QueuedMerge } from "../worker/src/queued-merges";
-import type { PullRequestState } from "../worker/src/delivery";
 import { signIn } from "./session";
 import {
   ADMIN_ID,
@@ -29,6 +26,18 @@ const REPOSITORY = "https://github.com/e2e/queued-merge";
 const MERGED = { id: new mongoose.Types.ObjectId(), number: 9_128, pr: `${REPOSITORY}/pull/1` };
 const CLOSED = { id: new mongoose.Types.ObjectId(), number: 9_129, pr: `${REPOSITORY}/pull/2` };
 const MOVED = { id: new mongoose.Types.ObjectId(), number: 9_130, pr: `${REPOSITORY}/pull/3` };
+const RERUN = { id: new mongoose.Types.ObjectId(), number: 9_131, pr: `${REPOSITORY}/pull/4` };
+const QUEUING_RUN = "e2e-run-queued-merge";
+
+// Required by path: a static import pulls worker/ into the app's tsc, whose Next.js ProcessEnv it does not satisfy
+function workerModule(name: string) {
+  return require(join(__dirname, "..", "worker", "src", name));
+}
+const { createApiClient } = workerModule("api");
+const { createOutbox } = workerModule("outbox");
+const { createQueuedMerges, watchQueuedMerges } = workerModule("queued-merges");
+
+type Store = { read(): string; write(text: string): void };
 
 async function db() {
   if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
@@ -56,13 +65,16 @@ async function serveTheProject() {
     { $set: { identity: identityId, owner: ADMIN_ID, repos: [{ remote: `${REPOSITORY}.git`, path: "/Users/someone/queued-merge" }] } }
   );
   const task = taskFactory(new Date());
+  const ranLast = (runId: string) => ({ execution: { lastRunId: runId, workerId: String(WORKER_ID), attempts: 1 } });
   await handle.collection("tasks").insertMany([
-    task({ _id: MERGED.id, taskNumber: MERGED.number, title: "Queued and merged", status: "in_review" }),
-    task({ _id: CLOSED.id, taskNumber: CLOSED.number, title: "Queued and closed", status: "in_review" }),
+    task({ _id: MERGED.id, taskNumber: MERGED.number, title: "Queued and merged", status: "in_review", ...ranLast(QUEUING_RUN) }),
+    task({ _id: CLOSED.id, taskNumber: CLOSED.number, title: "Queued and closed", status: "in_review", ...ranLast(QUEUING_RUN) }),
     // A person took this one back to the queue after the run reported it
-    task({ _id: MOVED.id, taskNumber: MOVED.number, title: "Queued and moved by a person", status: "todo" }),
+    task({ _id: MOVED.id, taskNumber: MOVED.number, title: "Queued and moved by a person", status: "todo", ...ranLast(QUEUING_RUN) }),
+    // Run again since, by another machine, which reported it back into review
+    task({ _id: RERUN.id, taskNumber: RERUN.number, title: "Queued and run again", status: "in_review", ...ranLast("e2e-run-later") }),
   ]);
-  await handle.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: MOVED.number } });
+  await handle.collection("projects").updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: RERUN.number } });
 }
 
 function memoryStore(): Store {
@@ -70,11 +82,12 @@ function memoryStore(): Store {
   return { read: () => text, write: (next) => void (text = next) };
 }
 
-function queued(task: typeof MERGED): QueuedMerge {
+function queued(task: typeof MERGED) {
   return {
     projectId: String(PROJECT_ID),
     taskId: String(task.id),
     taskKey: `${PROJECT_KEY}-${task.number}`,
+    runId: QUEUING_RUN,
     prUrls: [task.pr],
     review: "in_review",
     done: "done",
@@ -110,13 +123,18 @@ test("the worker moves a task whose queued pull request merged to done, and leav
     { read: () => JSON.stringify({ workerId: String(WORKER_ID), credential: WORKER_CREDENTIAL }) }
   );
   const merges = createQueuedMerges(memoryStore());
-  for (const task of [MERGED, CLOSED, MOVED]) merges.add(queued(task));
-  const states: Record<string, PullRequestState> = { [MERGED.pr]: "merged", [CLOSED.pr]: "closed", [MOVED.pr]: "merged" };
+  for (const task of [MERGED, CLOSED, MOVED, RERUN]) merges.add(queued(task));
+  const states: Record<string, string> = {
+    [MERGED.pr]: "merged",
+    [CLOSED.pr]: "closed",
+    [MOVED.pr]: "merged",
+    [RERUN.pr]: "merged",
+  };
   const outbox = createOutbox(memoryStore(), () => {});
 
-  await watchQueuedMerges({ merges, pullRequestState: async (url) => states[url], outbox, now: () => Date.now() });
-  // Three comments and two moves; the move a person pre-empted is refused for good, not retried
-  expect(await outbox.flush(api)).toEqual({ delivered: 4, pending: 0, dropped: 1 });
+  await watchQueuedMerges({ merges, pullRequestState: async (url: string) => states[url], outbox, now: () => Date.now() });
+  // Four comments and one move; the moves a person or a later run pre-empted are refused for good, not retried
+  expect(await outbox.flush(api)).toEqual({ delivered: 5, pending: 0, dropped: 2 });
   expect(merges.list()).toEqual([]);
 
   await signIn(page, "admin");
@@ -132,4 +150,8 @@ test("the worker moves a task whose queued pull request merged to done, and leav
   const moved = await openTask(page, MOVED.number);
   await expect(page.locator("div.group", { hasText: `GitHub merged ${MOVED.pr}.` })).toBeVisible();
   await expect(moved).toContainText("To Do");
+
+  const rerun = await openTask(page, RERUN.number);
+  await expect(page.locator("div.group", { hasText: `GitHub merged ${RERUN.pr}.` })).toBeVisible();
+  await expect(rerun).toContainText("In Review");
 });

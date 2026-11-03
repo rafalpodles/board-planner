@@ -192,6 +192,7 @@ export function createReporter(
           projectId: task.projectId,
           taskId: task.taskId,
           taskKey: task.taskKey,
+          runId: task.runId,
           // pipeline-several.ts reports every repository's pull request in one string
           prUrls: prUrl.split(", ").filter(Boolean),
           review: statusIds.review,

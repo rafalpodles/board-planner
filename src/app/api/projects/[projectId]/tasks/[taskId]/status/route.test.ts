@@ -92,7 +92,7 @@ describe("PATCH .../tasks/:taskId/status", () => {
   });
 
   it("hands the column the caller expects the task in down (BP-1128)", async () => {
-    const res = await PATCH(request({ status: "done", from: "in_review" }, "worker"), ctx());
+    const res = await PATCH(request({ status: "done", from: "in_review", fromRun: "run-1" }, "worker"), ctx());
 
     expect(res.status).toBe(200);
     expect(changeStatus).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", "t1", "done", "u1", {
@@ -100,11 +100,12 @@ describe("PATCH .../tasks/:taskId/status", () => {
       workerId: "w1",
       refundAttempt: false,
       from: "in_review",
+      fromRun: "run-1",
     });
   });
 
-  it("refuses a from that is not a column id, and moves nothing", async () => {
-    const res = await PATCH(request({ status: "done", from: 7 }, "worker"), ctx());
+  it.each([{ from: 7 }, { from: "in_review", fromRun: 7 }])("refuses %o, and moves nothing", async (body) => {
+    const res = await PATCH(request({ status: "done", ...body }, "worker"), ctx());
 
     expect(res.status).toBe(400);
     expect(changeStatus).not.toHaveBeenCalled();

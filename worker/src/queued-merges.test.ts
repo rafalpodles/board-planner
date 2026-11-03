@@ -22,6 +22,7 @@ function queued(overrides: Partial<QueuedMerge> = {}): QueuedMerge {
     projectId: "CP",
     taskId: "t1",
     taskKey: "CP-1",
+    runId: "run-1",
     prUrls: ["https://github.com/x/y/pull/7"],
     review: "checking",
     done: "shipped",
@@ -48,7 +49,7 @@ describe("watchQueuedMerges (BP-1128)", () => {
 
     expect(ops).toEqual([
       { kind: "comment", projectId: "CP", taskId: "t1", body: "GitHub merged https://github.com/x/y/pull/7." },
-      { kind: "status", projectId: "CP", taskId: "t1", status: "shipped", from: "checking" },
+      { kind: "status", projectId: "CP", taskId: "t1", status: "shipped", from: "checking", fromRun: "run-1" },
     ]);
     expect(merges.list()).toEqual([]);
   });

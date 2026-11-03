@@ -12,7 +12,8 @@ export interface QueuedMerge {
   taskId: string;
   taskKey: string;
   prUrls: string[];
-  /** The review column the run reported into: the task is moved only from there. */
+  /** The run that queued it, and the review column it reported into: the task is moved only from there. */
+  runId?: string;
   review: string;
   done: string;
   queuedAt: string;
@@ -128,7 +129,14 @@ export async function watchQueuedMerges(deps: WatchDeps): Promise<void> {
     }
     if (states.every((state) => state === "merged")) {
       deps.outbox.add({ kind: "comment", projectId, taskId, body: `GitHub merged ${urls}.` });
-      deps.outbox.add({ kind: "status", projectId, taskId, status: entry.done, from: entry.review });
+      deps.outbox.add({
+        kind: "status",
+        projectId,
+        taskId,
+        status: entry.done,
+        from: entry.review,
+        ...(entry.runId ? { fromRun: entry.runId } : {}),
+      });
       settle(index);
       continue;
     }

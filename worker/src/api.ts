@@ -34,7 +34,7 @@ export interface HeldAgent {
 
 export interface ApiClient {
   claim(projectId: string, runId: string, heldAgents?: HeldAgent[]): Promise<ClaimedTask | null>;
-  setStatus(projectId: string, taskId: string, status: string, options?: { refundAttempt?: boolean; from?: string }): Promise<void>;
+  setStatus(projectId: string, taskId: string, status: string, options?: { refundAttempt?: boolean; from?: string; fromRun?: string }): Promise<void>;
   comment(projectId: string, taskId: string, body: string): Promise<void>;
   release(projectId: string, taskId: string, options?: { refund?: boolean }): Promise<void>;
   statusIds(projectId: string): Promise<StatusIds>;
@@ -448,6 +448,7 @@ export function createApiClient(
         status,
         ...(options?.refundAttempt ? { refundAttempt: true } : {}),
         ...(options?.from ? { from: options.from } : {}),
+        ...(options?.fromRun ? { fromRun: options.fromRun } : {}),
       });
     },
 

@@ -55,11 +55,11 @@ describe("createOutbox", () => {
     const store = memoryStore();
     const log = vi.fn();
     const outbox = createOutbox(store, log);
-    outbox.add({ kind: "status", projectId: "CP", taskId: "t1", status: "done", from: "review" });
+    outbox.add({ kind: "status", projectId: "CP", taskId: "t1", status: "done", from: "review", fromRun: "run-1" });
     const api = apiSpy({ setStatus: vi.fn().mockRejectedValue(new ApiError("PATCH failed: 412", 412, JSON.stringify({ error: "The task is no longer in review" }))) });
 
     expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 0, dropped: 1 });
-    expect(api.setStatus).toHaveBeenCalledWith("CP", "t1", "done", { from: "review" });
+    expect(api.setStatus).toHaveBeenCalledWith("CP", "t1", "done", { from: "review", fromRun: "run-1" });
   });
 
   // The whole reason this exists: the process can die between the merge and the report

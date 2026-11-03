@@ -341,9 +341,9 @@ describe("createApiClient", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    await api.setStatus("CP", "t1", "done", { from: "review" });
+    await api.setStatus("CP", "t1", "done", { from: "review", fromRun: "run-1" });
 
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ status: "done", from: "review" });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ status: "done", from: "review", fromRun: "run-1" });
   });
 
   it("refuses to claim, without a network call, when no identity is stored", async () => {

@@ -890,7 +890,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     });
 
     expect(api.comment).toHaveBeenCalledWith("p1", "t1", expect.stringContaining("auto-merge armed"));
-    expect(queuedMerges()).toEqual([expect.objectContaining({ taskId: "t1", prUrls: ["https://github.com/o/r/pull/1"], done: "done" })]);
+    expect(queuedMerges()).toEqual([
+      expect.objectContaining({ taskId: "t1", runId: CLAIMED.runId, prUrls: ["https://github.com/o/r/pull/1"], done: "done" }),
+    ]);
   });
 
   it("moves a task whose queued pull request GitHub merged to done from review, asking as the pinned account (BP-1128)", async () => {
@@ -900,6 +902,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           projectId: "p1",
           taskId: "t9",
           taskKey: "CP-9",
+          runId: "run-9",
           prUrls: ["https://github.com/x/y/pull/7"],
           review: "in_review",
           done: "done",
@@ -912,7 +915,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     });
 
     expect(api.comment).toHaveBeenCalledWith("p1", "t9", "GitHub merged https://github.com/x/y/pull/7.");
-    expect(api.setStatus).toHaveBeenCalledWith("p1", "t9", "done", { from: "in_review" });
+    expect(api.setStatus).toHaveBeenCalledWith("p1", "t9", "done", { from: "in_review", fromRun: "run-9" });
     expect(prViews[0]?.env?.GH_TOKEN).toBe("gho_pinned");
     expect(queuedMerges()).toEqual([]);
   });

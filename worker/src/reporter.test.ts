@@ -133,6 +133,7 @@ describe("createReporter", () => {
       expect.objectContaining({
         projectId: "CP",
         taskId: "t1",
+        runId: task.runId,
         prUrls: ["https://github.com/x/y/pull/7", "https://github.com/x/z/pull/8"],
         review: "checking",
         done: "shipped",
