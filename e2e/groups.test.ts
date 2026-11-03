@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { GROUPS } from "./groups";
 import { SMOKES } from "./smoke/smokes";
+import { SECOND_PASS_ENV } from "./flaky-reporter";
 
 // Recursive, because `testDir: "./e2e"` is: a spec in a subdirectory is collected by Playwright
 // and would be invisible to a flat listing — running in no job at all, which is the one thing
@@ -84,6 +85,12 @@ describe("the e2e shards", () => {
     expect(secondPass).toHaveLength(1);
     expect(secondPass[0]).toContain("npx playwright test --project=${{ matrix.group }}");
     expect(secondPass[0]).not.toContain("--shard");
+  });
+
+  // BP-1086: without it a test the first pass failed and this one passed is listed as nothing
+  it("tells the flake reporter which run is the second pass", () => {
+    const secondPass = workflow.split("\n").find((line) => line.includes("--last-failed")) ?? "";
+    expect(secondPass.trim()).toMatch(new RegExp(`^${SECOND_PASS_ENV}=1 npx playwright test `));
   });
 
   it("only runs the second pass after a failed first one, and keeps the first pass's traces", () => {

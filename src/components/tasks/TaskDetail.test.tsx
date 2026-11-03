@@ -218,6 +218,39 @@ describe("TaskDetail", () => {
     expect(taskReads).toBe(2);
   });
 
+  it("does not let a read that was in flight when a criterion autosaved put the old criterion back (BP-1086)", async () => {
+    api.patch.mockResolvedValue({});
+    renderDetail();
+    await loaded();
+    const base = api.get.getMockImplementation()!;
+    let server = { ...task } as typeof task;
+    let release: (t: typeof task) => void = () => {};
+    const stale = new Promise<typeof task>((resolve) => (release = resolve));
+    let taskReads = 0;
+    api.get.mockImplementation((url: string) => {
+      if (url !== "/api/projects/TP/tasks/6") return base(url);
+      taskReads += 1;
+      return taskReads === 1 ? stale : Promise.resolve(server);
+    });
+    api.put.mockImplementation(async (_url: string, body: Partial<typeof task>) => {
+      server = { ...server, ...body } as typeof task;
+      return server;
+    });
+
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
+    await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
+    const second = () => screen.getByRole("checkbox", { name: "Second criterion" });
+    await act(async () => second().click());
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1), { timeout: 2_000 });
+    await act(async () => {});
+    expect(second().getAttribute("aria-checked")).toBe("true");
+
+    await act(async () => release({ ...task } as typeof task));
+
+    expect(second().getAttribute("aria-checked")).toBe("true");
+    expect(taskReads).toBe(2);
+  });
+
   it("moves status changes through the endpoint that runs the transition", async () => {
     api.patch.mockResolvedValue({});
     renderDetail();

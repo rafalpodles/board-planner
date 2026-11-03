@@ -477,11 +477,13 @@ jobs:
         # Next's dev server sometimes answers a bare 404 page for routes that exist, and keeps doing so
         # until the process ends (BP-1042). A per-test retry runs on the same process, so the tests that
         # failed run once more on a fresh one; a real failure fails again and the job stays red.
+        # e2e/flaky-reporter.ts lists in the job summary every test that passed only on retry or on
+        # that second pass, which E2E_SECOND_PASS tells it it is (BP-1086).
         run: |
           if ! npx playwright test --project=${{ matrix.group }} --shard=${{ matrix.shard }}/${{ steps.affected.outputs.shards }}; then
             echo "::warning title=e2e second pass::the first pass of ${{ matrix.group }} shard ${{ matrix.shard }} failed; its failed tests run once more on a fresh dev server (BP-1042)"
             rm -rf e2e/.artifacts-first-pass && cp -R e2e/.artifacts e2e/.artifacts-first-pass
-            npx playwright test --project=${{ matrix.group }} --last-failed
+            E2E_SECOND_PASS=1 npx playwright test --project=${{ matrix.group }} --last-failed
           fi
 
       - uses: actions/upload-artifact@v7

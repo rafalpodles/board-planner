@@ -118,9 +118,16 @@ function recordMinted(sent: ChecklistDraftItem[], stored: { _id?: string }[] | u
   });
 }
 
-export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err: unknown) => boolean) {
+export function useTaskEditor(
+  projectId: string,
+  task: ApiTask,
+  onRefused?: (err: unknown) => boolean,
+  onWritten?: () => void
+) {
   const refused = useRef(onRefused);
   refused.current = onRefused;
+  const written = useRef(onWritten);
+  written.current = onWritten;
   const api = useApi();
   const [draft, setDraft] = useState<TaskDraft>(() => draftFromTask(task));
   const [autoSaveState, setAutoSaveState] = useState<AutoSaveState>("idle");
@@ -175,6 +182,7 @@ export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err
       try {
         const edited = withKnownIds(pending, minted.current);
         const saved: Partial<ApiTask> | undefined = await api.put(`/api/projects/${projectId}/tasks/${task._id}`, edited);
+        written.current?.();
         if (edited.checklist) recordMinted(edited.checklist, saved?.checklist, minted.current);
         serverValues.current = { ...serverValues.current, ...withKnownIds(edited, minted.current) };
         setDraft((d) => {
