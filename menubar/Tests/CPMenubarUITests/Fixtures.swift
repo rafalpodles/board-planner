@@ -54,7 +54,7 @@ enum Fixtures {
          "projects":[
           {"project":"p1","key":"BP","name":"Board Planner","baseBranch":"main","model":"opus","reviewModel":"sonnet","maxDiffLines":800,"taskTimeoutMs":1800000,"blocked":""},
           {"project":"p2","key":"FNV","name":"Fonvo","baseBranch":"main","model":"opus","reviewModel":"sonnet","maxDiffLines":800,"taskTimeoutMs":1800000,"blocked":"/Users/dev/Workspace/FNV has no package-lock.json, and the build gate runs npm ci, which fails without one"},
-          {"project":"p3","key":"SB","name":"Ventures","baseBranch":"main","model":"opus","reviewModel":"sonnet","maxDiffLines":800,"taskTimeoutMs":1800000,"blocked":""}
+          {"project":"p3","key":"SB","name":"Ventures","baseBranch":"main","model":"opus","reviewModel":"sonnet","maxDiffLines":800,"taskTimeoutMs":1800000,"blocked":"","held":[{"agent":"Ship it","reason":"this project names its own gate commands but no test command, and its agent has a Tests pass gate: set one in Settings → Workers, or take that gate out of the agent"}]}
          ]}
         """
         return try! JSONDecoder().decode(ConfigResponse.self, from: Data(json.utf8))
