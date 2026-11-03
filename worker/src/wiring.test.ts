@@ -619,6 +619,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // What queued-merges.json holds when the worker starts, and what `gh pr view` answers (BP-1128)
       queuedMerges?: string;
       prView?: string;
+      mergeSettings?: string;
     } = {}
   ) {
     const queuedMergesStore = memoryStore(opts.queuedMerges ?? "");
@@ -719,6 +720,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           : {}),
         ...inner,
         run: (command: string, args: string[], runOpts: RunOpts) => {
+          if (opts.mergeSettings !== undefined && command.endsWith("/gh") && args[0] === "api" && args[1] === "graphql") {
+            return Promise.resolve({ code: 0, stdout: opts.mergeSettings, stderr: "", timedOut: false });
+          }
           if (opts.prView !== undefined && command.endsWith("/gh") && args[0] === "pr" && args[1] === "view") {
             prViews.push(runOpts);
             return Promise.resolve({ code: 0, stdout: opts.prView, stderr: "", timedOut: false });
@@ -863,6 +867,31 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       prViews,
     };
   }
+
+  it("watches the pull request a run left with auto-merge armed (BP-1128)", async () => {
+    const queuing: ClaimedTask = {
+      ...CLAIMED,
+      agent: {
+        agentId: "a1",
+        name: "Merges its own work",
+        sequence: [
+          { key: "implement", kind: "step", name: "Implement", prompt: "make the change", capability: "edit" },
+          { key: "push", kind: "step", name: "Push", deterministic: true },
+          { key: "pull-request", kind: "step", name: "Pull request", deterministic: true },
+          { key: "merge", kind: "step", name: "Merge", deterministic: true },
+        ],
+      },
+    };
+    const { api, queuedMerges } = await runOneTask(undefined, undefined, {
+      tasks: [queuing],
+      deliverable: true,
+      mergeSettings: JSON.stringify({ data: { repository: { squashMergeAllowed: true, autoMergeAllowed: true } } }),
+      prView: '{"state":"OPEN"}',
+    });
+
+    expect(api.comment).toHaveBeenCalledWith("p1", "t1", expect.stringContaining("auto-merge armed"));
+    expect(queuedMerges()).toEqual([expect.objectContaining({ taskId: "t1", prUrls: ["https://github.com/o/r/pull/1"], done: "done" })]);
+  });
 
   it("moves a task whose queued pull request GitHub merged to done from review, asking as the pinned account (BP-1128)", async () => {
     const { api, prViews, queuedMerges } = await runOneTask(undefined, undefined, {
