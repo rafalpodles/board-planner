@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.12.1](https://github.com/rafalpodles/board-planner/compare/v1.12.0...v1.12.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* a task whose queued auto-merge lands moves to done, and one closed unmerged says so (BP-1128) ([#775](https://github.com/rafalpodles/board-planner/issues/775)) ([a8f5868](https://github.com/rafalpodles/board-planner/commit/a8f58680eaedf407165e47f2663c6fe6f470c278))
+* **e2e:** flaky tests are listed in the CI summary, and four are fixed by cause (BP-1086) ([#772](https://github.com/rafalpodles/board-planner/issues/772)) ([9f83786](https://github.com/rafalpodles/board-planner/commit/9f837860c7a50827b7b1256efe5f1740eebf8f17))
+
 ## [1.12.0](https://github.com/rafalpodles/board-planner/compare/v1.11.0...v1.12.0) (2026-11-03)
 
 
