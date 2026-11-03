@@ -258,6 +258,7 @@ export const GROUPS = {
     "fleet-table-controls.spec.ts",
     "run-conflict.spec.ts",
     "run-completion.spec.ts",
+    "queued-merge-reaches-done.spec.ts",
     "run-record-survives-lock.spec.ts",
     "machine-fault-outcome.spec.ts",
     "run-history-fits.spec.ts",
