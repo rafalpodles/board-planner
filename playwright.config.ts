@@ -254,7 +254,8 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   // `stub-crash-reporter` fails a run whose stubs reported a crash; on its own, `list` would
   // leave the line in the log for whoever scrolls back (BP-581)
-  reporter: [["list"], ["./e2e/stub-crash-reporter.ts"], ["./e2e/request-log-reporter.ts"]],
+  // `flaky-reporter` names in the CI summary every test that passed only on retry or on the second pass (BP-1086)
+  reporter: [["list"], ["./e2e/stub-crash-reporter.ts"], ["./e2e/request-log-reporter.ts"], ["./e2e/flaky-reporter.ts"]],
   // Kept next to the tests, where e2e/.gitignore covers it — the repo root does not ignore
   // Playwright's default test-results/
   outputDir: "./e2e/.artifacts",

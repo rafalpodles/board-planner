@@ -92,6 +92,9 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
     localWrites.current += 1;
     setTask(updater);
   }, []);
+  const noteAutosave = useCallback(() => {
+    localWrites.current += 1;
+  }, []);
   // Whole-task reloads finish on their slowest read, so their readiness can land after a newer one
   const readinessReads = useRef({ issued: 0, shown: 0 });
   const showReadiness = (read: number, value: ApiHandoverReadiness | null) => {
@@ -233,6 +236,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       onClose={onClose}
       onReload={loadData}
       onTaskChange={changeTask}
+      onAutosaved={noteAutosave}
       onRefused={(err) => refuse(err)}
     />
   );
@@ -256,6 +260,7 @@ interface TaskDetailViewProps {
   onClose: () => void;
   onReload: () => void;
   onTaskChange: (updater: (prev: ApiTask | null) => ApiTask | null) => void;
+  onAutosaved: () => void;
   onRefused: (err: unknown) => boolean;
 }
 
@@ -270,6 +275,7 @@ function TaskDetailView({
   onClose,
   onReload,
   onTaskChange,
+  onAutosaved,
   onRefused,
 }: TaskDetailViewProps) {
   const api = useApi();
@@ -305,7 +311,8 @@ function TaskDetailView({
   const { draft, set, autoSaveState, autoSaveError, retry, resend, savedCount } = useTaskEditor(
     projectId,
     task,
-    onRefused
+    onRefused,
+    onAutosaved
   );
 
   const columns = effectiveColumns(project.columns);

@@ -48,8 +48,11 @@ async function withDb<T>(fn: (db: mongoose.mongo.Db) => Promise<T>): Promise<T> 
   return fn(handle);
 }
 
+// Only finished answers: `runPmTurn` stores the assistant row empty before it calls the model and
+// fills it when the turn ends, so counting every row returned while the turn was still running
+// (BP-1086)
 const answers = () =>
-  withDb((db) => db.collection("pmmessages").countDocuments({ role: "assistant" }));
+  withDb((db) => db.collection("pmmessages").countDocuments({ role: "assistant", content: { $ne: "" } }));
 
 /**
  * Types a message carrying its own directive, sends it, and waits for the **stored** answer.

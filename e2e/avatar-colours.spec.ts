@@ -105,11 +105,20 @@ test("the colour follows the theme: a different shade in light than in dark", as
     .getByRole("link", { name: new RegExp(SIBLING_TASK_TITLE) })
     .locator('span[style*="--avatar-"]');
 
+  // The theme is ThemeProvider's `data-theme`, set from a matchMedia listener once the page has
+  // hydrated: read before it lands, the "dark" palette colour is still the light one (BP-1086)
+  const html = page.locator("html");
+  const showsPaletteColour = async () =>
+    (await backgroundOf(avatar)) === (await paletteColour(page, ADMIN_USERNAME));
+
   await page.emulateMedia({ colorScheme: "dark" });
-  await expect.poll(async () => backgroundOf(avatar)).toBe(await paletteColour(page, ADMIN_USERNAME));
+  await expect(html).toHaveAttribute("data-theme", "dark");
+  await expect.poll(showsPaletteColour).toBe(true);
   const dark = await backgroundOf(avatar);
+  expect(dark).not.toMatch(TRANSPARENT);
 
   await page.emulateMedia({ colorScheme: "light" });
-  await expect.poll(() => backgroundOf(avatar)).not.toBe(dark);
-  await expectPersonColour(page, avatar, ADMIN_USERNAME);
+  await expect(html).toHaveAttribute("data-theme", "light");
+  await expect.poll(showsPaletteColour).toBe(true);
+  expect(await backgroundOf(avatar)).not.toBe(dark);
 });

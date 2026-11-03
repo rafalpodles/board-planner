@@ -265,16 +265,19 @@ test.describe("Workers · Default agent", () => {
     await expect(page.getByLabel("Default agent")).toHaveValue("");
 
     // And both are on the project's audit log, by the agent's name. The write is fire-and-forget
-    // and the card reads once per mount, so the read is retried rather than assumed to have caught it
+    // and the card reads once per mount, so the rows are waited for in the store and the page is
+    // opened once after. Retrying the navigation instead gave each attempt two seconds, which a
+    // dev server's first compile of the audit route outlasts on every attempt (BP-1086)
+    const entries = ["Default agent: none → Default", "Default agent: Default → none"];
+    await expect
+      .poll(() =>
+        withDb((db) =>
+          db.collection("projectauditlogs").countDocuments({ project: PROJECT_ID, detail: { $in: entries } })
+        )
+      )
+      .toBe(2);
+    await page.goto(`${SETTINGS}?section=audit`);
     const details = page.getByTestId("audit-detail");
-    await expect(async () => {
-      await page.goto(`${SETTINGS}?section=audit`);
-      await expect(details.filter({ hasText: "Default agent: none → Default" })).toHaveCount(1, {
-        timeout: 2_000,
-      });
-      await expect(details.filter({ hasText: "Default agent: Default → none" })).toHaveCount(1, {
-        timeout: 2_000,
-      });
-    }).toPass({ timeout: 20_000 });
+    for (const entry of entries) await expect(details.filter({ hasText: entry })).toHaveCount(1);
   });
 });
