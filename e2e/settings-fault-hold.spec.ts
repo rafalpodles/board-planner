@@ -154,13 +154,13 @@ test.describe("a project's own commands that cannot run", () => {
   test("a claim tells the machine which of its holds the board still steps over", async ({ request }) => {
     const standing = await claim(request, holding());
     expect(standing.status(), await standing.text()).toBe(204);
-    expect(standing.headers()["x-agents-held"]).toBe(String(HELD_AGENT));
+    expect(standing.headers()["x-agents-held"]).toBe(JSON.stringify([String(HELD_AGENT)]));
 
     await (await db()).collection("agents").updateOne({ _id: HELD_AGENT }, { $set: { composition: compose([]) } });
 
     const lifted = await claim(request, holding());
     expect(lifted.status()).toBe(204);
-    expect(lifted.headers()["x-agents-held"]).toBe("");
+    expect(lifted.headers()["x-agents-held"]).toBe("[]");
     expect((await claim(request)).headers()["x-agents-held"]).toBeUndefined();
   });
 

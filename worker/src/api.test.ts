@@ -332,10 +332,12 @@ describe("createApiClient", () => {
     const heard: string[][] = [];
     const heldAgents = [{ agentId: "a1", gates: ["build"] }, { agentId: "a2", gates: [] }];
 
-    await createApiClient(config, answered("a1") as never, identityStore).claim("CP", "run-1", heldAgents, (ids) => heard.push(ids));
-    await createApiClient(config, answered("") as never, identityStore).claim("CP", "run-2", heldAgents, (ids) => heard.push(ids));
+    await createApiClient(config, answered('["a1"]') as never, identityStore).claim("CP", "run-1", heldAgents, (ids) => heard.push(ids));
+    await createApiClient(config, answered("[]") as never, identityStore).claim("CP", "run-2", heldAgents, (ids) => heard.push(ids));
     await createApiClient(config, answered(null) as never, identityStore).claim("CP", "run-3", heldAgents, (ids) => heard.push(ids));
-    await createApiClient(config, answered("a1") as never, identityStore).claim("CP", "run-4", [], (ids) => heard.push(ids));
+    await createApiClient(config, answered('["a1"]') as never, identityStore).claim("CP", "run-4", [], (ids) => heard.push(ids));
+    await createApiClient(config, answered("a1,a2") as never, identityStore).claim("CP", "run-5", heldAgents, (ids) => heard.push(ids));
+    await createApiClient(config, answered("[1]") as never, identityStore).claim("CP", "run-6", heldAgents, (ids) => heard.push(ids));
 
     expect(heard).toEqual([["a1"], []]);
   });

@@ -84,9 +84,10 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
 
   const stillHeld = await agentsStillHeld(db, projectId, held, machineOwnerId);
   // Which of the machine's holds the board still honours, so a hold lifted here by a change to the
-  // agent's gates leaves the machine's own account of it too
+  // agent's gates leaves the machine's own account of it too. JSON, so that none is `[]` and not an
+  // empty value a proxy may drop
   const answer = (response: NextResponse) => {
-    if (held.length > 0) response.headers.set(AGENTS_HELD_HEADER, stillHeld.join(","));
+    if (held.length > 0) response.headers.set(AGENTS_HELD_HEADER, JSON.stringify(stillHeld));
     return response;
   };
 

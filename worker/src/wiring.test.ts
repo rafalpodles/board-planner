@@ -663,10 +663,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     const api = {
       claim: vi.fn<ApiClient["claim"]>(async (projectId, _runId, heldAgents, onStillHeld) => {
-        if (opts.boardStillHolds && heldAgents?.length) onStillHeld?.(opts.boardStillHolds);
         const refusal =
           typeof opts.claimRefusal === "string" ? opts.claimRefusal : opts.claimRefusal?.[projectId];
         if (refusal) throw new ClaimRefused(refusal);
+        if (opts.boardStillHolds && heldAgents?.length) onStillHeld?.(opts.boardStillHolds);
         return queue[claims++] ?? null;
       }),
       setStatus: vi.fn<ApiClient["setStatus"]>().mockResolvedValue(undefined),

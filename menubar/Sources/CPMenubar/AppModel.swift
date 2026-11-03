@@ -91,7 +91,8 @@ final class AppModel {
                     while !Task.isCancelled {
                         try? await Task.sleep(for: configRefresh)
                         if Task.isCancelled { return }
-                        if let fresh = try? await client.config() { self.config = fresh }
+                        guard let fresh = try? await client.config(), !Task.isCancelled else { continue }
+                        self.config = fresh
                     }
                 }
                 defer { refresh.cancel() }

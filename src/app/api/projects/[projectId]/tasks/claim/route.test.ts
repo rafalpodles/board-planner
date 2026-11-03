@@ -619,10 +619,10 @@ describe("claiming a task whose agent runs on a coding CLI", () => {
 
     it("tells the machine which of its holds still stand, with the queue empty or not", async () => {
       const OTHER = "69a52e3b399b27d3cbb2c5ca";
-      snapshotFor.mockImplementation(async (_db: unknown, _project: unknown, agentId: unknown) =>
+      snapshotFor.mockImplementation((async (_db: unknown, _project: unknown, agentId: unknown) =>
         agentId === AGENT
           ? { agentId: AGENT, name: "Held", sequence: [{ key: "build", kind: "gate", name: "Builds", gateKind: "build" }] }
-          : { agentId: String(agentId), name: "Edited", sequence: [] }
+          : { agentId: String(agentId), name: "Edited", sequence: [] }) as never
       );
       const holds = [{ agentId: AGENT, gates: ["build"] }, { agentId: OTHER, gates: ["build"] }];
 
@@ -631,9 +631,9 @@ describe("claiming a task whose agent runs on a coding CLI", () => {
       const empty = await claimHolding(holds);
 
       expect(claimed.status).toBe(200);
-      expect(claimed.headers.get("x-agents-held")).toBe(AGENT);
+      expect(claimed.headers.get("x-agents-held")).toBe(JSON.stringify([AGENT]));
       expect(empty.status).toBe(204);
-      expect(empty.headers.get("x-agents-held")).toBe(AGENT);
+      expect(empty.headers.get("x-agents-held")).toBe(JSON.stringify([AGENT]));
     });
 
     it("says nothing about holds to a machine that has none", async () => {

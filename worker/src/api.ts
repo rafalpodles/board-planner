@@ -29,6 +29,17 @@ export interface PhaseEvent {
 // stopped it. The server judges those, since this machine sees an agent only by claiming a task.
 const AGENTS_HELD_HEADER = "x-agents-held";
 
+// Null for a board that says nothing, or something unreadable: no hold is dropped on either
+function agentIdsIn(header: string | null): string[] | null {
+  if (header === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(header);
+    return Array.isArray(parsed) && parsed.every((id) => typeof id === "string") ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface HeldAgent {
   agentId: string;
   gates: string[];
@@ -385,8 +396,8 @@ export function createApiClient(
         }
         throw error;
       }
-      const stillHeld = heldAgents?.length ? (response.headers?.get(AGENTS_HELD_HEADER) ?? null) : null;
-      if (stillHeld !== null) onStillHeld?.(stillHeld.split(",").filter(Boolean));
+      const stillHeld = heldAgents?.length ? agentIdsIn(response.headers?.get(AGENTS_HELD_HEADER) ?? null) : null;
+      if (stillHeld) onStillHeld?.(stillHeld);
       if (response.status === 204) return null;
 
       const raw = (await response.json()) as RawTask;
