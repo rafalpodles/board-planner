@@ -220,7 +220,7 @@ async function claudeSession(
   const account = typeof parsed.email === "string" ? parsed.email : "";
   const plan = typeof parsed.subscriptionType === "string" ? parsed.subscriptionType : "";
 
-  if (parsed.authMethod === "apiKey") {
+  if (parsed.authMethod === "api_key") {
     return {
       account,
       answered: true,
