@@ -53,7 +53,7 @@ describe("ProjectTree", () => {
     const accented = container.querySelectorAll("[data-active-project]");
     expect(accented.length).toBe(1);
     expect(accented[0].textContent).toContain("Test Project");
-    expect(accented[0].className).toContain("shadow-[inset_3px_0_0_var(--color-primary)]");
+    expect(accented[0].className.split(/\s+/)).toContain("bg-bg-hover");
   });
 
   it("expands the route project's sub-nav and leaves the others collapsed", () => {

@@ -332,7 +332,7 @@ export function Sidebar({
       onClick={(e) => {
         if ((e.target as HTMLElement).closest("a")) onNavigate();
       }}
-      className={`fixed inset-y-0 left-0 z-50 flex w-[260px] shrink-0 flex-col border-r border-border bg-bg-card transition-transform md:h-dvh md:translate-x-0 md:transition-[width] ${
+      className={`fixed inset-y-0 left-0 z-50 flex w-[260px] shrink-0 flex-col border-r border-border bg-bg transition-transform md:h-dvh md:translate-x-0 md:transition-[width] ${
         floats ? "md:fixed md:top-0 md:z-[45]" : "md:sticky md:top-0 md:z-30"
       } ${mobileOpen ? "translate-x-0" : "-translate-x-full"} ${
         compact ? "md:w-14" : "md:w-[260px]"

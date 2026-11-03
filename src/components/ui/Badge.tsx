@@ -27,6 +27,10 @@ const categoryAccents: Record<Category, string> = {
   idea: "var(--color-warning)",
 };
 
+export function categoryAccent(category: string): string | undefined {
+  return category in categoryAccents ? categoryAccents[category as Category] : undefined;
+}
+
 interface BadgeProps {
   children: React.ReactNode;
   variant?: "status" | "priority" | "category" | "default";
@@ -55,7 +59,7 @@ export function Badge({
     }
   }
 
-  const base = "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium";
+  const base = "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium";
 
   if (!accent) {
     return (

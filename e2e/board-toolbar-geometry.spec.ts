@@ -7,6 +7,9 @@ import { signIn as arriveSignedIn } from "./session";
  * breakpoint the others did not have — `Button`'s `sm` size carries `min-h-11 sm:min-h-[36px]`.
  * So the row grew and shrank as the window resized, which is what a person actually sees.
  *
+ * BP-1129 made the row 36px on desktop and kept 44px touch targets on a phone, by decision: the
+ * row changes height at exactly one breakpoint, as a whole, so every control still agrees.
+ *
  * Heights are the one thing here the server cannot answer, so they are measured in the browser.
  */
 
@@ -37,7 +40,7 @@ async function controlHeights(page: Page) {
 const PHONE = { width: 390, height: 780 };
 const DESKTOP = { width: 1280, height: 900 };
 
-test("every board toolbar control is the same height, at any width", async ({ page }) => {
+test("every board toolbar control is the same height, at each width", async ({ page }) => {
   await signIn(page);
   await page.setViewportSize(PHONE);
   await page.goto(`/projects/${PROJECT_KEY}`);
@@ -65,11 +68,8 @@ test("every board toolbar control is the same height, at any width", async ({ pa
   const desktopHeights = [...new Set(Object.values(onDesktop))];
   expect(desktopHeights, `desktop heights: ${JSON.stringify(onDesktop)}`).toHaveLength(1);
 
-  // The complaint was that the row's height changed with the window, so this is the assertion
-  // that matters: the one height on a phone is the one height on a desktop.
-  expect(desktopHeights[0], `phone ${phoneHeights[0]} vs desktop ${desktopHeights[0]}`).toBe(
-    phoneHeights[0],
-  );
+  expect(phoneHeights[0], "a phone keeps 44px touch targets").toBe(44);
+  expect(desktopHeights[0], "the desktop row is the compact one").toBe(36);
 });
 
 test("the board's text search is a desktop-only control", async ({ page }) => {

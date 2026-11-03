@@ -243,7 +243,7 @@ export function ProjectTree({
       <div className="mb-1.5 ml-2.5 flex items-center gap-1">
         <Link
           href="/projects"
-          className="focus-ring inline-flex min-h-[44px] items-center rounded text-[10.5px] font-bold uppercase tracking-wider text-text-muted transition-colors hover:text-text md:min-h-0"
+          className="focus-ring inline-flex min-h-[44px] items-center rounded text-xs font-medium text-text-muted transition-colors hover:text-text md:min-h-0"
         >
           Projects
         </Link>
@@ -285,7 +285,7 @@ export function ProjectTree({
               data-reorderable={canReorder || undefined}
               {...(canReorder ? handleProps : {})}
               className={`relative flex w-full items-center gap-1.5 rounded-lg pr-2.5 transition-colors hover:bg-bg-hover ${
-                isRouteProject ? "shadow-[inset_3px_0_0_var(--color-primary)]" : ""
+                isRouteProject && !isDragging ? "bg-bg-hover" : ""
               } ${canReorder ? "cursor-grab touch-pan-y active:cursor-grabbing" : ""} ${
                 isDragging ? "bg-bg-card shadow-lg ring-1 ring-border" : ""
               }`}
@@ -322,7 +322,7 @@ export function ProjectTree({
             </div>
 
             {expanded && (
-              <div className="ml-5 flex flex-col gap-px border-l border-border pl-3">
+              <div className="mt-1 ml-5 flex flex-col gap-0.5 border-l border-border pl-3">
                 {projectSections(project, pathname).map((section) => (
                   <SubItem key={section.label} {...section} />
                 ))}

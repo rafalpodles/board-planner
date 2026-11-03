@@ -2,6 +2,9 @@
 @plugin "@tailwindcss/typography";
 
 @theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
   /* Accent-as-text; overridden per theme so it stays readable on the background */
   --color-primary: #60a5fa;
   --color-primary-hover: #93c5fd;
@@ -17,13 +20,13 @@
   --color-danger-solid: #dc2626;
   --color-danger-solid-hover: #b91c1c;
   --color-success-solid: #15803d;
-  --color-bg: #0f172a;
-  --color-bg-card: #1e293b;
-  --color-bg-input: #334155;
-  --color-bg-hover: #334155;
-  --color-border: #475569;
-  --color-text: #f1f5f9;
-  --color-text-muted: #a9b6c8;
+  --color-bg: #141415;
+  --color-bg-card: #202023;
+  --color-bg-input: #26262a;
+  --color-bg-hover: #26262a;
+  --color-border: rgba(237, 237, 237, 0.1);
+  --color-text: #ededed;
+  --color-text-muted: #a1a1a6;
 
   --color-status-planned: #9ca3af;
   --color-status-todo: #60a5fa;
@@ -38,8 +41,8 @@
   --color-difficulty-l: #fbbf24;
   --color-difficulty-xl: #f87171;
 
-  --color-priority-low: #9ca3af;
-  --color-priority-medium: #60a5fa;
+  --color-priority-low: #98989e;
+  --color-priority-medium: #b8b8be;
   --color-priority-high: #fbbf24;
   --color-priority-urgent: #f87171;
 
@@ -57,25 +60,25 @@ body {
 :root {
   --avatar-0: #1d4ed8;
   --avatar-1: #0f766e;
-  --avatar-2: #15803d;
+  --avatar-2: #166534;
   --avatar-3: #92400e;
-  --avatar-4: #c2410c;
+  --avatar-4: #9a3412;
   --avatar-5: #be123c;
   --avatar-6: #a21caf;
   --avatar-7: #6d28d9;
   --avatar-8: #0e7490;
-  --avatar-9: #4d7c0f;
+  --avatar-9: #3f6212;
 }
 
 /* Light theme overrides */
 [data-theme="light"] {
-  --color-bg: #f8fafc;
+  --color-bg: #fafafa;
   --color-bg-card: #ffffff;
-  --color-bg-input: #e2e8f0;
-  --color-bg-hover: #e2e8f0;
-  --color-border: #cbd5e1;
-  --color-text: #0f172a;
-  --color-text-muted: #475569;
+  --color-bg-input: #f0f0f1;
+  --color-bg-hover: #ececee;
+  --color-border: rgba(23, 23, 23, 0.12);
+  --color-text: #171717;
+  --color-text-muted: #525252;
   --color-primary: #1d4ed8;
   --color-primary-hover: #1e40af;
   --color-primary-on-tint: #1e40af;
@@ -110,8 +113,8 @@ body {
   --color-difficulty-l: #92400e;
   --color-difficulty-xl: #b91c1c;
 
-  --color-priority-low: #4b5563;
-  --color-priority-medium: #1d4ed8;
+  --color-priority-low: #737373;
+  --color-priority-medium: #525252;
   --color-priority-high: #92400e;
   --color-priority-urgent: #b91c1c;
 }
@@ -121,7 +124,7 @@ body {
    the accent — enough hue to tell categories apart at a glance. */
 .chip {
   --chip: var(--color-primary);
-  background-color: color-mix(in srgb, var(--chip) 18%, var(--color-bg-card));
+  background-color: color-mix(in srgb, var(--chip) 12%, var(--color-bg-card));
   color: color-mix(in srgb, var(--chip) 85%, var(--color-text));
 }
 
@@ -233,10 +236,10 @@ body {
    means one rule gives a pale tint in light mode and a dark one in dark mode. */
 .cat-card {
   border-color: var(--cat);
-  background-color: color-mix(in srgb, var(--cat) 8%, var(--color-bg));
+  background-color: color-mix(in srgb, var(--cat) 8%, var(--color-bg-card));
 }
 .cat-card:hover {
-  background-color: color-mix(in srgb, var(--cat) 16%, var(--color-bg));
+  background-color: color-mix(in srgb, var(--cat) 16%, var(--color-bg-card));
 }
 
 /* Hover thickens the card's edge. An inset outline rather than a second border pixel,
@@ -267,7 +270,6 @@ body {
 }
 
 .cat-row {
-  box-shadow: inset 3px 0 0 var(--cat);
   background-color: color-mix(in srgb, var(--cat) 5%, var(--color-bg));
 }
 .cat-row:hover {

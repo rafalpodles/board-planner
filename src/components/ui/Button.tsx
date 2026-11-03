@@ -4,7 +4,7 @@ import { ButtonHTMLAttributes, forwardRef } from "react";
 
 const variants = {
   primary: "bg-primary-solid hover:bg-primary-solid-hover text-white",
-  secondary: "bg-bg-input hover:bg-bg-hover text-text border border-border",
+  secondary: "bg-transparent hover:bg-bg-hover text-text border border-border",
   danger: "bg-danger-solid hover:bg-danger-solid-hover text-white",
   ghost: "hover:bg-bg-hover text-text-muted hover:text-text",
 };

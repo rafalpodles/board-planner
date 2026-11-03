@@ -513,7 +513,7 @@ export function BoardFilters({
     "focus-ring h-8 w-full rounded-lg border border-border bg-bg-input px-2 text-[12px] text-text";
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-1.5 md:gap-2.5 md:px-6 md:py-2.5">
+    <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 md:gap-2 md:px-6 md:pt-4 md:pb-2">
       {/* Basis below the target width so the row fits before anything wraps;
           it grows back up to 200px whenever there is room.
           Hidden on a phone: the header's magnifier opens the same search, and this is the widest
@@ -537,25 +537,25 @@ export function BoardFilters({
           placeholder={`Search tasks, or ${projectKey ?? "CP"}-128…`}
           value={filters.search}
           onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-          className="focus-ring h-11 w-full rounded-lg border border-border bg-bg-card pl-8 pr-2.5 text-[13px] text-text placeholder:text-text-muted"
+          className="focus-ring h-11 md:h-9 w-full rounded-lg border border-transparent bg-bg-input pl-8 pr-2.5 text-[13px] text-text placeholder:text-text-muted"
         />
       </div>
 
-      <div className="hidden h-[22px] w-px shrink-0 bg-border md:block" />
+      
 
       <div className="relative shrink-0" ref={popoverRef}>
         <button
           onClick={() => setShowFilters((v) => !v)}
           aria-expanded={showFilters}
-          className={`focus-ring flex h-11 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium transition-colors ${
+          className={`focus-ring flex h-11 md:h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium transition-colors ${
             hasActiveFilters
               ? "border-primary bg-primary/10 text-primary-on-tint"
-              : "border-border text-text-muted hover:text-text"
+              : "border-transparent bg-bg-input text-text-muted hover:text-text"
           }`}
         >
           Filters
           {activeCount > 0 && (
-            <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary-solid px-1 text-[10px] font-bold text-white">
+            <span className="flex h-4 min-w-4 items-center justify-center rounded bg-text px-1 font-mono text-[10px] font-medium text-bg">
               {activeCount}
             </span>
           )}
@@ -587,7 +587,7 @@ export function BoardFilters({
             {chips.length > 0 && (
               <>
                 <div className="mb-2 flex items-center justify-between">
-                  <span className="text-[10.5px] font-bold uppercase tracking-wider text-text-muted">
+                  <span className="text-xs font-medium text-text-muted">
                     Active
                   </span>
                   <button
@@ -836,7 +836,7 @@ export function BoardFilters({
       )}
 
       {showGroupBy && onGroupByChange && (
-        <div className="flex h-11 shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card md:ml-auto">
+        <div className="flex h-11 md:h-9 shrink-0 items-center overflow-hidden rounded-lg bg-bg-input md:ml-auto">
           <select
             value={groupByRows ? laneGroupBy(groupBy) : groupBy}
             aria-label="Group tasks by"
@@ -855,7 +855,7 @@ export function BoardFilters({
       )}
 
       <div
-        className={`flex h-11 shrink-0 items-center overflow-hidden rounded-lg border border-border bg-bg-card ${
+        className={`flex h-11 md:h-9 shrink-0 items-center overflow-hidden rounded-lg bg-bg-input ${
           showGroupBy && onGroupByChange ? "" : "md:ml-auto"
         }`}
       >

@@ -96,7 +96,7 @@ export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPick
           {/* Kept apart, so it is obvious which columns this project invented */}
           {fromProject.length > 0 && (
             <>
-              <p className="mt-2 px-2 pb-1 pt-1 text-[10.5px] font-bold uppercase tracking-wider text-text-muted">
+              <p className="mt-2 px-2 pb-1 pt-1 text-xs font-medium text-text-muted">
                 Project fields
               </p>
               {fromProject.map((column) => (

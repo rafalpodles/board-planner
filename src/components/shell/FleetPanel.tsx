@@ -104,11 +104,11 @@ export function FleetPanel() {
           aria-expanded={open}
           aria-controls={open ? "fleet-list" : undefined}
           onClick={() => setOpen((o) => !o)}
-          className="focus-ring inline-flex min-h-[44px] items-center gap-1.5 rounded text-[10.5px] font-bold uppercase tracking-wider text-text-muted transition-colors hover:text-text md:min-h-0"
+          className="focus-ring inline-flex min-h-[44px] items-center gap-1.5 rounded text-xs font-medium text-text-muted transition-colors hover:text-text md:min-h-0"
         >
           Machines
           {working > 0 && (
-            <span className="rounded-full bg-bg-input px-1.5 text-[10px] font-semibold normal-case tracking-normal text-text">
+            <span className="rounded-full bg-bg-input px-1.5 text-[10px] font-semibold text-text">
               {working} working
             </span>
           )}
