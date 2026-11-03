@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { ApiClient, StatusIds } from "./api.js";
 import { createReporter, ReleaseMemory } from "./reporter.js";
+import { QueuedMerge } from "./queued-merges.js";
 import { ClaimedTask } from "./types.js";
 import { claimedTask } from "./__fixtures__/task.js";
 
@@ -114,6 +115,26 @@ describe("createReporter", () => {
     expect(api.setStatus).toHaveBeenCalledWith("CP", "t1", "checking");
     expect(api.comment.mock.calls[0][2]).toMatch(/auto-merge armed/);
     expect(api.comment.mock.calls[0][2]).not.toMatch(/did not merge it/);
+  });
+
+  // BP-1128: nothing else ever moves this task once the run has ended
+  it("watches a queued pull request, and only a queued one, from the review column it reported into", async () => {
+    const added: QueuedMerge[] = [];
+    const merges = { add: (entry: QueuedMerge) => added.push(entry), list: () => added, replace: vi.fn() };
+    const reporter = createReporter(apiSpy(), statuses, vi.fn(), undefined, new Map(), merges);
+
+    await reporter.delivered(task, "https://github.com/x/y/pull/7, https://github.com/x/z/pull/8", "s", true);
+    await reporter.delivered(task, "https://github.com/x/y/pull/9", "s");
+
+    expect(added).toEqual([
+      expect.objectContaining({
+        projectId: "CP",
+        taskId: "t1",
+        prUrls: ["https://github.com/x/y/pull/7", "https://github.com/x/z/pull/8"],
+        review: "checking",
+        done: "shipped",
+      }),
+    ]);
   });
 
   // The url is not free text and so does not go through safeText, which made it a path around the

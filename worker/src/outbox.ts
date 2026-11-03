@@ -7,7 +7,7 @@ import { RunRecord } from "./run-record.js";
 // fail — so it has to survive the process, not just the request.
 export type OutboxOp =
   | { kind: "comment"; projectId: string; taskId: string; body: string }
-  | { kind: "status"; projectId: string; taskId: string; status: string; refundAttempt?: boolean }
+  | { kind: "status"; projectId: string; taskId: string; status: string; refundAttempt?: boolean; from?: string }
   | { kind: "release"; projectId: string; taskId: string; refund: boolean }
   // A record posted after a merge hits the same redeploy the comment does, and it is the only
   // trace the run leaves — losing it makes a finished run indistinguishable from one that never ran.
@@ -64,8 +64,10 @@ const MAX_ENTRIES = 500;
  * (found in review). 405 stays: App Router answers it for a route file without that verb, which is
  * the "worker newer than its board" family this exists for. 413 earns its place — a `comment` op
  * carries patch output, and a body a platform limit rejects is rejected identically for ever.
+ * 412 is a move that named the column it expected the task in, after a person moved it elsewhere
+ * (BP-1128): asking again only asks to undo what they did.
  */
-const PERMANENT_REFUSALS = new Set([400, 405, 410, 413, 414, 415, 422]);
+const PERMANENT_REFUSALS = new Set([400, 405, 410, 412, 413, 414, 415, 422]);
 
 function permanent(error: unknown): boolean {
   return error instanceof ApiError && PERMANENT_REFUSALS.has(error.status);
@@ -122,6 +124,7 @@ function taskOf(op: OutboxOp): string | undefined {
 async function deliver(api: ApiClient, op: OutboxOp): Promise<void> {
   if (op.kind === "comment") return api.comment(op.projectId, op.taskId, op.body);
   if (op.kind === "status") {
+    if (op.from) return api.setStatus(op.projectId, op.taskId, op.status, { from: op.from });
     return op.refundAttempt
       ? api.setStatus(op.projectId, op.taskId, op.status, { refundAttempt: true })
       : api.setStatus(op.projectId, op.taskId, op.status);

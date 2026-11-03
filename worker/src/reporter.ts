@@ -1,5 +1,6 @@
 import { ApiClient, StatusIds } from "./api.js";
 import { Outbox, OutboxOp } from "./outbox.js";
+import { QueuedMerges } from "./queued-merges.js";
 import { scrub } from "./scrub.js";
 import { ClaimedTask } from "./types.js";
 
@@ -65,7 +66,8 @@ export function createReporter(
   statusIds: StatusIds,
   log: Log = (message) => console.error(message),
   outbox?: Outbox,
-  lastRelease: ReleaseMemory = new Map()
+  lastRelease: ReleaseMemory = new Map(),
+  queuedMerges?: QueuedMerges
 ): Reporter {
 
   // Losing a report strands the task: the work is merged but the board still shows it active,
@@ -179,12 +181,24 @@ export function createReporter(
     },
 
     // No Merge step, or one that left GitHub's auto-merge armed: either way nothing has landed on
-    // the base branch yet, so review, not done.
+    // the base branch yet, so review, not done. A queued one is watched until GitHub settles it.
     async delivered(task, prUrl, summary, mergeQueued = false) {
       const what = mergeQueued
-        ? `Opened ${scrub(prUrl)} with auto-merge armed: GitHub merges what is still open once the base branch's required checks and reviews pass. The task stays here until somebody moves it.`
+        ? `Opened ${scrub(prUrl)} with auto-merge armed: GitHub merges what is still open once the base branch's required checks and reviews pass. This worker moves the task to done when it does.`
         : `Opened ${scrub(prUrl)} for review. The worker did not merge it.`;
       await report(task, statusIds.review, `${what}\n\n${safeText(summary)}`);
+      if (mergeQueued) {
+        queuedMerges?.add({
+          projectId: task.projectId,
+          taskId: task.taskId,
+          taskKey: task.taskKey,
+          // pipeline-several.ts reports every repository's pull request in one string
+          prUrls: prUrl.split(", ").filter(Boolean),
+          review: statusIds.review,
+          done: statusIds.done,
+          queuedAt: new Date().toISOString(),
+        });
+      }
     },
 
     async failed(task, reason) {

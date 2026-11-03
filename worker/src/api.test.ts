@@ -337,6 +337,15 @@ describe("createApiClient", () => {
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ status: "review" });
   });
 
+  it("names the column the task is expected in when told to (BP-1128)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await api.setStatus("CP", "t1", "done", { from: "review" });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ status: "done", from: "review" });
+  });
+
   it("refuses to claim, without a network call, when no identity is stored", async () => {
     const fetchMock = vi.fn();
     const api = createApiClient(config, fetchMock as never, { read: () => "" });

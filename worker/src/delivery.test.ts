@@ -502,6 +502,21 @@ describe("merge", () => {
     expect(mergeArgs(run)).toEqual(expect.arrayContaining(["--squash", "--auto"]));
   });
 
+  it.each([
+    ['{"state":"MERGED"}', 0, "merged"],
+    ['{"state":"CLOSED"}', 0, "closed"],
+    ['{"state":"OPEN"}', 0, "open"],
+    ["", 1, "unknown"],
+    ["not json", 0, "unknown"],
+  ] as const)("reads a pull request's state from gh: %s exit %d is %s (BP-1128)", async (stdout, code, expected) => {
+    const { runner, run } = fakeCli({ "gh pr view": { stdout, code } });
+
+    await expect(
+      createDelivery(runner, gitPath, ghPath).pullRequestState("/state", "https://github.com/x/y/pull/7"),
+    ).resolves.toBe(expected);
+    expect(run.mock.calls[0][1]).toEqual(expect.arrayContaining(["--repo", "x/y"]));
+  });
+
   it("reports a merge gh made at once under --auto as merged", async () => {
     const { runner } = fakeCli({
       "gh api graphql": { stdout: mergeSettings(["squash"], true) },

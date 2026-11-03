@@ -50,6 +50,18 @@ describe("createOutbox", () => {
     expect(api.setStatus).toHaveBeenCalledWith("CP", "t1", "review", { refundAttempt: true });
   });
 
+  // BP-1128: a merge reported after a person moved the task carries the column it expects it in
+  it("sends the column a status move expects the task in, and drops it once the board answers 412", async () => {
+    const store = memoryStore();
+    const log = vi.fn();
+    const outbox = createOutbox(store, log);
+    outbox.add({ kind: "status", projectId: "CP", taskId: "t1", status: "done", from: "review" });
+    const api = apiSpy({ setStatus: vi.fn().mockRejectedValue(new ApiError("PATCH failed: 412", 412, JSON.stringify({ error: "The task is no longer in review" }))) });
+
+    expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 0, dropped: 1 });
+    expect(api.setStatus).toHaveBeenCalledWith("CP", "t1", "done", { from: "review" });
+  });
+
   // The whole reason this exists: the process can die between the merge and the report
   it("survives a restart, because a new instance reads the same store", async () => {
     const store = memoryStore();
