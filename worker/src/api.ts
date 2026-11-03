@@ -27,13 +27,21 @@ export interface PhaseEvent {
 
 // An agent this machine will not claim for, with the gates it had when a project's own commands
 // stopped it. The server judges those, since this machine sees an agent only by claiming a task.
+const AGENTS_HELD_HEADER = "x-agents-held";
+
 export interface HeldAgent {
   agentId: string;
   gates: string[];
 }
 
 export interface ApiClient {
-  claim(projectId: string, runId: string, heldAgents?: HeldAgent[]): Promise<ClaimedTask | null>;
+  /** `onStillHeld` hears which of `heldAgents` the board still steps over; a board older than that says nothing. */
+  claim(
+    projectId: string,
+    runId: string,
+    heldAgents?: HeldAgent[],
+    onStillHeld?: (agentIds: string[]) => void
+  ): Promise<ClaimedTask | null>;
   setStatus(projectId: string, taskId: string, status: string, options?: { refundAttempt?: boolean; from?: string; fromRun?: string }): Promise<void>;
   comment(projectId: string, taskId: string, body: string): Promise<void>;
   release(projectId: string, taskId: string, options?: { refund?: boolean }): Promise<void>;
@@ -365,7 +373,7 @@ export function createApiClient(
   }
 
   return {
-    async claim(projectId, runId, heldAgents) {
+    async claim(projectId, runId, heldAgents, onStillHeld) {
       let response: Response;
       try {
         response = await send(projectId, "/tasks/claim", "POST", heldAgents?.length ? { runId, heldAgents } : { runId });
@@ -377,6 +385,8 @@ export function createApiClient(
         }
         throw error;
       }
+      const stillHeld = heldAgents?.length ? (response.headers?.get(AGENTS_HELD_HEADER) ?? null) : null;
+      if (stillHeld !== null) onStillHeld?.(stillHeld.split(",").filter(Boolean));
       if (response.status === 204) return null;
 
       const raw = (await response.json()) as RawTask;

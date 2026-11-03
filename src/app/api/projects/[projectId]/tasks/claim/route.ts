@@ -7,7 +7,7 @@ import { ownerReachableProjectIds, verdictFor } from "@/lib/worker-service";
 import { capabilitiesOf } from "@/lib/worker-capabilities";
 import { snapshotFor } from "@/lib/agent-snapshot";
 import { agentsBeyond, lackedBy } from "@/lib/agent-providers";
-import { agentsStillHeld, heldAgentsFrom } from "@/lib/held-agents";
+import { AGENTS_HELD_HEADER, agentsStillHeld, heldAgentsFrom } from "@/lib/held-agents";
 import { releaseTask } from "@/lib/task-service";
 import { claimingMachineIds, HELD_BY_PLAN_ON_THE_MACHINE, isHeldByPlan } from "@/lib/machine-limit";
 
@@ -82,6 +82,14 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
   const machineOwnerId = ownerIdOf(worker.owner);
   const capabilities = capabilitiesOf(request);
 
+  const stillHeld = await agentsStillHeld(db, projectId, held, machineOwnerId);
+  // Which of the machine's holds the board still honours, so a hold lifted here by a change to the
+  // agent's gates leaves the machine's own account of it too
+  const answer = (response: NextResponse) => {
+    if (held.length > 0) response.headers.set(AGENTS_HELD_HEADER, stillHeld.join(","));
+    return response;
+  };
+
   let task: Awaited<ReturnType<typeof claimNextTask>>;
   try {
     task = await claimNextTask(
@@ -93,7 +101,7 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
       identityOf(worker),
       // What this machine says it can run, read from this request and never from a stored heartbeat,
       // and what a project's own commands stopped it running
-      [...(await agentsBeyond(db, capabilities)), ...(await agentsStillHeld(db, projectId, held, machineOwnerId))]
+      [...(await agentsBeyond(db, capabilities)), ...stillHeld]
     );
   } catch (error) {
     // 409 with the reason, never 204: 204 is what an empty queue answers, and a board with no
@@ -104,7 +112,7 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
     }
     throw error;
   }
-  if (!task) return new NextResponse(null, { status: 204 });
+  if (!task) return answer(new NextResponse(null, { status: 204 }));
 
   // Resolved here rather than referenced, so the run means what it meant when it started even if
   // the agent is edited while it holds the task.
@@ -147,7 +155,7 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
     // 204, not an error: the worker's loop treats a failed claim as a cycle failure and retries on
     // the next poll. Nothing is claimable here until somebody fixes the agent, which is what 204
     // means.
-    return new NextResponse(null, { status: 204 });
+    return answer(new NextResponse(null, { status: 204 }));
   }
 
   // The filter above judged the agent as it stood a moment ago. An agent edited in that window can
@@ -161,7 +169,7 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
       actorId: identityOf(worker),
     }).catch(() => {});
     console.error(`Claim released: ${projectId}/${String(task._id)} needs ${lacking}, which this machine does not report`);
-    return new NextResponse(null, { status: 204 });
+    return answer(new NextResponse(null, { status: 204 }));
   }
 
   // toJSON, not a spread: claimNextTask returns a hydrated document, and spreading one yields
@@ -169,5 +177,5 @@ export const POST = withWorker(async (request, { params, worker, db }) => {
   // read taskNumber as undefined, refused the key "BP-undefined", and left the task held for the
   // full lease. This route used to hand the document straight to NextResponse.json, which called
   // toJSON itself; adding a field alongside it is what removed that.
-  return NextResponse.json({ ...task.toJSON(), agent, previousRejectionReason });
+  return answer(NextResponse.json({ ...task.toJSON(), agent, previousRejectionReason }));
 });

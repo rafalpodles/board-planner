@@ -1138,7 +1138,11 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       [...bound.keys()].filter(
         (projectId) => !unusable.has(projectId) && !quarantineReasonFor(projectId)
       ),
-    api,
+    api: {
+      ...api,
+      claim: (projectId, runId, heldAgents) =>
+        api.claim(projectId, runId, heldAgents, (agentIds) => settingsHolds.keepOnly(projectId, agentIds)),
+    },
     execute: executeHolding,
     heldAgents: (projectId) => {
       const settings = gateSettingsOf(projectId);

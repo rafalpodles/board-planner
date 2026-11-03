@@ -118,11 +118,32 @@ describe("what a settings fault holds", () => {
     expect(log).not.toHaveBeenCalledWith(expect.stringContaining("project P2"));
   });
 
-  it("says which agent, on which project, why, and what lifts it", () => {
+  it("says which agent, on which project, what lifts it, and why", () => {
     expect(describeHold("BP", { agentId: "a1", agentName: "Ship it", reason: FAULT })).toBe(
-      `BP: agent "Ship it" is held, its tasks left in their column — ${FAULT}. ` +
-        "Its tasks are claimed again once the project's commands, repositories or base branch change, or the agent's gates do; " +
-        "a fix in the repository itself within a day, or at once if this worker restarts."
+      `BP: agent "Ship it" is held, its tasks left in their column until the project's commands, repositories ` +
+        `or base branch change, or the agent's gates do; a day at most, or until this worker restarts — ${FAULT}`
     );
+  });
+
+  // The heartbeat route keeps 500 characters of a check
+  it("fits the longest fault the worker raises within what the server keeps, whatever the agent is called", () => {
+    const longestFault =
+      "this project names its own gate commands but neither an install nor a build command, and its agent has a Builds gate: set one in Settings → Workers, or take that gate out of the agent";
+    const sentence = describeHold("ABCDEFGHIJ", { agentId: "a1", agentName: "x".repeat(300), reason: longestFault });
+
+    expect(sentence.length).toBeLessThanOrEqual(500);
+    expect(sentence).toContain(`"${"x".repeat(59)}…"`);
+  });
+
+  it("lets go of what the board says it no longer holds on that project, and of nothing else", () => {
+    const holds = createSettingsHolds(vi.fn());
+    holds.hold(onAgent("a1"), SETTINGS, FAULT);
+    holds.hold(onAgent("a2"), SETTINGS, FAULT);
+    holds.hold(onAgent("a3", "P2"), SETTINGS, FAULT);
+
+    holds.keepOnly("P1", ["a2"]);
+
+    expect(holds.standing("P1", SETTINGS).map((entry) => entry.agentId)).toEqual(["a2"]);
+    expect(holds.standing("P2", SETTINGS).map((entry) => entry.agentId)).toEqual(["a3"]);
   });
 });

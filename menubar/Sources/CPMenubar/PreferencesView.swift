@@ -372,7 +372,7 @@ private struct ProjectsTab: View {
     let model: AppModel
 
     private var projects: [ProjectConfig] { model.config?.projects ?? [] }
-    private var ready: Int { projects.filter { ($0.blocked ?? "").isEmpty }.count }
+    private var ready: Int { projects.filter { $0.claimState == .ready }.count }
 
     var body: some View {
         ScrollView {
@@ -466,7 +466,7 @@ private struct ProjectRow: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    Text("Its tasks wait in their column until these settings or the agent's gates change, a day at most, or the worker restarts.")
+                    Text("A held agent's tasks wait in their column until the project's commands, repositories or base branch change, or the agent's gates do; a day at most, or until the worker restarts.")
                         .font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

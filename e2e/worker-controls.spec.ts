@@ -1125,7 +1125,8 @@ test("a machine that quarantined a checkout says so on the fleet screen, not `re
 /**
  * BP-1119. After a settings fault the worker leaves that agent's tasks in their column and keeps
  * claiming every other agent's. The row wiring.ts composes for it passes, so the machine reads ready,
- * and carries the agent, the fault and the way out onto the line under the machine.
+ * and carries the agent, the fault and the way out onto the line under the machine. This pins the
+ * route and the page with that row; composing it is wiring.test.ts's.
  */
 test("a machine holding an agent after a settings fault names it on the fleet screen, until the hold lifts", async ({
   page,
@@ -1146,9 +1147,8 @@ test("a machine holding an agent after a settings fault names it on the fleet sc
           ok: true,
           warn: true,
           detail:
-            `TP: agent "Runs the tests" is held, its tasks left in their column — ${FAULT}. ` +
-            "Its tasks are claimed again once the project's commands, repositories or base branch change, or the agent's gates do; " +
-            "a fix in the repository itself within a day, or at once if this worker restarts.",
+            `TP: agent "Runs the tests" is held, its tasks left in their column until the project's commands, repositories ` +
+            `or base branch change, or the agent's gates do; a day at most, or until this worker restarts — ${FAULT}`,
         },
       ],
     },
@@ -1159,8 +1159,8 @@ test("a machine holding an agent after a settings fault names it on the fleet sc
   await expect(fleetRow(page, WORKER_NAME).getByText(/^ready/)).toBeVisible();
   const warning = page.getByTestId("preflight-warning");
   await expect(warning).toContainText('agent held — TP: agent "Runs the tests" is held');
-  await expect(warning).toContainText("no test command");
-  await expect(warning).toContainText("at once if this worker restarts");
+  await expect(warning).toContainText("until this worker restarts");
+  await expect(warning).toContainText("take that gate out of the agent");
 
   await heartbeat(request, { preflight: { ok: true, account: "owner", checks: [gh] } });
 

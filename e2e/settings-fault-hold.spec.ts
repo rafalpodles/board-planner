@@ -149,6 +149,21 @@ test.describe("a project's own commands that cannot run", () => {
     expect((await answer.json())._id).toBe(String(_id));
   });
 
+  // BP-1119. The machine shows a hold for as long as the board says it stands, so a hold the board
+  // lifted on a gate change is dropped there too, with no task of that agent waiting
+  test("a claim tells the machine which of its holds the board still steps over", async ({ request }) => {
+    const standing = await claim(request, holding());
+    expect(standing.status(), await standing.text()).toBe(204);
+    expect(standing.headers()["x-agents-held"]).toBe(String(HELD_AGENT));
+
+    await (await db()).collection("agents").updateOne({ _id: HELD_AGENT }, { $set: { composition: compose([]) } });
+
+    const lifted = await claim(request, holding());
+    expect(lifted.status()).toBe(204);
+    expect(lifted.headers()["x-agents-held"]).toBe("");
+    expect((await claim(request)).headers()["x-agents-held"]).toBeUndefined();
+  });
+
   test("a report replayed after the run ended gives nothing back, even when it moves the task again", async ({ request }) => {
     const { _id } = await addTask(HELD_AGENT, 1);
     expect((await claim(request)).status()).toBe(200);

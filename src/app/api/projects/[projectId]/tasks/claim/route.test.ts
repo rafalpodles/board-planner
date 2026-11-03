@@ -617,6 +617,29 @@ describe("claiming a task whose agent runs on a coding CLI", () => {
       expect(claimNextTask.mock.calls[0][6]).toEqual([]);
     });
 
+    it("tells the machine which of its holds still stand, with the queue empty or not", async () => {
+      const OTHER = "69a52e3b399b27d3cbb2c5ca";
+      snapshotFor.mockImplementation(async (_db: unknown, _project: unknown, agentId: unknown) =>
+        agentId === AGENT
+          ? { agentId: AGENT, name: "Held", sequence: [{ key: "build", kind: "gate", name: "Builds", gateKind: "build" }] }
+          : { agentId: String(agentId), name: "Edited", sequence: [] }
+      );
+      const holds = [{ agentId: AGENT, gates: ["build"] }, { agentId: OTHER, gates: ["build"] }];
+
+      const claimed = await claimHolding(holds);
+      claimNextTask.mockResolvedValueOnce(null);
+      const empty = await claimHolding(holds);
+
+      expect(claimed.status).toBe(200);
+      expect(claimed.headers.get("x-agents-held")).toBe(AGENT);
+      expect(empty.status).toBe(204);
+      expect(empty.headers.get("x-agents-held")).toBe(AGENT);
+    });
+
+    it("says nothing about holds to a machine that has none", async () => {
+      expect((await claim()).headers.get("x-agents-held")).toBeNull();
+    });
+
     it("refuses a list it cannot read, and claims nothing", async () => {
       const response = await claimHolding([{ agentId: { $ne: null }, gates: [] }]);
 
