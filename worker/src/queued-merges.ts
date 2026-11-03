@@ -12,8 +12,9 @@ export interface QueuedMerge {
   taskId: string;
   taskKey: string;
   prUrls: string[];
-  /** The run that queued it, and the review column it reported into: the task is moved only from there. */
+  /** The run that queued it: a task claimed again since is not moved. */
   runId?: string;
+  /** The review column the run reported into: the task is moved only from there. */
   review: string;
   done: string;
   queuedAt: string;
@@ -84,12 +85,6 @@ export interface WatchDeps {
   log?: Log;
 }
 
-/**
- * Asks GitHub about each queued pull request at most every `CHECK_INTERVAL_MS`. Merged: the task goes
- * to done, but only from the review column the run left it in, so a person who has moved it since
- * keeps it where they put it. Closed unmerged: a comment, and the task stays in review. The reports
- * go through the outbox, so a redeploy of the board does not lose them.
- */
 function due(entry: QueuedMerge, now: number): boolean {
   return !entry.checkedAt || !(now - Date.parse(entry.checkedAt) < CHECK_INTERVAL_MS);
 }
@@ -98,6 +93,13 @@ export function anyMergeDue(merges: QueuedMerges, now: number): boolean {
   return merges.list().some((entry) => due(entry, now));
 }
 
+/**
+ * Asks GitHub about each queued pull request at most every `CHECK_INTERVAL_MS`. Merged: the task goes
+ * to done, but only from the review column the run left it in, so a person who has moved it since
+ * keeps it where they put it, and only while no run has claimed it since. Closed unmerged: a comment,
+ * and the task stays in review. The reports go through the outbox, so a redeploy of the board does not
+ * lose them.
+ */
 export async function watchQueuedMerges(deps: WatchDeps): Promise<void> {
   const entries = deps.merges.list();
   if (entries.length === 0) return;
