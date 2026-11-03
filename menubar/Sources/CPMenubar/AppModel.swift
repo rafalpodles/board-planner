@@ -10,16 +10,19 @@ final class AppModel {
     private var client: SocketClient
     private let fixedClient: Bool
     private var pump: Task<Void, Never>?
+    private let configRefresh: Duration
 
-    init(client: SocketClient? = nil) {
+    init(client: SocketClient? = nil, configRefresh: Duration = .seconds(30)) {
         self.client = client ?? AppModel.liveClient()
         self.fixedClient = client != nil
+        self.configRefresh = configRefresh
     }
 
     #if DEBUG
     init(previewState: WorkerState, config: ConfigResponse? = nil) {
         self.client = AppModel.liveClient()
         self.fixedClient = true
+        self.configRefresh = .seconds(30)
         self.state = previewState
         self.config = config
     }
@@ -83,6 +86,16 @@ final class AppModel {
                             isBusy: SyncPass.busy(asking: { [client] in try await client.status() }))
                     }
                 }
+                // A hold starts and lifts while the socket stays open, and the stream carries neither
+                let refresh = Task { [client, configRefresh] in
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: configRefresh)
+                        if Task.isCancelled { return }
+                        guard let fresh = try? await client.config(), !Task.isCancelled else { continue }
+                        self.config = fresh
+                    }
+                }
+                defer { refresh.cancel() }
                 for await event in client.stream() {
                     state.apply(event, at: Date())
                     Notifier.shared.handle(event)

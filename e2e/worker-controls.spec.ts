@@ -1123,6 +1123,53 @@ test("a machine that quarantined a checkout says so on the fleet screen, not `re
 });
 
 /**
+ * BP-1119. After a settings fault the worker leaves that agent's tasks in their column and keeps
+ * claiming every other agent's. The row wiring.ts composes for it passes, so the machine reads ready,
+ * and carries the agent, the fault and the way out onto the line under the machine. This pins the
+ * route and the page with that row; composing it is wiring.test.ts's.
+ */
+test("a machine holding an agent after a settings fault names it on the fleet screen, until the hold lifts", async ({
+  page,
+  request,
+}) => {
+  const FAULT =
+    "this project names its own gate commands but no test command, and its agent has a Tests pass gate: set one in Settings → Workers, or take that gate out of the agent";
+  const gh = { name: "gh", ok: true, detail: "" };
+
+  await heartbeat(request, {
+    preflight: {
+      ok: true,
+      account: "owner",
+      checks: [
+        gh,
+        {
+          name: "agent held",
+          ok: true,
+          warn: true,
+          detail:
+            `TP: agent "Runs the tests" is held, its tasks left in their column until the project's commands, repositories ` +
+            `or base branch change, or the agent's gates do; a day at most, or until this worker restarts — ${FAULT}`,
+        },
+      ],
+    },
+  });
+
+  await signIn(page);
+  await page.goto("/settings/workers");
+  await expect(fleetRow(page, WORKER_NAME).getByText(/^ready/)).toBeVisible();
+  const warning = page.getByTestId("preflight-warning");
+  await expect(warning).toContainText('agent held — TP: agent "Runs the tests" is held');
+  await expect(warning).toContainText("until this worker restarts");
+  await expect(warning).toContainText("take that gate out of the agent");
+
+  await heartbeat(request, { preflight: { ok: true, account: "owner", checks: [gh] } });
+
+  await page.reload();
+  await expect(fleetRow(page, WORKER_NAME).getByText(/^ready/)).toBeVisible();
+  await expect(page.getByTestId("preflight-warning")).toHaveCount(0);
+});
+
+/**
  * BP-349. Whether a machine confines the agent it runs is the operator's to know, and the fleet
  * screen is the only place they can learn it without a terminal. Two states reach this row and they
  * say opposite things: a machine that cannot confine anything, and one whose owner has accepted

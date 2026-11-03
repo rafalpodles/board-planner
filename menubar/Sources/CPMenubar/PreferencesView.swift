@@ -372,7 +372,7 @@ private struct ProjectsTab: View {
     let model: AppModel
 
     private var projects: [ProjectConfig] { model.config?.projects ?? [] }
-    private var ready: Int { projects.filter { ($0.blocked ?? "").isEmpty }.count }
+    private var ready: Int { projects.filter { $0.claimState == .ready }.count }
 
     var body: some View {
         ScrollView {
@@ -431,7 +431,11 @@ private struct ProjectRow: View {
                     // which the worker has served since BP-379 and nothing here showed (BP-512).
                     // Coloured dot, neutral text: the status colours alone do not reach contrast on
                     // their own tint in light mode.
-                    StatePill(text: blocked.isEmpty ? "Ready" : "Not claiming", color: blocked.isEmpty ? .green : .orange)
+                    switch project.claimState {
+                    case .ready: StatePill(text: "Ready", color: .green)
+                    case .holding: StatePill(text: project.heldAgents.count == 1 ? "Holding an agent" : "Holding \(project.heldAgents.count) agents", color: .yellow)
+                    case .notClaiming: StatePill(text: "Not claiming", color: .orange)
+                    }
                     Image(systemName: "chevron.right")
                         .font(.caption2).foregroundStyle(.secondary)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
@@ -448,6 +452,22 @@ private struct ProjectRow: View {
                     Image(systemName: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(.orange)
                         .accessibilityHidden(true)
                     Text(blocked).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 4)
+            }
+            if !project.heldAgents.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(project.heldAgents.enumerated()), id: \.offset) { _, held in
+                        HStack(alignment: .firstTextBaseline, spacing: 5) {
+                            Image(systemName: "pause.circle.fill").font(.caption2).foregroundStyle(.yellow)
+                                .accessibilityHidden(true)
+                            Text("\(held.agent) is held: \(held.reason).").font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Text("A held agent's tasks wait in their column until the project's commands, repositories or base branch change, or the agent's gates do; a day at most, or until the worker restarts.")
+                        .font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.top, 4)

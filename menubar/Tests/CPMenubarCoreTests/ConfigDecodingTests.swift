@@ -111,3 +111,33 @@ private let SERVED = """
     #expect(config.offers == nil)
     #expect(config.githubAccounts == nil)
 }
+
+@Test func readsWhichAgentsASettingsFaultHolds() throws {
+    let holding = SERVED.replacingOccurrences(
+        of: "\"blocked\": \"\",",
+        with: "\"blocked\": \"\", \"held\": [{ \"agent\": \"Ship it\", \"reason\": \"this project names its own gate commands but no test command\" }],"
+    )
+
+    let project = try #require(try JSONDecoder().decode(ConfigResponse.self, from: Data(holding.utf8)).projects.first)
+
+    #expect(project.heldAgents == [HeldAgent(agent: "Ship it", reason: "this project names its own gate commands but no test command")])
+    #expect(project.claimState == .holding)
+}
+
+@Test func decodesAProjectRowWithoutHeld() throws {
+    let project = try #require(try JSONDecoder().decode(ConfigResponse.self, from: Data(SERVED.utf8)).projects.first)
+
+    #expect(project.heldAgents.isEmpty)
+    #expect(project.claimState == .ready)
+}
+
+@Test func aBlockedProjectReadsAsNotClaimingThoughItAlsoHoldsAnAgent() throws {
+    let both = SERVED.replacingOccurrences(
+        of: "\"blocked\": \"\",",
+        with: "\"blocked\": \"the checkout is quarantined\", \"held\": [{ \"agent\": \"Ship it\", \"reason\": \"no test command\" }],"
+    )
+
+    let project = try #require(try JSONDecoder().decode(ConfigResponse.self, from: Data(both.utf8)).projects.first)
+
+    #expect(project.claimState == .notClaiming)
+}

@@ -326,6 +326,22 @@ describe("createApiClient", () => {
     expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ runId: "run-2" });
   });
 
+  it("passes on which of its holds the board still steps over, and nothing from a board that does not say", async () => {
+    const answered = (header: string | null) =>
+      vi.fn().mockResolvedValue({ ok: true, status: 204, headers: new Headers(header === null ? {} : { "x-agents-held": header }) });
+    const heard: string[][] = [];
+    const heldAgents = [{ agentId: "a1", gates: ["build"] }, { agentId: "a2", gates: [] }];
+
+    await createApiClient(config, answered('["a1"]') as never, identityStore).claim("CP", "run-1", heldAgents, (ids) => heard.push(ids));
+    await createApiClient(config, answered("[]") as never, identityStore).claim("CP", "run-2", heldAgents, (ids) => heard.push(ids));
+    await createApiClient(config, answered(null) as never, identityStore).claim("CP", "run-3", heldAgents, (ids) => heard.push(ids));
+    await createApiClient(config, answered('["a1"]') as never, identityStore).claim("CP", "run-4", [], (ids) => heard.push(ids));
+    await createApiClient(config, answered("a1,a2") as never, identityStore).claim("CP", "run-5", heldAgents, (ids) => heard.push(ids));
+    await createApiClient(config, answered("[1]") as never, identityStore).claim("CP", "run-6", heldAgents, (ids) => heard.push(ids));
+
+    expect(heard).toEqual([["a1"], []]);
+  });
+
   it("asks for a refund on the status write only when told to", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const api = createApiClient(config, fetchMock as never, identityStore);

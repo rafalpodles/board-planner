@@ -22,6 +22,16 @@ public struct ProjectConfig: Decodable, Sendable {
     // board refusing the claim outright — or empty when it is. Optional so a worker older than
     // this field still decodes, for the reason autoMerge's comment above gives (BP-512).
     public let blocked: String?
+    // Agents whose tasks this machine leaves in their column after a settings fault. Not `blocked`:
+    // every other agent's tasks are still claimed. Optional for a worker older than BP-1119.
+    public private(set) var held: [HeldAgent]? = nil
+
+    public var heldAgents: [HeldAgent] { held ?? [] }
+
+    public var claimState: ClaimState {
+        if !(blocked ?? "").isEmpty { return .notClaiming }
+        return heldAgents.isEmpty ? .ready : .holding
+    }
 
     /// What an operator recognises it by, the same shape as `ProjectOffer.label` — but with no
     /// repository URL to fall back to, since a bound project already has its checkout.
@@ -33,6 +43,15 @@ public struct ProjectConfig: Decodable, Sendable {
         if !key.isEmpty { return key }
         return project
     }
+}
+
+public struct HeldAgent: Decodable, Sendable, Equatable {
+    public let agent: String
+    public let reason: String
+}
+
+public enum ClaimState: Equatable, Sendable {
+    case ready, holding, notClaiming
 }
 
 public struct GithubAccountChoice: Decodable, Sendable, Identifiable, Equatable {

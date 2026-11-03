@@ -1145,7 +1145,11 @@ would run npm and report that as the project's check.
   rest of the project's work flows. The hold goes when the project's commands, repositories or base
   branch change, or the agent's gates do. It is kept in memory and lasts a day, because a commit that
   adds the program changes no setting: a wrong setting left standing costs a task a day per agent and
-  machine. A working directory the checkout lacks is left to the gate: the task may be the one that
+  machine. The claim's answer says which holds the board still honours (`x-agents-held`, a JSON list),
+  and the machine drops the rest, so a gate taken out of the agent lifts the hold with no task waiting.
+  While one stands, the heartbeat carries a passing `agent held` row in amber naming the project, the
+  agent, how it lifts and the fault, and the socket lists it per project as `held`, which the menubar
+  shows under the project (**BP-1119**). A working directory the checkout lacks is left to the gate: the task may be the one that
   creates it. A project on the npm gates is not claimed from without npm; the worker itself no longer
   needs it.
 - **Test-presence** recognises other ecosystems' test files on these projects only: on the npm gates a
