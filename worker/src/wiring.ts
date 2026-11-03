@@ -1021,8 +1021,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   }
 
   async function watchMerges(): Promise<void> {
-    if (queuedMerges.list().length === 0) return;
-    const delivery = createDelivery(deps.runner, resolvedGitPath(), resolvedToolPath("gh"), undefined, await githubIdentityToken());
+    const ghPath = resolvedToolPath("gh");
+    if (!ghPath || queuedMerges.list().length === 0) return;
+    const delivery = createDelivery(deps.runner, resolvedGitPath(), ghPath, undefined, await githubIdentityToken());
     await watchQueuedMerges({
       merges: queuedMerges,
       pullRequestState: (prUrl) => delivery.pullRequestState(bootstrap.stateDir, prUrl),

@@ -92,6 +92,21 @@ describe("watchQueuedMerges (BP-1128)", () => {
     expect(merges.list()).toHaveLength(1);
   });
 
+  it("keeps watching every entry when asking gh throws for one of them", async () => {
+    const { merges, ops, pullRequestState, watch } = rig(
+      [queued(), queued({ taskId: "t2", prUrls: ["https://github.com/x/y/pull/8"] })],
+      { "https://github.com/x/y/pull/8": "merged" }
+    );
+    pullRequestState.mockImplementationOnce(async () => {
+      throw new Error("gh is not resolved");
+    });
+
+    await watch();
+
+    expect(merges.list().map((entry) => entry.taskId)).toEqual(["t1"]);
+    expect(ops).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "status", taskId: "t2" })]));
+  });
+
   it("moves a task with several repositories only once every pull request has merged", async () => {
     const prUrls = ["https://github.com/x/y/pull/7", "https://github.com/x/z/pull/8"];
     const { ops, watch } = rig([queued({ prUrls })], { [prUrls[0]]: "merged", [prUrls[1]]: "open" });

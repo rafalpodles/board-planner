@@ -95,7 +95,7 @@ export async function watchQueuedMerges(deps: WatchDeps): Promise<void> {
       continue;
     }
     const states: PullRequestState[] = [];
-    for (const url of entry.prUrls) states.push(await deps.pullRequestState(url));
+    for (const url of entry.prUrls) states.push(await deps.pullRequestState(url).catch((): PullRequestState => "unknown"));
     const urls = entry.prUrls.map(scrub).join(", ");
     const { projectId, taskId } = entry;
 
