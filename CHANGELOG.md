@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.12.0](https://github.com/rafalpodles/board-planner/compare/v1.11.0...v1.12.0) (2026-11-03)
+
+
+### Features
+
+* **menubar:** a fault that aged out of the icon leaves a caption saying when (BP-633) ([#765](https://github.com/rafalpodles/board-planner/issues/765)) ([ce7f6a6](https://github.com/rafalpodles/board-planner/commit/ce7f6a61820d86c8659ed94347ab013d1dba459b))
+
+
+### Bug Fixes
+
+* the worker takes a task through to a merge (BP-1127) ([#770](https://github.com/rafalpodles/board-planner/issues/770)) ([202dd42](https://github.com/rafalpodles/board-planner/commit/202dd42e04547500a02e7b4cd90e5ceb09330d6f))
+
 ## [1.11.0](https://github.com/rafalpodles/board-planner/compare/v1.10.0...v1.11.0) (2026-11-02)
 
 
