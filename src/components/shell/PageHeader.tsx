@@ -25,7 +25,7 @@ export function PageHeader({ title, subtitle, icon, actions }: PageHeaderProps) 
             </span>
           )}
           {/* 24px fits five characters in the ~90px a narrow header leaves the title */}
-          <h1 className="truncate text-[15px] font-bold leading-tight @md:text-2xl">{title}</h1>
+          <h1 className="truncate text-[15px] font-medium leading-tight @md:text-xl">{title}</h1>
         </div>
         {/* Reserved even when empty: the block is vertically centred, so a page without a
             subtitle would otherwise sit ~7px lower than every page with one */}

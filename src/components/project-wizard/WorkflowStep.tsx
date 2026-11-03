@@ -238,9 +238,11 @@ export function WorkflowStep({ state, onChange }: WorkflowStepProps) {
               <li
                 key={c.uid}
                 className="min-w-0 rounded-lg border border-border bg-bg-input/30 px-2.5 py-1.5"
-                style={{ borderLeft: `3px solid ${c.color}` }}
               >
-                <b className="block text-[13px]">{c.label}</b>
+                <b className="flex items-center gap-2 text-[13px]">
+                  <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: c.color }} />
+                  {c.label}
+                </b>
                 <span className="block text-[11px] text-text-muted">
                   {ROLE_LABELS[c.role].label}
                   {c.triggersPmReview ? " · PM review" : ""}

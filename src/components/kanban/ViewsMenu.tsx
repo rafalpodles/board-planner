@@ -164,7 +164,7 @@ export function ViewsMenu({ projectId, projectRef, canShare, snapshot, onApply }
         }}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="focus-ring flex h-11 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[13px] font-medium text-text-muted transition-colors hover:text-text"
+        className="focus-ring flex h-11 md:h-9 items-center gap-1.5 rounded-lg border border-transparent bg-bg-input px-2.5 text-[13px] font-medium text-text-muted transition-colors hover:text-text"
       >
         Views
         <svg

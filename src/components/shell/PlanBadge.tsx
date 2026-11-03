@@ -64,9 +64,9 @@ export function PlanBadge({ compact }: { compact: boolean }) {
   }
 
   return (
-    <div className="mx-2.5 mb-2 rounded-lg border border-border px-2.5 py-2" data-testid="plan-badge">
+    <div className="mx-2.5 mb-2 rounded-lg px-3 py-2" data-testid="plan-badge">
       <div className="flex items-center gap-2">
-        <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary-on-tint">{name}</span>
+        <span className="shrink-0 text-xs font-medium text-text">{name}</span>
         <span className={`min-w-0 flex-1 text-xs ${tone}`} data-testid="plan-badge-detail">
           {notice.kind === "free" && "Free plan"}
           {notice.kind === "pro" && (trial && organisation.planEndsAt ? `Ends ${formatPlanDate(organisation.planEndsAt)}` : "Plan active")}
@@ -83,7 +83,7 @@ export function PlanBadge({ compact }: { compact: boolean }) {
         <Link
           href={UPGRADE_HREF}
           data-testid="plan-badge-action"
-          className="focus-ring mt-2 flex min-h-[44px] w-full items-center justify-center rounded-md bg-primary-solid px-3 text-xs font-semibold text-white transition-colors hover:bg-primary-solid-hover md:min-h-0 md:py-1.5"
+          className="focus-ring mt-2 flex min-h-[44px] w-full items-center justify-center rounded-md border border-border bg-bg-input px-3 text-xs font-medium text-text transition-colors hover:bg-bg-hover md:min-h-0 md:py-1.5"
         >
           {action}
         </Link>

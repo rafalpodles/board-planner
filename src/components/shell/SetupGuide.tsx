@@ -76,7 +76,7 @@ export function SetupGuideCard({
       type="button"
       onClick={onOpen}
       data-testid="setup-guide-card"
-      className="focus-ring mx-2.5 mb-2 block rounded-xl border border-border bg-bg-card p-3 text-left transition-colors hover:border-primary/50"
+      className="focus-ring mx-2.5 mb-2 block rounded-lg p-3 text-left transition-colors hover:bg-bg-hover"
     >
       <span className="flex items-center gap-2.5">
         <Ring done={done} total={total} size={38} />

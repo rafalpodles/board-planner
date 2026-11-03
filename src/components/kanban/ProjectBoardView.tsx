@@ -370,10 +370,10 @@ export function ProjectBoardView({
                 setSelectionMode((on) => !on);
                 setSelectedTasks(new Set());
               }}
-              className={`focus-ring flex h-11 items-center text-[13px] px-2.5 rounded-lg border transition-colors
+              className={`focus-ring flex h-11 md:h-9 items-center text-[13px] px-2.5 rounded-lg border transition-colors
                 ${selectionMode
                   ? "border-primary bg-primary/10 text-primary-on-tint"
-                  : "border-border text-text-muted hover:text-text hover:border-border"
+                  : "border-transparent bg-bg-input text-text-muted hover:text-text"
                 }`}
               title="Select multiple tasks, then right-click one of them"
             >

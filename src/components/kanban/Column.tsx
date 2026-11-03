@@ -138,19 +138,17 @@ export function Column({
       data-testid={`column-${column.id}`}
       data-lane={lane?.key}
       role={collapsed ? "button" : lane ? "group" : undefined}
-      className={`bg-bg-card rounded-xl border border-border
-        border-t-2 flex flex-col ${
+      className={`rounded-xl border flex flex-col ${
           lane
             ? "max-h-[26rem] min-h-24"
             : "max-h-[calc(100vh-12rem)] lg:max-h-full lg:h-full lg:min-h-0"
         }
-        transition-colors ${isDragOver ? "bg-primary/5 border-primary/30" : ""}
+        transition-colors ${isDragOver ? "bg-primary/5 border-primary/30" : "border-border bg-text/[0.035]"}
         ${collapsed ? "focus-ring items-center gap-2.5 py-2.5 cursor-pointer hover:bg-bg-hover" : ""}`}
-      style={{ borderTopColor: column.color }}
     >
       {collapsed ? (
         <>
-          <span className="rounded-full bg-bg-input px-2 py-0.5 text-xs text-text-muted">
+          <span className="font-mono text-xs tabular-nums text-text-muted">
             {tasks.length}
           </span>
           <span className="min-h-0 flex-1 truncate text-[12px] font-semibold text-text-muted [writing-mode:vertical-rl]">
@@ -168,10 +166,13 @@ export function Column({
         </>
       ) : (
       <>
-      <div className="px-3 py-2.5 flex items-center justify-between gap-1.5 border-b border-border">
-        <h3 className="min-w-0 truncate text-sm font-medium">{column.label}</h3>
+      <div className="px-3 pt-3 pb-1 flex items-center justify-between gap-1.5">
+        <h3 className="flex min-w-0 items-center gap-2 text-sm font-medium">
+          <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: column.color }} />
+          <span className="truncate">{column.label}</span>
+        </h3>
         <div className="flex shrink-0 items-center gap-1">
-          <span className="text-xs text-text-muted bg-bg-input rounded-full px-2 py-0.5">
+          <span className="px-1 font-mono text-xs tabular-nums text-text-muted">
             {tasks.length}
           </span>
           {/* Only an empty column can return to the rail, so only it offers the way back */}

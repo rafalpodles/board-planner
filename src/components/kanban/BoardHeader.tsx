@@ -72,7 +72,7 @@ export function BoardHeader({
             {projectIcon || DEFAULT_PROJECT_ICON}
           </span>
           {/* 24px fits five characters in the ~90px a narrow header leaves the title */}
-          <h1 className="truncate text-[15px] font-bold leading-tight @md:text-2xl">
+          <h1 className="truncate text-[15px] font-medium leading-tight @md:text-xl">
             {projectName}
           </h1>
         </div>
@@ -139,7 +139,7 @@ export function BoardHeader({
         </div>
       </div>
 
-      <div className="ml-auto flex h-11 shrink-0 items-center rounded-lg border border-border bg-bg-card p-0.5">
+      <div className="ml-auto flex h-11 md:h-9 shrink-0 items-center rounded-lg bg-bg-input p-0.5">
         {(["board", "list"] as const).map((mode) => (
           <button
             key={mode}
@@ -161,7 +161,7 @@ export function BoardHeader({
 
       {onSummary && (
         <span className={summaryOnPhone ? "contents" : "hidden @md:contents"}>
-          <Button size="sm" variant="secondary" onClick={onSummary} aria-label="Summary" title="Summary" className="h-11 shrink-0 whitespace-nowrap">
+          <Button size="sm" variant="secondary" onClick={onSummary} aria-label="Summary" title="Summary" className="h-11 md:h-9 shrink-0 whitespace-nowrap">
             <svg aria-hidden className="h-4 w-4 @md:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h7" />
             </svg>
@@ -175,7 +175,7 @@ export function BoardHeader({
         onClick={onRefresh}
         title="Refresh board (R)"
         aria-label="Refresh board"
-        className="focus-ring flex h-11 shrink-0 items-center justify-center rounded-lg px-2 text-text-muted transition-colors hover:bg-bg-card hover:text-text"
+        className="focus-ring flex h-11 md:h-9 shrink-0 items-center justify-center rounded-lg px-2 text-text-muted transition-colors hover:bg-bg-card hover:text-text"
       >
         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
@@ -193,7 +193,7 @@ export function BoardHeader({
         title="New task (N)"
         aria-label="New task"
         // Button's own sm size is responsive (min-h-11 sm:min-h-[36px]); this row must not resize
-        className="h-11 shrink-0 whitespace-nowrap"
+        className="h-11 md:h-9 shrink-0 whitespace-nowrap"
       >
         <svg
           aria-hidden

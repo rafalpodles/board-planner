@@ -149,8 +149,11 @@ export function PriorityBars({ priority }: { priority: Priority }) {
           className="block w-[3px] rounded-[1px]"
           style={
             {
-              height: 5 + i * 2,
-              background: i <= level ? PRIORITY_ACCENT[priority] : "var(--color-border)",
+              height: 4 + i * 3,
+              background:
+                i <= level
+                  ? PRIORITY_ACCENT[priority]
+                  : "color-mix(in srgb, var(--color-text) 22%, transparent)",
             } as CSSProperties
           }
         />

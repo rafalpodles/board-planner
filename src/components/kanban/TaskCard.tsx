@@ -3,7 +3,8 @@
 import { useRef, type CSSProperties } from "react";
 import { ApiTask, ApiCustomField, ApiProjectCategory, PRIORITY_LABELS } from "@/types";
 import { ageAt, QUIET_MS, runLook } from "@/lib/run-state";
-import { Badge } from "@/components/ui/Badge";
+import { categoryAccent } from "@/components/ui/Badge";
+import { PriorityBars } from "@/components/tasks/detail/atoms";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { cardBadges } from "@/lib/custom-fields";
 import { taskPath } from "@/lib/urls";
@@ -16,8 +17,7 @@ import { avatarStyle } from "@/lib/avatar-color";
 // A card is a summary; past a few badges it stops being one
 const MAX_CARD_BADGES = 3;
 
-// Cards are narrow; the default badge padding makes three of them wrap raggedly
-const COMPACT_BADGE = "text-[11px] px-1.5 whitespace-nowrap";
+const TAG = "inline-flex items-center gap-1.5 rounded-md bg-bg-input px-1.5 py-0.5 text-[11px] text-text-muted";
 
 interface TaskCardProps {
   task: ApiTask;
@@ -91,7 +91,7 @@ export function TaskCard({
               e.dataTransfer.effectAllowed = "move";
             }
       }
-      className={`block bg-bg rounded-lg border p-3 cursor-pointer card-edge
+      className={`block bg-bg-card rounded-lg border p-3 cursor-pointer card-edge
         transition-colors group
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
         ${running ? (quiet ? "task-running run-quiet" : "task-running") : ""}
@@ -126,8 +126,8 @@ export function TaskCard({
         activate(e.shiftKey);
       }}
     >
-      <div className={`flex flex-wrap items-center gap-1 mb-2 ${checkboxShown ? "pr-14" : "pr-8"}`}>
-        <span className="text-xs font-mono text-text-muted flex items-center gap-1 mr-0.5">
+      <div className={`flex flex-wrap items-center gap-2 mb-1.5 ${checkboxShown ? "pr-14" : "pr-8"}`}>
+        <span className="text-xs font-mono tabular-nums text-text-muted flex items-center gap-1">
           {task.recurrence && (
             <svg className="w-3 h-3 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -161,29 +161,18 @@ export function TaskCard({
             Archived
           </span>
         )}
-        <Badge variant="priority" value={task.priority} className={COMPACT_BADGE}>
-          {PRIORITY_LABELS[task.priority] ?? task.priority}
-        </Badge>
-        <Badge
-          variant="category"
-          value={task.category}
-          color={catColor}
-          className={COMPACT_BADGE}
-        >
-          {task.category}
-        </Badge>
       </div>
 
-      <h3 className={`text-sm font-medium mb-2 line-clamp-2 ${task.archivedAt ? "text-text-muted" : ""}`}>{task.title}</h3>
+      <h3 className={`text-sm font-medium leading-5 mb-3 line-clamp-2 ${task.archivedAt ? "text-text-muted" : ""}`}>{task.title}</h3>
 
       {shownBadges.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
           {shownBadges.map((badge) => (
             <span
               key={badge.key}
-              className="chip chip-custom text-[11px] px-1.5 py-0.5 rounded-full font-medium"
-              style={{ "--chip": badge.color || "var(--color-text-muted)" } as CSSProperties}
+              className={TAG}
             >
+              {badge.color && <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: badge.color }} />}
               {badge.label}
             </span>
           ))}
@@ -212,30 +201,24 @@ export function TaskCard({
               // useful thing about it is which one — a card reading "Parent (1)" would say nothing
               <span
                 title={`Parent: ${parent.title}`}
-                className="chip text-[11px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap"
-                style={{ "--chip": "var(--color-text-muted)" } as CSSProperties}
+                className={`${TAG} whitespace-nowrap`}
               >
                 Parent {projectKey}-{parent.taskNumber}
               </span>
             )}
             {blocked > 0 && (
-              <span
-                className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
-                style={{ "--chip": "var(--color-warning)" } as CSSProperties}
-              >
+              <span className={TAG}>
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warning" />
                 Blocked ({blocked})
               </span>
             )}
             {relates > 0 && (
-              <span
-                className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
-                style={{ "--chip": "var(--color-primary)" } as CSSProperties}
-              >
+              <span className={TAG}>
                 Relates ({relates})
               </span>
             )}
             {duplicates > 0 && (
-              <span className="text-[11px] text-text-muted bg-bg-input px-1.5 py-0.5 rounded font-medium">
+              <span className={TAG}>
                 Duplicate ({duplicates})
               </span>
             )}
@@ -251,13 +234,13 @@ export function TaskCard({
         <div className="mb-2 flex items-center gap-1.5">
           <div className="flex-1 h-1 bg-bg-input rounded-full overflow-hidden">
             <div
-              className="h-full bg-primary-solid rounded-full transition-all"
+              className="h-full bg-text-muted rounded-full"
               style={{
                 width: `${(task.checklist.filter((i) => i.done).length / task.checklist.length) * 100}%`,
               }}
             />
           </div>
-          <span className="text-[10px] text-text-muted whitespace-nowrap">
+          <span className="font-mono text-[11px] tabular-nums text-text-muted whitespace-nowrap">
             {task.checklist.filter((i) => i.done).length}/{task.checklist.length}
           </span>
         </div>
@@ -292,29 +275,45 @@ export function TaskCard({
         </div>
       )}
 
-      <div className="flex items-center justify-between">
-        {task.assignee && typeof task.assignee === "object" ? (
-          <span className="text-xs text-text-muted flex items-center gap-1">
+      <div className="flex items-center gap-3 text-xs text-text-muted">
+        {task.category && (
+          <span className="flex min-w-0 items-center gap-1.5" data-testid="task-card-type">
             <span
-              className="w-5 h-5 rounded-full text-text flex items-center justify-center text-[10px] font-medium"
-              style={avatarStyle(task.assignee.username || task.assignee.fullName)}
-            >
-              {task.assignee.fullName?.charAt(0).toUpperCase() || "?"}
-            </span>
-            <span>{task.assignee.fullName || task.assignee.username}</span>
-          </span>
-        ) : <span />}
-        {task.dueDate && dateOnlyKey(task.dueDate) && (
-          <span
-            data-testid="task-card-due"
-            className={`text-[10px] ${dueDateClass(task.dueDate)} flex items-center gap-0.5`}
-          >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            {formatDateOnly(task.dueDate, { month: "short", day: "numeric" })}
+              aria-hidden
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: catColor ?? categoryAccent(task.category) ?? "var(--color-text-muted)" }}
+            />
+            <span className="truncate">{task.category}</span>
           </span>
         )}
+        <span className="ml-auto flex shrink-0 items-center gap-3">
+          {task.dueDate && dateOnlyKey(task.dueDate) && (
+            <span
+              data-testid="task-card-due"
+              className={`font-mono text-[11px] tabular-nums ${dueDateClass(task.dueDate)}`}
+            >
+              {formatDateOnly(task.dueDate, { month: "short", day: "numeric" })}
+            </span>
+          )}
+          {task.priority && (
+            <span title={`${PRIORITY_LABELS[task.priority] ?? task.priority} priority`} className="flex items-center">
+              <PriorityBars priority={task.priority} />
+              <span className="sr-only">{PRIORITY_LABELS[task.priority] ?? task.priority} priority</span>
+            </span>
+          )}
+          {task.assignee && typeof task.assignee === "object" && (
+            <span title={task.assignee.fullName || task.assignee.username}>
+              <span
+                aria-hidden
+                className="w-5 h-5 rounded-full text-text flex items-center justify-center text-[10px] font-medium"
+                style={avatarStyle(task.assignee.username || task.assignee.fullName)}
+              >
+                {task.assignee.fullName?.charAt(0).toUpperCase() || "?"}
+              </span>
+              <span className="sr-only">{task.assignee.fullName || task.assignee.username}</span>
+            </span>
+          )}
+        </span>
       </div>
     </a>
 

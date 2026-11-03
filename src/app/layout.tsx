@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import { AuthProvider } from "@/components/AuthProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
@@ -17,6 +18,9 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
+const geist = Geist({ subsets: ["latin", "latin-ext"], variable: "--font-geist" });
+const geistMono = Geist_Mono({ subsets: ["latin", "latin-ext"], variable: "--font-geist-mono" });
+
 export default async function RootLayout({
   children,
 }: {
@@ -24,7 +28,7 @@ export default async function RootLayout({
 }) {
   const nonce = (await headers()).get(NONCE_HEADER) ?? undefined;
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={`${geist.variable} ${geistMono.variable}`}>
       <head>
         {/* Runs before first paint, so the resolved theme is on <html> with no flash.
             Mirrors resolveTheme in ThemeProvider — change both together. */}
