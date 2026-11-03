@@ -1489,6 +1489,27 @@ describe("clearing the phase on every exit from the active column", () => {
     });
   });
 
+  // BP-1128: a worker reporting a merge it queued hours ago moves the task only from review
+  describe("a move that names the column it expects the task in", () => {
+    beforeEach(() => {
+      findOne.mockReturnValue({ lean: () => Promise.resolve({ _id: "t1", taskNumber: 1, status: "checking", title: "x" }) });
+    });
+
+    it("moves a task still in that column", async () => {
+      const result = await changeStatus(db, "p1", "t1", "doing", "actor", { from: "checking" });
+
+      expect(result.ok).toBe(true);
+      expect(findOneAndUpdate).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses with 412 and writes nothing once a person has moved it elsewhere", async () => {
+      const result = await changeStatus(db, "p1", "t1", "doing", "actor", { from: "ready" });
+
+      expect(result).toMatchObject({ ok: false, status: 412 });
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+    });
+  });
+
   // BP-758: this is the write the worker's outcome record is sent after, and lastRunId is what the
   // record is then matched by
   it("keeps the id the run's record is matched by", async () => {
