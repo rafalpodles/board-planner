@@ -133,6 +133,35 @@ describe("stored credentials never leave their saved url", () => {
   });
 });
 
+describe("a stored credential that cannot be used (BP-1085)", () => {
+  it("answers 400 'click Connect first' when an OAuth server's token cannot be resolved", async () => {
+    projectWithServer({
+      name: "notion",
+      url: "https://good.example/mcp",
+      authType: "oauth",
+      oauth: { status: "needs_reauth" },
+    });
+    resolveServerToken.mockRejectedValue(new Error("OAuth connection not established or needs re-authorization"));
+
+    const response = await POST(request({ name: "notion", authType: "oauth" }), ctx());
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("OAuth connection not established — click Connect first");
+    expect(McpClientMock).not.toHaveBeenCalled();
+  });
+
+  it("answers 400 with the reason when a stored bearer token cannot be read", async () => {
+    projectWithServer({ name: "jira", url: "https://good.example/mcp", authType: "bearer", authToken: "enc:v2:x" });
+    resolveServerToken.mockRejectedValue(new Error("This secret was stored before secrets were sealed. Re-enter it."));
+
+    const response = await POST(request({ name: "jira", authType: "bearer" }), ctx());
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("This secret was stored before secrets were sealed. Re-enter it.");
+    expect(McpClientMock).not.toHaveBeenCalled();
+  });
+});
+
 // The picker in Settings is only usable if it can say what each tool does. `listTools` returns a
 // description per tool and this route used to map it away, which is why the allowlist had to be
 // typed from memory (BP-569).
