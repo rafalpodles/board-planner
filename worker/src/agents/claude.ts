@@ -119,6 +119,11 @@ export function claudeAgent(path: string): CodingAgent {
         // and Board Planner itself still available from the operator's own ~/.claude.json — so an
         // unattended agent could move the task it is working on, and no gate or diff would see it.
         "--strict-mcp-config",
+        // The checkout's CLAUDE.md and .claude/settings.json only. The user source is where the
+        // operator's own ~/.claude/CLAUDE.md lives, which wrote one run's pull request in Polish on an
+        // English repository (BP-1123); --safe-mode would close the project's file with it.
+        "--setting-sources",
+        "project",
         "--append-system-prompt",
         call.systemPrompt,
         // The block's model wins over the worker's, so one agent can spend Opus on the change and
