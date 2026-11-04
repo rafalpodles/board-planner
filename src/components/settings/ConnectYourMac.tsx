@@ -38,7 +38,7 @@ export function ConnectYourMac() {
         <li>
           <div className="mb-2 flex items-center justify-between gap-2">
             <p>Install the Board Planner Worker app with Homebrew:</p>
-            <Button size="sm" variant="secondary" onClick={copy}>
+            <Button size="sm" variant="secondary" onClick={copy} className="shrink-0 whitespace-nowrap">
               {copied ? "Copied!" : "Copy commands"}
             </Button>
           </div>
