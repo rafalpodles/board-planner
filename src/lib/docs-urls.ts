@@ -1,3 +1,4 @@
 export const MCP_DOCS_URL = "https://board-planner.com/docs/ai/claude-code-and-mcp/";
 export const EXECUTION_DOCS_URL = "https://board-planner.com/docs/ai/execution-workers/";
+export const LATEST_RELEASE_URL = "https://github.com/rafalpodles/board-planner/releases/latest";
 export const GETTING_THE_SOFTWARE_URL = `${EXECUTION_DOCS_URL}#getting-the-software`;

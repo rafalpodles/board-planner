@@ -279,8 +279,13 @@ test("a member connects a machine from their own settings, finds it listed, and 
   await page.getByRole("link", { name: "Machines", exact: true }).first().click();
   await expect(page).toHaveURL(/\/settings\/machines$/);
   await expect(page.getByTestId("no-machines")).toBeVisible();
+  const mac = page.getByTestId("connect-your-mac");
+  await expect(mac.getByRole("heading", { name: "Connect your Mac" })).toBeVisible();
+  await expect(mac.getByTestId("brew-install")).toContainText(
+    "brew install --cask rafalpodles/tap/board-planner-worker"
+  );
 
-  await page.getByRole("button", { name: "Connect a machine" }).click();
+  await page.getByRole("button", { name: "Connect a machine with a token" }).click();
   const dialog = page.getByRole("dialog", { name: "Connect a machine" });
   const [minted] = await Promise.all([
     page.waitForResponse(
@@ -637,7 +642,7 @@ test("a self-hosted instance connects a person's second machine, and neither one
   await page.goto("/settings/machines");
 
   for (const name of ["e2e-member-box-1", "e2e-member-box-2"]) {
-    await page.getByRole("button", { name: "Connect a machine" }).click();
+    await page.getByRole("button", { name: "Connect a machine with a token" }).click();
     const dialog = page.getByRole("dialog", { name: "Connect a machine" });
     const [minted] = await Promise.all([
       page.waitForResponse(

@@ -155,7 +155,7 @@ async function startDeviceEnrolment(request: APIRequestContext, who: Organisatio
 
 async function mintFromMachinesPage(page: Page, who: OrganisationFixture) {
   await page.goto(`${originOf(who)}/settings/machines`);
-  await page.getByRole("button", { name: "Connect a machine" }).click();
+  await page.getByRole("button", { name: "Connect a machine with a token" }).click();
   const dialog = page.getByRole("dialog", { name: "Connect a machine" });
   const [minted] = await Promise.all([
     page.waitForResponse((r) => r.url().endsWith("/api/workers/enrolment") && r.request().method() === "POST"),

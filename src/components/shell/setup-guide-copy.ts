@@ -1,4 +1,4 @@
-import { EXECUTION_DOCS_URL, MCP_DOCS_URL } from "@/lib/docs-urls";
+import { MCP_DOCS_URL } from "@/lib/docs-urls";
 import { projectPath } from "@/lib/urls";
 import type { SetupGuideGroupId, SetupGuideStepId } from "@/types";
 
@@ -98,8 +98,7 @@ export const STEP_COPY: Record<SetupGuideStepId, StepCopy> = {
     title: "Connect a machine",
     why: "Install the menubar app and enrol it with one code.",
     action: "How to connect one",
-    href: () => `${EXECUTION_DOCS_URL}#setting-one-up`,
-    external: true,
+    href: () => "/settings/machines",
   },
   handover: {
     title: "Hand a task to an agent",

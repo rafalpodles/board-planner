@@ -94,12 +94,12 @@ describe("SetupGuidePanel", () => {
     expect(screen.getByText("Pull requests show up on their tasks, with CI status.")).toBeTruthy();
   });
 
-  it("sends the machine step to the docs, outside the app", () => {
+  it("sends the machine step to Settings › Machines, where the install commands are", () => {
     render_(guide(["tasks", "team", "repository", "runs"]));
 
     const link = screen.getByTestId("setup-guide-next").querySelector("a")!;
-    expect(link.getAttribute("href")).toMatch(/\/docs\/ai\/execution-workers\//);
-    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("href")).toBe("/settings/machines");
+    expect(link.getAttribute("target")).toBeNull();
   });
 
   it("names the instance lock instead of offering a link nobody can follow", () => {

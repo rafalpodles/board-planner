@@ -1121,9 +1121,7 @@ describe("the hand-over notice, with the board judged too", () => {
 
     expect(notice().dataset.reason).toBe("no-machine");
     expect(notice().textContent).toContain("You have no machine connected");
-    expect(screen.getByRole("link", { name: "How to connect one" }).getAttribute("href")).toBe(
-      "https://board-planner.com/docs/ai/execution-workers/#setting-one-up"
-    );
+    expect(screen.getByRole("link", { name: "How to connect one" }).getAttribute("href")).toBe("/settings/machines");
   });
 
   it("tells the assignee their machine has gone quiet, with where to look", () => {
