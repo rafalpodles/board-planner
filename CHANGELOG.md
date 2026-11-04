@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.13.0](https://github.com/rafalpodles/board-planner/compare/v1.12.1...v1.13.0) (2026-11-04)
+
+
+### Features
+
+* a settings hold is visible on the machine — the fleet screen and the menubar name the held agent and why (BP-1119) ([#774](https://github.com/rafalpodles/board-planner/issues/774)) ([2b5052e](https://github.com/rafalpodles/board-planner/commit/2b5052ea35be4378b57a11c3730e129befe7947f))
+* **menubar:** the app ships as Board Planner Worker.app with the brand icon (BP-1130) ([#778](https://github.com/rafalpodles/board-planner/issues/778)) ([69fa259](https://github.com/rafalpodles/board-planner/commit/69fa25953848f59ab82d663cffb5005554ba9b3c))
+* quieter board chrome with Geist type and compact cards (BP-1129) ([#777](https://github.com/rafalpodles/board-planner/issues/777)) ([30e8787](https://github.com/rafalpodles/board-planner/commit/30e878719b4d6d821e0d6a5d48cac7dd8c259310))
+
 ## [1.12.1](https://github.com/rafalpodles/board-planner/compare/v1.12.0...v1.12.1) (2026-11-03)
 
 
