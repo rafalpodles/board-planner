@@ -33,7 +33,7 @@ describe("Connect your Mac", () => {
     writeText.mockResolvedValue(undefined);
     render(<ConnectYourMac />);
 
-    await act(async () => screen.getByRole("button", { name: "Copy" }).click());
+    await act(async () => screen.getByRole("button", { name: "Copy commands" }).click());
 
     expect(writeText).toHaveBeenCalledWith(screen.getByTestId("brew-install").textContent);
     expect(screen.getByRole("button", { name: "Copied!" })).toBeTruthy();
@@ -43,7 +43,7 @@ describe("Connect your Mac", () => {
     writeText.mockRejectedValue(new Error("denied"));
     render(<ConnectYourMac />);
 
-    await act(async () => screen.getByRole("button", { name: "Copy" }).click());
+    await act(async () => screen.getByRole("button", { name: "Copy commands" }).click());
 
     expect(toast).toHaveBeenCalledWith("Copy failed — select the commands and copy them manually", "error");
   });

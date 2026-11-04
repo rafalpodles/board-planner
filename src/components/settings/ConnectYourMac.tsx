@@ -39,7 +39,7 @@ export function ConnectYourMac() {
           <div className="mb-2 flex items-center justify-between gap-2">
             <p>Install the Board Planner Worker app with Homebrew:</p>
             <Button size="sm" variant="secondary" onClick={copy}>
-              {copied ? "Copied!" : "Copy"}
+              {copied ? "Copied!" : "Copy commands"}
             </Button>
           </div>
           <pre
@@ -57,7 +57,7 @@ export function ConnectYourMac() {
           </p>
         </li>
         <li>
-          Open it from Applications. It lives in the menu bar: give it this board&apos;s address and a folder
+          Open it from Applications. It lives in the menu bar: give it your Board Planner address and a folder
           for its checkouts, then click <span className="font-medium text-text">Connect</span>.
         </li>
         <li>Approve the machine on the page it opens in your browser. It then shows up below.</li>
