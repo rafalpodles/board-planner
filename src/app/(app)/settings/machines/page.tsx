@@ -7,7 +7,7 @@ import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
 import { Button } from "@/components/ui/Button";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { EnrolWorkerModal } from "@/components/settings/EnrolWorkerModal";
-import { GETTING_THE_SOFTWARE_URL } from "@/lib/docs-urls";
+import { ConnectYourMac } from "@/components/settings/ConnectYourMac";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { timeAgo } from "@/lib/time";
 import type { ApiMyMachine } from "@/types";
@@ -84,16 +84,16 @@ export default function MachinesPage() {
             the PM agent to assign to you — that name an agent, in projects you can reach.
           </p>
         </div>
-        <Button onClick={() => setConnecting(true)}>Connect a machine</Button>
       </div>
 
-      <p className="mb-6 text-sm text-text-muted">
-        On a Mac, the menubar app connects the machine for you —{" "}
-        <a href={GETTING_THE_SOFTWARE_URL} target="_blank" rel="noreferrer" className="text-primary underline">
-          Getting the software
-        </a>
-        . A Linux box or a container is connected here, with a single-use token.
-      </p>
+      <ConnectYourMac />
+
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3 text-sm text-text-muted">
+        <p className="min-w-0 grow basis-48">A Linux box or a container is connected with a single-use token instead.</p>
+        <Button variant="secondary" onClick={() => setConnecting(true)}>
+          Connect a machine with a token
+        </Button>
+      </div>
 
       <EnrolWorkerModal open={connecting} onClose={closeDialog} title="Connect a machine" />
 

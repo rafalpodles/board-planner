@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, type CSSProperties } from "react";
 import {
   ApiCustomField,
@@ -83,6 +84,14 @@ function MachineLink({ children }: { children: string }) {
     <a href={CONNECT_MACHINE_URL} target="_blank" rel="noreferrer" className="underline">
       {children}
     </a>
+  );
+}
+
+function ConnectMachineLink() {
+  return (
+    <Link href="/settings/machines" className="underline">
+      How to connect one
+    </Link>
   );
 }
 
@@ -181,7 +190,7 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
       return (
         <>
           You have no machine connected with this board&apos;s repository checked out.{" "}
-          <MachineLink>How to connect one</MachineLink>
+          <ConnectMachineLink />
         </>
       );
     case "machine-stale":

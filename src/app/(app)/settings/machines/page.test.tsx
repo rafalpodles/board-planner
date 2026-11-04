@@ -33,6 +33,18 @@ afterEach(cleanup);
  * had no way to connect it, and no page listing the machines they did connect.
  */
 describe("Settings → Machines", () => {
+  it("leads with connecting a Mac, ahead of the token route for Linux", async () => {
+    api.get.mockResolvedValue([]);
+
+    render(<MachinesPage />);
+    await screen.findByTestId("no-machines");
+
+    const mac = screen.getByTestId("connect-your-mac");
+    const token = screen.getByRole("button", { name: "Connect a machine with a token" });
+    expect(mac.compareDocumentPosition(token) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(mac).getByTestId("brew-install").textContent).toContain("brew install --cask");
+  });
+
   it("lists the reader's machines, each with the way to its projects", async () => {
     api.get.mockResolvedValue([machine()]);
 
@@ -75,7 +87,7 @@ describe("Settings → Machines", () => {
 
     render(<MachinesPage />);
     await screen.findByTestId("no-machines");
-    await act(async () => screen.getByRole("button", { name: "Connect a machine" }).click());
+    await act(async () => screen.getByRole("button", { name: "Connect a machine with a token" }).click());
 
     const dialog = screen.getByRole("dialog", { name: "Connect a machine" });
     await act(async () => within(dialog).getByRole("button", { name: "Mint token" }).click());
@@ -89,7 +101,7 @@ describe("Settings → Machines", () => {
 
     render(<MachinesPage />);
     await screen.findByTestId("no-machines");
-    await act(async () => screen.getByRole("button", { name: "Connect a machine" }).click());
+    await act(async () => screen.getByRole("button", { name: "Connect a machine with a token" }).click());
     await act(async () => screen.getByRole("button", { name: "Cancel" }).click());
 
     expect(await screen.findByTestId("my-machine")).toBeTruthy();
@@ -111,7 +123,7 @@ describe("Settings → Machines", () => {
 
     render(<MachinesPage />);
     await screen.findByTestId("my-machine");
-    await act(async () => screen.getByRole("button", { name: "Connect a machine" }).click());
+    await act(async () => screen.getByRole("button", { name: "Connect a machine with a token" }).click());
     await act(async () => screen.getByRole("button", { name: "Cancel" }).click());
 
     expect((await screen.findByRole("status")).textContent).toBe(
@@ -127,7 +139,7 @@ describe("Settings → Machines", () => {
       .mockResolvedValue([machine({ name: "Newer" })]);
 
     render(<MachinesPage />);
-    await act(async () => screen.getByRole("button", { name: "Connect a machine" }).click());
+    await act(async () => screen.getByRole("button", { name: "Connect a machine with a token" }).click());
     await act(async () => screen.getByRole("button", { name: "Cancel" }).click());
     await screen.findByText("Newer");
 

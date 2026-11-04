@@ -171,7 +171,7 @@ test.describe("a member's own task, as the board changes under it", () => {
     await expect(notice(page)).toContainText("You have no machine connected");
     await expect(notice(page).getByRole("link", { name: "How to connect one" })).toHaveAttribute(
       "href",
-      "https://board-planner.com/docs/ai/execution-workers/#setting-one-up"
+      "/settings/machines"
     );
     await expect(waiting(page)).toHaveCount(0);
   });
