@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0](https://github.com/rafalpodles/board-planner/compare/v1.13.0...v1.14.0) (2026-11-04)
+
+
+### Features
+
+* Settings → Machines leads with connecting a Mac through Homebrew (BP-1133) ([#780](https://github.com/rafalpodles/board-planner/issues/780)) ([554948c](https://github.com/rafalpodles/board-planner/commit/554948c5969fa1ff4868de162a6250a4c8ec42d0))
+
 ## [1.13.0](https://github.com/rafalpodles/board-planner/compare/v1.12.1...v1.13.0) (2026-11-04)
 
 
