@@ -1,4 +1,4 @@
-# CPMenubar
+# Board Planner Worker, the menu bar app
 
 The operator's cockpit for the Board Planner execution worker: a menu bar app that shows whether a
 run is stuck or working, raises a notification when one ends, and manages the repository allowlist.
@@ -61,7 +61,7 @@ make app       # test, build the worker, assemble the app through bundle.sh, ad-
 make clean
 ```
 
-`make app` produces `.build/CPMenubar.app`, signed ad hoc, which opens on this Mac only. The
+`make app` produces `.build/Board Planner Worker.app`, signed ad hoc, which opens on this Mac only. The
 signed and notarised build people download is made by CI on a version tag — see
 [RELEASING.md](RELEASING.md). `LSUIElement` keeps it out of the Dock and ⌘-Tab, so
 the menu bar icon and ⌘, from the panel are the only ways in.
@@ -78,14 +78,14 @@ folder holds *their* project, which has no `worker/` in it.
 ## Run
 
 ```
-open .build/CPMenubar.app
+open ".build/Board Planner Worker.app"
 ```
 
 Against a rig whose state directory is not the default, pass it through — the app reads the same
 variable the worker does:
 
 ```
-CP_STATE_DIR=$HOME/cp-rig/state .build/CPMenubar.app/Contents/MacOS/CPMenubar
+CP_STATE_DIR=$HOME/cp-rig/state ".build/Board Planner Worker.app/Contents/MacOS/CPMenubar"
 ```
 
 ## Layout

@@ -35,12 +35,15 @@ jobs:
       # Building and testing the Swift never saw the defect this covers: `make app` assembled a
       # bundle with no worker in it, which fails at the end of onboarding rather than at build time.
       # Assembling it here is the only place that difference shows.
-      - name: The assembled app carries a worker
+      - name: The assembled app carries a worker and its icon
+        env:
+          APP: .build/Board Planner Worker.app
         run: |
           make app
-          test -f .build/CPMenubar.app/Contents/Resources/worker/main.js
-          test -x .build/CPMenubar.app/Contents/Resources/worker/bin/cp-reap
-          codesign --verify --strict --deep --verbose=2 .build/CPMenubar.app
+          test -f "$APP/Contents/Resources/worker/main.js"
+          test -x "$APP/Contents/Resources/worker/bin/cp-reap"
+          test -f "$APP/Contents/Resources/AppIcon.icns"
+          codesign --verify --strict --deep --verbose=2 "$APP"
       - name: The worker packs into a tarball that runs without an install
         run: |
           ../worker/pack.sh 0.0.0 "$RUNNER_TEMP/pack"

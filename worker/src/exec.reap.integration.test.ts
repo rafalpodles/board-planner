@@ -403,16 +403,16 @@ describe("untamperable, on a Mac with more than one user", () => {
 
   function owned(helperOwner: number, mode = 0o100755) {
     return (path: string) =>
-      path === "/Applications/CPMenubar.app/Contents/Resources/worker/bin/cp-reap"
+      path === "/Applications/Board Planner Worker.app/Contents/Resources/worker/bin/cp-reap"
         ? { ...file, uid: helperOwner, mode }
-        : path.includes("CPMenubar.app")
+        : path.includes("Board Planner Worker.app")
           ? directory(helperOwner)
           : path === "/Applications"
             ? directory(0, 0o40775)
             : directory(0);
   }
   const at = { realpath: (path: string) => path };
-  const helper = "/Applications/CPMenubar.app/Contents/Resources/worker/bin/cp-reap";
+  const helper = "/Applications/Board Planner Worker.app/Contents/Resources/worker/bin/cp-reap";
 
   it("trusts a helper owned by whoever owns the worker's own code", () => {
     expect(untamperable(helper, { ...at, uid: 502, codeOwner: 501, lstat: owned(501) })).toBe("");
