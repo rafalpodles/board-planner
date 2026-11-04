@@ -36,18 +36,18 @@ export function ConnectYourMac() {
       </h3>
       <ol className="list-decimal space-y-3 pl-5 text-text-muted">
         <li>
-          <p className="mb-2">Install the Board Planner Worker app with Homebrew:</p>
-          <div className="flex items-start gap-2">
-            <pre
-              data-testid="brew-install"
-              className="min-w-0 flex-1 overflow-x-auto rounded border border-border bg-bg px-3 py-2 text-xs text-text select-all"
-            >
-              {BREW_INSTALL}
-            </pre>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p>Install the Board Planner Worker app with Homebrew:</p>
             <Button size="sm" variant="secondary" onClick={copy}>
               {copied ? "Copied!" : "Copy"}
             </Button>
           </div>
+          <pre
+            data-testid="brew-install"
+            className="overflow-x-auto rounded border border-border bg-bg px-2.5 py-2 text-[11px] leading-5 text-text select-all"
+          >
+            {BREW_INSTALL}
+          </pre>
           <p className="mt-2 text-xs">
             No Homebrew?{" "}
             <a href={LATEST_RELEASE_URL} target="_blank" rel="noreferrer" className="text-primary underline">
