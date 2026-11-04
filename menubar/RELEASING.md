@@ -200,6 +200,14 @@ The build job stops before signing unless all six are set, and names each missin
 A notarisation that has no verdict within the limit fails the job with its submission id. Finish
 it by hand with `xcrun notarytool wait <id>` and staple, or re-run the job.
 
+## Homebrew follows on its own
+
+The cask `board-planner-worker` in [rafalpodles/homebrew-tap](https://github.com/rafalpodles/homebrew-tap)
+points at `board-planner-menubar-X.Y.Z.zip`. The tap's `bump.yml` runs hourly. It reads the latest
+published release and its `SHA256SUMS` and commits the new `version` and `sha256` with the tap's own
+token, so a release needs nothing more from here. To pick a release up at once, run `bump.yml` by hand
+in the tap. A change to the zip's name or to the `.app` inside it needs the cask changed too.
+
 ## By hand
 
 `bundle.sh` signs with the hardened runtime, notarises, staples and produces a zip — it just needs
