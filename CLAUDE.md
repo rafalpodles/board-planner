@@ -385,6 +385,8 @@ Every `vX.Y.Z` tag also publishes `ghcr.io/rafalpodles/board-planner:<x.y.z>` an
 builds the checkout instead. The image bakes in no address — see [README.md](README.md).
 Releases are cut by merging release-please's PR, which tags `vX.Y.Z` and runs `release.yml` in the
 same run; a tag pushed by hand still releases too — see [menubar/RELEASING.md](menubar/RELEASING.md).
+Homebrew (`rafalpodles/homebrew-tap`, cask `board-planner-worker`) picks each release up within the hour
+by itself (BP-1131).
 
 ## Deploy
 Railway auto-deploys from `main` branch.
