@@ -1341,8 +1341,6 @@ export interface LegalTerms {
   version: string;
   terms: string;
   privacy: string;
-  termsPl: string;
-  privacyPl: string;
 }
 
 export interface ApiUser {

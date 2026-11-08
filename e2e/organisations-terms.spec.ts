@@ -67,7 +67,7 @@ test.describe("BP-939: the cloud terms", () => {
     await expect(box).not.toBeChecked();
     await expect(page.getByRole("link", { name: "Terms of Service" })).toHaveAttribute("href", "https://board-planner.com/legal/terms");
     await expect(page.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "https://board-planner.com/legal/privacy");
-    await expect(page.getByRole("link", { name: "Polski" })).toHaveCount(2);
+    await expect(page.getByRole("link", { name: "Polski" })).toHaveCount(0);
     await page.screenshot({ path: `${SHOTS}/bp939-sign-up.png`, fullPage: true });
     await page.setViewportSize({ width: 375, height: 812 });
     await page.screenshot({ path: `${SHOTS}/bp939-sign-up-phone.png`, fullPage: true });

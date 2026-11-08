@@ -9,8 +9,6 @@ const TERMS = {
   version: "2026-10-15",
   terms: "https://board-planner.com/legal/terms",
   privacy: "https://board-planner.com/legal/privacy",
-  termsPl: "https://board-planner.com/legal/terms/pl",
-  privacyPl: "https://board-planner.com/legal/privacy/pl",
 };
 
 function Form() {
