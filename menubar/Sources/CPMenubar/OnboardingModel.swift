@@ -153,6 +153,7 @@ final class OnboardingModel {
             while !Task.isCancelled, !state.deviceCode.isEmpty {
                 try? await Task.sleep(for: .milliseconds(intervalMs))
                 guard let result = try? await client.poll(deviceCode: state.deviceCode) else { continue }
+                if Task.isCancelled { return }
 
                 switch result {
                 case .pending:
@@ -172,6 +173,23 @@ final class OnboardingModel {
                 }
             }
         }
+    }
+
+    func resumeApproval() {
+        guard Onboarding.resumesApproval(state), !busy else { return }
+        busy = true
+        pollUntilDecided(
+            client: DeviceEnrolmentClient(apiURL: state.apiURL),
+            intervalMs: DeviceEnrolmentStart.defaultIntervalMs)
+    }
+
+    func cancelApproval() {
+        poller?.cancel()
+        poller = nil
+        busy = false
+        state = Onboarding.approvalAbandoned(state)
+        persist()
+        message = ""
     }
 
     // The credential goes where registration would have put it, so a worker enrolled by the app is

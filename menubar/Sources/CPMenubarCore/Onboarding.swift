@@ -195,6 +195,11 @@ public enum Onboarding {
         return next
     }
 
+    /// A device code still on file means an approval the app stopped waiting for when it quit.
+    public static func resumesApproval(_ state: OnboardingState) -> Bool {
+        state.step == .awaitingApproval && !state.deviceCode.isEmpty
+    }
+
     /// The clone exists and a push has been shown to work. Only now is there something to run.
     public static func cloned(_ state: OnboardingState, at path: String) -> OnboardingState {
         var next = state
