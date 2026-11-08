@@ -123,4 +123,11 @@ describe("readinessGaps and a board that lists several repositories (BP-1070)", 
   it("is silent when the board lists one repository, which sends neither", () => {
     expect(readinessGaps({ ...READY, machineMissing: [], machineNeedsUpdate: false })).toEqual([]);
   });
+
+  it("says the machine cannot run the agent's CLI only for a machine that is otherwise live (BP-1094)", () => {
+    expect(readinessGaps({ ...READY, agentLacks: ["codex"] })).toEqual(["machine-lacks-cli"]);
+    expect(readinessGaps({ ...READY, agentLacks: [] })).toEqual([]);
+    expect(readinessGaps({ ...READY, machine: "stale", agentLacks: ["codex"] })).not.toContain("machine-lacks-cli");
+    expect(readinessGaps({ ...READY, machineNeedsUpdate: true, agentLacks: ["codex"] })).toEqual(["machine-needs-update"]);
+  });
 });

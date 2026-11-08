@@ -4,6 +4,7 @@ import {
   seedAgents,
   seedMemberHandover,
   seedMachine,
+  seedCodexHandover,
   setBoardReadiness,
   blockTask,
   setTaskStatus,
@@ -21,6 +22,7 @@ import {
   MEMBER_BACKLOG_TASK_NUMBER,
   MEMBER_MACHINE_ID,
   WORKER_CREDENTIAL,
+  CODEX_HANDOVER_AGENT_NAME,
 } from "./seed";
 import { signIn } from "./session";
 
@@ -41,12 +43,13 @@ const waiting = (page: Page) => page.getByRole("complementary").getByTestId("han
 const problems = (page: Page) => notice(page).getByTestId("handover-problem");
 
 /** The member's machine reporting in, exactly as worker/src/registration.ts does */
-async function machineSays(request: APIRequestContext, body: Record<string, unknown>) {
+async function machineSays(request: APIRequestContext, body: Record<string, unknown>, capabilities?: string) {
   const response = await request.post(`/api/workers/${MEMBER_MACHINE_ID}/heartbeat`, {
     headers: {
       Authorization: `Bearer ${WORKER_CREDENTIAL}`,
       "x-worker-id": String(MEMBER_MACHINE_ID),
       "x-cp-protocol": "1",
+      ...(capabilities === undefined ? {} : { "x-cp-capabilities": capabilities }),
     },
     data: body,
   });
@@ -493,5 +496,45 @@ test.describe("the agent picker", () => {
       "href",
       "https://board-planner.com/docs/ai/execution-workers/"
     );
+  });
+});
+
+// BP-1094. The claim skips a task whose agent needs a coding CLI the machine cannot run, and says
+// nothing; the member's own task screen has to name the CLI and what to do about it.
+test.describe("an agent whose review runs on Codex", () => {
+  test.beforeEach(async () => {
+    await seedCodexHandover();
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await seedMachine("git@github.com:e2e/handover-board.git");
+  });
+
+  test("on a machine that runs only Claude Code says so, and clears once the machine reports Codex", async ({
+    page,
+    request,
+  }) => {
+    await machineSays(request, {}, "gate-commands,multi-repository,agent-claude");
+    const readiness = await openAs(page, "member");
+    expect(readiness.agentsOutOfReach).toEqual([{ agent: expect.any(String), lacks: ["codex"] }]);
+
+    await expect(page.getByRole("complementary").getByText(CODEX_HANDOVER_AGENT_NAME).first()).toBeVisible();
+    await expect(notice(page)).toHaveAttribute("data-reason", "machine-lacks-cli");
+    await expect(notice(page)).toHaveText(
+      "Nothing will run this yet. This task's agent runs on Codex, and none of your machines can run it. Sign in on one of them (codex login) and restart its worker, or choose another agent."
+    );
+    await expect(waiting(page)).toHaveCount(0);
+
+    await machineSays(request, {}, "gate-commands,multi-repository,agent-claude,agent-codex");
+    const again = await readAgain(page);
+    expect(again.readiness).not.toHaveProperty("agentsOutOfReach");
+    await expect(waiting(page)).toHaveText("Waiting for your machine to take it.", { timeout: 1_000 });
+    await expect(notice(page)).toHaveCount(0);
+  });
+
+  test("anyone else reading the task is not told about the member's machines", async ({ page, request }) => {
+    await machineSays(request, {}, "gate-commands,multi-repository,agent-claude");
+    await openAs(page, "admin");
+
+    await expect(page.getByRole("complementary").getByText(CODEX_HANDOVER_AGENT_NAME).first()).toBeVisible();
+    await expect(page.getByText(/none of your machines/)).toHaveCount(0);
   });
 });

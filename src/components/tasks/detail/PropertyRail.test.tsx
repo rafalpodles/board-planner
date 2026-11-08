@@ -1703,3 +1703,68 @@ describe("a board that lists several repositories", () => {
     expect(screen.queryByText(/too old/)).toBeNull();
   });
 });
+
+// BP-1094. A task whose agent runs on a coding CLI none of the reader's machines can run waits in the
+// approved column for ever, and the claim says nothing; the task screen has to.
+describe("an agent none of the reader's machines can run", () => {
+  const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" } as ApiUser;
+  const AGENT = [{ _id: "a1", name: "Codex review" }] as React.ComponentProps<typeof PropertyRail>["agents"];
+  const board = (over: Record<string, unknown> = {}) => ({
+    repositoryUrl: "https://github.com/acme/app",
+    workerEnabled: true,
+    lockedByInstance: false,
+    canAdmin: false,
+    columns: BOARD.map((c) => ({ role: c.role })),
+    machine: "live" as const,
+    bindingError: "",
+    haltedBy: null,
+    ...over,
+  });
+  const rail = (over: Record<string, unknown> = {}, currentUsername = "owner") =>
+    renderRail({
+      agents: AGENT,
+      columns: BOARD,
+      board: board(over),
+      draft: { ...draft, agent: "a1", assignee: "owner" },
+      stored: { agent: "a1", assignee: OWNER, assignedBy: OWNER, status: "ready" as never },
+      currentUsername,
+    });
+
+  it("names the CLI, how to sign in to it, and the way out", () => {
+    rail({ agentsOutOfReach: [{ agent: "a1", lacks: ["codex"] }] });
+
+    const notice = screen.getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe("machine-lacks-cli");
+    expect(notice.textContent).toBe(
+      "Nothing will run this yet. This task's agent runs on Codex, and none of your machines can run it. Sign in on one of them (codex login) and restart its worker, or choose another agent."
+    );
+  });
+
+  it("names Claude Code for a machine signed in only to Codex", () => {
+    rail({ agentsOutOfReach: [{ agent: "a1", lacks: ["claude"] }] });
+
+    expect(screen.getByTestId("handover-notice").textContent).toContain("runs on Claude Code");
+    expect(screen.getByTestId("handover-notice").textContent).toContain("(claude auth login)");
+  });
+
+  it("says no machine runs both when each of the reader's machines runs one of them", () => {
+    rail({ agentsOutOfReach: [{ agent: "a1", lacks: ["claude", "codex"], together: true }] });
+
+    expect(screen.getByTestId("handover-notice").textContent).toBe(
+      "Nothing will run this yet. This task's agent runs on Claude Code and Codex, and none of your machines runs both. Sign in to the one it lacks on one of them (claude auth login, codex login) and restart its worker, or choose another agent."
+    );
+  });
+
+  it("says nothing of another agent out of reach, and waits for the machine", () => {
+    rail({ agentsOutOfReach: [{ agent: "a2", lacks: ["codex"] }] });
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+    expect(screen.getByTestId("handover-waiting")).toBeTruthy();
+  });
+
+  it("does not say it to somebody who is not the task's assignee", () => {
+    rail({ agentsOutOfReach: [{ agent: "a1", lacks: ["codex"] }] }, "claude");
+
+    expect(screen.queryByText(/none of your machines/)).toBeNull();
+  });
+});

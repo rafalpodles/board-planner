@@ -18,7 +18,8 @@ export type ReadinessGap =
   | "machine-stopped"
   | "machine-failing"
   | "machine-missing-repository"
-  | "machine-needs-update";
+  | "machine-needs-update"
+  | "machine-lacks-cli";
 
 export interface ReadinessFacts {
   repositoryUrl?: string | null;
@@ -33,6 +34,8 @@ export interface ReadinessFacts {
   machineMissing?: string[] | null;
   /** The reader's machine holds every repository but its worker cannot run several in one go */
   machineNeedsUpdate?: boolean | null;
+  /** The coding CLIs the task's agent needs that none of the reader's live machines can run */
+  agentLacks?: string[] | null;
 }
 
 type RoleBearing = { role: ColumnRole };
@@ -86,6 +89,7 @@ export function readinessGaps(facts: ReadinessFacts): ReadinessGap[] {
   if (facts.machine === "live") {
     if (facts.machineMissing?.length) gaps.push("machine-missing-repository");
     else if (facts.machineNeedsUpdate) gaps.push("machine-needs-update");
+    else if (facts.agentLacks?.length) gaps.push("machine-lacks-cli");
   }
   return gaps;
 }

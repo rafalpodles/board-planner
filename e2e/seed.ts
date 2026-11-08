@@ -2805,6 +2805,46 @@ export async function makeMachinesStale() {
   await mongoose.disconnect();
 }
 
+export const CODEX_HANDOVER_AGENT_ID = id("e2e00000000000000000ab94");
+export const CODEX_HANDOVER_AGENT_NAME = "Reviewed on Codex";
+
+/** BP-1094: the member's handed-over task gets an agent whose review runs on Codex. Requires seedMemberHandover(). */
+export async function seedCodexHandover() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("agentblocks").deleteMany({ key: "e2e-codex-review" });
+  await db.collection("agentblocks").insertOne({
+    key: "e2e-codex-review",
+    kind: "gate",
+    name: "Codex review",
+    description: "",
+    builtIn: false,
+    gateKind: "review",
+    params: { focus: "general", provider: "codex", model: "gpt-5" },
+    capability: "read-only",
+    provider: "claude",
+    model: "",
+    fallbackModel: "",
+    deterministic: false,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db.collection("agents").insertOne({
+    _id: CODEX_HANDOVER_AGENT_ID,
+    name: CODEX_HANDOVER_AGENT_NAME,
+    description: "",
+    scope: "project",
+    owner: null,
+    project: PROJECT_ID,
+    builtIn: false,
+    composition: { analysis: [], implementation: [{ key: "implement" }], verification: [{ key: "e2e-codex-review" }], delivery: [{ key: "push" }] },
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db.collection("tasks").updateOne({ _id: MEMBER_HANDOVER_TASK_ID }, { $set: { agent: CODEX_HANDOVER_AGENT_ID } });
+  await stampOrganisationAndDisconnect();
+}
+
 /** A machine `owner` enrolled, holding a checkout of `remote`, last seen `seenAgoMs` ago. */
 export async function seedMachine(
   remote: string,
