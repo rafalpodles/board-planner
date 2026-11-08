@@ -34,7 +34,7 @@ const LOOPBACK = "127.0.0.1";
 const SMTP_PORT = Number(process.env.SMTP_STUB_PORT ?? 3994);
 const CONTROL_PORT = Number(process.env.SMTP_STUB_CONTROL_PORT ?? SMTP_PORT + 1);
 
-/** `{ from, to, data }` per message, oldest first. */
+/** `{ from, to, user, data }` per message, oldest first; `user` is the login the client signed in with. */
 let messages = [];
 
 /**
@@ -102,7 +102,7 @@ function converse(socket, session) {
         buffer = buffer.subarray(end + 5);
         session.readingData = false;
         const refused = refuseFor !== null && session.to.includes(refuseFor);
-        if (!refused) messages.push({ from: session.from, to: session.to, data: session.data });
+        if (!refused) messages.push({ from: session.from, to: session.to, user: session.user ?? "", data: session.data });
         session.data = "";
         session.to = [];
         // After the body, not at RCPT: what the mail screen exists to show is the sentence a server
@@ -129,11 +129,18 @@ function converse(socket, session) {
 function command(socket, session, line) {
   const verb = line.split(" ")[0].toUpperCase();
 
-  // A continuation of AUTH LOGIN — the client's base64 username, then its password. Neither is
-  // checked: what a spec asserts is that a message arrived, never who sent it.
+  // A continuation of AUTH LOGIN — the client's base64 username, then its password. The password
+  // is never checked; the username is recorded with each message, so a spec can tell which
+  // server's login a message came through, and `REFUSED_LOGIN` is turned away (BP-899).
   if (session.expectingAuth) {
-    session.expectingAuth = session.expectingAuth === "username" ? "password" : null;
-    socket.write(session.expectingAuth ? "334 UGFzc3dvcmQ6\r\n" : "235 2.7.0 Accepted\r\n");
+    if (session.expectingAuth === "username") {
+      session.user = Buffer.from(line, "base64").toString("utf8");
+      session.expectingAuth = "password";
+      socket.write("334 UGFzc3dvcmQ6\r\n");
+      return;
+    }
+    session.expectingAuth = null;
+    socket.write(authAnswer(session));
     return;
   }
 
@@ -174,7 +181,8 @@ function command(socket, session, line) {
         socket.write("334 VXNlcm5hbWU6\r\n");
         return;
       }
-      socket.write("235 2.7.0 Accepted\r\n");
+      session.user = Buffer.from(line.split(/\s+/)[2] ?? "", "base64").toString("utf8").split("\0")[1] ?? "";
+      socket.write(authAnswer(session));
       return;
     case "MAIL":
       session.from = address(line);
@@ -206,6 +214,12 @@ function command(socket, session, line) {
     default:
       socket.write("250 2.0.0 Ok\r\n");
   }
+}
+
+const REFUSED_LOGIN = "refused";
+
+function authAnswer(session) {
+  return session.user === REFUSED_LOGIN ? "535 5.7.8 Authentication credentials invalid\r\n" : "235 2.7.0 Accepted\r\n";
 }
 
 function address(line) {

@@ -1,6 +1,6 @@
 import { APP_NAME } from "@/lib/brand";
 import { passwordSignInEnabled } from "@/lib/password-sign-in";
-import { isEmailConfigured, sendEmail } from "@/lib/email";
+import { isEmailConfigured, sendEmail, type MailSender } from "@/lib/email";
 import { EmailContent, renderEmail } from "@/lib/email-template";
 import type { Types } from "mongoose";
 import { organisationOrigin } from "@/lib/organisation-host";
@@ -14,6 +14,7 @@ import { organisationOrigin } from "@/lib/organisation-host";
  * afternoon must not take the request down with it.
  */
 async function deliver(
+  sender: MailSender,
   to: string,
   subject: string,
   build: () => EmailContent | Promise<EmailContent>
@@ -23,7 +24,7 @@ async function deliver(
   // so anything thrown while assembling it would be an unhandled rejection rather than a log line.
   try {
     const { html, text } = renderEmail(await build());
-    await sendEmail({ to, subject, text, html });
+    await sendEmail({ sender, to, subject, text, html });
   } catch (err) {
     console.error(`Could not send the "${subject}" notice:`, err);
   }
@@ -52,7 +53,7 @@ export interface PasswordChangedNotice {
 
 export async function notifyPasswordChanged(n: PasswordChangedNotice): Promise<void> {
   const byAdmin = n.how === "admin";
-  await deliver(n.email, `The password on your ${APP_NAME} account was changed`, async () => ({
+  await deliver(n.organisation, n.email, `The password on your ${APP_NAME} account was changed`, async () => ({
     preheader: byAdmin
       ? `An administrator set a new password for ${n.username}.`
       : `The password for ${n.username} was changed with a reset link.`,
@@ -89,6 +90,7 @@ export async function notifyPasswordChanged(n: PasswordChangedNotice): Promise<v
 }
 
 export interface AddressChangedNotice {
+  organisation: Types.ObjectId;
   /** The address losing the account, which is the one that hears about it. */
   previousEmail: string;
   username: string;
@@ -106,7 +108,7 @@ export function maskAddress(address: string): string {
 }
 
 export async function notifyAddressChanged(n: AddressChangedNotice): Promise<void> {
-  await deliver(n.previousEmail, `The email address on your ${APP_NAME} account changed`, () => ({
+  await deliver(n.organisation, n.previousEmail, `The email address on your ${APP_NAME} account changed`, () => ({
     preheader: `This address no longer resets the password for ${n.username}.`,
     kicker: "Account security",
     heading: `This address no longer recovers the account ${n.username}`,
@@ -144,7 +146,7 @@ export async function notifyCredentialCreated(n: CredentialCreatedNotice): Promi
   const heading = isToken
     ? `A new API token was created on your account`
     : `${n.name} was connected to your account`;
-  await deliver(n.email, heading, async () => ({
+  await deliver(n.organisation, n.email, heading, async () => ({
     preheader: `${n.name} can now act as ${n.username}.`,
     kicker: "Account security",
     heading,
@@ -177,7 +179,7 @@ export interface IdentityLinkedNotice {
 
 export async function notifyIdentityLinked(n: IdentityLinkedNotice): Promise<void> {
   const heading = `${n.provider} can now sign in to your account`;
-  await deliver(n.email, heading, async () => ({
+  await deliver(n.organisation, n.email, heading, async () => ({
     preheader: `Signing in with ${n.provider} now opens ${n.username}.`,
     kicker: "Account security",
     heading,
@@ -198,6 +200,7 @@ export async function notifyIdentityLinked(n: IdentityLinkedNotice): Promise<voi
 }
 
 export interface AddressConfirmationNotice {
+  organisation: Types.ObjectId;
   email: string;
   username: string;
   confirmUrl: string;
@@ -209,7 +212,7 @@ export interface AddressConfirmationNotice {
  * beyond a username, which is constrained to a plain shape, and it is throttled per account.
  */
 export async function sendAddressConfirmation(n: AddressConfirmationNotice): Promise<void> {
-  await deliver(n.email, `Confirm your email address for ${APP_NAME}`, () => ({
+  await deliver(n.organisation, n.email, `Confirm your email address for ${APP_NAME}`, () => ({
     preheader: `Confirm this address to use it for the account ${n.username}.`,
     kicker: "Account security",
     heading: "Confirm this email address",

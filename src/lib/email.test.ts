@@ -13,7 +13,7 @@ vi.stubEnv("SMTP_PASS", "secret");
 const { sendEmail, sendEmailOrThrow, isValidEmail, normaliseEmail, emailSettingsSummary } =
   await import("./email");
 
-const MESSAGE = { to: "someone@example.com", subject: "s", text: "t" };
+const MESSAGE = { sender: "platform" as const, to: "someone@example.com", subject: "s", text: "t" };
 
 beforeEach(() => {
   vi.clearAllMocks();

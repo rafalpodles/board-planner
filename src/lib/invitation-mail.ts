@@ -4,6 +4,7 @@ import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { renderEmail } from "@/lib/email-template";
 import { InvitationBoardInput } from "@/lib/invitations";
 import { InvitationDelivery, IUser } from "@/types";
+import type { Types } from "mongoose";
 
 export const NO_ORIGIN_ERROR =
   "This instance does not know its own address (PUBLIC_ORIGIN), so it cannot build a link. Ask an administrator.";
@@ -14,6 +15,7 @@ export function invitationLink(origin: string, token: string): string {
 }
 
 export interface InvitationMail {
+  organisation: Types.ObjectId;
   to: string;
   token: string;
   origin: string;
@@ -52,6 +54,7 @@ export async function deliverInvitation(mail: InvitationMail): Promise<Invitatio
     ],
   });
   const sent = await sendEmail({
+    sender: mail.organisation,
     to: mail.to,
     subject: `${mail.inviterName} invited you to ${APP_NAME}`,
     text,
@@ -61,6 +64,7 @@ export async function deliverInvitation(mail: InvitationMail): Promise<Invitatio
 }
 
 export function deliverTo(
+  organisation: Types.ObjectId,
   to: string,
   token: string,
   origin: string,
@@ -71,6 +75,7 @@ export function deliverTo(
 ): Promise<InvitationDelivery> {
   const nameOf = new Map(projects.map((p) => [String(p._id), p.name]));
   return deliverInvitation({
+    organisation,
     to,
     token,
     origin,

@@ -16,6 +16,8 @@ export interface ISettings {
   ssoTrialNoticeFor?: Date | null;
   // Shared providers (google, github) this organisation's administrators turned off for it; absent means every one is offered (BP-1027)
   disabledProviders?: string[];
+  // The organisation's own mail server (BP-899); the password is sealed under the organisation's key
+  smtp?: { host: string; port: number; user: string; password: string; fromAddress: string; fromName: string };
 }
 
 const settingsSchema = new Schema<ISettings>({
@@ -47,6 +49,20 @@ const settingsSchema = new Schema<ISettings>({
   },
   ssoTrialNoticeFor: { type: Date, default: null },
   disabledProviders: { type: [String], default: undefined },
+  smtp: {
+    type: new Schema(
+      {
+        host: { type: String, required: true, maxlength: 253 },
+        port: { type: Number, required: true, min: 1, max: 65535 },
+        user: { type: String, required: true, maxlength: 254 },
+        password: { type: String, required: true },
+        fromAddress: { type: String, required: true, maxlength: 254 },
+        fromName: { type: String, default: "", maxlength: 80 },
+      },
+      { _id: false }
+    ),
+    default: undefined,
+  },
 });
 
 withOrganisation(settingsSchema);

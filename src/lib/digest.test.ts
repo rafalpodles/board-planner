@@ -457,6 +457,15 @@ describe("digestTick across organisations in their own timezones (BP-667)", () =
     expect(asked).toEqual([tokyo.toHexString()]);
   });
 
+  // BP-899: a digest is the organisation's mail, so it leaves through the organisation's own server when it has one
+  it("sends each organisation's digest as that organisation's mail", async () => {
+    const acme = new Types.ObjectId("0000000000000000000000a1");
+    servedOrganisations.list = [{ _id: acme }];
+
+    expect(await digestTick(new Date("2026-08-17T09:00:00Z"))).toBe(1);
+    expect((sendEmail.mock.calls.at(-1)?.[0] as { sender: unknown }).sender).toEqual(acme);
+  });
+
   it("falls back to the instance's hour and zone for an organisation that set neither", async () => {
     servedOrganisations.list = [{ _id: new Types.ObjectId("0000000000000000000000a1") }];
 

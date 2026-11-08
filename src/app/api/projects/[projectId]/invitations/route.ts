@@ -140,6 +140,7 @@ export const POST = withProjectOwner(async (request, { params, user, db }) => {
 
   const delivery = await deliverWithinBudget(db, email, origin, outcome.token, () =>
     deliverTo(
+      db.organisation,
       email,
       outcome.token,
       origin,

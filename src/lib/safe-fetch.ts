@@ -54,6 +54,35 @@ export async function assertPublicDestination(
   return url;
 }
 
+/**
+ * One public address for a host a client connects to directly rather than through `safeFetch`, such as
+ * an SMTP server. The caller connects to this address and to nothing else, so a name that resolves
+ * public now and private a moment later never reaches inward.
+ */
+export async function vettedAddress(hostname: string, options: DestinationOptions = {}): Promise<string> {
+  const host = unbracket(hostname);
+  const loopbackIsFine = options.allowLoopback === true;
+
+  if (isInternalName(host)) {
+    if (loopbackIsFine && isLoopbackName(host)) return "127.0.0.1";
+    throw new BlockedDestinationError(`Refusing internal hostname ${host}`);
+  }
+
+  // A zone ID (`fe80::1%eth0`) is a literal isIP accepts and isPrivateAddress cannot parse
+  if (host.includes("%")) throw new BlockedDestinationError(`Refusing scoped address ${host}`);
+
+  // Only a literal the socket layer reads exactly as written: `012.0.0.5` is 12.0.0.5 to the check and 10.0.0.5 to
+  // glibc's and musl's getaddrinfo, so anything else is resolved below and the resolver's own answer is what gets vetted
+  const { isIP } = await import("node:net");
+  if (isIP(host) !== 0) {
+    if (!isPrivateAddress(host)) return host;
+    if (loopbackIsFine && (host === "127.0.0.1" || host === "::1")) return host;
+    throw new BlockedDestinationError(`Refusing private address ${host}`);
+  }
+
+  return (await resolvePublic(host, loopbackIsFine))[0].address;
+}
+
 function isLoopbackName(host: string): boolean {
   return host === "localhost" || host.endsWith(".localhost");
 }

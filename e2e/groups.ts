@@ -198,6 +198,7 @@ export const GROUPS = {
     "organisations-machine-limit.spec.ts",
     "organisations-oidc-relay.spec.ts",
     "organisations-sso.spec.ts",
+    "organisations-own-mail-server.spec.ts",
     "organisations-provider-switch.spec.ts",
     "organisations-route-families.spec.ts",
     "organisations-origin.spec.ts",

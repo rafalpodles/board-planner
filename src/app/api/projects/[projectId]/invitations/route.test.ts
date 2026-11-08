@@ -76,7 +76,8 @@ describe("POST /api/projects/:id/invitations", () => {
       relation: "owner",
       invitedBy: "o1",
     });
-    const [, token, , inviter, role, boards] = deliverTo.mock.calls[0];
+    const [organisation, , token, , inviter, role, boards] = deliverTo.mock.calls[0];
+    expect(organisation).toEqual(DEFAULT_ORGANISATION_ID);
     expect([token, inviter, role, boards]).toEqual([
       "cpi_secret",
       caller,

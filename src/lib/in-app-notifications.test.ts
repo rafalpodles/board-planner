@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Types } from "mongoose";
 
 const sendEmail = vi.fn().mockResolvedValue(true);
 const sendPersonalChat = vi.fn(async (_params: unknown): Promise<void> => {});
@@ -113,7 +114,7 @@ vi.mock("@/lib/personal-chat", () => ({ sendPersonalChat: (p: unknown) => sendPe
 const { createNotifications, collectRecipients, assigneeIdOf } = await import(
   "@/lib/in-app-notifications"
 );
-const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
+const { scoped, scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 
 const NOTIFICATION = {
   type: "comment_added" as const,
@@ -173,6 +174,16 @@ describe("a notice nobody caused (BP-1109)", () => {
 });
 
 describe("notification emails", () => {
+  // BP-899: notification mail is the organisation's, so it leaves through the organisation's own server when it has one
+  it("is sent as the organisation's mail, for every recipient", async () => {
+    const acme = new Types.ObjectId("0000000000000000000000a1");
+    await createNotifications(scoped(acme), NOTIFICATION);
+    const mails = await sentMails();
+
+    expect(mails).toHaveLength(2);
+    for (const mail of mails) expect((mail as unknown as { sender: unknown }).sender).toEqual(acme);
+  });
+
   it("links back to the task the notification is about", async () => {
     await createNotifications(scopedToDefaultOrganisation(), NOTIFICATION);
     const [mail] = await sentMails();

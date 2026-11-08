@@ -12,6 +12,7 @@ export const FEATURE_KEYS = [
   "workers.multiple",
   "identity.sso",
   "reports.insights",
+  "email.smtp",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];

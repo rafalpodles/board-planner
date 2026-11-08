@@ -312,6 +312,7 @@ export const PUT = withAdmin(async (request, { params, user: admin, db }) => {
     // To the address being taken off the account, exactly as the self-service path does — this is
     // the half where the person doing it is not the person losing the recovery address.
     void notifyAddressChanged({
+      organisation: db.organisation,
       previousEmail,
       username: target.username,
       newEmail: target.email,

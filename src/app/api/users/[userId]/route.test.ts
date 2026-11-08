@@ -508,6 +508,7 @@ describe("PUT /api/users/:id — an admin repoints the address", () => {
     await PUT(put({ email: "new@example.com" }), ctx());
 
     expect(notifyAddressChanged).toHaveBeenCalledWith({
+      organisation: DEFAULT_ORGANISATION_ID,
       previousEmail: "target@example.com",
       username: "target",
       newEmail: "new@example.com",

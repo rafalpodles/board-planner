@@ -153,6 +153,7 @@ async function deliverLink(
       ],
     });
     const sent = await sendEmail({
+      sender: db.organisation,
       to: user.email,
       subject: `Reset your ${APP_NAME} password`,
       text,

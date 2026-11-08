@@ -5,6 +5,8 @@ import { SMTP_STUB_CONTROL_URL } from "../playwright.config";
 export interface StubMessage {
   from: string;
   to: string[];
+  /** The login the client signed in with, so a spec can tell which server's credentials carried it */
+  user: string;
   data: string;
 }
 

@@ -65,7 +65,7 @@ async function deliverCode(email: string, code: string): Promise<void> {
       outro: ["If you did not ask for it, ignore this message: nothing happens without the code."],
       footer: [`Sent because somebody entered ${email} on the ${APP_NAME} sign-in page.`],
     });
-    const sent = await sendEmail({ to: email, subject: `${code} is your ${APP_NAME} code`, text, html });
+    const sent = await sendEmail({ sender: "platform", to: email, subject: `${code} is your ${APP_NAME} code`, text, html });
     if (!sent) console.error("A sign-in code could not be sent");
   } catch (err) {
     console.error("Sign-in code delivery failed:", err);

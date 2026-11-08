@@ -49,6 +49,7 @@ export const POST = withAuth(async (_request, { user, db }) => {
 
   const token = await issueEmailChange(db, user._id, user.email, { ofCurrentAddress: true });
   void sendAddressConfirmation({
+    organisation: db.organisation,
     email: user.email,
     username: user.username,
     confirmUrl: `${origin}/confirm-email#token=${encodeURIComponent(token)}`,

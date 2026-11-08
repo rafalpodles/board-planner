@@ -182,6 +182,7 @@ async function sendDigest(
   });
 
   return sendEmail({
+    sender: db.organisation,
     to: user.email,
     subject: `[${APP_NAME}] ${count} on your tasks`,
     text,

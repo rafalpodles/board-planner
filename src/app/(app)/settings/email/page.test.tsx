@@ -200,3 +200,106 @@ describe("the mail screen when it cannot read its settings", () => {
     expect(api.get).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("an organisation's own mail server, in the cloud (BP-899)", () => {
+  const PLATFORM = { managedByPlatform: true, configured: true, from: "Board Planner <noreply@board.example>" };
+  const OWN = {
+    hosted: true,
+    plan: "pro",
+    trial: false,
+    trialEndsAt: null,
+    available: true,
+    set: true,
+    host: "smtp.acme.example",
+    port: 587,
+    user: "mailer@acme.example",
+    fromAddress: "boards@acme.example",
+    fromName: "Acme boards",
+    unreadable: false,
+    active: true,
+  };
+  const answer = (own: Record<string, unknown>) =>
+    api.get.mockImplementation(async (path: string) => (path === "/api/settings/smtp" ? own : PLATFORM));
+
+  it("says mail leaves through it, from its address, while it is active", async () => {
+    answer(OWN);
+
+    await openTheScreen();
+
+    expect(screen.getByText("Sent through your own mail server. This screen shows whether it works.")).toBeTruthy();
+    expect(screen.getByTestId("email-own-server").textContent).toContain("smtp.acme.example:587");
+    expect(screen.getByTestId("email-own-server").textContent).toContain("Acme boards <boards@acme.example>");
+    expect(screen.queryByText("Provided by the service")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Your own mail server" })).toBeTruthy();
+  });
+
+  it("goes back to the service's server, and offers Pro, once the plan no longer includes it", async () => {
+    answer({ ...OWN, plan: "free", available: false, active: false });
+
+    await openTheScreen();
+
+    expect(screen.getByText("Provided by the service")).toBeTruthy();
+    expect(screen.queryByTestId("email-own-server")).toBeNull();
+    expect(screen.getByTestId("smtp-upgrade").textContent).toContain("included in Pro");
+    expect(screen.queryByTestId("smtp-form")).toBeNull();
+  });
+
+  it("does not ask for the password again on a plan that shows no form to enter it in", async () => {
+    answer({ ...OWN, plan: "free", available: false, active: false, unreadable: true });
+
+    await openTheScreen();
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("cannot be read");
+    expect(alert.textContent).not.toContain("Enter it again below");
+  });
+
+  it("says why saving waits once the stored password no longer applies", async () => {
+    answer(OWN);
+    await openTheScreen();
+    expect(screen.queryByTestId("smtp-password-needed")).toBeNull();
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Username"), { target: { value: "someone-else" } });
+    });
+
+    expect(screen.getByTestId("smtp-password-needed")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save changes" })).toHaveProperty("disabled", true);
+  });
+
+  it("gives no change of server as the reason when the stored password simply cannot be read", async () => {
+    answer({ ...OWN, unreadable: true, active: false });
+
+    await openTheScreen();
+
+    expect(screen.getByRole("alert").textContent).toContain("Enter it again below");
+    expect(screen.queryByTestId("smtp-password-needed")).toBeNull();
+  });
+
+  it("clears a delivery result once the server it went through is saved over", async () => {
+    answer(OWN);
+    api.post.mockResolvedValue({ to: "admin@example.test" });
+    api.put.mockResolvedValue({ ...OWN, fromName: "Acme" });
+    await openTheScreen();
+
+    await pressSend();
+    expect(screen.getByText("Accepted for delivery to admin@example.test")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Sender name (optional)"), { target: { value: "Acme" } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    });
+
+    expect(api.put).toHaveBeenCalledWith("/api/settings/smtp", expect.objectContaining({ fromName: "Acme" }));
+    expect(screen.queryByText("Accepted for delivery to admin@example.test")).toBeNull();
+  });
+
+  it("is not asked about on a self-hosted instance, whose server is the environment's", async () => {
+    await openTheScreen();
+
+    expect(api.get).not.toHaveBeenCalledWith("/api/settings/smtp");
+    expect(screen.queryByRole("heading", { name: "Your own mail server" })).toBeNull();
+  });
+});

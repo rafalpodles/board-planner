@@ -206,6 +206,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
     }
     const token = await issueEmailChange(db, user._id, pendingEmail);
     void sendAddressConfirmation({
+      organisation: db.organisation,
       email: pendingEmail,
       username: user.username,
       confirmUrl: `${origin}/confirm-email#token=${encodeURIComponent(token)}`,
@@ -279,6 +280,7 @@ export const PUT = withAuth(async (request, { user, db }) => {
     // Told to the address losing the ability to recover the account, not the one gaining it: the
     // person who needs to hear about this is the one who did not do it.
     void notifyAddressChanged({
+      organisation: db.organisation,
       previousEmail,
       username: user.username,
       newEmail: updates.email,

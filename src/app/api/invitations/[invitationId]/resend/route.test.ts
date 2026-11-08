@@ -115,8 +115,9 @@ describe("POST /api/invitations/:id/resend", () => {
     expect(res.status).toBe(200);
     expect(reissueInvitation).toHaveBeenCalledWith(scopedToDefaultOrganisation(), ID, "admin-2");
     expect(recordDelivery).toHaveBeenCalledWith(scopedToDefaultOrganisation(), ID, "cpi_new", "email");
-    expect(deliverTo.mock.calls[0][1]).toBe("cpi_new");
-    expect(deliverTo.mock.calls[0][3]).toBe(caller);
+    expect(deliverTo.mock.calls[0][0]).toEqual(DEFAULT_ORGANISATION_ID);
+    expect(deliverTo.mock.calls[0][2]).toBe("cpi_new");
+    expect(deliverTo.mock.calls[0][4]).toBe(caller);
     expect(JSON.stringify(await res.json())).not.toContain("cpi_new");
     expect(logInstanceAudit.mock.calls[0][1]).toMatchObject({ action: "invitation_resent" });
   });

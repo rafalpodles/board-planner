@@ -247,6 +247,7 @@ async function sendEmailNotifications(n: {
     });
 
     sendEmail({
+      sender: n.organisation,
       to: user.email,
       subject: `[${APP_NAME}] ${n.title}`,
       text,

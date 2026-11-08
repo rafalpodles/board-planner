@@ -16,13 +16,13 @@ vi.mock("@/models/organisation", () => ({
   Organisation: { findById: (id: Types.ObjectId) => ({ select: () => ({ lean: async () => ({ slug: organisationSlug(id) }) }) }) },
 }));
 
-const { notifyPasswordChanged, notifyAddressChanged, notifyCredentialCreated, notifyIdentityLinked, maskAddress } =
+const { notifyPasswordChanged, notifyAddressChanged, notifyCredentialCreated, notifyIdentityLinked, sendAddressConfirmation, maskAddress } =
   await import("@/lib/security-mail");
 const { forgetOrganisationSlugs } = await import("@/lib/organisation-host");
 
 const ORGANISATION = new Types.ObjectId();
 
-const sent = () => sendEmail.mock.calls.at(-1)?.[0] as { to: string; subject: string; html: string; text: string };
+const sent = () => sendEmail.mock.calls.at(-1)?.[0] as { sender: unknown; to: string; subject: string; html: string; text: string };
 
 beforeEach(() => {
   sendEmail.mockClear();
@@ -78,6 +78,7 @@ describe("notifyPasswordChanged", () => {
 describe("notifyAddressChanged", () => {
   it("goes to the address losing the account and shows the new one masked", async () => {
     await notifyAddressChanged({
+      organisation: ORGANISATION,
       previousEmail: "old@example.com",
       username: "owner",
       newEmail: "attacker@evil.test",
@@ -85,6 +86,7 @@ describe("notifyAddressChanged", () => {
     });
 
     expect(sent().to).toBe("old@example.com");
+    expect(sent().sender).toBe(ORGANISATION);
     expect(sent().text).not.toContain("attacker@evil.test");
     expect(sent().text).toContain("a•••@•••.test");
     expect(sent().text).toContain("owner");
@@ -92,6 +94,7 @@ describe("notifyAddressChanged", () => {
 
   it("says the account did it itself when no administrator is named", async () => {
     await notifyAddressChanged({
+      organisation: ORGANISATION,
       previousEmail: "old@example.com",
       username: "owner",
       newEmail: "new@example.com",
@@ -195,5 +198,21 @@ describe("with ORGANISATION_DOMAIN set, every button leads to the account's own 
     await notifyPasswordChanged({ organisation: ORGANISATION, email: "owner@example.com", username: "owner", how: "admin" });
 
     expect(sent().html).not.toContain("href=\"http");
+  });
+});
+
+// BP-899: every notice is the organisation's mail, so it leaves through the organisation's own server when it has one
+describe("the sender of every notice", () => {
+  it.each([
+    ["password changed", () => notifyPasswordChanged({ organisation: ORGANISATION, email: "owner@example.com", username: "owner", how: "admin" })],
+    ["address changed", () => notifyAddressChanged({ organisation: ORGANISATION, previousEmail: "old@example.com", username: "owner", newEmail: "new@example.com" })],
+    ["credential created", () => notifyCredentialCreated({ organisation: ORGANISATION, email: "owner@example.com", username: "owner", kind: "token", name: "ci", scope: "every board" })],
+    ["identity linked", () => notifyIdentityLinked({ organisation: ORGANISATION, email: "owner@example.com", username: "owner", provider: "Acme", providerEmail: "o@acme.example" })],
+    ["address confirmation", () => sendAddressConfirmation({ organisation: ORGANISATION, email: "owner@example.com", username: "owner", confirmUrl: "https://app.example.com/confirm-email#token=t" })],
+  ])("%s is the account's organisation's mail", async (_notice, send) => {
+    await send();
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(sent().sender).toBe(ORGANISATION);
   });
 });

@@ -1,6 +1,8 @@
 import nodemailer, { type Transporter } from "nodemailer";
+import type { Types } from "mongoose";
 import { APP_NAME, APP_DOMAIN } from "@/lib/brand";
 import { organisationDomain } from "./organisation-host";
+import { smtpTransportOptions } from "./smtp-transport";
 
 const SMTP_HOST = process.env.SMTP_HOST;
 const SMTP_PORT = parseInt(process.env.SMTP_PORT || "587", 10);
@@ -13,21 +15,7 @@ let transporter: Transporter | null = null;
 function getTransporter(): Transporter | null {
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return null;
   if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: SMTP_PORT,
-      secure: SMTP_PORT === 465,
-      // nodemailer's own defaults are two minutes to connect and ten to finish. A blackholed host
-      // would hold the test-send request open long past what a person waits, and every fire-and-
-      // forget notification would dangle behind it.
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 20_000,
-      // Without this, an attacker who strips the STARTTLS advertisement on port 587 gets the
-      // AUTH exchange in cleartext — SMTP_USER and SMTP_PASS handed over (BP-306)
-      requireTLS: SMTP_PORT !== 465,
-      auth: { user: SMTP_USER, pass: SMTP_PASS },
-    });
+    transporter = nodemailer.createTransport(smtpTransportOptions({ host: SMTP_HOST, port: SMTP_PORT, user: SMTP_USER, pass: SMTP_PASS }));
   }
   return transporter;
 }
@@ -69,7 +57,11 @@ export function isValidEmail(value: string): boolean {
   return true;
 }
 
+// Mail to an organisation's people goes through its own server when it has one (BP-899); the platform's own mail never does
+export type MailSender = Types.ObjectId | "platform";
+
 interface SendEmailParams {
+  sender: MailSender;
   to: string;
   subject: string;
   text: string;
@@ -88,23 +80,29 @@ export class EmailNotConfiguredError extends Error {
  * watching — everywhere else a delivery failure must not take the request down with it.
  */
 export async function sendEmailOrThrow({
+  sender,
   to,
   subject,
   text,
   html,
   headers,
 }: SendEmailParams): Promise<void> {
+  const message = { to, subject, text, html: html || text, headers };
+
+  // A refusal by the organisation's own server is that server's answer, never a reason to send through ours instead
+  if (sender !== "platform") {
+    // Loaded here so that a caller wanting only `isValidEmail` does not load the database and the sealing key with it
+    const { ownMailFrom, ownMailServerFor, ownMailTransport } = await import("./organisation-smtp");
+    const own = await ownMailServerFor(sender);
+    if (own) {
+      await (await ownMailTransport(own)).sendMail({ ...message, from: ownMailFrom(own) });
+      return;
+    }
+  }
+
   const t = getTransporter();
   if (!t) throw new EmailNotConfiguredError();
-
-  await t.sendMail({
-    from: SMTP_FROM,
-    to,
-    subject,
-    text,
-    html: html || text,
-    headers,
-  });
+  await t.sendMail({ ...message, from: SMTP_FROM });
 }
 
 export async function sendEmail(params: SendEmailParams): Promise<boolean> {

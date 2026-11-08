@@ -89,6 +89,7 @@ describe("POST /api/users/me/email-change (BP-928)", () => {
     expect(await res.json()).toEqual({ sent: "pat@example.com" });
     expect(issueEmailChange).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "u1", "pat@example.com", { ofCurrentAddress: true });
     expect(sendAddressConfirmation).toHaveBeenCalledWith({
+      organisation: scopedToDefaultOrganisation().organisation,
       email: "pat@example.com",
       username: "pat",
       confirmUrl: "https://app.example.com/confirm-email#token=cpe_token",
