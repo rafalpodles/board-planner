@@ -54,6 +54,10 @@ Plenty of tools can now make a machine write code. Board Planner is about everyt
 **who proposed the work, who approved it, what the machine was allowed to touch, what had to pass
 before anything landed, and where it stops and gives the work back.**
 
+<p align="center">
+  <img src="docs/images/agent-loop.gif" alt="A task handed to the Default agent from the Assignee and Agent menus, picked up by the worker on a Mac, coded, passed through the gates, and back on the board as a pull request that is then merged" width="480">
+</p>
+
 Two agents, at the two ends of that arc: a **PM agent** that proposes and writes things down, and
 an **execution worker** that takes an approved task and does it. Neither decides anything you did
 not let it decide.
