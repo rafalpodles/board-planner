@@ -258,24 +258,22 @@ test.describe("BP-1135: the operator sees where each new organisation came from"
 
     const plain = `plain-${Date.now()}`;
     await page.context().clearCookies();
-    await page.evaluate(() => sessionStorage.clear()).catch(() => {});
     await provideAddressAndCode(page, freshAddress("plain"), ORGANISATIONS_PLATFORM_ORIGIN, "/?start");
     await createFromTheForm(page, plain);
     expect((await listed(request, plain)).acquisition).toBeNull();
   });
 
-  test("with no tags, the site that linked to the sign-up page is kept as a host, and it outlives a later visit with neither", async ({ page, request }) => {
+  test("with no tags, the site that linked to the sign-up page is kept as a host, and nothing is left on the device", async ({ page, request }) => {
     const slug = `referred-${Date.now()}`;
     const email = freshAddress("referred");
     await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?start`, { referer: "https://news.ycombinator.com/item?id=42" });
-    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("bp_acquisition"))).toContain("news.ycombinator.com");
-    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?start`);
-    expect(await page.evaluate(() => document.referrer)).toBe("");
     await page.getByLabel("E-mail address").fill(email);
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByLabel("Code").fill(await codeSentTo(email));
     await page.getByRole("button", { name: "Continue" }).click();
     await createFromTheForm(page, slug);
     expect((await listed(request, slug)).acquisition).toEqual({ referrerHost: "news.ycombinator.com", at: expect.any(String) });
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?start`);
+    expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
   });
 });

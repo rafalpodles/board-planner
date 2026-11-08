@@ -5,8 +5,6 @@ export interface Acquisition {
   referrerHost?: string;
 }
 
-export const ACQUISITION_STORAGE_KEY = "bp_acquisition";
-
 const TAG_MAX = 100;
 const TAG = /^[A-Za-z0-9._+\-]+$/;
 const HOST_MAX = 253;
