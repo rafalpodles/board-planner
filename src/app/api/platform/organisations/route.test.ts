@@ -65,3 +65,17 @@ describe("GET /api/platform/organisations", () => {
     expect(lastActiveOf).not.toHaveBeenCalled();
   });
 });
+
+describe("GET /api/platform/organisations: where each came from (BP-1135)", () => {
+  it("returns the acquisition stored at sign-up, and null for an organisation with none", async () => {
+    lastActiveOf.mockResolvedValue(null);
+    const acquisition = { source: "reddit", campaign: "launch-2026q4", referrerHost: "www.reddit.com", at: new Date("2026-11-08T10:00:00Z") };
+    rows.value = [
+      { _id: new Types.ObjectId(), name: "Tagged", slug: "tagged", acquisition },
+      { _id: new Types.ObjectId(), name: "Plain", slug: "plain" },
+    ];
+    const [tagged, plain] = await list();
+    expect(tagged.acquisition).toEqual({ ...acquisition, at: acquisition.at.toISOString() });
+    expect(plain.acquisition).toBeNull();
+  });
+});

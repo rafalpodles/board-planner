@@ -42,6 +42,8 @@ export interface IOrganisation {
   termsAcceptedVersion?: string;
   termsAcceptedAt?: Date;
   termsAcceptedBy?: mongoose.Types.ObjectId;
+  // BP-1135
+  acquisition?: { source?: string; medium?: string; campaign?: string; referrerHost?: string; at: Date } | null;
 }
 
 const entitlementsSchema = new Schema<IOrganisationEntitlements>(
@@ -79,6 +81,20 @@ const organisationSchema = new Schema<IOrganisation>({
   termsAcceptedVersion: { type: String },
   termsAcceptedAt: { type: Date },
   termsAcceptedBy: { type: Schema.Types.ObjectId },
+  acquisition: {
+    type: new Schema(
+      {
+        source: { type: String, maxlength: 100, immutable: true },
+        medium: { type: String, maxlength: 100, immutable: true },
+        campaign: { type: String, maxlength: 100, immutable: true },
+        referrerHost: { type: String, maxlength: 253, immutable: true },
+        at: { type: Date, required: true, immutable: true },
+      },
+      { _id: false }
+    ),
+    default: null,
+    immutable: true,
+  },
   memberSync: { type: new Schema({ members: { type: Number, required: true, min: 0 }, at: { type: Date, required: true } }, { _id: false }), default: null },
   entitlements: {
     type: entitlementsSchema,

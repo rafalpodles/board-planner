@@ -165,3 +165,19 @@ describe("terms at sign-up (BP-939)", () => {
     expect(userCreate.mock.calls[0][0]).not.toHaveProperty("termsAcceptedVersion");
   });
 });
+
+describe("where the organisation came from (BP-1135)", () => {
+  it("stores the campaign tags and referrer host on the organisation, with when", async () => {
+    const acquisition = { source: "reddit", campaign: "launch-2026q4", referrerHost: "www.reddit.com" };
+    expect(await createOrganisation("bill@initech.example", { ...INPUT, acquisition })).toMatchObject({ ok: true });
+    expect(create.mock.calls[0][0].acquisition).toEqual({ ...acquisition, at: expect.any(Date) });
+  });
+
+  it("stores nothing when nothing came, or only what was odd, and still creates the organisation", async () => {
+    for (const acquisition of [undefined, null, "reddit", { source: "<b>" }]) {
+      create.mockClear();
+      expect(await createOrganisation("bill@initech.example", { ...INPUT, acquisition })).toMatchObject({ ok: true });
+      expect(create.mock.calls[0][0]).not.toHaveProperty("acquisition");
+    }
+  });
+});

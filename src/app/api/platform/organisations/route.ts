@@ -22,7 +22,7 @@ export const GET = withPlatformRequest(async (request, { keyId }) => {
   const rows = await Organisation.find(after ? { _id: { $gt: after } } : {})
     .sort({ _id: 1 })
     .limit(limit + 1)
-    .select("name slug licenceKey suspendedAt deletedAt deadNoticeAt")
+    .select("name slug licenceKey suspendedAt deletedAt deadNoticeAt acquisition")
     .lean();
   const page = rows.slice(0, limit);
 
@@ -53,6 +53,7 @@ export const GET = withPlatformRequest(async (request, { keyId }) => {
         deadNoticeAt: row.deadNoticeAt ?? null,
         suspendedAt: row.suspendedAt ?? null,
         deletedAt: row.deletedAt ?? null,
+        acquisition: row.acquisition ?? null,
       };
     })
   );

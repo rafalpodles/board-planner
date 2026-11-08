@@ -8,6 +8,7 @@ import { APP_NAME } from "@/lib/brand";
 import { latinFold } from "@/lib/identifiers";
 import { useLegalTerms } from "@/hooks/use-legal-terms";
 import { TermsCheckbox } from "@/components/legal/TermsCheckbox";
+import { acquisitionFromLanding, acquisitionQuery, type Acquisition } from "@/lib/acquisition";
 
 interface Organisation {
   id: string;
@@ -42,6 +43,12 @@ async function send(path: string, method: string, body?: unknown) {
 
 const hostOf = (origin: string) => new URL(origin).host;
 
+function withAcquisition(path: string, acquisition: Acquisition | null): string {
+  const query = acquisitionQuery(acquisition);
+  if (!query) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}${query}`;
+}
+
 function RememberCheckbox({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
   return (
     <div className="flex items-start gap-2 text-sm" data-testid="remember-organisation">
@@ -63,7 +70,15 @@ function RememberCheckbox({ checked, onChange }: { checked: boolean; onChange: (
   );
 }
 
-export function PlatformSignIn({ signingUp = false, canSignUp = true }: { signingUp?: boolean; canSignUp?: boolean }) {
+export function PlatformSignIn({
+  signingUp = false,
+  canSignUp = true,
+  ownDomains = [],
+}: {
+  signingUp?: boolean;
+  canSignUp?: boolean;
+  ownDomains?: string[];
+}) {
   const [step, setStep] = useState<Step>({ name: "email" });
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -80,6 +95,7 @@ export function PlatformSignIn({ signingUp = false, canSignUp = true }: { signin
   const [remember, setRemember] = useState(false);
   const [forgotten, setForgotten] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [acquisition, setAcquisition] = useState<Acquisition | null>(null);
   const terms = useLegalTerms();
 
   useEffect(() => {
@@ -88,6 +104,7 @@ export function PlatformSignIn({ signingUp = false, canSignUp = true }: { signin
 
   useEffect(() => {
     setSwitching(new URLSearchParams(window.location.search).has("switch"));
+    setAcquisition(acquisitionFromLanding(window.location.search, document.referrer, [window.location.hostname, ...ownDomains]));
   }, []);
 
   const forget = () =>
@@ -207,7 +224,7 @@ export function PlatformSignIn({ signingUp = false, canSignUp = true }: { signin
   const submitCreate = (e: FormEvent) => {
     e.preventDefault();
     void run(async () => {
-      const { ok, data } = await send("/api/sign-in/organisation", "POST", { name: orgName, slug, fullName, username, password, acceptTerms, remember });
+      const { ok, data } = await send("/api/sign-in/organisation", "POST", { name: orgName, slug, fullName, username, password, acceptTerms, remember, acquisition });
       if (data.restart) {
         backToEmail();
         return setError(data.error);
@@ -248,7 +265,7 @@ export function PlatformSignIn({ signingUp = false, canSignUp = true }: { signin
             {canSignUp && (
               <p className="text-center text-sm text-text-muted">
                 {signingUp ? "Already have an account? " : "New here? "}
-                <a href={signingUp ? "/" : "/?start"} className="focus-ring underline">
+                <a href={withAcquisition(signingUp ? "/" : "/?start", acquisition)} className="focus-ring underline">
                   {signingUp ? "Sign in" : "Create an organisation"}
                 </a>
               </p>

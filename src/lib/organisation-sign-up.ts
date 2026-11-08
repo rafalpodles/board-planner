@@ -11,6 +11,7 @@ import { purgeOrganisationRows } from "./organisation-life-cycle";
 import { checkNewAccount, type NewAccountFields } from "./new-account";
 import { logInstanceAudit } from "./instanceAudit";
 import { checkTermsAccepted, type TermsAcceptance } from "./legal-terms";
+import { readAcquisition, type Acquisition } from "./acquisition";
 import { Organisation } from "@/models/organisation";
 
 export const SLUG_RULE = "An address is 3 to 40 lowercase letters, digits or hyphens, starting and ending with a letter or digit";
@@ -23,6 +24,7 @@ export type SignUpInput = {
   fullName?: unknown;
   password?: unknown;
   acceptTerms?: unknown;
+  acquisition?: unknown;
 };
 
 export interface SignUp {
@@ -30,6 +32,7 @@ export interface SignUp {
   slug: string;
   account: NewAccountFields;
   terms: TermsAcceptance;
+  acquisition: Acquisition | null;
 }
 
 export type SignUpOutcome =
@@ -54,7 +57,10 @@ export function checkSignUp(email: string, input: SignUpInput): { ok: true; valu
   if (!account.ok) return account;
   const terms = checkTermsAccepted(input.acceptTerms);
   if (!terms.ok) return terms;
-  return { ok: true, value: { name: name.value, slug: slug.slug, account: account.value, terms: terms.fields } };
+  return {
+    ok: true,
+    value: { name: name.value, slug: slug.slug, account: account.value, terms: terms.fields, acquisition: readAcquisition(input.acquisition) },
+  };
 }
 
 export async function slugTaken(slug: string): Promise<boolean> {
@@ -69,7 +75,8 @@ export async function createOrganisation(signUp: SignUp): Promise<SignUpOutcome>
   const creator = new Types.ObjectId();
   const organisationTerms = "termsAcceptedVersion" in signUp.terms ? { ...signUp.terms, termsAcceptedBy: creator } : {};
   try {
-    await Organisation.create({ _id: organisation, name: signUp.name, slug: signUp.slug, ...organisationTerms });
+    const acquisition = signUp.acquisition ? { acquisition: { ...signUp.acquisition, at: new Date() } } : {};
+    await Organisation.create({ _id: organisation, name: signUp.name, slug: signUp.slug, ...organisationTerms, ...acquisition });
   } catch (error) {
     if (duplicateKeyField(error) !== null) return { ok: false, error: SLUG_UNAVAILABLE };
     throw error;
