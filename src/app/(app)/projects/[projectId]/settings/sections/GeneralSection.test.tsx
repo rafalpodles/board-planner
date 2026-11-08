@@ -414,11 +414,80 @@ describe("GeneralSection member access", () => {
       fireEvent.change(await screen.findByLabelText("Access for alice"), {
         target: { value: "none" },
       });
+      fireEvent.click(await screen.findByRole("button", { name: "Remove myself" }));
 
       await save();
 
       expect(routerReplace).toHaveBeenCalledWith("/projects");
       expect(reloadProjects).toHaveBeenCalledTimes(1);
+    });
+
+    // BP-848
+    it("asks before staging their own removal, and Cancel leaves the row as it is", async () => {
+      renderSection({ currentUserId: "u1" });
+      const select = await screen.findByLabelText("Access for alice");
+
+      fireEvent.change(select, { target: { value: "none" } });
+
+      const dialog = await screen.findByRole("dialog");
+      expect(dialog.textContent).toContain("immediately lose access to Test Project");
+      expect(dialog.textContent).toContain("Only another owner or an admin can add you back");
+      expect(select).toHaveProperty("value", "owner");
+      expect(accessGroup()?.count ?? 0).toBe(0);
+
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(select).toHaveProperty("value", "owner");
+      expect(accessGroup()?.count ?? 0).toBe(0);
+      expect(api.del).not.toHaveBeenCalled();
+    });
+
+    it("stages their own removal only once Remove myself is chosen", async () => {
+      renderSection({ currentUserId: "u1" });
+      const select = await screen.findByLabelText("Access for alice");
+
+      fireEvent.change(select, { target: { value: "none" } });
+      fireEvent.click(await screen.findByRole("button", { name: "Remove myself" }));
+
+      await waitFor(() => expect(accessGroup()?.count).toBe(1));
+      expect(select).toHaveProperty("value", "none");
+      expect(api.del).not.toHaveBeenCalled();
+    });
+
+    it("does not warn about removal when stepping down to member", async () => {
+      renderSection({ currentUserId: "u1" });
+      const select = await screen.findByLabelText("Access for alice");
+
+      fireEvent.change(select, { target: { value: "member" } });
+
+      await waitFor(() => expect(accessGroup()?.count).toBe(1));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("does not warn about removing somebody else", async () => {
+      renderSection({ currentUserId: "u1" });
+
+      fireEvent.change(await screen.findByLabelText("Access for bob"), { target: { value: "none" } });
+
+      await waitFor(() => expect(accessGroup()?.count).toBe(1));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("as the last owner, is refused, says why, and the row goes back to owner", async () => {
+      api.del.mockRejectedValueOnce(new Error("A board must keep at least one owner"));
+      renderSection({ currentUserId: "u1" });
+      const select = await screen.findByLabelText("Access for alice");
+      fireEvent.change(select, { target: { value: "none" } });
+      fireEvent.click(await screen.findByRole("button", { name: "Remove myself" }));
+      await waitFor(() => expect(accessGroup()?.count).toBe(1));
+
+      await save();
+
+      expect(toast).toHaveBeenCalledWith("Alice A: A board must keep at least one owner", "error");
+      await waitFor(() => expect(select).toHaveProperty("value", "owner"));
+      expect(accessGroup()?.count).toBe(0);
+      expect(routerReplace).not.toHaveBeenCalled();
     });
 
     // An instance admin keeps the board whatever their own grant says

@@ -16,6 +16,7 @@ import { DangerAction } from "@/components/settings/DangerAction";
 import { ProjectExport } from "@/components/settings/ProjectExport";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { LoadFailed } from "@/components/ui/LoadFailed";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { BoardInvitations } from "@/components/settings/BoardInvitations";
 import { BoardGroupRoles } from "@/components/settings/BoardGroupRoles";
 import { useDirtyGroup } from "@/components/settings/settings-context";
@@ -148,6 +149,20 @@ export function GeneralSection({
   const [accessEdits, setAccessEdits] = useState<Record<string, Access>>({});
   const [newcomers, setNewcomers] = useState<Record<string, ApiMemberCandidate>>({});
   const [savingAccess, setSavingAccess] = useState(false);
+  const [confirmingSelfRemoval, setConfirmingSelfRemoval] = useState(false);
+
+  function pickAccess(userId: string, relation: Access) {
+    if (userId === currentUserId && relation === "none" && !isAdmin) {
+      setConfirmingSelfRemoval(true);
+      return;
+    }
+    chooseAccess(userId, relation);
+  }
+
+  function confirmSelfRemoval() {
+    if (currentUserId) chooseAccess(currentUserId, "none");
+    setConfirmingSelfRemoval(false);
+  }
 
   function chooseAccess(userId: string, relation: Access) {
     const current = members.find((m) => m._id === userId)?.relation ?? "none";
@@ -197,6 +212,14 @@ export function GeneralSection({
           refused.push(
             `${nameOf(userId)}: ${err instanceof Error ? err.message : "Failed to update access"}`
           );
+          if (userId === currentUserId && relation === "none") {
+            setAccessEdits((prev) => {
+              if (prev[userId] !== relation) return prev;
+              const next = { ...prev };
+              delete next[userId];
+              return next;
+            });
+          }
           continue;
         }
         landed++;
@@ -377,7 +400,7 @@ export function GeneralSection({
                   <select
                     value={accessEdits[m._id] ?? m.relation ?? "none"}
                     disabled={savingAccess}
-                    onChange={(e) => chooseAccess(m._id, e.target.value as Access)}
+                    onChange={(e) => pickAccess(m._id, e.target.value as Access)}
                     className={`focus-ring rounded-lg border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0 ${
                       m._id in accessEdits ? "border-warning/60" : "border-border"
                     }`}
@@ -394,6 +417,15 @@ export function GeneralSection({
         </div>
         )}
       </SettingsCard>
+
+      <ConfirmDialog
+        open={confirmingSelfRemoval}
+        onClose={() => setConfirmingSelfRemoval(false)}
+        onConfirm={confirmSelfRemoval}
+        title="Remove yourself from this board?"
+        message={`Once saved, you immediately lose access to ${project.name}. Only another owner or an admin can add you back.`}
+        confirmLabel="Remove myself"
+      />
 
       {membersRead === "loaded" && <BoardInvitations projectId={projectId} />}
       {membersRead === "loaded" && <BoardGroupRoles projectId={projectId} />}
