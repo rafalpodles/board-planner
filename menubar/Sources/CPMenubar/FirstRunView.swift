@@ -223,6 +223,7 @@ struct FirstRunView: View {
             .padding(.vertical, 12)
 
             HStack {
+                Button("Cancel") { onboarding.cancelApproval() }
                 Spacer()
                 Button("Open the page again") {
                     if let url = URL(string: onboarding.state.verificationURL) { NSWorkspace.shared.open(url) }

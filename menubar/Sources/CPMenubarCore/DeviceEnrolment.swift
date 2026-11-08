@@ -5,6 +5,9 @@ public struct DeviceEnrolmentStart: Decodable, Equatable, Sendable {
     public let userCode: String
     public let verificationUrl: String
     public let intervalMs: Int
+
+    /// The server's DEVICE_POLL_INTERVAL_MS, for a poll resumed after a relaunch that kept no answer
+    public static let defaultIntervalMs = 2_000
 }
 
 public enum DeviceEnrolmentPoll: Equatable, Sendable {

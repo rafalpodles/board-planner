@@ -26,6 +26,7 @@ struct CPMenubarApp: App {
         let onboarding = OnboardingModel()
         _onboarding = State(initialValue: onboarding)
         Task { await onboarding.resumeWorker() }
+        onboarding.resumeApproval()
 
         Notifier.shared.requestAuthorization()
     }

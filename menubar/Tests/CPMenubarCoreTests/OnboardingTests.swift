@@ -48,6 +48,24 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(after.userCode, "")
     }
 
+    func testARelaunchWithAStoredDeviceCodeResumesWaitingForTheApproval() {
+        var state = Onboarding.folderChosen(OnboardingState(), path: "/checkout")
+        state = Onboarding.approvalStarted(state, deviceCode: "cpd_x", userCode: "BCDF2345", verificationURL: "u")
+        let store = defaults()
+        Onboarding.save(state, defaults: store)
+
+        XCTAssertTrue(Onboarding.resumesApproval(Onboarding.load(defaults: store)))
+    }
+
+    func testNothingIsResumedWithoutAStoredDeviceCode() {
+        let chosen = Onboarding.folderChosen(OnboardingState(), path: "/checkout")
+        let started = Onboarding.approvalStarted(chosen, deviceCode: "cpd_x", userCode: "BCDF2345", verificationURL: "u")
+
+        XCTAssertFalse(Onboarding.resumesApproval(chosen), "a folder chosen and no Connect yet")
+        XCTAssertFalse(Onboarding.resumesApproval(Onboarding.approvalAbandoned(started)), "cancelled, refused or expired")
+        XCTAssertFalse(Onboarding.resumesApproval(Onboarding.approved(started, workerID: "w1")), "already approved")
+    }
+
     func testApprovalSpendsTheDeviceCode() {
         var state = Onboarding.folderChosen(OnboardingState(), path: "/checkout")
         state = Onboarding.approvalStarted(state, deviceCode: "cpd_x", userCode: "BCDF2345", verificationURL: "u")
