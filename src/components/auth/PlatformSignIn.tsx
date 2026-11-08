@@ -8,6 +8,7 @@ import { APP_NAME } from "@/lib/brand";
 import { latinFold } from "@/lib/identifiers";
 import { useLegalTerms } from "@/hooks/use-legal-terms";
 import { TermsCheckbox } from "@/components/legal/TermsCheckbox";
+import { ACQUISITION_STORAGE_KEY, acquisitionFromLanding, readAcquisition, type Acquisition } from "@/lib/acquisition";
 
 interface Organisation {
   id: string;
@@ -41,6 +42,16 @@ async function send(path: string, method: string, body?: unknown) {
 }
 
 const hostOf = (origin: string) => new URL(origin).host;
+
+function landingAcquisition(): Acquisition | null {
+  const landed = acquisitionFromLanding(window.location.search, document.referrer, window.location.hostname);
+  try {
+    // Safari in private mode throws on sessionStorage
+    if (landed) sessionStorage.setItem(ACQUISITION_STORAGE_KEY, JSON.stringify(landed));
+    else return readAcquisition(JSON.parse(sessionStorage.getItem(ACQUISITION_STORAGE_KEY) ?? "null"));
+  } catch {}
+  return landed;
+}
 
 function RememberCheckbox({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
   return (
@@ -80,6 +91,7 @@ export function PlatformSignIn({ signingUp = false, canSignUp = true }: { signin
   const [remember, setRemember] = useState(false);
   const [forgotten, setForgotten] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [acquisition, setAcquisition] = useState<Acquisition | null>(null);
   const terms = useLegalTerms();
 
   useEffect(() => {
@@ -88,6 +100,7 @@ export function PlatformSignIn({ signingUp = false, canSignUp = true }: { signin
 
   useEffect(() => {
     setSwitching(new URLSearchParams(window.location.search).has("switch"));
+    setAcquisition(landingAcquisition());
   }, []);
 
   const forget = () =>
@@ -207,7 +220,7 @@ export function PlatformSignIn({ signingUp = false, canSignUp = true }: { signin
   const submitCreate = (e: FormEvent) => {
     e.preventDefault();
     void run(async () => {
-      const { ok, data } = await send("/api/sign-in/organisation", "POST", { name: orgName, slug, fullName, username, password, acceptTerms, remember });
+      const { ok, data } = await send("/api/sign-in/organisation", "POST", { name: orgName, slug, fullName, username, password, acceptTerms, remember, acquisition });
       if (data.restart) {
         backToEmail();
         return setError(data.error);
