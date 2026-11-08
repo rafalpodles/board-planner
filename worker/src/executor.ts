@@ -41,13 +41,15 @@ function protectedPathsNote(laterChecks: string[]): string {
 
 const CHECK_NAMES: Record<string, string> = { build: "the build", "test-run": "the test suite" };
 
-// Said only when a check really follows: the agent has no shell, and without this it closes its
-// summary with "the tests were not run", which reads on the pull request as an untested change
-// (BP-780). Promising checks an agent is not composed with would be the opposite lie.
-function checksNote(laterChecks: string[]): string {
+// Said only when a check really follows: without this an agent closes its summary with "the tests
+// were not run", which reads on the pull request as an untested change (BP-780). Promising checks an
+// agent is not composed with would be the opposite lie. "No shell" only to a CLI that has none: Codex
+// reads the repository through its shell, and told it had none it wrote blind or gave up (BP-1138).
+function checksNote(laterChecks: string[], hasShell: boolean): string {
   const named = [...new Set(laterChecks.map((kind) => CHECK_NAMES[kind]).filter(Boolean))];
   if (named.length === 0) return "";
-  return ` You have no shell and cannot run anything. After this step the worker itself runs ${named.join(" and ")}, before anything is delivered, and lists what passed on the pull request — so do not say in your summary that it was not run.`;
+  const noShell = hasShell ? "" : " You have no shell and cannot run anything.";
+  return `${noShell} After this step the worker itself runs ${named.join(" and ")}, before anything is delivered, and lists what passed on the pull request — so do not say in your summary that it was not run.`;
 }
 
 // The brief says not to change what these commands name, which an agent can only do if it is told them
@@ -58,10 +60,15 @@ function gateCommandsNote(commands: GateCommands): string {
   return ` This project's gates run ${named.map((command) => `\`${command}\``).join(", ")}${where}. The rule above also covers any file those commands name, and gradlew, mvnw, justfile, Taskfile.yml, noxfile.py, pytest.ini, conftest.py, build.rs, GNUmakefile, go.work, .cargo/, .mvn/ and gradle/wrapper/.`;
 }
 
-function systemPromptFor(brief: StepBrief, repositories: readonly WorktreeRef[] = [], commands: GateCommands = NPM_GATES): string {
+function systemPromptFor(
+  brief: StepBrief,
+  hasShell: boolean,
+  repositories: readonly WorktreeRef[] = [],
+  commands: GateCommands = NPM_GATES
+): string {
   const laterChecks = brief.laterChecks ?? [];
   const base =
-    SYSTEM_PROMPT + protectedPathsNote(laterChecks) + gateCommandsNote(commands) + checksNote(laterChecks) + layoutNote(repositories);
+    SYSTEM_PROMPT + protectedPathsNote(laterChecks) + gateCommandsNote(commands) + checksNote(laterChecks, hasShell) + layoutNote(repositories);
   const step = brief.prompt.trim();
   return step ? `${base}\n\nThis step: ${step}` : base;
 }
@@ -254,7 +261,7 @@ export function createExecutor(
 
       const agentArgs = agent.editArgs({
         prompt: buildPrompt(task),
-        systemPrompt: systemPromptFor(brief, repositories, gateCommandsOf(config)),
+        systemPrompt: systemPromptFor(brief, agent.hasShell, repositories, gateCommandsOf(config)),
         capability: brief.capability,
         model: agent.id === "claude" ? modelOr(brief.model || config.model, DEFAULT_MODEL) : brief.model.trim(),
         fallbackModel: agent.id === "claude" ? modelOr(brief.fallbackModel || config.fallbackModel, DEFAULT_FALLBACK_MODEL) : "",

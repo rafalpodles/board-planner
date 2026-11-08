@@ -96,6 +96,7 @@ export function claudeAgent(path: string): CodingAgent {
     path,
     worktreeWritable: () => true,
     reviewerWritesCheckout: true,
+    hasShell: false,
     // Measured: without the keychains the CLI answers "Not logged in", and it reads no other part of a home
     sessionReadable: () =>
       realHomes().flatMap((home) => [join(home, ".claude"), join(home, ".claude.json"), join(home, "Library", "Keychains")]).concat(programDirectory(path)),
