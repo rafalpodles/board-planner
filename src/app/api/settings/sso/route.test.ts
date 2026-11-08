@@ -154,12 +154,27 @@ describe("PUT /api/settings/sso (BP-951)", () => {
     discoverProvider.mockRejectedValueOnce(new Error("fetch failed", { cause: new BlockedDestinationError("internal") }));
     const blocked = await call("PUT", FORM);
     expect(blocked.status).toBe(400);
-    expect((await blocked.json()).error).toContain("not one this server may call");
+    expect((await blocked.json()).error).toContain("does not resolve, or it is inside the service's own network");
 
     discoverProvider.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const unreadable = await call("PUT", FORM);
     expect(unreadable.status).toBe(400);
     expect((await unreadable.json()).error).toContain("discovery document");
+    expect(row).toBeNull();
+  });
+
+  it("answers a host that does not resolve exactly as one inside the network, so neither tells which names the resolver knows (BP-1134)", async () => {
+    discoverProvider.mockRejectedValueOnce(new Error("fetch failed", { cause: new BlockedDestinationError("Could not resolve login.acme.example") }));
+    const unresolved = await call("PUT", FORM);
+    discoverProvider.mockRejectedValueOnce(new Error("fetch failed", { cause: new BlockedDestinationError("login.acme.example resolves to the private address 10.0.0.1") }));
+    const internal = await call("PUT", FORM);
+
+    expect(unresolved.status).toBe(400);
+    expect(internal.status).toBe(400);
+    const unresolvedBody = await unresolved.text();
+    expect(unresolvedBody).toBe(await internal.text());
+    expect(unresolvedBody).toContain("does not resolve");
+    expect(unresolvedBody).toContain("inside the service's own network");
     expect(row).toBeNull();
   });
 

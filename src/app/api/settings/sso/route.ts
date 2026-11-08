@@ -73,7 +73,7 @@ export const PUT = withAdmin(async (request, { user, db }) => {
     await discoverProvider({ id: "oidc", kind: "oidc", linksByAddress: true, label, issuer, clientId, clientSecret: secret, own: true });
   } catch (err) {
     if (isBlocked(err)) {
-      return NextResponse.json({ error: "That address is not one this server may call. Use the public address of your provider." }, { status: 400 });
+      return NextResponse.json({ error: "That address cannot be used: it does not resolve, or it is inside the service's own network. Check the host name and use your provider's public address." }, { status: 400 });
     }
     return NextResponse.json({ error: "Could not read the provider's discovery document. Check the issuer address, it must serve /.well-known/openid-configuration." }, { status: 400 });
   }
