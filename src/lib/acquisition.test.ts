@@ -58,6 +58,7 @@ describe("acquisitionFromLanding (BP-1135)", () => {
     const own = ["bp.example.co.uk", "app.oldbrand.com"];
     expect(acquisitionFromLanding("", "https://www.bbc.co.uk/", own)).toEqual({ referrerHost: "www.bbc.co.uk" });
     expect(acquisitionFromLanding("", "https://other.example.co.uk/", own)).toEqual({ referrerHost: "other.example.co.uk" });
+    expect(acquisitionFromLanding("", "https://xbp.example.co.uk/", own)).toEqual({ referrerHost: "xbp.example.co.uk" });
     for (const ours of ["https://bp.example.co.uk/", "https://acme.bp.example.co.uk/", "https://app.oldbrand.com/"]) {
       expect(acquisitionFromLanding("", ours, own)).toBeNull();
     }

@@ -267,9 +267,13 @@ test.describe("BP-1135: the operator sees where each new organisation came from"
     const slug = `referred-${Date.now()}`;
     const email = freshAddress("referred");
     await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?start`, { referer: "https://news.ycombinator.com/item?id=42" });
-    await page.getByRole("link", { name: "Sign in", exact: true }).click();
+    const signIn = page.getByRole("link", { name: "Sign in", exact: true });
+    await expect(signIn).toHaveAttribute("href", "/?ref=news.ycombinator.com");
+    await signIn.click();
     await page.waitForURL(`${ORGANISATIONS_PLATFORM_ORIGIN}/?ref=news.ycombinator.com`);
-    await page.getByRole("link", { name: "Create an organisation" }).click();
+    const create = page.getByRole("link", { name: "Create an organisation" });
+    await expect(create).toHaveAttribute("href", "/?start&ref=news.ycombinator.com");
+    await create.click();
     await page.waitForURL(`${ORGANISATIONS_PLATFORM_ORIGIN}/?start&ref=news.ycombinator.com`);
     await page.getByLabel("E-mail address").fill(email);
     await page.getByRole("button", { name: "Continue" }).click();

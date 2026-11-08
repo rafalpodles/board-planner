@@ -107,3 +107,20 @@ describe("the platform host's front page (BP-1009)", () => {
     expect(servedOrganisationById).not.toHaveBeenCalled();
   });
 });
+
+describe("the platform host's own domains, for telling an outside referrer from ours (BP-1135)", () => {
+  it("hands the form the organisation domain and the default organisation's host", async () => {
+    process.env.ORGANISATION_DEFAULT_HOST = "app.board-planner.com";
+    try {
+      requestFrom("login.board-planner.com", null);
+      expect(await home({ start: "" })).toMatchObject({ props: { ownDomains: ["board-planner.com", "app.board-planner.com"] } });
+    } finally {
+      delete process.env.ORGANISATION_DEFAULT_HOST;
+    }
+  });
+
+  it("hands it the organisation domain alone when there is no default host", async () => {
+    requestFrom("login.board-planner.com", null);
+    expect(await home({ start: "" })).toMatchObject({ props: { ownDomains: ["board-planner.com"] } });
+  });
+});
