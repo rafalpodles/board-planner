@@ -7,7 +7,7 @@ import { originFor } from "@/lib/organisation-host";
 import { APP_NAME } from "@/lib/brand";
 import { countAttempt, sourceKey } from "@/lib/rate-limit";
 import { ownMailServerFor } from "@/lib/organisation-smtp";
-import { BlockedDestinationError, UnresolvedDestinationError } from "@/lib/safe-fetch";
+import { BlockedDestinationError } from "@/lib/safe-fetch";
 import { mailServerAnswer } from "@/lib/smtp-transport";
 
 const TESTS_PER_WINDOW = 5;
@@ -82,11 +82,8 @@ export const POST = withAdmin(async (_request, { user, db }) => {
     if (err instanceof EmailNotConfiguredError) {
       return NextResponse.json({ error: err.message }, { status: 409 });
     }
-    if (err instanceof UnresolvedDestinationError) {
-      return NextResponse.json({ error: "Your mail server's host name does not resolve right now." }, { status: 409 });
-    }
     if (err instanceof BlockedDestinationError) {
-      return NextResponse.json({ error: "Your mail server's address is not one this server may call." }, { status: 409 });
+      return NextResponse.json({ error: "Your mail server's address cannot be used right now: it does not resolve, or it is inside the service's own network." }, { status: 409 });
     }
     // The whole point of the endpoint: what the mail server actually said. Everywhere else this
     // is swallowed, which is why a misconfigured deployment looks exactly like a working one.

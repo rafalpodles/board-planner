@@ -14,7 +14,7 @@ vi.mock("@/models/settings", () => ({ Settings: { findOne: () => ({ lean: async 
 
 const { ownMailServerFor, ownMailTransport, forgetMailRoute, ownMailFrom } = await import("./organisation-smtp");
 const { encryptSecret } = await import("./encryption");
-const { BlockedDestinationError, UnresolvedDestinationError } = await import("./safe-fetch");
+const { BlockedDestinationError } = await import("./safe-fetch");
 
 const ORGANISATION = new Types.ObjectId();
 const SERVER = { host: "smtp.acme.example", port: 587, user: "mailer", password: "smtp-pass", fromAddress: "boards@acme.example", fromName: "Acme" };
@@ -112,6 +112,9 @@ describe("ownMailTransport", () => {
     ["localhost", "localhost", []],
     // The check would read 012 as 12; getaddrinfo reads it as octal 10, and so does this lookup's answer
     ["a leading-zero literal the resolver reads as octal", "012.0.0.5", [{ address: "10.0.0.5", family: 4 }]],
+    // isIP accepts a zone ID, and isPrivateAddress cannot parse one into its groups
+    ["a link-local literal with a zone", "fe80::1%eth0", []],
+    ["the loopback literal with a zone", "[::1%lo0]", []],
   ])("refuses %s and connects to nothing", async (_case, host, answer) => {
     lookup.mockResolvedValue(answer);
 
@@ -119,10 +122,10 @@ describe("ownMailTransport", () => {
     expect(createTransport).not.toHaveBeenCalled();
   });
 
-  it("says a name that does not resolve is unresolved, not internal", async () => {
+  it("refuses a name that does not resolve, and connects to nothing", async () => {
     lookup.mockRejectedValue(Object.assign(new Error("getaddrinfo ENOTFOUND smtp.acme.exmaple"), { code: "ENOTFOUND" }));
 
-    await expect(ownMailTransport({ ...SERVER, host: "smtp.acme.exmaple" })).rejects.toBeInstanceOf(UnresolvedDestinationError);
+    await expect(ownMailTransport({ ...SERVER, host: "smtp.acme.exmaple" })).rejects.toBeInstanceOf(BlockedDestinationError);
     expect(createTransport).not.toHaveBeenCalled();
   });
 

@@ -7,7 +7,7 @@ import { organisationDomain } from "@/lib/organisation-host";
 import { forgetMailRoute, ownMailTransport } from "@/lib/organisation-smtp";
 import { countInLiveWindow, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
-import { BlockedDestinationError, UnresolvedDestinationError } from "@/lib/safe-fetch";
+import { BlockedDestinationError } from "@/lib/safe-fetch";
 import { writeSettings } from "@/lib/settings-write";
 import { parseSmtpInput } from "@/lib/smtp-input";
 import { mailServerAnswer } from "@/lib/smtp-transport";
@@ -69,11 +69,9 @@ export const PUT = withAdmin(async (request, { user, db }) => {
       transport.close();
     }
   } catch (err) {
-    if (err instanceof UnresolvedDestinationError) {
-      return NextResponse.json({ error: `No mail server answers to ${host}. Check the host name.` }, { status: 400 });
-    }
+    // One answer for both, as for webhooks: telling them apart would say which internal names the platform's resolver knows
     if (err instanceof BlockedDestinationError) {
-      return NextResponse.json({ error: "That address is not one this server may call. Use the public address of your mail server." }, { status: 400 });
+      return NextResponse.json({ error: "That address cannot be used: it does not resolve, or it is inside the service's own network. Check the host name and use your mail server's public address." }, { status: 400 });
     }
     return NextResponse.json({ error: `Your mail server did not accept the connection: ${mailServerAnswer(err)}` }, { status: 400 });
   }

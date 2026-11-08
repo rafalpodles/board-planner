@@ -8,14 +8,6 @@ export class BlockedDestinationError extends Error {
   }
 }
 
-/** The name does not resolve at all: refused like any other destination, but a typo rather than an internal address */
-export class UnresolvedDestinationError extends BlockedDestinationError {
-  constructor(host: string) {
-    super(`Could not resolve ${host}`);
-    this.name = "UnresolvedDestinationError";
-  }
-}
-
 const MAX_REDIRECTS = 5;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
@@ -76,8 +68,11 @@ export async function vettedAddress(hostname: string, options: DestinationOption
     throw new BlockedDestinationError(`Refusing internal hostname ${host}`);
   }
 
+  // A zone ID (`fe80::1%eth0`) is a literal isIP accepts and isPrivateAddress cannot parse
+  if (host.includes("%")) throw new BlockedDestinationError(`Refusing scoped address ${host}`);
+
   // Only a literal the socket layer reads exactly as written: `012.0.0.5` is 12.0.0.5 to the check and 10.0.0.5 to
-  // getaddrinfo, so anything else is resolved below and the resolver's own answer is what gets vetted
+  // glibc's and musl's getaddrinfo, so anything else is resolved below and the resolver's own answer is what gets vetted
   const { isIP } = await import("node:net");
   if (isIP(host) !== 0) {
     if (!isPrivateAddress(host)) return host;
@@ -109,9 +104,9 @@ async function resolvePublic(host: string, loopbackIsFine: boolean): Promise<Vet
     const { lookup } = await import("node:dns/promises");
     resolved = await lookup(host, { all: true, verbatim: true });
   } catch {
-    throw new UnresolvedDestinationError(host);
+    throw new BlockedDestinationError(`Could not resolve ${host}`);
   }
-  if (resolved.length === 0) throw new UnresolvedDestinationError(host);
+  if (resolved.length === 0) throw new BlockedDestinationError(`Could not resolve ${host}`);
 
   const loopbackAllowed = loopbackIsFine && isLoopbackName(host);
   const inward = resolved.find(

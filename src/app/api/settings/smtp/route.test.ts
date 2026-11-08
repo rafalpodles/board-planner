@@ -39,7 +39,7 @@ vi.mock("@/models/settings", () => {
 const { GET, PUT, DELETE } = await import("./route");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { decryptSecret, encryptSecret } = await import("@/lib/encryption");
-const { BlockedDestinationError, UnresolvedDestinationError } = await import("@/lib/safe-fetch");
+const { BlockedDestinationError } = await import("@/lib/safe-fetch");
 
 const ADMIN = { _id: "a1", username: "root", role: "admin", viaMachineCredential: false };
 const ORGANISATION = () => scopedToDefaultOrganisation().organisation;
@@ -107,19 +107,22 @@ describe("PUT /api/settings/smtp (BP-899)", () => {
     const res = await call("PUT", FORM);
 
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/not one this server may call/);
+    expect((await res.json()).error).toMatch(/inside the service's own network/);
     expect(row).toBeNull();
   });
 
-  it("says a host name that does not resolve is a typo to check, not an internal address", async () => {
-    ownMailTransport.mockRejectedValue(new UnresolvedDestinationError("smtp.acme.exmaple"));
+  // A different answer would tell a tenant which internal names the platform's resolver knows, as webhooks refuse to
+  it("answers a name that does not resolve exactly as one that resolves inward", async () => {
+    ownMailTransport.mockRejectedValueOnce(new BlockedDestinationError("Could not resolve redis"));
+    const unresolved = await call("PUT", { ...FORM, host: "redis" });
+    ownMailTransport.mockRejectedValueOnce(new BlockedDestinationError("postgres resolves to the private address 10.0.0.7"));
+    const inward = await call("PUT", { ...FORM, host: "postgres" });
 
-    const res = await call("PUT", { ...FORM, host: "smtp.acme.exmaple" });
-
-    expect(res.status).toBe(400);
-    const { error } = await res.json();
-    expect(error).toContain("No mail server answers to smtp.acme.exmaple");
-    expect(error).not.toMatch(/may call/);
+    expect(unresolved.status).toBe(400);
+    expect(inward.status).toBe(400);
+    const [a, b] = [await unresolved.json(), await inward.json()];
+    expect(a).toEqual(b);
+    expect(a.error).not.toMatch(/redis|postgres|10\.0\.0\.7/);
     expect(row).toBeNull();
   });
 

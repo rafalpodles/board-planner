@@ -30,7 +30,7 @@ vi.mock("@/models/rateLimit", async () => {
 
 const { GET, POST } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
-const { BlockedDestinationError, UnresolvedDestinationError } = await import("@/lib/safe-fetch");
+const { BlockedDestinationError } = await import("@/lib/safe-fetch");
 
 const ADMIN = { _id: "admin-1", role: "admin" };
 const ctx = () => ({ params: Promise.resolve({}) });
@@ -215,21 +215,16 @@ describe("POST /api/admin/email through the organisation's own server", () => {
     expect(await res.json()).toEqual({ error: "550 5.7.1 Relaying denied" });
   });
 
-  it("says nothing was contacted when the server's address is internal", async () => {
-    sendEmailOrThrow.mockRejectedValue(new BlockedDestinationError("smtp.acme.example resolves to the private address 10.0.0.5"));
+  it("says nothing was contacted when the address cannot be used, with one answer whether it is internal or unresolved", async () => {
+    sendEmailOrThrow.mockRejectedValueOnce(new BlockedDestinationError("smtp.acme.example resolves to the private address 10.0.0.5"));
+    const inward = await POST(req(), ctx());
+    sendEmailOrThrow.mockRejectedValueOnce(new BlockedDestinationError("Could not resolve smtp.acme.example"));
+    const unresolved = await POST(req(), ctx());
 
-    const res = await POST(req(), ctx());
-
-    expect(res.status).toBe(409);
-    expect((await res.json()).error).toMatch(/not one this server may call/);
-  });
-
-  it("says the host name does not resolve, rather than calling it internal", async () => {
-    sendEmailOrThrow.mockRejectedValue(new UnresolvedDestinationError("smtp.acme.example"));
-
-    const res = await POST(req(), ctx());
-
-    expect(res.status).toBe(409);
-    expect((await res.json()).error).toMatch(/does not resolve/);
+    expect(inward.status).toBe(409);
+    expect(unresolved.status).toBe(409);
+    const body = await inward.json();
+    expect(body).toEqual(await unresolved.json());
+    expect(body.error).toMatch(/does not resolve, or it is inside the service's own network/);
   });
 });

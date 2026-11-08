@@ -111,7 +111,7 @@ function Form({ state, onSaved }: { state: OwnMailServerState; onSaved: (answer:
           aria-describedby={error ? errorId : undefined}
         />
         {state.set && !needsPassword && <p className="text-xs text-text-muted">Leave the password blank to keep the stored one.</p>}
-        {state.set && needsPassword && !password && (
+        {state.set && !state.unreadable && needsPassword && !password && (
           <p className="text-xs text-text-muted" data-testid="smtp-password-needed">
             Enter the password to save: it is asked for again when the host, port or username changes.
           </p>

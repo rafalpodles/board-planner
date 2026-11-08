@@ -267,6 +267,35 @@ describe("an organisation's own mail server, in the cloud (BP-899)", () => {
     expect(screen.getByRole("button", { name: "Save changes" })).toHaveProperty("disabled", true);
   });
 
+  it("gives no change of server as the reason when the stored password simply cannot be read", async () => {
+    answer({ ...OWN, unreadable: true, active: false });
+
+    await openTheScreen();
+
+    expect(screen.getByRole("alert").textContent).toContain("Enter it again below");
+    expect(screen.queryByTestId("smtp-password-needed")).toBeNull();
+  });
+
+  it("clears a delivery result once the server it went through is saved over", async () => {
+    answer(OWN);
+    api.post.mockResolvedValue({ to: "admin@example.test" });
+    api.put.mockResolvedValue({ ...OWN, fromName: "Acme" });
+    await openTheScreen();
+
+    await pressSend();
+    expect(screen.getByText("Accepted for delivery to admin@example.test")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Sender name (optional)"), { target: { value: "Acme" } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    });
+
+    expect(api.put).toHaveBeenCalledWith("/api/settings/smtp", expect.objectContaining({ fromName: "Acme" }));
+    expect(screen.queryByText("Accepted for delivery to admin@example.test")).toBeNull();
+  });
+
   it("is not asked about on a self-hosted instance, whose server is the environment's", async () => {
     await openTheScreen();
 

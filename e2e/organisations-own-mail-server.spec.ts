@@ -154,7 +154,7 @@ test.describe("BP-899: an organisation's own mail server", () => {
       await fillServer(page, { host, port: 587, ...OWN });
       expect((await save(page)).status(), host).toBe(400);
 
-      await expect(page.getByRole("alert"), host).toContainText("not one this server may call");
+      await expect(page.getByRole("alert"), host).toContainText("inside the service's own network");
       expect(await storedServer(ACME), host).toBeUndefined();
     }
   });
