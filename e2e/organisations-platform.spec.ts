@@ -1,7 +1,7 @@
-import { test, expect, type APIRequestContext } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { generateKeyPairSync } from "node:crypto";
 import mongoose from "mongoose";
-import { MAIL_SERVER, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
+import { MAIL_SERVER, ORGANISATIONS_PLATFORM_ORIGIN, RUN_ORGANISATIONS_SERVER } from "../playwright.config";
 import { PLATFORM_REQUEST_WINDOW_MS, signPlatformRequest } from "../src/lib/platform-request";
 import { E2E_PLATFORM_REQUEST_KEY, e2eLicence } from "./licence-key";
 import { E2E_MONGODB_URI } from "./seed";
@@ -18,7 +18,7 @@ import {
   signInOn,
   type OrganisationFixture,
 } from "./organisations";
-import { withDb } from "./platform-sign-in";
+import { codeSentTo, freshAddress, provideAddressAndCode, withDb } from "./platform-sign-in";
 
 test.skip(!RUN_ORGANISATIONS_SERVER, "needs the ORGANISATION_DOMAIN server — set E2E_ORGANISATIONS_SERVER=1");
 
@@ -224,5 +224,58 @@ test.describe("BP-892: the platform operator is the licence service, not an orga
     await page.reload();
     await expect(page.getByText("Provided by the service")).toBeVisible();
     await page.screenshot({ path: "e2e/.artifacts/bp892-email-phone.png" });
+  });
+});
+
+test.describe("BP-1135: the operator sees where each new organisation came from", () => {
+  async function createFromTheForm(page: Page, slug: string) {
+    await expect(page.getByTestId("create-organisation")).toBeVisible();
+    await page.getByLabel("Organisation name").fill(`Source ${slug}`);
+    await page.getByLabel("Organisation address").fill(slug);
+    await page.getByLabel("Your name").fill("Samir Nagheenanajar");
+    await page.getByLabel("Password").fill("source-password-1");
+    await page.getByRole("button", { name: "Create the organisation" }).click();
+    await page.waitForURL(`${originOf(slug)}/projects`);
+  }
+
+  async function listed(request: APIRequestContext, slug: string) {
+    const response = await signedGet(request, "/api/platform/organisations");
+    expect(response.status(), await response.text()).toBe(200);
+    return (await response.json()).organisations.find((row: { slug: string }) => row.slug === slug);
+  }
+
+  test("a sign-up from a tagged link keeps its campaign and referring site, and a plain one has none", async ({ page, request }) => {
+    const tagged = `tagged-${Date.now()}`;
+    await provideAddressAndCode(page, freshAddress("tagged"), ORGANISATIONS_PLATFORM_ORIGIN, "/?start&utm_source=reddit&utm_medium=cpc&utm_campaign=launch-2026q4&ref=www.reddit.com");
+    await createFromTheForm(page, tagged);
+    expect((await listed(request, tagged)).acquisition).toEqual({
+      source: "reddit",
+      medium: "cpc",
+      campaign: "launch-2026q4",
+      referrerHost: "www.reddit.com",
+      at: expect.any(String),
+    });
+
+    const plain = `plain-${Date.now()}`;
+    await page.context().clearCookies();
+    await page.evaluate(() => sessionStorage.clear()).catch(() => {});
+    await provideAddressAndCode(page, freshAddress("plain"), ORGANISATIONS_PLATFORM_ORIGIN, "/?start");
+    await createFromTheForm(page, plain);
+    expect((await listed(request, plain)).acquisition).toBeNull();
+  });
+
+  test("with no tags, the site that linked to the sign-up page is kept as a host, and it outlives a later visit with neither", async ({ page, request }) => {
+    const slug = `referred-${Date.now()}`;
+    const email = freshAddress("referred");
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?start`, { referer: "https://news.ycombinator.com/item?id=42" });
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("bp_acquisition"))).toContain("news.ycombinator.com");
+    await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?start`);
+    expect(await page.evaluate(() => document.referrer)).toBe("");
+    await page.getByLabel("E-mail address").fill(email);
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByLabel("Code").fill(await codeSentTo(email));
+    await page.getByRole("button", { name: "Continue" }).click();
+    await createFromTheForm(page, slug);
+    expect((await listed(request, slug)).acquisition).toEqual({ referrerHost: "news.ycombinator.com", at: expect.any(String) });
   });
 });
