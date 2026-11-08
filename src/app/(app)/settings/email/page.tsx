@@ -208,7 +208,14 @@ export default function EmailSettingsPage() {
 
       {own && (
         <div className="mt-8">
-          <OwnMailServer state={own} onSaved={setOwn} />
+          <OwnMailServer
+            state={own}
+            onSaved={(answer) => {
+              setOwn(answer);
+              // A delivery result is about the server it went through, which this save may have replaced
+              setResult(null);
+            }}
+          />
         </div>
       )}
     </div>

@@ -4,6 +4,7 @@ const getAuthUser = vi.fn();
 const userFindOne = vi.fn();
 const sendEmailOrThrow = vi.fn();
 const emailSettingsSummary = vi.fn();
+const ownMailServerFor = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -21,6 +22,7 @@ vi.mock("@/lib/email", () => ({
   },
 }));
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
+vi.mock("@/lib/organisation-smtp", () => ({ ownMailServerFor }));
 vi.mock("@/models/rateLimit", async () => {
   const { inMemoryRateLimitModel } = await import("@/lib/rate-limit-test-store");
   return { RateLimit: inMemoryRateLimitModel() };
@@ -28,6 +30,7 @@ vi.mock("@/models/rateLimit", async () => {
 
 const { GET, POST } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
+const { BlockedDestinationError, UnresolvedDestinationError } = await import("@/lib/safe-fetch");
 
 const ADMIN = { _id: "admin-1", role: "admin" };
 const ctx = () => ({ params: Promise.resolve({}) });
@@ -43,6 +46,7 @@ beforeEach(async () => {
   getAuthUser.mockResolvedValue(ADMIN);
   adminRecord("admin@example.com");
   sendEmailOrThrow.mockResolvedValue(undefined);
+  ownMailServerFor.mockResolvedValue(null);
   emailSettingsSummary.mockReturnValue({
     managedByPlatform: false,
     configured: true,
@@ -180,5 +184,52 @@ describe("GET /api/admin/email", () => {
     const res = await GET(new Request("http://x/api/admin/email"), ctx());
 
     expect(res.status).toBe(403);
+  });
+});
+
+// BP-899. In the cloud an organisation on Pro may send through its own server; the test then goes through it
+describe("POST /api/admin/email through the organisation's own server", () => {
+  const OWN = { host: "smtp.acme.example", port: 587, user: "mailer", password: "p", fromAddress: "boards@acme.example", fromName: "Acme" };
+
+  beforeEach(() => {
+    emailSettingsSummary.mockReturnValue({ managedByPlatform: true, configured: true, from: "Board Planner <noreply@example.com>" });
+    ownMailServerFor.mockResolvedValue(OWN);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  it("names the organisation's server and address in the message, and sends it as the organisation's mail", async () => {
+    expect((await POST(req(), ctx())).status).toBe(200);
+
+    const sent = sendEmailOrThrow.mock.calls[0][0] as { sender: unknown; text: string };
+    expect(String(sent.sender)).toMatch(/^[0-9a-f]{24}$/);
+    expect(sent.text).toContain("smtp.acme.example:587");
+    expect(sent.text).toContain("boards@acme.example");
+  });
+
+  it("hands back what the organisation's own server said, which is not the platform's to hide", async () => {
+    sendEmailOrThrow.mockRejectedValue(new Error("550 5.7.1 Relaying denied\nAUTH PLAIN c2VjcmV0"));
+
+    const res = await POST(req(), ctx());
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "550 5.7.1 Relaying denied" });
+  });
+
+  it("says nothing was contacted when the server's address is internal", async () => {
+    sendEmailOrThrow.mockRejectedValue(new BlockedDestinationError("smtp.acme.example resolves to the private address 10.0.0.5"));
+
+    const res = await POST(req(), ctx());
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/not one this server may call/);
+  });
+
+  it("says the host name does not resolve, rather than calling it internal", async () => {
+    sendEmailOrThrow.mockRejectedValue(new UnresolvedDestinationError("smtp.acme.example"));
+
+    const res = await POST(req(), ctx());
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/does not resolve/);
   });
 });

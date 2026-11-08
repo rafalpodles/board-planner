@@ -34,7 +34,7 @@ const LOOPBACK = "127.0.0.1";
 const SMTP_PORT = Number(process.env.SMTP_STUB_PORT ?? 3994);
 const CONTROL_PORT = Number(process.env.SMTP_STUB_CONTROL_PORT ?? SMTP_PORT + 1);
 
-/** `{ from, to, data }` per message, oldest first. */
+/** `{ from, to, user, data }` per message, oldest first; `user` is the login the client signed in with. */
 let messages = [];
 
 /**

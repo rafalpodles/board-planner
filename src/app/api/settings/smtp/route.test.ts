@@ -39,7 +39,7 @@ vi.mock("@/models/settings", () => {
 const { GET, PUT, DELETE } = await import("./route");
 const { scopedToDefaultOrganisation } = await import("@/lib/db-scope");
 const { decryptSecret, encryptSecret } = await import("@/lib/encryption");
-const { BlockedDestinationError } = await import("@/lib/safe-fetch");
+const { BlockedDestinationError, UnresolvedDestinationError } = await import("@/lib/safe-fetch");
 
 const ADMIN = { _id: "a1", username: "root", role: "admin", viaMachineCredential: false };
 const ORGANISATION = () => scopedToDefaultOrganisation().organisation;
@@ -108,6 +108,18 @@ describe("PUT /api/settings/smtp (BP-899)", () => {
 
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/not one this server may call/);
+    expect(row).toBeNull();
+  });
+
+  it("says a host name that does not resolve is a typo to check, not an internal address", async () => {
+    ownMailTransport.mockRejectedValue(new UnresolvedDestinationError("smtp.acme.exmaple"));
+
+    const res = await call("PUT", { ...FORM, host: "smtp.acme.exmaple" });
+
+    expect(res.status).toBe(400);
+    const { error } = await res.json();
+    expect(error).toContain("No mail server answers to smtp.acme.exmaple");
+    expect(error).not.toMatch(/may call/);
     expect(row).toBeNull();
   });
 
@@ -204,6 +216,17 @@ describe("GET and DELETE /api/settings/smtp", () => {
     storeServer({ password: "enc:v3:garbage" });
 
     expect(await (await call("GET")).json()).toMatchObject({ set: true, unreadable: true, active: false });
+  });
+
+  it("removes it only for an administrator at the screen, and only in the cloud", async () => {
+    storeServer();
+    getAuthUser.mockResolvedValue({ ...ADMIN, viaMachineCredential: true });
+    expect((await call("DELETE")).status).toBe(403);
+
+    getAuthUser.mockResolvedValue(ADMIN);
+    delete process.env.ORGANISATION_DOMAIN;
+    expect((await call("DELETE")).status).toBe(404);
+    expect(stored()?.host).toBe(FORM.host);
   });
 
   it("removes it on any plan, and forgets the route at once", async () => {

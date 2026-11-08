@@ -244,6 +244,29 @@ describe("an organisation's own mail server, in the cloud (BP-899)", () => {
     expect(screen.queryByTestId("smtp-form")).toBeNull();
   });
 
+  it("does not ask for the password again on a plan that shows no form to enter it in", async () => {
+    answer({ ...OWN, plan: "free", available: false, active: false, unreadable: true });
+
+    await openTheScreen();
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("cannot be read");
+    expect(alert.textContent).not.toContain("Enter it again below");
+  });
+
+  it("says why saving waits once the stored password no longer applies", async () => {
+    answer(OWN);
+    await openTheScreen();
+    expect(screen.queryByTestId("smtp-password-needed")).toBeNull();
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText("Username"), { target: { value: "someone-else" } });
+    });
+
+    expect(screen.getByTestId("smtp-password-needed")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save changes" })).toHaveProperty("disabled", true);
+  });
+
   it("is not asked about on a self-hosted instance, whose server is the environment's", async () => {
     await openTheScreen();
 

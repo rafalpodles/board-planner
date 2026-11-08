@@ -111,6 +111,11 @@ function Form({ state, onSaved }: { state: OwnMailServerState; onSaved: (answer:
           aria-describedby={error ? errorId : undefined}
         />
         {state.set && !needsPassword && <p className="text-xs text-text-muted">Leave the password blank to keep the stored one.</p>}
+        {state.set && needsPassword && !password && (
+          <p className="text-xs text-text-muted" data-testid="smtp-password-needed">
+            Enter the password to save: it is asked for again when the host, port or username changes.
+          </p>
+        )}
         <Input label="From address" type="email" value={fromAddress} onChange={(e) => setFromAddress(e.target.value)} placeholder="boards@example.com" spellCheck={false} autoComplete="off" required />
         <Input label="Sender name (optional)" value={fromName} onChange={(e) => setFromName(e.target.value)} maxLength={80} placeholder="Acme boards" autoComplete="off" />
         <p className="text-xs text-text-muted">Saving signs in to your server first. Nothing is stored unless it accepts.</p>
@@ -187,12 +192,12 @@ export function OwnMailServer({ state, onSaved }: { state: OwnMailServerState; o
     >
       {state.unreadable && (
         <p role="alert" className="text-sm text-danger">
-          The stored password cannot be read, so mail goes through the service&apos;s server. Enter it again below.
+          The stored password cannot be read, so mail goes through the service&apos;s server.{state.available && " Enter it again below."}
         </p>
       )}
       {state.available && state.trial && state.trialEndsAt && (
         <p className="text-sm text-text-muted" data-testid="smtp-trial">
-          Included in your trial until {day(state.trialEndsAt)} (UTC). Mail goes through the service&apos;s server again then unless you choose Pro; what you enter here is kept.
+          Included in your trial until {day(state.trialEndsAt)} (UTC). From then on mail goes through the service&apos;s server unless you choose Pro; what you enter here is kept.
         </p>
       )}
       {!state.available && (

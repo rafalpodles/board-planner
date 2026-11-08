@@ -7,7 +7,7 @@ import { originFor } from "@/lib/organisation-host";
 import { APP_NAME } from "@/lib/brand";
 import { countAttempt, sourceKey } from "@/lib/rate-limit";
 import { ownMailServerFor } from "@/lib/organisation-smtp";
-import { BlockedDestinationError } from "@/lib/safe-fetch";
+import { BlockedDestinationError, UnresolvedDestinationError } from "@/lib/safe-fetch";
 import { mailServerAnswer } from "@/lib/smtp-transport";
 
 const TESTS_PER_WINDOW = 5;
@@ -81,6 +81,9 @@ export const POST = withAdmin(async (_request, { user, db }) => {
     // to decide which of the two it says, and 502 here would blame a server that never heard us.
     if (err instanceof EmailNotConfiguredError) {
       return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+    if (err instanceof UnresolvedDestinationError) {
+      return NextResponse.json({ error: "Your mail server's host name does not resolve right now." }, { status: 409 });
     }
     if (err instanceof BlockedDestinationError) {
       return NextResponse.json({ error: "Your mail server's address is not one this server may call." }, { status: 409 });

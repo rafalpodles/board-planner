@@ -14,7 +14,7 @@ vi.mock("@/models/settings", () => ({ Settings: { findOne: () => ({ lean: async 
 
 const { ownMailServerFor, ownMailTransport, forgetMailRoute, ownMailFrom } = await import("./organisation-smtp");
 const { encryptSecret } = await import("./encryption");
-const { BlockedDestinationError } = await import("./safe-fetch");
+const { BlockedDestinationError, UnresolvedDestinationError } = await import("./safe-fetch");
 
 const ORGANISATION = new Types.ObjectId();
 const SERVER = { host: "smtp.acme.example", port: 587, user: "mailer", password: "smtp-pass", fromAddress: "boards@acme.example", fromName: "Acme" };
@@ -69,6 +69,21 @@ describe("ownMailServerFor (BP-899)", () => {
     expect(getOrganisation).not.toHaveBeenCalled();
   });
 
+  it("is read again after ten seconds, so a lapsed plan moves mail back to the platform's server in every process", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      expect(await ownMailServerFor(ORGANISATION)).toEqual(SERVER);
+      plan({ plan: "free" });
+
+      vi.advanceTimersByTime(9_000);
+      expect(await ownMailServerFor(ORGANISATION)).toEqual(SERVER);
+      vi.advanceTimersByTime(2_000);
+      expect(await ownMailServerFor(ORGANISATION)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("is read once for a burst of mail, and again once forgotten", async () => {
     await ownMailServerFor(ORGANISATION);
     await ownMailServerFor(ORGANISATION);
@@ -95,10 +110,19 @@ describe("ownMailTransport", () => {
     ["the metadata address", "169.254.169.254", []],
     ["an internal name", "mail.internal", []],
     ["localhost", "localhost", []],
+    // The check would read 012 as 12; getaddrinfo reads it as octal 10, and so does this lookup's answer
+    ["a leading-zero literal the resolver reads as octal", "012.0.0.5", [{ address: "10.0.0.5", family: 4 }]],
   ])("refuses %s and connects to nothing", async (_case, host, answer) => {
     lookup.mockResolvedValue(answer);
 
     await expect(ownMailTransport({ ...SERVER, host })).rejects.toBeInstanceOf(BlockedDestinationError);
+    expect(createTransport).not.toHaveBeenCalled();
+  });
+
+  it("says a name that does not resolve is unresolved, not internal", async () => {
+    lookup.mockRejectedValue(Object.assign(new Error("getaddrinfo ENOTFOUND smtp.acme.exmaple"), { code: "ENOTFOUND" }));
+
+    await expect(ownMailTransport({ ...SERVER, host: "smtp.acme.exmaple" })).rejects.toBeInstanceOf(UnresolvedDestinationError);
     expect(createTransport).not.toHaveBeenCalled();
   });
 

@@ -7,7 +7,8 @@ import { decryptSecret } from "@/lib/encryption";
 import { can } from "@/lib/entitlements";
 import { getOrganisation } from "@/lib/organisation";
 import { organisationDomain } from "@/lib/organisation-host";
-import { isIpLiteral, unbracket } from "@/lib/private-address";
+import { isIP } from "node:net";
+import { unbracket } from "@/lib/private-address";
 import { vettedAddress } from "@/lib/safe-fetch";
 import { smtpTransportOptions } from "@/lib/smtp-transport";
 
@@ -31,7 +32,7 @@ export async function ownMailTransport(server: OwnMailServer): Promise<Transport
       port: server.port,
       user: server.user,
       pass: server.password,
-      servername: isIpLiteral(host) ? undefined : host,
+      servername: isIP(host) !== 0 ? undefined : host,
     })
   );
 }

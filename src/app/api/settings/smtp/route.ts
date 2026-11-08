@@ -7,13 +7,13 @@ import { organisationDomain } from "@/lib/organisation-host";
 import { forgetMailRoute, ownMailTransport } from "@/lib/organisation-smtp";
 import { countInLiveWindow, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
-import { BlockedDestinationError } from "@/lib/safe-fetch";
+import { BlockedDestinationError, UnresolvedDestinationError } from "@/lib/safe-fetch";
 import { writeSettings } from "@/lib/settings-write";
 import { parseSmtpInput } from "@/lib/smtp-input";
 import { mailServerAnswer } from "@/lib/smtp-transport";
 import { smtpView } from "@/lib/smtp-view";
 
-// Each save makes the server connect to an address the administrator typed, for up to half a minute
+// Each save makes the server connect to an address the administrator typed, for up to 40 seconds
 const SAVES_PER_WINDOW = 10;
 
 const CLOUD_ONLY = { error: "A mail server of its own is set per organisation in the cloud; here it comes from the environment" };
@@ -69,6 +69,9 @@ export const PUT = withAdmin(async (request, { user, db }) => {
       transport.close();
     }
   } catch (err) {
+    if (err instanceof UnresolvedDestinationError) {
+      return NextResponse.json({ error: `No mail server answers to ${host}. Check the host name.` }, { status: 400 });
+    }
     if (err instanceof BlockedDestinationError) {
       return NextResponse.json({ error: "That address is not one this server may call. Use the public address of your mail server." }, { status: 400 });
     }
