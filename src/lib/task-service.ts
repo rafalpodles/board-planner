@@ -937,10 +937,14 @@ interface StatusChangeAnnouncement {
   project: Parameters<typeof roleOf>[0];
 }
 
+function capitalise(value: string): string {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
 /**
- * Everything a status change sets off, in one place because it has two callers. The board, the
- * right-click menu and the list dropdown all PATCH the status and go through changeStatus; the
- * edit form PUTs the whole task and goes through updateTask. Only the PM trigger was ever copied
+ * Everything a status change sets off, in one place because it has two callers. The right-click
+ * menu and the list dropdown PATCH /status and go through changeStatus; the board's drag-and-drop
+ * and the edit form PUT the task and go through updateTask. Only the PM trigger was ever copied
  * to the second one, so the same act had two different outcomes with nothing to tell them apart:
  * closing a recurring task from the detail view silently stopped it recurring, and no webhook,
  * no Slack or Discord message and no in-app notification fired for a move made there.
@@ -948,10 +952,6 @@ interface StatusChangeAnnouncement {
  * Activity logging stays with each caller. changeStatus writes one entry deliberately, and
  * updateTask already writes one through its own field tracking, so logging here would double it.
  */
-function capitalise(value: string): string {
-  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
-}
-
 async function announceStatusChange(db: ScopedDb, a: StatusChangeAnnouncement): Promise<void> {
   const status = String(a.task.status);
   const [project, actor] = await Promise.all([
