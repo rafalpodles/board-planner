@@ -149,11 +149,14 @@ test.describe("BP-899: an organisation's own mail server", () => {
     await makePro(request, ACME);
     await openEmailSettings(page, ACME);
 
-    await fillServer(page, { host: "10.0.0.5", port: 587, ...OWN });
-    expect((await save(page)).status()).toBe(400);
+    // The second is the same address written so that a decimal check reads it as public and the resolver as 10.0.0.5
+    for (const host of ["10.0.0.5", "012.0.0.5"]) {
+      await fillServer(page, { host, port: 587, ...OWN });
+      expect((await save(page)).status(), host).toBe(400);
 
-    await expect(page.getByRole("alert")).toContainText("not one this server may call");
-    expect(await storedServer(ACME)).toBeUndefined();
+      await expect(page.getByRole("alert"), host).toContainText("not one this server may call");
+      expect(await storedServer(ACME), host).toBeUndefined();
+    }
   });
 
   test("a Free organisation is offered Pro instead of the form, and its save is refused", async ({ page }) => {
