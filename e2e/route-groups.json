@@ -477,6 +477,9 @@
     "project",
     "people"
   ],
+  "src/app/api/settings/smtp/route.ts": [
+    "people"
+  ],
   "src/app/api/settings/sso/route.ts": [
     "people"
   ],

@@ -140,7 +140,7 @@ test.describe("BP-899: an organisation's own mail server", () => {
     await fillServer(page, { host: MAIL_SERVER.host, port: MAIL_SERVER.port, ...OWN, user: "refused" });
     expect((await save(page)).status()).toBe(400);
 
-    await expect(page.getByRole("alert")).toContainText("535 5.7.8 Authentication credentials invalid");
+    await expect(page.getByTestId("smtp-form").getByRole("alert")).toContainText("535 5.7.8 Authentication credentials invalid");
     await expect(page.getByText("Not set up", { exact: true })).toBeVisible();
     expect(await storedServer(ACME)).toBeUndefined();
   });
@@ -154,7 +154,7 @@ test.describe("BP-899: an organisation's own mail server", () => {
       await fillServer(page, { host, port: 587, ...OWN });
       expect((await save(page)).status(), host).toBe(400);
 
-      await expect(page.getByRole("alert"), host).toContainText("inside the service's own network");
+      await expect(page.getByTestId("smtp-form").getByRole("alert"), host).toContainText("inside the service's own network");
       expect(await storedServer(ACME), host).toBeUndefined();
     }
   });
