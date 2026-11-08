@@ -53,8 +53,9 @@ repeating failure runs out of retries and lands in front of a human instead of c
 The pull request carries the agent's summary and, under it, the gates the run passed before it was
 opened — each with the commands it ran (`npm ci --ignore-scripts --no-audit --no-fund` and
 `npm run build` for `build`, `npm test` for `test-run`) and how long it took (BP-780). The agent
-itself has no shell, and is told that the worker runs these checks after it, so its summary does
-not claim the tests were never run.
+is told that the worker runs these checks after it, so its summary does not claim the tests were
+never run. A Claude Code step is also told it has no shell, which it has not; a Codex step is not,
+because Codex reads and edits the repository through its own shell (BP-1138).
 
 ## Configuration
 

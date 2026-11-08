@@ -130,7 +130,7 @@ export function formatDuration(ms: number): string {
   return `${minutes} min ${seconds % 60} s`;
 }
 
-// Written by the worker, not by the agent: the agent has no shell and cannot say what ran.
+// Written by the worker, not by the agent: what the agent says it ran is not evidence of what ran.
 function checksSection(checks: PassedCheck[]): string {
   if (checks.length === 0) return "";
   const lines = checks.map((check) => {
