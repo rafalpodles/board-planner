@@ -48,6 +48,7 @@ import type { AnyColumn } from "@/lib/columns";
 import { MAX_RECURRENCE_INTERVAL, clampInterval } from "@/lib/recurrence";
 import { formatDateOnly } from "@/lib/date-only";
 import { UPGRADE_HREF } from "@/lib/machine-limit-copy";
+import { PROVIDERS } from "@/lib/agent-kinds";
 
 const RECURRENCE_UNITS: Record<RecurrenceFrequency, string> = {
   daily: "day",
@@ -108,6 +109,14 @@ interface BlockerContext {
   haltedBy: WorkerHaltSource | null;
   /** The repositories the reader's machine has no checkout of */
   missingRepositories: string[];
+  /** The coding CLIs the task's agent needs that none of the reader's machines can run */
+  agentLacks: string[];
+}
+
+const SIGN_IN_COMMAND: Record<string, string> = { claude: "claude auth login", codex: "codex login" };
+
+function providerLabel(provider: string): string {
+  return PROVIDERS.find((p) => p.value === provider)?.label ?? provider;
 }
 
 function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }) {
@@ -281,6 +290,28 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
           machine.
         </>
       );
+    case "machine-lacks-cli": {
+      const labels = ctx.agentLacks.map(providerLabel);
+      const commands = ctx.agentLacks.map((provider) => SIGN_IN_COMMAND[provider]).filter(Boolean);
+      return (
+        <>
+          This task&apos;s agent runs on {labels.join(" and ")}, and none of your machines can run{" "}
+          {labels.length === 1 ? "it" : "them"}. Sign in on one of them
+          {commands.length > 0 && (
+            <>
+              {" "}
+              ({commands.map((command, i) => (
+                <span key={command}>
+                  {i > 0 && ", "}
+                  <code>{command}</code>
+                </span>
+              ))})
+            </>
+          )}{" "}
+          and restart its worker, or choose another agent.
+        </>
+      );
+    }
     case "machine-failing":
       return (
         <>
@@ -306,6 +337,7 @@ function HandoverNotice({
   handover,
   awaiting,
   board,
+  agent,
   assignee,
   viewer,
   viewerIsInstanceAdmin,
@@ -314,6 +346,7 @@ function HandoverNotice({
   handover: Handover | null;
   awaiting: boolean;
   board: BoardReadiness | null;
+  agent: string | null;
   assignee: ApiUserSummary | null;
   viewer: string | null;
   viewerIsInstanceAdmin: boolean;
@@ -327,6 +360,7 @@ function HandoverNotice({
   if (final?.reason === "no-agent") return null;
 
   const viewerIsAssignee = !!viewer && assignee?.username === viewer;
+  const agentLacks = board?.agentsOutOfReach?.find((entry) => entry.agent === agent)?.lacks ?? [];
   const gaps =
     board && !final
       ? readinessGaps({
@@ -338,6 +372,7 @@ function HandoverNotice({
           machine: viewerIsAssignee ? board.machine : null,
           machineMissing: board.machineMissing,
           machineNeedsUpdate: board.machineNeedsUpdate,
+          agentLacks,
         })
       : [];
   const blockers: Blocker[] = [
@@ -353,6 +388,7 @@ function HandoverNotice({
     bindingError: board?.bindingError ?? "",
     haltedBy: board?.haltedBy ?? null,
     missingRepositories: board?.machineMissing ?? [],
+    agentLacks,
   };
 
   if (blockers.length === 0) {
@@ -696,6 +732,7 @@ export function PropertyRail({
             handover={handover}
             awaiting={awaiting}
             board={board}
+            agent={storedAgent}
             assignee={stored.assignee ?? null}
             viewer={currentUsername}
             viewerIsInstanceAdmin={viewerIsInstanceAdmin}

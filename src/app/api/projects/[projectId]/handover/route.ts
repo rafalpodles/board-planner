@@ -5,7 +5,8 @@ import { check } from "@/lib/grants";
 import { getProjectColumns } from "@/lib/columns";
 import { projectRepositoryUrl } from "@/lib/repository";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
-import { machineReadinessFor, namesGateCommands } from "@/lib/worker-service";
+import { liveMachinesFor, machineReadinessFor, namesGateCommands } from "@/lib/worker-service";
+import { agentsOutOfReach } from "@/lib/agent-providers";
 import { hasSeveralRepositories } from "@/lib/repositories";
 import { repositoryCoverage } from "@/lib/repo-match";
 import { GATE_COMMANDS, MULTI_REPOSITORY } from "@/lib/worker-capabilities";
@@ -33,7 +34,10 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
   const judged = judgeMachines(project, workers);
-  const machine = machineReadinessFor(judged.workers, project, new Date(), claiming);
+  const now = new Date();
+  const machine = machineReadinessFor(judged.workers, project, now, claiming);
+  const live = liveMachinesFor(judged.workers, project, now, claiming);
+  const outOfReach = await agentsOutOfReach(db, live.map((worker) => worker.capabilities ?? []));
   const body: ApiHandoverReadiness = {
     canAdmin,
     repositoryUrl: projectRepositoryUrl(project),
@@ -44,6 +48,7 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
     bindingError: machine.bindingError,
     haltedBy: machine.haltedBy,
     ...judged.extra,
+    ...(outOfReach.length > 0 ? { agentsOutOfReach: outOfReach } : {}),
   };
   return NextResponse.json(body);
 });

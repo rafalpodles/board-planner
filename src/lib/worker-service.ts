@@ -278,22 +278,34 @@ export function machineReadinessFor(
   claiming: Set<string> | null = null
 ): MachineReadiness {
   let best: MachineReadiness = { state: "none", bindingError: "", haltedBy: null };
-  const projectId = project._id ? String(project._id) : "";
   for (const worker of workers) {
-    if (!matchRepo(project, worker.repos ?? [])) continue;
-    const refused = bindingErrorFor(worker.bindingError, projectId);
-    const condition = machineCondition(worker, now, isHeldByPlan(worker as never, claiming));
-    const state: MachineState =
-      condition.state !== "live" ? condition.state : refused ? "unbound" : "live";
-    if (MACHINE_RANK[state] > MACHINE_RANK[best.state]) {
-      best = {
-        state,
-        bindingError: state === "unbound" ? refused : "",
-        haltedBy: condition.haltedBy,
-      };
-    }
+    const readiness = readinessOf(worker, project, now, claiming);
+    if (readiness && MACHINE_RANK[readiness.state] > MACHINE_RANK[best.state]) best = readiness;
   }
   return best;
+}
+
+/** The machines among these that would take this project's work right now */
+export function liveMachinesFor<W extends ServingMachine>(
+  workers: W[],
+  project: ServedProject,
+  now = new Date(),
+  claiming: Set<string> | null = null
+): W[] {
+  return workers.filter((worker) => readinessOf(worker, project, now, claiming)?.state === "live");
+}
+
+function readinessOf(
+  worker: ServingMachine,
+  project: ServedProject,
+  now: Date,
+  claiming: Set<string> | null
+): MachineReadiness | null {
+  if (!matchRepo(project, worker.repos ?? [])) return null;
+  const refused = bindingErrorFor(worker.bindingError, project._id ? String(project._id) : "");
+  const condition = machineCondition(worker, now, isHeldByPlan(worker as never, claiming));
+  const state: MachineState = condition.state !== "live" ? condition.state : refused ? "unbound" : "live";
+  return { state, bindingError: state === "unbound" ? refused : "", haltedBy: condition.haltedBy };
 }
 
 export function machineStateFor(
