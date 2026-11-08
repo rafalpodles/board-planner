@@ -98,7 +98,7 @@ build. Bump the SHA deliberately, from the action's release page.
 
 `.github/workflows/release.yml` runs on a pushed tag `vX.Y.Z` or when `release-please.yml` calls it
 with one. A `resolve` job reads the tag — from the call's `tag` input, or the pushed ref — and every
-other job takes the version from it, never from `github.ref`, which is `main` when called. Then three
+other job takes the version from it, never from `github.ref`, which is `main` when called. Then these
 jobs:
 
 - **build** (`macos-latest`, `contents: read`, environment `release`). Installs the worker with
@@ -120,14 +120,14 @@ jobs:
   `packages: write`). Builds the repository's `Dockerfile` on each architecture's own runner and, on a
   release, pushes it by digest only. No QEMU: an emulated arm64 build hung in `npm ci` until the
   90-minute timeout and pushed nothing for 1.12.0 to 1.13.0 (BP-1137).
-- **image** (`ubuntu-latest`, releases only). Joins the two digests with `docker buildx imagetools
+- **image** (`ubuntu-latest`, `contents: read` + `packages: write`, releases only). Joins the two digests with `docker buildx imagetools
   create` under `ghcr.io/rafalpodles/board-planner:X.Y.Z`, checks the index carries both amd64 and
   arm64, and tags it `:latest` only when `vX.Y.Z` is the highest
   `vX.Y.Z` tag in the repository (`git tag --sort=-v:refname`, pre-release names ignored), so a
   backport such as `v1.1.1` pushed after `v1.2.0` does not take `latest` backwards — with the
   workflow's own `GITHUB_TOKEN`,
   labelled with the OCI `source`, `version` and `revision` so GHCR links the package to the
-  repository. It needs no environment and no secret, and depends on neither job above: a failed
+  repository. It needs no environment and no secret, and depends on neither **build** nor **publish**: a failed
   notarisation does not hold the image back, nor the reverse. The image bakes in no address — every
   link the app builds comes from `PUBLIC_ORIGIN` at runtime. A mistaken high tag (say `v9.0.0`)
   keeps `latest` from moving until that tag is deleted.

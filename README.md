@@ -189,7 +189,8 @@ docker compose up -d
 ```
 
 That runs the published image, `ghcr.io/rafalpodles/board-planner`, built for `linux/amd64` and
-`linux/arm64` on every release from 1.1.0 on — 1.0.x predates it and has no image. `:latest` is the
+`linux/arm64` on every release from 1.1.0 on — 1.0.x predates it, and 1.12.0 to 1.13.0 were published
+without one. `:latest` is the
 newest release; pin one with `BOARD_PLANNER_VERSION=1.2.3` in a `.env` next to the compose file. To upgrade,
 `docker compose pull && docker compose up -d`.
 
