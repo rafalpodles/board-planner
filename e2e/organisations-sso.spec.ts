@@ -163,13 +163,17 @@ test.describe("BP-951: an organisation's own sign-in provider", () => {
     await expect(page.getByRole("button", { name: `Continue with ${SSO_LABEL}` })).toBeVisible();
   });
 
-  test("refuses an address inside the network, and a provider that does not answer", async ({ page, request }) => {
+  test("refuses an address inside the network, one that does not resolve, and a provider that does not answer", async ({ page, request }) => {
     await makePro(request, ACME);
     await openSettings(page, ACME);
 
     const inside = await putFrom(page, { issuer: "https://10.0.0.1", clientId: SSO_CLIENT.clientId, clientSecret: SSO_CLIENT.clientSecret });
     expect(inside.status).toBe(400);
-    expect(inside.body.error).toContain("not one this server may call");
+    expect(inside.body.error).toContain("does not resolve, or it is inside the service's own network");
+
+    const unresolved = await putFrom(page, { issuer: "https://login.nowhere.invalid", clientId: SSO_CLIENT.clientId, clientSecret: SSO_CLIENT.clientSecret });
+    expect(unresolved.status).toBe(400);
+    expect(unresolved.body).toEqual(inside.body);
 
     const silent = await putFrom(page, { issuer: "https://127.0.0.1:9", clientId: SSO_CLIENT.clientId, clientSecret: SSO_CLIENT.clientSecret });
     expect(silent.status).toBe(400);
