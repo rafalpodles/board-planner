@@ -54,6 +54,29 @@ export async function assertPublicDestination(
   return url;
 }
 
+/**
+ * One public address for a host a client connects to directly rather than through `safeFetch`, such as
+ * an SMTP server. The caller connects to this address and to nothing else, so a name that resolves
+ * public now and private a moment later never reaches inward.
+ */
+export async function vettedAddress(hostname: string, options: DestinationOptions = {}): Promise<string> {
+  const host = unbracket(hostname);
+  const loopbackIsFine = options.allowLoopback === true;
+
+  if (isInternalName(host)) {
+    if (loopbackIsFine && isLoopbackName(host)) return "127.0.0.1";
+    throw new BlockedDestinationError(`Refusing internal hostname ${host}`);
+  }
+
+  if (isIpLiteral(host)) {
+    if (!isPrivateAddress(host)) return host;
+    if (loopbackIsFine && (host === "127.0.0.1" || host === "::1")) return host;
+    throw new BlockedDestinationError(`Refusing private address ${host}`);
+  }
+
+  return (await resolvePublic(host, loopbackIsFine))[0].address;
+}
+
 function isLoopbackName(host: string): boolean {
   return host === "localhost" || host.endsWith(".localhost");
 }

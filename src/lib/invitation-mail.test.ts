@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Types } from "mongoose";
 
 const isEmailConfigured = vi.fn();
 const sendEmail = vi.fn();
@@ -7,7 +8,10 @@ vi.mock("@/lib/email", () => ({ isEmailConfigured, sendEmail }));
 
 const { deliverInvitation, invitationLink } = await import("./invitation-mail");
 
+const ORGANISATION = new Types.ObjectId();
+
 const MAIL = {
+  organisation: ORGANISATION,
   to: "ada@example.com",
   token: "cpi_secret",
   origin: "https://planner.example",
@@ -29,6 +33,7 @@ describe("delivering an invitation", () => {
     expect(result).toEqual({ delivery: "email" });
     const sent = sendEmail.mock.calls[0][0];
     expect(sent.to).toBe("ada@example.com");
+    expect(sent.sender).toBe(ORGANISATION);
     expect(sent.text).toContain(invitationLink(MAIL.origin, MAIL.token));
     expect(sent.text).toContain("Orbit");
   });

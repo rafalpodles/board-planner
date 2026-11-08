@@ -22,7 +22,7 @@ const { forgetOrganisationSlugs } = await import("@/lib/organisation-host");
 
 const ORGANISATION = new Types.ObjectId();
 
-const sent = () => sendEmail.mock.calls.at(-1)?.[0] as { to: string; subject: string; html: string; text: string };
+const sent = () => sendEmail.mock.calls.at(-1)?.[0] as { sender: unknown; to: string; subject: string; html: string; text: string };
 
 beforeEach(() => {
   sendEmail.mockClear();
@@ -78,6 +78,7 @@ describe("notifyPasswordChanged", () => {
 describe("notifyAddressChanged", () => {
   it("goes to the address losing the account and shows the new one masked", async () => {
     await notifyAddressChanged({
+      organisation: ORGANISATION,
       previousEmail: "old@example.com",
       username: "owner",
       newEmail: "attacker@evil.test",
@@ -85,6 +86,7 @@ describe("notifyAddressChanged", () => {
     });
 
     expect(sent().to).toBe("old@example.com");
+    expect(sent().sender).toBe(ORGANISATION);
     expect(sent().text).not.toContain("attacker@evil.test");
     expect(sent().text).toContain("a•••@•••.test");
     expect(sent().text).toContain("owner");
@@ -92,6 +94,7 @@ describe("notifyAddressChanged", () => {
 
   it("says the account did it itself when no administrator is named", async () => {
     await notifyAddressChanged({
+      organisation: ORGANISATION,
       previousEmail: "old@example.com",
       username: "owner",
       newEmail: "new@example.com",

@@ -85,7 +85,7 @@ export async function POST(request: Request) {
       target: user.username,
       detail: `${previousEmail || "none"} → ${outcome.email}`,
     });
-    void notifyAddressChanged({ previousEmail, username: user.username, newEmail: outcome.email });
+    void notifyAddressChanged({ organisation: db.organisation, previousEmail, username: user.username, newEmail: outcome.email });
   } else {
     const proved = await db.User.updateOne(
       { _id: user._id, email: outcome.email },

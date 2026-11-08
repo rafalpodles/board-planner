@@ -113,7 +113,7 @@ export const POST = withAdmin(async (request, { user, db }) => {
     invitedBy: user._id,
   });
   const delivery = await deliverWithinBudget(db, email, origin, token, () =>
-    deliverTo(invitation.email, token, origin, user, role, boards.value, projects)
+    deliverTo(db.organisation, invitation.email, token, origin, user, role, boards.value, projects)
   );
   await recordDelivery(db, invitation._id, token, delivery.delivery);
 

@@ -34,7 +34,7 @@ async function tell(organisation: Types.ObjectId, label: string, endsAt: Date): 
       button: origin ? { label: "Choose Pro", url: `${origin}/settings/organisation` } : undefined,
       footer: ["Sent to the administrators of an organisation whose trial includes single sign-on."],
     });
-    if (await sendEmail({ to: address, subject: `Single sign-on stops when your trial ends on ${date}`, text, html })) sent += 1;
+    if (await sendEmail({ sender: "platform", to: address, subject: `Single sign-on stops when your trial ends on ${date}`, text, html })) sent += 1;
   }
   return sent;
 }

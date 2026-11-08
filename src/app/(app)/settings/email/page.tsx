@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/Button";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { useToast } from "@/components/ui/Toast";
+import { OwnMailServer, type OwnMailServerState } from "@/components/settings/OwnMailServer";
 
 type EmailSettings =
   | { managedByPlatform: false; configured: boolean; host: string; port: number; user: string; from: string }
@@ -20,6 +21,7 @@ export default function EmailSettingsPage() {
   const { toast } = useToast();
 
   const [settings, setSettings] = useState<EmailSettings | null>(null);
+  const [own, setOwn] = useState<OwnMailServerState | null>(null);
   const [failed, setFailed] = useState(false);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{
@@ -31,7 +33,10 @@ export default function EmailSettingsPage() {
   const load = useCallback(async () => {
     setFailed(false);
     try {
-      setSettings(await api.get("/api/admin/email"));
+      const read: EmailSettings = await api.get("/api/admin/email");
+      // Only the cloud has a server of its own to read; self-hosted it is the environment's, shown above
+      setOwn(read.managedByPlatform ? await api.get("/api/settings/smtp") : null);
+      setSettings(read);
     } catch {
       toast("Failed to read the mail settings", "error");
       // Never the unconfigured state: telling an admin whose SMTP works to set three environment
@@ -87,7 +92,9 @@ export default function EmailSettingsPage() {
     <>
       <h2 className="text-lg font-semibold mb-1">Email</h2>
       <p className="text-sm text-text-muted mb-6">
-        {settings?.managedByPlatform
+        {own?.active
+          ? "Sent through your own mail server. This screen shows whether it works."
+          : settings?.managedByPlatform
           ? "Sent by the service's own mail server. This screen shows whether it works."
           : "Configured in the environment, not here. This screen shows whether it works."}
       </p>
@@ -111,7 +118,20 @@ export default function EmailSettingsPage() {
     <div className="max-w-2xl">
       {header}
 
-      {settings.managedByPlatform && !settings.configured ? (
+      {own?.active ? (
+        <dl className="mb-6 divide-y divide-border rounded-lg border border-border text-sm" data-testid="email-own-server">
+          {[
+            ["Server", `${own.host}:${own.port}`],
+            ["Username", own.user],
+            ["From", own.fromName ? `${own.fromName} <${own.fromAddress}>` : own.fromAddress],
+          ].map(([label, value]) => (
+            <div key={label} className="flex gap-4 px-4 py-2">
+              <dt className="w-24 shrink-0 text-text-muted sm:w-48">{label}</dt>
+              <dd className="min-w-0 break-all">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : settings.managedByPlatform && !settings.configured ? (
         <div className="mb-6 rounded-lg border border-border p-4 text-sm">
           <p className="font-medium">Mail is not available on this service yet.</p>
           <p className="mt-1 text-text-muted">Until it is, no email is sent.</p>
@@ -183,6 +203,12 @@ export default function EmailSettingsPage() {
               If it does not arrive, check the spam folder and your mail provider&apos;s logs.
             </p>
           )}
+        </div>
+      )}
+
+      {own && (
+        <div className="mt-8">
+          <OwnMailServer state={own} onSaved={setOwn} />
         </div>
       )}
     </div>

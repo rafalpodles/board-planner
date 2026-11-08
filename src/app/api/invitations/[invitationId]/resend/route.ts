@@ -53,7 +53,7 @@ export const POST = withAdmin(async (request, { params, user, db }) => {
   const delivery: InvitationDelivery = linkOnly
     ? { delivery: "link", link: invitationLink(origin, token), reason: "requested" }
     : await deliverWithinBudget(db, invitation.email, origin, token, () =>
-        deliverTo(invitation.email, token, origin, user, invitation.role, invitation.boards, projects)
+        deliverTo(db.organisation, invitation.email, token, origin, user, invitation.role, invitation.boards, projects)
       );
   await recordDelivery(db, invitation._id, token, delivery.delivery);
 

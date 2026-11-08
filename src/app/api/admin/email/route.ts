@@ -6,15 +6,11 @@ import { withAdmin } from "@/lib/middleware";
 import { originFor } from "@/lib/organisation-host";
 import { APP_NAME } from "@/lib/brand";
 import { countAttempt, sourceKey } from "@/lib/rate-limit";
+import { ownMailServerFor } from "@/lib/organisation-smtp";
+import { BlockedDestinationError } from "@/lib/safe-fetch";
+import { mailServerAnswer } from "@/lib/smtp-transport";
 
 const TESTS_PER_WINDOW = 5;
-
-// A mail server refusing AUTH sometimes quotes the offending command back, and that command
-// carries SMTP_PASS. One line, capped, keeps the diagnosis without the credential.
-function firstLine(err: unknown): string {
-  const message = err instanceof Error ? err.message : "The mail server refused the message";
-  return message.split("\n")[0].slice(0, 200);
-}
 
 export const GET = withAdmin(async (_request, { user, db }) => {
   if (user.viaMachineCredential) {
@@ -49,8 +45,10 @@ export const POST = withAdmin(async (_request, { user, db }) => {
   }
 
   const settings = emailSettingsSummary();
+  const own = await ownMailServerFor(db.organisation);
+  const host = own ? `${own.host}:${own.port}` : !settings.managedByPlatform ? `${settings.host}:${settings.port}` : null;
   const { html, text } = renderEmail({
-    preheader: `Delivery works from ${(!settings.managedByPlatform && settings.host) || "this deployment"}.`,
+    preheader: `Delivery works from ${(own?.host ?? (!settings.managedByPlatform && settings.host)) || "this deployment"}.`,
     kicker: "Delivery test",
     heading: "Your mail server accepted this message",
     alert: {
@@ -60,8 +58,8 @@ export const POST = withAdmin(async (_request, { user, db }) => {
       ],
     },
     rows: [
-      ...(settings.managedByPlatform ? [] : [{ label: "Host", value: `${settings.host}:${settings.port}` }]),
-      { label: "From", value: settings.from },
+      ...(host ? [{ label: "Host", value: host }] : []),
+      { label: "From", value: own ? own.fromAddress : settings.from },
       { label: "Requested by", value: `${admin?.username ?? ""} · ${new Date().toUTCString()}` },
       { label: "Instance", value: (await originFor(db)) ?? "not configured" },
     ],
@@ -72,6 +70,7 @@ export const POST = withAdmin(async (_request, { user, db }) => {
 
   try {
     await sendEmailOrThrow({
+      sender: db.organisation,
       to,
       subject: `${APP_NAME} test message`,
       text,
@@ -83,6 +82,9 @@ export const POST = withAdmin(async (_request, { user, db }) => {
     if (err instanceof EmailNotConfiguredError) {
       return NextResponse.json({ error: err.message }, { status: 409 });
     }
+    if (err instanceof BlockedDestinationError) {
+      return NextResponse.json({ error: "Your mail server's address is not one this server may call." }, { status: 409 });
+    }
     // The whole point of the endpoint: what the mail server actually said. Everywhere else this
     // is swallowed, which is why a misconfigured deployment looks exactly like a working one.
     // Trimmed, because a server rejecting AUTH sometimes echoes the offending command back — and
@@ -90,7 +92,7 @@ export const POST = withAdmin(async (_request, { user, db }) => {
     console.error("Test email failed:", err);
     return NextResponse.json(
       // The server's own words name its host, address or login, which on a shared instance are the platform's
-      { error: settings.managedByPlatform ? "The service's mail server did not accept the message." : firstLine(err) },
+      { error: settings.managedByPlatform && !own ? "The service's mail server did not accept the message." : mailServerAnswer(err) },
       { status: 502 }
     );
   }

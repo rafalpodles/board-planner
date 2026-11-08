@@ -129,7 +129,7 @@ async function sendNotice(organisation: Types.ObjectId, name: string, slug: stri
       button: origin ? { label: `Sign in to ${APP_NAME}`, url: `${origin}/login` } : undefined,
       footer: ["Sent to the administrators of an organisation with no plan and no recent use. This notice cannot be turned off."],
     });
-    if (await sendEmail({ to: address, subject: `${label} will be suspended and deleted on ${date}`, text, html })) sent += 1;
+    if (await sendEmail({ sender: "platform", to: address, subject: `${label} will be suspended and deleted on ${date}`, text, html })) sent += 1;
   }
   return sent;
 }
