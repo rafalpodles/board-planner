@@ -200,3 +200,54 @@ describe("the mail screen when it cannot read its settings", () => {
     expect(api.get).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("an organisation's own mail server, in the cloud (BP-899)", () => {
+  const PLATFORM = { managedByPlatform: true, configured: true, from: "Board Planner <noreply@board.example>" };
+  const OWN = {
+    hosted: true,
+    plan: "pro",
+    trial: false,
+    trialEndsAt: null,
+    available: true,
+    set: true,
+    host: "smtp.acme.example",
+    port: 587,
+    user: "mailer@acme.example",
+    fromAddress: "boards@acme.example",
+    fromName: "Acme boards",
+    unreadable: false,
+    active: true,
+  };
+  const answer = (own: Record<string, unknown>) =>
+    api.get.mockImplementation(async (path: string) => (path === "/api/settings/smtp" ? own : PLATFORM));
+
+  it("says mail leaves through it, from its address, while it is active", async () => {
+    answer(OWN);
+
+    await openTheScreen();
+
+    expect(screen.getByText("Sent through your own mail server. This screen shows whether it works.")).toBeTruthy();
+    expect(screen.getByTestId("email-own-server").textContent).toContain("smtp.acme.example:587");
+    expect(screen.getByTestId("email-own-server").textContent).toContain("Acme boards <boards@acme.example>");
+    expect(screen.queryByText("Provided by the service")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Your own mail server" })).toBeTruthy();
+  });
+
+  it("goes back to the service's server, and offers Pro, once the plan no longer includes it", async () => {
+    answer({ ...OWN, plan: "free", available: false, active: false });
+
+    await openTheScreen();
+
+    expect(screen.getByText("Provided by the service")).toBeTruthy();
+    expect(screen.queryByTestId("email-own-server")).toBeNull();
+    expect(screen.getByTestId("smtp-upgrade").textContent).toContain("included in Pro");
+    expect(screen.queryByTestId("smtp-form")).toBeNull();
+  });
+
+  it("is not asked about on a self-hosted instance, whose server is the environment's", async () => {
+    await openTheScreen();
+
+    expect(api.get).not.toHaveBeenCalledWith("/api/settings/smtp");
+    expect(screen.queryByRole("heading", { name: "Your own mail server" })).toBeNull();
+  });
+});

@@ -2,7 +2,6 @@ import nodemailer, { type Transporter } from "nodemailer";
 import type { Types } from "mongoose";
 import { APP_NAME, APP_DOMAIN } from "@/lib/brand";
 import { organisationDomain } from "./organisation-host";
-import { ownMailFrom, ownMailServerFor, ownMailTransport } from "./organisation-smtp";
 import { smtpTransportOptions } from "./smtp-transport";
 
 const SMTP_HOST = process.env.SMTP_HOST;
@@ -91,10 +90,14 @@ export async function sendEmailOrThrow({
   const message = { to, subject, text, html: html || text, headers };
 
   // A refusal by the organisation's own server is that server's answer, never a reason to send through ours instead
-  const own = sender === "platform" ? null : await ownMailServerFor(sender);
-  if (own) {
-    await (await ownMailTransport(own)).sendMail({ ...message, from: ownMailFrom(own) });
-    return;
+  if (sender !== "platform") {
+    // Loaded here so that a caller wanting only `isValidEmail` does not load the database and the sealing key with it
+    const { ownMailFrom, ownMailServerFor, ownMailTransport } = await import("./organisation-smtp");
+    const own = await ownMailServerFor(sender);
+    if (own) {
+      await (await ownMailTransport(own)).sendMail({ ...message, from: ownMailFrom(own) });
+      return;
+    }
   }
 
   const t = getTransporter();

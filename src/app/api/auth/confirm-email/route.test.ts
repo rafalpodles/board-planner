@@ -88,6 +88,7 @@ describe("POST /api/auth/confirm-email", () => {
       })
     );
     expect(notifyAddressChanged).toHaveBeenCalledWith({
+      organisation: DEFAULT_ORGANISATION_ID,
       previousEmail: "old@example.com",
       username: "owner",
       newEmail: "new@example.com",
