@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { agentsBeyond, agentsNamingAny, canRun, gateProvider, lackedBy, providersOf } from "./agent-providers";
+import { agentsBeyond, agentsNamingAny, agentsOutOfReach, canRun, gateProvider, lackedBy, providersOf } from "./agent-providers";
 import type { ScopedDb } from "@/lib/db-scope";
 import type { SnapshotEntry } from "./agent-snapshot";
 
@@ -116,5 +116,55 @@ describe("the filter agentsBeyond sends is one the Agent model can cast", () => 
     const { Agent } = await import("@/models/agent");
 
     expect(() => Agent.find({ "composition.delivery": { $in: ["implement"] } } as never).cast(Agent)).toThrow(/Cast to embedded failed/);
+  });
+});
+
+describe("agentsOutOfReach", () => {
+  // Blocks per provider, and the agents naming each block
+  function dbWith(blocksOn: Record<string, string[]>, agentsNaming: Record<string, string[]>) {
+    const blockFind = vi.fn((filter: { $or: { provider?: unknown }[] }) => {
+      const provider = typeof filter.$or[0].provider === "string" ? filter.$or[0].provider : "claude";
+      return { lean: async () => (blocksOn[provider] ?? []).map((key) => ({ key })) };
+    });
+    const agentFind = vi.fn((filter: unknown) => {
+      const keys = new Set<string>();
+      JSON.stringify(filter, (_key, value) => (typeof value === "string" && keys.add(value), value));
+      const ids = Object.entries(agentsNaming).filter(([, named]) => named.some((key) => keys.has(key))).map(([id]) => id);
+      return { lean: async () => ids.map((_id) => ({ _id })) };
+    });
+    return { db: { AgentBlock: { find: blockFind }, Agent: { find: agentFind } } as unknown as ScopedDb, blockFind };
+  }
+  const blocks = { claude: ["write"], codex: ["review-codex"] };
+
+  it("judges nothing, and asks nothing, without a machine", async () => {
+    const { db, blockFind } = dbWith(blocks, { a: ["review-codex"] });
+
+    expect(await agentsOutOfReach(db, [])).toEqual([]);
+    expect(blockFind).not.toHaveBeenCalled();
+  });
+
+  it("names an agent on Codex for a machine that runs only Claude Code, and one built before BP-987", async () => {
+    const { db } = dbWith(blocks, { a: ["write", "review-codex"], b: ["write"] });
+
+    expect(await agentsOutOfReach(db, [["agent-claude"]])).toEqual([{ agent: "a", lacks: ["codex"] }]);
+    expect(await agentsOutOfReach(db, [[]])).toEqual([{ agent: "a", lacks: ["codex"] }]);
+  });
+
+  it("names an agent on Claude Code for a machine signed in only to Codex", async () => {
+    const { db } = dbWith(blocks, { a: ["write"], c: ["review-codex"] });
+
+    expect(await agentsOutOfReach(db, [["agent-codex"]])).toEqual([{ agent: "a", lacks: ["claude"] }]);
+  });
+
+  it("names nothing one of several machines can run", async () => {
+    const { db } = dbWith(blocks, { a: ["write", "review-codex"] });
+
+    expect(await agentsOutOfReach(db, [["agent-claude"], ["agent-claude", "agent-codex"]])).toEqual([]);
+  });
+
+  it("names an agent needing both when each machine runs only one, by what the first lacks", async () => {
+    const { db } = dbWith(blocks, { a: ["write", "review-codex"] });
+
+    expect(await agentsOutOfReach(db, [["agent-claude"], ["agent-codex"]])).toEqual([{ agent: "a", lacks: ["codex"] }]);
   });
 });

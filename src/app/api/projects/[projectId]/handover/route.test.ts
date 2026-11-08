@@ -46,6 +46,16 @@ vi.mock("@/models/worker", () => ({
   Worker: { find: (...a: unknown[]) => (workerFind(...a), { lean: workerLean }) },
 }));
 vi.mock("@/models/task", () => ({ Task: {} }));
+const blockFind = vi.fn();
+const blockLean = vi.fn();
+const agentFind = vi.fn();
+const agentLean = vi.fn();
+vi.mock("@/models/agentBlock", () => ({
+  AgentBlock: { find: (...a: unknown[]) => (blockFind(...a), { lean: () => blockLean(...a) }) },
+}));
+vi.mock("@/models/agent", () => ({
+  Agent: { find: (...a: unknown[]) => (agentFind(...a), { lean: agentLean }) },
+}));
 
 const { GET } = await import("./route");
 
@@ -60,6 +70,8 @@ beforeEach(() => {
   check.mockImplementation(async (_db: unknown, _user: unknown, _project: string, need: string) => need === "access");
   projectLean.mockResolvedValue({ _id: PROJECT, repositoryUrl: "https://github.com/acme/orbit" });
   workerLean.mockResolvedValue([]);
+  blockLean.mockResolvedValue([]);
+  agentLean.mockResolvedValue([]);
 });
 
 async function read() {
@@ -384,5 +396,60 @@ describe("GET handover readiness on a board that lists several repositories", ()
 
     expect(body).not.toHaveProperty("machineMissing");
     expect(body).not.toHaveProperty("machineNeedsUpdate");
+  });
+});
+
+// BP-1094. A task whose agent runs on a coding CLI none of the reader's machines can run is never
+// claimed, and the screen can only say so if this names the agents out of reach.
+describe("GET handover readiness for agents the reader's machines cannot run", () => {
+  const live = (capabilities: string[], seen = new Date()) => ({
+    _id: "507f1f77bcf86cd799439031",
+    enabled: true,
+    lastSeenAt: seen,
+    capabilities,
+    repos: [{ remote: "git@github.com:acme/orbit.git", path: "/Users/ada/orbit" }],
+  });
+  const ON_CODEX = "507f1f77bcf86cd799439041";
+
+  beforeEach(() => {
+    blockLean.mockImplementation(async (filter: { $or: { provider?: unknown }[] }) =>
+      filter.$or[0].provider === "codex" ? [{ key: "review-on-codex" }] : []
+    );
+    agentLean.mockResolvedValue([{ _id: ON_CODEX }]);
+  });
+
+  it("names an agent that runs on Codex when the reader's machine runs only Claude Code", async () => {
+    workerLean.mockResolvedValue([live(["gate-commands", "agent-claude"])]);
+
+    const { body } = await read();
+
+    expect(body.machine).toBe("live");
+    expect(body.agentsOutOfReach).toEqual([{ agent: ON_CODEX, lacks: ["codex"] }]);
+  });
+
+  it("says nothing when the machine can run Codex too, and does not look", async () => {
+    workerLean.mockResolvedValue([live(["gate-commands", "agent-claude", "agent-codex"])]);
+
+    const { body } = await read();
+
+    expect(body).not.toHaveProperty("agentsOutOfReach");
+    expect(blockFind).not.toHaveBeenCalled();
+  });
+
+  it("judges only machines that would take work now: a stale one has its own reason", async () => {
+    workerLean.mockResolvedValue([live(["agent-claude"], new Date(Date.now() - 24 * 3600_000))]);
+
+    const { body } = await read();
+
+    expect(body.machine).toBe("stale");
+    expect(body).not.toHaveProperty("agentsOutOfReach");
+    expect(blockFind).not.toHaveBeenCalled();
+  });
+
+  it("says nothing when the reader has no machine at all", async () => {
+    const { body } = await read();
+
+    expect(body.machine).toBe("none");
+    expect(body).not.toHaveProperty("agentsOutOfReach");
   });
 });
