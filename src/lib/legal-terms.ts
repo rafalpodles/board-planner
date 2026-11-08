@@ -54,7 +54,7 @@ export function legalTermsVersion(): string | null {
 export function legalTerms(): LegalTerms | null {
   const version = legalTermsVersion();
   if (!version) return null;
-  return { version, terms: TERMS_URL, privacy: PRIVACY_URL, termsPl: `${TERMS_URL}/pl`, privacyPl: `${PRIVACY_URL}/pl` };
+  return { version, terms: TERMS_URL, privacy: PRIVACY_URL };
 }
 
 export function checkTermsAccepted(acceptTerms: unknown, now = new Date()): { ok: true; fields: TermsAcceptance } | { ok: false; error: string } {

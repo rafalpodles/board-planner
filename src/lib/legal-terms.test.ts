@@ -32,8 +32,6 @@ describe("the gate (BP-939)", () => {
       version: VERSION,
       terms: "https://board-planner.com/legal/terms",
       privacy: "https://board-planner.com/legal/privacy",
-      termsPl: "https://board-planner.com/legal/terms/pl",
-      privacyPl: "https://board-planner.com/legal/privacy/pl",
     });
   });
 

@@ -128,8 +128,6 @@ describe("the invitation page with the cloud terms published (BP-939)", () => {
     version: "2026-10-15",
     terms: "https://board-planner.com/legal/terms",
     privacy: "https://board-planner.com/legal/privacy",
-    termsPl: "https://board-planner.com/legal/terms/pl",
-    privacyPl: "https://board-planner.com/legal/privacy/pl",
   };
 
   it("offers an unticked box linking both documents, and sends what it says", async () => {
@@ -143,7 +141,7 @@ describe("the invitation page with the cloud terms published (BP-939)", () => {
     expect(box.required).toBe(true);
     expect(screen.getByRole("link", { name: "Terms of Service" }).getAttribute("href")).toBe(TERMS.terms);
     expect(screen.getByRole("link", { name: "Privacy Policy" }).getAttribute("href")).toBe(TERMS.privacy);
-    expect(screen.getAllByRole("link", { name: "Polski" }).map((a) => a.getAttribute("href"))).toEqual([TERMS.termsPl, TERMS.privacyPl]);
+    expect(screen.queryByRole("link", { name: "Polski" })).toBeNull();
 
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "ada" } });
     fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "Ada" } });
