@@ -37,7 +37,11 @@ export const GET = withProjectAccess(async (_request, { params, user, db }) => {
   const now = new Date();
   const machine = machineReadinessFor(judged.workers, project, now, claiming);
   const live = liveMachinesFor(judged.workers, project, now, claiming);
-  const outOfReach = await agentsOutOfReach(db, live.map((worker) => worker.capabilities ?? []));
+  const outOfReach = await agentsOutOfReach(
+    db,
+    live.map((worker) => worker.capabilities ?? []),
+    { projectId: project._id, userId: user._id }
+  );
   const body: ApiHandoverReadiness = {
     canAdmin,
     repositoryUrl: projectRepositoryUrl(project),

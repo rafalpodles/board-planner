@@ -425,6 +425,8 @@ describe("GET handover readiness for agents the reader's machines cannot run", (
 
     expect(body.machine).toBe("live");
     expect(body.agentsOutOfReach).toEqual([{ agent: ON_CODEX, lacks: ["codex"] }]);
+    expect(JSON.stringify(agentFind.mock.calls[0][0])).toContain(`{"scope":"user","owner":"${READER}"}`);
+    expect(JSON.stringify(agentFind.mock.calls[0][0])).toContain(`{"scope":"project","project":"${PROJECT}"}`);
   });
 
   it("says nothing when the machine can run Codex too, and does not look", async () => {

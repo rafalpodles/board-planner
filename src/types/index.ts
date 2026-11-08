@@ -2138,7 +2138,7 @@ export interface ApiHandoverReadiness {
   /** For such a board: the reader's machine has every checkout but its worker cannot run several at once */
   machineNeedsUpdate?: boolean;
   /** The agents none of the reader's live machines can run, with the coding CLIs (`claude`, `codex`) they lack */
-  agentsOutOfReach?: { agent: string; lacks: string[] }[];
+  agentsOutOfReach?: { agent: string; lacks: string[]; together?: true }[];
 }
 
 export type SetupGuideStepId =

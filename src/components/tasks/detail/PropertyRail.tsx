@@ -111,6 +111,8 @@ interface BlockerContext {
   missingRepositories: string[];
   /** The coding CLIs the task's agent needs that none of the reader's machines can run */
   agentLacks: string[];
+  /** Each of them runs on one of the reader's machines, but no machine runs them all */
+  agentLacksTogether: boolean;
 }
 
 const SIGN_IN_COMMAND: Record<string, string> = { claude: "claude auth login", codex: "codex login" };
@@ -295,8 +297,10 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
       const commands = ctx.agentLacks.map((provider) => SIGN_IN_COMMAND[provider]).filter(Boolean);
       return (
         <>
-          This task&apos;s agent runs on {labels.join(" and ")}, and none of your machines can run{" "}
-          {labels.length === 1 ? "it" : "them"}. Sign in on one of them
+          This task&apos;s agent runs on {labels.join(" and ")}, and{" "}
+          {ctx.agentLacksTogether
+            ? "none of your machines runs both. Sign in to the one it lacks on one of them"
+            : `none of your machines can run ${labels.length === 1 ? "it" : "them"}. Sign in on one of them`}
           {commands.length > 0 && (
             <>
               {" "}
@@ -360,7 +364,8 @@ function HandoverNotice({
   if (final?.reason === "no-agent") return null;
 
   const viewerIsAssignee = !!viewer && assignee?.username === viewer;
-  const agentLacks = board?.agentsOutOfReach?.find((entry) => entry.agent === agent)?.lacks ?? [];
+  const outOfReach = board?.agentsOutOfReach?.find((entry) => entry.agent === agent);
+  const agentLacks = outOfReach?.lacks ?? [];
   const gaps =
     board && !final
       ? readinessGaps({
@@ -389,6 +394,7 @@ function HandoverNotice({
     haltedBy: board?.haltedBy ?? null,
     missingRepositories: board?.machineMissing ?? [],
     agentLacks,
+    agentLacksTogether: outOfReach?.together === true,
   };
 
   if (blockers.length === 0) {

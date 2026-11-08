@@ -2805,7 +2805,6 @@ export async function makeMachinesStale() {
   await mongoose.disconnect();
 }
 
-/** A machine `owner` enrolled, holding a checkout of `remote`, last seen `seenAgoMs` ago. */
 export const CODEX_HANDOVER_AGENT_ID = id("e2e00000000000000000ab94");
 export const CODEX_HANDOVER_AGENT_NAME = "Reviewed on Codex";
 
@@ -2846,6 +2845,7 @@ export async function seedCodexHandover() {
   await stampOrganisationAndDisconnect();
 }
 
+/** A machine `owner` enrolled, holding a checkout of `remote`, last seen `seenAgoMs` ago. */
 export async function seedMachine(
   remote: string,
   {

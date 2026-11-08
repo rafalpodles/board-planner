@@ -1,5 +1,5 @@
 import type { QueryFilter } from "mongoose";
-import { AGENT_BUCKETS, IAgentBlock } from "@/types";
+import { AGENT_BUCKETS, IAgent, IAgentBlock } from "@/types";
 import type { ScopedDb } from "@/lib/db-scope";
 import { DEFAULT_PROVIDER, isProvider, PROVIDER_IDS, providerCapability, ProviderId } from "./agent-kinds";
 import type { SnapshotEntry } from "./agent-snapshot";
@@ -89,16 +89,23 @@ export async function agentsBeyond(db: ScopedDb, capabilities: readonly string[]
 
 export interface AgentOutOfReach {
   agent: string;
-  /** The coding CLIs it needs that none of the machines can run, or where each lacks a different one, those the first lacks */
+  /** The coding CLIs it needs that none of the machines can run; with `together`, every CLI it needs */
   lacks: ProviderId[];
+  /** Each CLI runs on some machine, but none runs all of them */
+  together?: true;
 }
 
 /**
  * The agents none of these machines can run, judged as the claim judges one machine (agentsBeyond):
  * an agent is out of reach when every machine lacks a CLI one of its blocks runs on. No machines, no
- * verdict: having none is its own reason.
+ * verdict: having none is its own reason. Only agents that can run on this project for this person are
+ * named, as snapshotFor allows them: somebody else's personal agent or another board's is not theirs to know.
  */
-export async function agentsOutOfReach(db: ScopedDb, machines: readonly (readonly string[])[]): Promise<AgentOutOfReach[]> {
+export async function agentsOutOfReach(
+  db: ScopedDb,
+  machines: readonly (readonly string[])[],
+  { projectId, userId }: { projectId: unknown; userId: unknown }
+): Promise<AgentOutOfReach[]> {
   if (machines.length === 0) return [];
   const beyondEach = machines.map((capabilities) => PROVIDER_IDS.filter((provider) => !canRun(capabilities, provider)));
   const candidates = PROVIDER_IDS.filter((provider) => beyondEach.some((beyond) => beyond.includes(provider)));
@@ -107,7 +114,8 @@ export async function agentsOutOfReach(db: ScopedDb, machines: readonly (readonl
   for (const provider of candidates) {
     const blocks = await db.AgentBlock.find({ $or: blocksOn(provider) }, "key").lean();
     if (blocks.length === 0) continue;
-    const agents = await db.Agent.find(agentsNamingAny(blocks.map((block) => block.key)), "_id").lean();
+    const runsHere = { $or: [{ scope: "global" }, { scope: "project", project: projectId }, { scope: "user", owner: userId }] } as QueryFilter<IAgent>;
+    const agents = await db.Agent.find({ $and: [runsHere, agentsNamingAny(blocks.map((block) => block.key))] }, "_id").lean();
     for (const agent of agents) {
       const id = String(agent._id);
       uses.set(id, (uses.get(id) ?? new Set()).add(provider));
@@ -118,7 +126,7 @@ export async function agentsOutOfReach(db: ScopedDb, machines: readonly (readonl
   for (const [agent, needs] of uses) {
     if (!beyondEach.every((beyond) => beyond.some((provider) => needs.has(provider)))) continue;
     const nowhere = [...needs].filter((provider) => beyondEach.every((beyond) => beyond.includes(provider)));
-    out.push({ agent, lacks: nowhere.length > 0 ? nowhere : beyondEach[0].filter((provider) => needs.has(provider)) });
+    out.push(nowhere.length > 0 ? { agent, lacks: nowhere } : { agent, lacks: [...needs], together: true });
   }
   return out;
 }

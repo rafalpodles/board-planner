@@ -1747,6 +1747,14 @@ describe("an agent none of the reader's machines can run", () => {
     expect(screen.getByTestId("handover-notice").textContent).toContain("(claude auth login)");
   });
 
+  it("says no machine runs both when each of the reader's machines runs one of them", () => {
+    rail({ agentsOutOfReach: [{ agent: "a1", lacks: ["claude", "codex"], together: true }] });
+
+    expect(screen.getByTestId("handover-notice").textContent).toBe(
+      "Nothing will run this yet. This task's agent runs on Claude Code and Codex, and none of your machines runs both. Sign in to the one it lacks on one of them (claude auth login, codex login) and restart its worker, or choose another agent."
+    );
+  });
+
   it("says nothing of another agent out of reach, and waits for the machine", () => {
     rail({ agentsOutOfReach: [{ agent: "a2", lacks: ["codex"] }] });
 

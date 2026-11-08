@@ -132,39 +132,53 @@ describe("agentsOutOfReach", () => {
       const ids = Object.entries(agentsNaming).filter(([, named]) => named.some((key) => keys.has(key))).map(([id]) => id);
       return { lean: async () => ids.map((_id) => ({ _id })) };
     });
-    return { db: { AgentBlock: { find: blockFind }, Agent: { find: agentFind } } as unknown as ScopedDb, blockFind };
+    return { db: { AgentBlock: { find: blockFind }, Agent: { find: agentFind } } as unknown as ScopedDb, blockFind, agentFind };
   }
   const blocks = { claude: ["write"], codex: ["review-codex"] };
+  const HERE = { projectId: "p1", userId: "u1" };
 
   it("judges nothing, and asks nothing, without a machine", async () => {
     const { db, blockFind } = dbWith(blocks, { a: ["review-codex"] });
 
-    expect(await agentsOutOfReach(db, [])).toEqual([]);
+    expect(await agentsOutOfReach(db, [], HERE)).toEqual([]);
     expect(blockFind).not.toHaveBeenCalled();
   });
 
   it("names an agent on Codex for a machine that runs only Claude Code, and one built before BP-987", async () => {
     const { db } = dbWith(blocks, { a: ["write", "review-codex"], b: ["write"] });
 
-    expect(await agentsOutOfReach(db, [["agent-claude"]])).toEqual([{ agent: "a", lacks: ["codex"] }]);
-    expect(await agentsOutOfReach(db, [[]])).toEqual([{ agent: "a", lacks: ["codex"] }]);
+    expect(await agentsOutOfReach(db, [["agent-claude"]], HERE)).toEqual([{ agent: "a", lacks: ["codex"] }]);
+    expect(await agentsOutOfReach(db, [[]], HERE)).toEqual([{ agent: "a", lacks: ["codex"] }]);
   });
 
   it("names an agent on Claude Code for a machine signed in only to Codex", async () => {
     const { db } = dbWith(blocks, { a: ["write"], c: ["review-codex"] });
 
-    expect(await agentsOutOfReach(db, [["agent-codex"]])).toEqual([{ agent: "a", lacks: ["claude"] }]);
+    expect(await agentsOutOfReach(db, [["agent-codex"]], HERE)).toEqual([{ agent: "a", lacks: ["claude"] }]);
   });
 
   it("names nothing one of several machines can run", async () => {
     const { db } = dbWith(blocks, { a: ["write", "review-codex"] });
 
-    expect(await agentsOutOfReach(db, [["agent-claude"], ["agent-claude", "agent-codex"]])).toEqual([]);
+    expect(await agentsOutOfReach(db, [["agent-claude"], ["agent-claude", "agent-codex"]], HERE)).toEqual([]);
   });
 
-  it("names an agent needing both when each machine runs only one, by what the first lacks", async () => {
+  it("names an agent needing both when each machine runs only one, as needing them together", async () => {
     const { db } = dbWith(blocks, { a: ["write", "review-codex"] });
 
-    expect(await agentsOutOfReach(db, [["agent-claude"], ["agent-codex"]])).toEqual([{ agent: "a", lacks: ["codex"] }]);
+    expect(await agentsOutOfReach(db, [["agent-claude"], ["agent-codex"]], HERE)).toEqual([
+      { agent: "a", lacks: ["claude", "codex"], together: true },
+    ]);
+  });
+
+  // Somebody else's personal agent, or another board's, is not the reader's to learn about
+  it("asks only about agents that can run on this project for this person", async () => {
+    const { db, agentFind } = dbWith(blocks, { a: ["review-codex"] });
+
+    await agentsOutOfReach(db, [["agent-claude"]], HERE);
+
+    expect((agentFind.mock.calls[0][0] as { $and: unknown[] }).$and[0]).toEqual({
+      $or: [{ scope: "global" }, { scope: "project", project: "p1" }, { scope: "user", owner: "u1" }],
+    });
   });
 });
