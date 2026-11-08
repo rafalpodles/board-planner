@@ -263,10 +263,14 @@ test.describe("BP-1135: the operator sees where each new organisation came from"
     expect((await listed(request, plain)).acquisition).toBeNull();
   });
 
-  test("with no tags, the site that linked to the sign-up page is kept as a host, and nothing is left on the device", async ({ page, request }) => {
+  test("with no tags, the site that linked to the sign-up page is kept as a host through Sign in and back, and sessionStorage stays empty", async ({ page, request }) => {
     const slug = `referred-${Date.now()}`;
     const email = freshAddress("referred");
     await page.goto(`${ORGANISATIONS_PLATFORM_ORIGIN}/?start`, { referer: "https://news.ycombinator.com/item?id=42" });
+    await page.getByRole("link", { name: "Sign in", exact: true }).click();
+    await page.waitForURL(`${ORGANISATIONS_PLATFORM_ORIGIN}/?ref=news.ycombinator.com`);
+    await page.getByRole("link", { name: "Create an organisation" }).click();
+    await page.waitForURL(`${ORGANISATIONS_PLATFORM_ORIGIN}/?start&ref=news.ycombinator.com`);
     await page.getByLabel("E-mail address").fill(email);
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByLabel("Code").fill(await codeSentTo(email));

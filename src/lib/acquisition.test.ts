@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { acquisitionFromLanding, readAcquisition } from "./acquisition";
+import { acquisitionFromLanding, acquisitionQuery, readAcquisition } from "./acquisition";
 
 describe("readAcquisition (BP-1135)", () => {
   it("keeps the campaign tags and a referrer host", () => {
@@ -14,6 +14,7 @@ describe("readAcquisition (BP-1135)", () => {
   it("drops what is odd rather than refusing, and answers null when nothing is left", () => {
     expect(readAcquisition({ source: "<script>", medium: 7, campaign: " spring ", referrerHost: "https://x.example/path" })).toEqual({ campaign: "spring" });
     expect(readAcquisition({ source: "a b", referrerHost: "localhost" })).toBeNull();
+    expect(readAcquisition({ referrerHost: "203.0.113.7" })).toBeNull();
     expect(readAcquisition({ source: { $ne: null } })).toBeNull();
     for (const value of [undefined, null, "reddit", ["reddit"], 1]) expect(readAcquisition(value)).toBeNull();
   });
@@ -29,7 +30,7 @@ describe("readAcquisition (BP-1135)", () => {
 });
 
 describe("acquisitionFromLanding (BP-1135)", () => {
-  const OWN = "login.board-planner.com";
+  const OWN = ["login.board-planner.com", "board-planner.com"];
 
   it("reads the utm tags and the site's ref", () => {
     expect(acquisitionFromLanding("?start&utm_source=reddit&utm_medium=cpc&utm_campaign=launch&ref=www.reddit.com", "https://board-planner.com/", OWN)).toEqual({
@@ -53,7 +54,25 @@ describe("acquisitionFromLanding (BP-1135)", () => {
     expect(acquisitionFromLanding("?start", "not a url", OWN)).toBeNull();
   });
 
-  it("reads a two-label host as its own domain", () => {
-    expect(acquisitionFromLanding("", "https://sub.localtest.me/", "localtest.me")).toBeNull();
+  it("takes our own hosts from the configured domains, not from the page's host", () => {
+    const own = ["bp.example.co.uk", "app.oldbrand.com"];
+    expect(acquisitionFromLanding("", "https://www.bbc.co.uk/", own)).toEqual({ referrerHost: "www.bbc.co.uk" });
+    expect(acquisitionFromLanding("", "https://other.example.co.uk/", own)).toEqual({ referrerHost: "other.example.co.uk" });
+    for (const ours of ["https://bp.example.co.uk/", "https://acme.bp.example.co.uk/", "https://app.oldbrand.com/"]) {
+      expect(acquisitionFromLanding("", ours, own)).toBeNull();
+    }
+  });
+});
+
+describe("acquisitionQuery (BP-1135)", () => {
+  it("writes what was read back as the tags the landing reads, so a link to another sign-in page keeps it", () => {
+    const acquisition = { source: "reddit", medium: "cpc", campaign: "launch", referrerHost: "www.reddit.com" };
+    const query = acquisitionQuery(acquisition);
+    expect(query).toBe("utm_source=reddit&utm_medium=cpc&utm_campaign=launch&ref=www.reddit.com");
+    expect(acquisitionFromLanding(`?start&${query}`, "https://login.board-planner.com/", ["board-planner.com"])).toEqual(acquisition);
+  });
+
+  it("is empty when there is nothing to carry", () => {
+    expect(acquisitionQuery(null)).toBe("");
   });
 });

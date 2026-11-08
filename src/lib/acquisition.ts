@@ -20,7 +20,8 @@ function host(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const lowered = value.trim().toLowerCase().replace(/\.$/, "");
   if (lowered.length > HOST_MAX) return undefined;
-  return HOST.test(lowered) ? lowered : undefined;
+  if (!HOST.test(lowered) || /^\d+$/.test(lowered.slice(lowered.lastIndexOf(".") + 1))) return undefined;
+  return lowered;
 }
 
 export function readAcquisition(value: unknown): Acquisition | null {
@@ -44,19 +45,25 @@ function hostOfUrl(url: string): string | undefined {
   }
 }
 
-function isOurs(candidate: string, ownHost: string): boolean {
-  const parent = ownHost.split(".").slice(1).join(".");
-  const domain = parent.includes(".") ? parent : ownHost;
-  return candidate === ownHost || candidate === domain || candidate.endsWith(`.${domain}`);
-}
+const isOurs = (candidate: string, ownDomains: string[]) => ownDomains.some((domain) => candidate === domain || candidate.endsWith(`.${domain}`));
 
-export function acquisitionFromLanding(search: string, referrer: string, ownHost: string): Acquisition | null {
+export function acquisitionFromLanding(search: string, referrer: string, ownDomains: string[]): Acquisition | null {
   const query = new URLSearchParams(search);
   const referrerHost = host(query.get("ref")) ?? host(hostOfUrl(referrer));
   return readAcquisition({
     source: query.get("utm_source"),
     medium: query.get("utm_medium"),
     campaign: query.get("utm_campaign"),
-    referrerHost: referrerHost && !isOurs(referrerHost, ownHost) ? referrerHost : undefined,
+    referrerHost: referrerHost && !isOurs(referrerHost, ownDomains) ? referrerHost : undefined,
   });
+}
+
+export function acquisitionQuery(acquisition: Acquisition | null): string {
+  if (!acquisition) return "";
+  const query = new URLSearchParams();
+  if (acquisition.source) query.set("utm_source", acquisition.source);
+  if (acquisition.medium) query.set("utm_medium", acquisition.medium);
+  if (acquisition.campaign) query.set("utm_campaign", acquisition.campaign);
+  if (acquisition.referrerHost) query.set("ref", acquisition.referrerHost);
+  return query.toString();
 }
