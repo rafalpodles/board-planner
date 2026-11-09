@@ -1,16 +1,18 @@
 # Board Planner — brand guide
 
-The product is a Kanban workspace for small teams and coding agents. Its identity should feel clear, capable, and grounded in the work. This kit extends the existing identity in `public/logo.svg` and uses the palette from the application.
+The product is a task board you hand work to coding agents from, with gates the work must pass before it comes back as a pull request. Its identity should feel clear, capable, and grounded in the work. This kit extends the existing identity in `public/logo.svg` and uses the palette from the application.
 
 ## Name and copy
 
 Always write **Board Planner**, with two words and both initials capitalized. The public address is **board-planner.com**.
 
-Primary line: **One board. Your team works it. So do your agents.**
+Primary line: **Hand the task to your coding agent. Get back a pull request that passed your gates.**
 
-Short description: **A shared Kanban workspace for people and coding agents.**
+Short description: **Hand board tasks to your coding agent; it opens a pull request only after your gates pass.**
 
-Longer description: **Plan tasks, run sprints, and follow progress on one board. Your team and your coding agents work with the same tasks, permissions, and history.**
+Longer description: **Assign a task and pick an agent. A worker on your own Mac runs it in a sandbox, then the gates you chose — tests, build, protected files, a second agent's review. Fail one and the task comes back with the reason; pass them all and the pull request lists every check.**
+
+In promotional copy say "coding agent", never the name of a specific tool.
 
 Write direct, concrete sentences. Describe the action or outcome. Avoid promises that agents work without oversight or that every task runs automatically.
 

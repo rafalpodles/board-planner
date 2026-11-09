@@ -4,10 +4,13 @@
 
 # Board Planner
 
-**One board. Your team works it. So do your agents.**
+**Hand the task to your coding agent. Get back a pull request that passed your gates.**
 
-A Kanban board, sprints and a dashboard small teams can actually run — plus an MCP server and a
-REST API, so coding agents pick up the same tasks under the same rules as everybody else.
+Assign a task and pick an agent. A worker on your own Mac runs it in a sandbox, then the gates you
+chose — diff size, a written test, the build, the test suite, a second agent's review, protected
+files. Fail one and the task comes back to the board with the reason; pass them all and the pull
+request lists every check. Underneath is a Kanban board with an MCP server and a REST API, so people
+and agents work the same tasks under the same rules.
 
 <a href="https://board-planner.com"><img src="https://img.shields.io/badge/%F0%9F%8C%90_board--planner.com-see_it_move-5b8cff?style=for-the-badge" alt="Website"></a>
 <a href="https://board-planner.com/docs"><img src="https://img.shields.io/badge/%F0%9F%93%96_Documentation-33_pages-1f2937?style=for-the-badge" alt="Documentation"></a>
