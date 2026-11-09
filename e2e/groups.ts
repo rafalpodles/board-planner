@@ -93,6 +93,7 @@ export const GROUPS = {
     "project-delete-grants.spec.ts",
     "project-delete-leftovers.spec.ts",
     "access-change-vs-its-refresh.spec.ts",
+    "self-removal-confirm.spec.ts",
     "project-settings.spec.ts",
     "toast-finds-its-place.spec.ts",
     "toast-stack.spec.ts",
