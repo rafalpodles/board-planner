@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.14.0](https://github.com/rafalpodles/board-planner/compare/v1.13.0...v1.14.0) (2026-11-09)
+
+
+### Features
+
+* an organisation on Pro sends its mail through its own SMTP server (BP-899) ([#782](https://github.com/rafalpodles/board-planner/issues/782)) ([73416e1](https://github.com/rafalpodles/board-planner/commit/73416e1b622db9c3e22ca968a3fdff7891e39662))
+* record where each new organisation came from (BP-1135) ([#786](https://github.com/rafalpodles/board-planner/issues/786)) ([3324d70](https://github.com/rafalpodles/board-planner/commit/3324d7074e41c61539547eb6bc5cdf8bfcc4e8f1))
+* Settings → Machines leads with connecting a Mac through Homebrew (BP-1133) ([#780](https://github.com/rafalpodles/board-planner/issues/780)) ([554948c](https://github.com/rafalpodles/board-planner/commit/554948c5969fa1ff4868de162a6250a4c8ec42d0))
+* the task screen says when none of your machines can run the coding CLI its agent needs (BP-1094) ([#788](https://github.com/rafalpodles/board-planner/issues/788)) ([12e64ec](https://github.com/rafalpodles/board-planner/commit/12e64ec866302e7104fac67a7f9f3c0fcea270d9))
+
+
+### Bug Fixes
+
+* **menubar:** a relaunch during device approval resumes polling, and the wait can be cancelled (BP-1097) ([#785](https://github.com/rafalpodles/board-planner/issues/785)) ([c3f9b75](https://github.com/rafalpodles/board-planner/commit/c3f9b75fe370e94ed90ae61991b32339a77ec60b))
+* **release:** build each Docker platform on its own runner, and fail loudly when no image is published (BP-1137) ([#791](https://github.com/rafalpodles/board-planner/issues/791)) ([46f736d](https://github.com/rafalpodles/board-planner/commit/46f736da69f217e1032ff7f42ce2326ecac4bc8e))
+* **worker:** a Codex step is no longer told it has no shell, so it reads the repository (BP-1138) ([#789](https://github.com/rafalpodles/board-planner/issues/789)) ([1e16d1e](https://github.com/rafalpodles/board-planner/commit/1e16d1ea4db811f40bfc5b9f446c87bb03b85f91))
+
 ## [1.13.0](https://github.com/rafalpodles/board-planner/compare/v1.12.1...v1.13.0) (2026-11-04)
 
 
