@@ -96,7 +96,7 @@ for(const dark of [false,true]) {
 
 const illustrationInfo=await sharp(path.join(root,'illustrations/shared-board.png')).metadata();
 assets.push({file:'illustrations/shared-board.png',title:'Shared board illustration',category:'Illustration',width:illustrationInfo.width,height:illustrationInfo.height,format:'PNG',usage:'Hero artwork and editorial campaign illustration. AI-generated, conceptual artwork.',preview:'light'});
-await fs.writeFile(path.join(root,'tokens.json'),JSON.stringify({name:'Board Planner',colors,fontFamily:font,tagline:'One board. Your team works it. So do your agents.'},null,2)+'\n');
+await fs.writeFile(path.join(root,'tokens.json'),JSON.stringify({name:'Board Planner',colors,fontFamily:font,tagline:'Hand the task to your coding agent. Get back a pull request that passed your gates.'},null,2)+'\n');
 await fs.writeFile(path.join(root,'tokens.css'),`:root {\n${Object.entries(colors).map(([key,value])=>`  --bp-${key}: ${value};`).join('\n')}\n  --bp-font: ${font};\n}\n`);
 await fs.writeFile(path.join(root,'manifest.json'),JSON.stringify(assets,null,2)+'\n');
 

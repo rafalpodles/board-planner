@@ -7,8 +7,8 @@
 **Hand the task to your coding agent. Get back a pull request that passed your gates.**
 
 Assign a task and pick an agent. A worker on your own Mac runs it in a sandbox, then the gates you
-chose — diff size, protected files, a written test, the build, the test suite, a second agent's
-review. Fail one and the task comes back to the board with the reason; pass them all and the pull
+chose — diff size, a written test, the build, the test suite, a second agent's review, protected
+files. Fail one and the task comes back to the board with the reason; pass them all and the pull
 request lists every check. Underneath is a Kanban board with an MCP server and a REST API, so people
 and agents work the same tasks under the same rules.
 
