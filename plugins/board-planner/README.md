@@ -21,9 +21,10 @@ shows what every agent is doing without anyone asking:
 
 ## Install
 
-Connect the MCP server first. It is part of every Board Planner instance at `/api/mcp` — in the
-cloud, `https://<your-organisation>.board-planner.com/api/mcp`. Clients that support OAuth sign in
-with no client id or secret; others use an API token from Settings → API Tokens. See
+Connect the MCP server first. It is `/api/mcp` on the address you open your board at — in the
+cloud `https://<your-organisation>.board-planner.com/api/mcp`, on your own server
+`https://<your-host>/api/mcp`. Clients that support OAuth sign in with no client id or secret;
+others use an API token from Settings → API Tokens. See
 [MCP integration](https://board-planner.com/docs/ai/claude-code-and-mcp/).
 
 Then install the plugin:

@@ -23,11 +23,6 @@
           "type": "json",
           "path": "worker/package-lock.json",
           "jsonpath": "$.packages[''].version"
-        },
-        {
-          "type": "json",
-          "path": "plugins/board-planner/.claude-plugin/plugin.json",
-          "jsonpath": "$.version"
         }
       ]
     }

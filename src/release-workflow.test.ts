@@ -137,20 +137,12 @@ describe("the release workflow", () => {
     expect(() => publish(true, "true", "false 1")).toThrow();
   });
 
-  it("has release-please keep the worker's manifest and lockfile, and the plugin, at the release", () => {
+  it("has release-please keep the worker's manifest and lockfile at the release", () => {
     expect(CONFIG.packages["."]["extra-files"]).toEqual([
       { type: "json", path: "worker/package.json", jsonpath: "$.version" },
       { type: "json", path: "worker/package-lock.json", jsonpath: "$.version" },
       { type: "json", path: "worker/package-lock.json", jsonpath: "$.packages[''].version" },
-      { type: "json", path: "plugins/board-planner/.claude-plugin/plugin.json", jsonpath: "$.version" },
     ]);
-  });
-
-  it("ships the plugin at the version of the release it is in", () => {
-    const read = (...p: string[]) => JSON.parse(readFileSync(join(__dirname, "..", ...p), "utf8"));
-    expect(read("plugins", "board-planner", ".claude-plugin", "plugin.json").version).toBe(
-      read(".release-please-manifest.json")["."]
-    );
   });
 
   // BP-768 review: a local `make` stamped 1.0.0 into the app, which is the bug again
