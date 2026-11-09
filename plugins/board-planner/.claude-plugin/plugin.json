@@ -1,5 +1,6 @@
 {
   "name": "board-planner",
+  "version": "1.14.0",
   "description": "Teaches an agent to work tasks from a Board Planner board over its MCP server: pick, claim, report, escalate and close.",
   "author": {
     "name": "Board Planner",
