@@ -1,6 +1,6 @@
 import { DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, modelOr, WorkerConfig } from "./config.js";
 import { agentEnv } from "./env.js";
-import { GateCommands, gateCommandsOf, NPM_GATES, usesOwnCommands } from "./gates/gate-commands.js";
+import { GateCommands, gateCommandsOf, NPM_GATES } from "./gates/gate-commands.js";
 import { sealedHomesFor } from "./sealed-home.js";
 import { PROTECTED_PATHS_BRIEF } from "./gates/protected-paths.js";
 import { Runner } from "./exec.js";
@@ -277,9 +277,7 @@ export function createExecutor(
       const worktrees = repositories && repositories.length > 1 ? repositories.map((ref) => ref.dir) : [worktreeDir];
       const spawn = confineTool(agent.tool, agent.path, agentArgs, {
         writable: [...(agent.worktreeWritable(brief.capability) ? worktrees : []), ...run.writable],
-        ...(usesOwnCommands(gateCommandsOf(config))
-          ? { sealedHomes: { ...sealedHomesFor([...agent.sessionReadable(), ...worktrees.map((dir) => (typeof dir === "string" ? dir : dir.path)), ...checkoutGitDirs]), keychain: true } }
-          : {}),
+        sealedHomes: { ...sealedHomesFor([...agent.sessionReadable(), ...worktrees.map((dir) => (typeof dir === "string" ? dir : dir.path)), ...checkoutGitDirs]), keychain: true },
       });
 
       // Before the spawn, not after: a step that cannot be confined does not run half-confined and

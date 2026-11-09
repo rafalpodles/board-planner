@@ -216,8 +216,8 @@ const LOOPBACK_ONLY = [
 // network-outbound allow placed after a named unix-socket deny reopened it (BP-810). That is why
 // `profileWith` puts PROFILE_TAIL after everything else.
 //
-// Reads are deliberately untouched. The agent has `Read` over the disk already — scrub.ts is built
-// on that being true — and confining reads would take the CLI's own session with it.
+// Reads are untouched here. The npm gates read as the operator does, and the home is shut to the
+// agent and the reviewer by `sealedHomes`, which keeps the CLI's own session open (BP-307).
 function profileFor(names: string[]): string {
   const allowWrites = names.map((name) => `(subpath (param "${name}"))`).join(" ");
   return [

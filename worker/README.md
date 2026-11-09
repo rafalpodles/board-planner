@@ -713,13 +713,13 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   own child, so the destination's `post-receive` would hold the credentials. Both are refused.
 
   What this does **not** claim: the allowlist includes `HOME`, because the CLI authenticates from
-  its logged-in session there. An agent that goes looking can **read** what is under it —
-  `~/.boardplanner/worker.json` (this worker's own board credential), `~/.config/gh/hosts.yml`,
-  `~/.claude/.credentials.json`, `~/.npmrc`, `~/.ssh`, `~/.aws`, all at this process's own uid.
-  Writing is a different matter since BP-349 — see the next bullet — but the environment is the
-  boundary for reading, and the filesystem is not: "a subprocess cannot inherit this worker's
-  secrets" is true of what travels in `env`, not of what the agent's own filesystem access can
-  reach (BP-310).
+  its logged-in session there. The agent's steps and the reviewer read with that home shut (BP-307,
+  the seal described under a project's own commands): `~/.boardplanner/worker.json`,
+  `~/.config/gh/hosts.yml`, `~/.npmrc`, `~/.ssh` and `~/.aws` answer ENOENT, and only the CLI's own
+  session (`sessionReadable`) and the keychain stay open. The npm gates do not get the seal: a test
+  the agent wrote can read all of them at this process's own uid, and what stops it is their
+  loopback-only network. "A subprocess cannot inherit this worker's secrets" is true of what travels
+  in `env`, not of what a gate's filesystem access can reach (BP-310).
 
   **What it costs.** `~/.gitconfig` is not read on those calls, so anything an operator keeps there
   no longer applies to delivery: a deploy key set through `core.sshCommand`, a `url.*.insteadOf`
@@ -1099,12 +1099,13 @@ would run npm and report that as the project's check.
   as `/tmp` and the per-user temp directory, the clipboard, other processes' command lines, and services
   on this machine. With the network on, what it can read it can send, so every
   branch in the clone and its git config are exposed. `CP_ALLOW_UNCONFINED_AGENT` drops all of it.
-- **The agent and the reviewer get the same seal on such a project**, because otherwise a steered
-  `Read` puts a key in a test file for the next gate to send. Each CLI's adapter says what its session
+- **The agent and the reviewer get the same seal, on every project** (BP-307), because otherwise a
+  steered `Read` puts a key in a test file for the next gate to send, or in the diff itself. Each CLI's adapter says what its session
   needs (`sessionReadable`). Measured with the real CLIs: Claude Code answers "Not logged in" without
   `~/Library/Keychains`, and reads and edits with `~/.claude`, `~/.claude.json` and the keychain open;
   Codex needs only its run's own home. It keeps the keychain's daemon, which a gate command does not.
-  A project on the npm gates is unchanged: its agent reads as it always has.
+  A project on the npm gates seals the agent and the reviewer the same way; its gates keep the real
+  home and the loopback-only network.
 - **No shell.** A command is words split on spaces. Anything a shell would act on, `*` and `?` among
   them but not the `[` and `]` of `pip install -e .[dev]`, which nothing expands, is refused where it is
   saved and again in `applyPolicy`, and so is a password in a URL, since a command reaches the

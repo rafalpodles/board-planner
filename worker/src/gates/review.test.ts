@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { basename, join } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { CLAUDE_SIGNED_OUT } from "../agents/claude.js";
@@ -335,16 +335,14 @@ describe("reviewGate", () => {
   // BP-349. The reviewer holds no write tool, so the only thing left that can write during a review
   // is a hook — which is exactly what the escape this closes plants. Confined to the throwaway
   // checkout, so nothing it leaves outlives the gate that made it.
-  // BP-985: on a project's own commands the reviewer reads with the home shut, like the steps
-  it("shuts the home to the reviewer only when told to", async () => {
-    const sealed = claudeReturning({ approved: true, reason: "" });
-    const open = claudeReturning({ approved: true, reason: "" });
+  // BP-985, BP-307: the reviewer reads with the home shut, like the steps, on every project
+  it("shuts the home to the reviewer", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(sealed.runner, gitPath, CLAUDE_PATH, TIMEOUT_MS, undefined, undefined, true).run(context());
-    await reviewGate(open.runner, gitPath, CLAUDE_PATH, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, CLAUDE_PATH, TIMEOUT_MS).run(context());
 
-    expect(spawnCall(sealed.run)[1].join("\n")).toContain("(deny file-read* (with errno ENOENT)");
-    expect(spawnCall(open.run)[1].join("\n")).not.toContain("(deny file-read* (with errno ENOENT)");
+    expect(spawnCall(run)[1].join("\n")).toContain("(deny file-read* (with errno ENOENT)");
+    expect(spawnCall(run)[1]).toContain(`H0=${realpathSync(userInfo().homedir)}`);
   });
 
   it("spawns the reviewer through the sandbox", async () => {
@@ -361,7 +359,7 @@ describe("reviewGate", () => {
     await reviewGate(runner, gitPath, CLAUDE_PATH, TIMEOUT_MS).run(context());
 
     const args = spawnCall(run)[1];
-    const writable = args.filter((_, index) => args[index - 1] === "-D");
+    const writable = args.filter((arg, index) => args[index - 1] === "-D" && arg.startsWith("W"));
     // The gate removes the checkout as it returns, so the directory is gone by now and cannot be
     // resolved again — rebuilt from the resolved temp root and the name the gate chose, which is
     // unique per call. Asserting the resolved form matters: `/var/folders` and `/private/var`
