@@ -162,6 +162,23 @@ describe("choosing the CLI per step", () => {
     expect(args).not.toContain("opus");
   });
 
+  // BP-1138. Codex reads the repository through its shell; told it had none, it wrote blind or gave up
+  it("does not tell a Codex step it has no shell, and still says the worker runs the checks after it", async () => {
+    await step({ provider: "codex", model: "gpt-6.1-sol", laterChecks: ["protected-paths", "build", "test-run"] });
+
+    const prompt = spawned()[1].at(-1) as string;
+    expect(prompt).toContain("After this step the worker itself runs the build and the test suite");
+    expect(prompt).not.toMatch(/no shell|cannot run anything/i);
+  });
+
+  it("still tells a Claude Code step it has no shell", async () => {
+    run.mockResolvedValueOnce(claudeOk());
+    await step({ laterChecks: ["build", "test-run"] });
+
+    const args = spawned()[1];
+    expect(args[args.indexOf("--append-system-prompt") + 1]).toContain("You have no shell and cannot run anything.");
+  });
+
   it("says a step on Codex names no model, spending the attempt and starting nothing", async () => {
     expect(await step({ provider: "codex", model: "  " })).toEqual({ kind: "error", message: expect.stringMatching(/codex and names no model/) });
     expect(run).not.toHaveBeenCalled();

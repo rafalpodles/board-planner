@@ -64,6 +64,8 @@ export interface CodingAgent {
   worktreeWritable(capability: Capability): boolean;
   /** Whether the review gate's clean checkout is writable to the reviewer */
   readonly reviewerWritesCheckout: boolean;
+  /** Whether it reads, edits and runs commands through a shell of its own, so a prompt must not deny it one (BP-1138) */
+  readonly hasShell: boolean;
   /** What its session and its own files need of a shut home (BP-985), measured per CLI */
   sessionReadable(): string[];
   /** The per-run setup for a call whose answer must have this shape, or why this machine cannot make it */

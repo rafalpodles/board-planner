@@ -261,6 +261,7 @@ export function codexAgent(path: string, options: CodexOptions = {}): CodingAgen
     path,
     worktreeWritable: (capability) => capability === "edit",
     reviewerWritesCheckout: false,
+    hasShell: true,
     // Its session is the copy of auth.json in the run's own home, which the confinement already lets it reach
     sessionReadable: () => [programDirectory(path)],
 
