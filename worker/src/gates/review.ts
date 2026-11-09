@@ -222,7 +222,6 @@ export function reviewGate(
   timeoutMs: number,
   reviewModel?: string,
   focus?: string,
-  sealHome = false,
 ): Gate {
   const agent = typeof claude === "string" ? claudeAgent(claude) : claude;
   const model = modelOr(reviewModel, DEFAULT_REVIEW_MODEL);
@@ -289,7 +288,7 @@ export function reviewGate(
         // which is a throwaway directory, so nothing it leaves survives the gate that made it.
         const spawn = confineTool(agent.tool, agent.path, reviewArgs, {
           writable: [...(agent.reviewerWritesCheckout ? [checkout.path] : []), ...run.writable],
-          ...(sealHome ? { sealedHomes: { ...sealedHomesFor([...agent.sessionReadable(), checkout.path]), keychain: true } } : {}),
+          sealedHomes: { ...sealedHomesFor([...agent.sessionReadable(), checkout.path]), keychain: true },
         });
         // machineFault, not a plain refusal: an unconfinable machine has not judged the change, and
         // reporting it as the reviewer rejecting one would blame the diff and push its branch.

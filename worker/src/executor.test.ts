@@ -1,5 +1,5 @@
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "fs";
-import { tmpdir } from "os";
+import { tmpdir, userInfo } from "os";
 import { join } from "path";
 import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
 import { PROTECTED_PATHS_BRIEF } from "./gates/protected-paths.js";
@@ -209,18 +209,21 @@ describe("createExecutor", () => {
     expect(promptOf(1)).not.toContain("This project's gates run");
   });
 
-  it("shuts the home to a step on a project's own commands, keeping the CLI's session, and leaves an npm project as it was", async () => {
+  // BP-307: an npm project too, or a steered Read puts ~/.ssh in the diff
+  it.each([
+    ["on the npm gates", config],
+    ["on its own commands", workerConfig({ testCommand: "go test ./..." })],
+  ])("shuts the home to a step of a project %s, keeping the CLI's session", async (_, projectConfig) => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(workerConfig({ testCommand: "go test ./..." }), runner, CLAUDE_PATH).execute(options);
-    await createExecutor(config, runner, CLAUDE_PATH).execute(options);
+    await createExecutor(projectConfig, runner, CLAUDE_PATH).execute(options);
 
-    const argv = (call: number) => (run.mock.calls[call][1] as string[]).join("\n");
-    expect(argv(0)).toContain("(deny file-read* (with errno ENOENT)");
-    expect(argv(0)).toContain("/.claude.json");
-    expect(argv(0)).toContain("/Library/Keychains");
-    expect(argv(0)).not.toContain("com.apple.SecurityServer");
-    expect(argv(1)).not.toContain("(deny file-read* (with errno ENOENT)");
+    const argv = run.mock.calls[0][1] as string[];
+    expect(argv.join("\n")).toContain("(deny file-read* (with errno ENOENT)");
+    expect(argv).toContain(`H0=${realpathSync(userInfo().homedir)}`);
+    expect(argv.join("\n")).toContain("/.claude.json");
+    expect(argv.join("\n")).toContain("/Library/Keychains");
+    expect(argv.join("\n")).not.toContain("com.apple.SecurityServer");
   });
 
   it("keeps a worktree readable under a shut home for a step that may not write it", async () => {
@@ -875,7 +878,7 @@ describe("the agent is confined to its worktree", () => {
     await createExecutor(config, runner, CLAUDE_PATH).execute(options);
 
     const args = run.mock.calls[0][1] as string[];
-    const params = args.filter((_, index) => args[index - 1] === "-D");
+    const params = args.filter((arg, index) => args[index - 1] === "-D" && arg.startsWith("W"));
     expect(params).toEqual([`W0=${realpathSync(worktreePath)}`]);
   });
 
@@ -951,7 +954,7 @@ describe("an agent that works across several repositories", () => {
   it("names every worktree as writable, the working directory's first", async () => {
     const args = await run();
 
-    expect(args.filter((_, index) => args[index - 1] === "-D")).toEqual([
+    expect(args.filter((arg, index) => args[index - 1] === "-D" && arg.startsWith("W"))).toEqual([
       `W0=${realpathSync(worktreePath)}`,
       `W1=${realpathSync(second)}`,
     ]);
@@ -985,7 +988,7 @@ describe("an agent that works across several repositories", () => {
   it.each([[undefined], [[repositories[0]]]])("keeps one worktree and says nothing about others when given %o", async (list) => {
     const args = await run({ repositories: list });
 
-    expect(args.filter((_, index) => args[index - 1] === "-D")).toEqual([`W0=${realpathSync(worktreePath)}`]);
+    expect(args.filter((arg, index) => args[index - 1] === "-D" && arg.startsWith("W"))).toEqual([`W0=${realpathSync(worktreePath)}`]);
     expect(systemPrompt(args)).not.toContain("spans several repositories");
   });
 
