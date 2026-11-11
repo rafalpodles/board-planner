@@ -774,7 +774,7 @@ export function PropertyRail({
 
         {/* Always rendered, so a screen reader hears the reasons change as the task is fixed. Focus
             lands here after Accept, since the button it was on is gone */}
-        <div aria-live="polite" data-testid="handover-live" ref={handoverLive} tabIndex={-1} className="outline-none">
+        <div aria-live="polite" data-testid="handover-live" ref={handoverLive} tabIndex={-1} className="focus-ring rounded">
           <HandoverNotice
             handover={handover}
             awaiting={awaiting}
