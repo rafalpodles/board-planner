@@ -352,7 +352,8 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     }
     if (sentAutonomy && pm.autonomy) {
       for (const key of PM_SAVED_AUTONOMY_FIELDS) {
-        if (sentAutonomy.has(key)) updates[`pm.autonomy.${key}`] = pm.autonomy[key];
+        const stored = (existing.pm?.autonomy as Record<string, unknown> | undefined)?.[key];
+        if (sentAutonomy.has(key) || stored === undefined) updates[`pm.autonomy.${key}`] = pm.autonomy[key];
       }
     }
     if (sent.has("mcpServers")) {

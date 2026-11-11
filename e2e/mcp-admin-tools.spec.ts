@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import { McpSession, type ToolCall } from "./mcp";
-import { API_TOKEN, E2E_MONGODB_URI, MEMBER_USERNAME, OWNER_ID, PROJECT_KEY, seed } from "./seed";
+import { API_TOKEN, E2E_MONGODB_URI, MEMBER_USERNAME, OWNER_ID, OWNER_USERNAME, PROJECT_KEY, seed } from "./seed";
 import { signIn } from "./session";
 
 /**
@@ -188,9 +188,12 @@ test("the two routes opened to a connection answer it instead of asking for a br
 
   accepted(await admin.callTool("list_my_machines", {}));
 
-  // A board with the PM off, so the review is refused by the board's own rule rather than started into the next test
+  // A board with the PM off, so the review is refused by the board's own rule rather than started into the next test,
+  // asked by an owner through their grant rather than by an instance admin
   accepted(await admin.callTool("create_project", { name: "Quiet board", key: "QUIET" }));
-  const review = await admin.callTool("run_pm_review", { project: "QUIET" });
+  accepted(await admin.callTool("set_member", { project: "QUIET", username: OWNER_USERNAME, relation: "owner" }));
+  const owner = await connected(request, OWNER_API_TOKEN);
+  const review = await owner.callTool("run_pm_review", { project: "QUIET" });
   refused(review);
   expect(review.text).toMatch(/PM agent is not enabled for this project/);
 });

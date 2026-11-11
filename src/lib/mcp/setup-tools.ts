@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { echo } from "@/lib/echo";
 import { PROJECT_KEY_RULE } from "@/lib/identifiers";
+import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { effectiveColumns } from "@/lib/columns";
 import { GATE_KINDS, PROVIDER_IDS } from "@/lib/agent-kinds";
 import {
@@ -96,6 +97,19 @@ function storedCategory(name: string, categories: { name: string }[]): string {
     throw new Error(`No category "${echo(name.trim())}". Categories: ${categories.map((c) => c.name).join(", ") || "none"}`);
   }
   return found.name;
+}
+
+function defaultAgentId(name: string, agents: AgentRow[], projectId: string): string {
+  const shared = agents.filter((a) => a.scope !== "user");
+  const wanted = name.trim().toLowerCase();
+  if (!shared.some((a) => a.name.trim().toLowerCase() === wanted) && agents.some((a) => a.name.trim().toLowerCase() === wanted)) {
+    throw new Error(`"${echo(name.trim())}" is a personal agent, and a board's default must be the board's own or a global one. Nothing was written.`);
+  }
+  const found = findAgent(name, shared, projectId);
+  if (!isRunnable(normaliseComposition(found.composition))) {
+    throw new Error(`"${echo(found.name)}" has no steps yet, so it cannot be offered first. Nothing was written.`);
+  }
+  return found._id;
 }
 
 async function ownedProject(client: PlannerClient, project: string, what: string): Promise<McpProject> {
@@ -223,15 +237,7 @@ export function registerSetupTools(registerTool: RegisterTool): void {
       }
 
       const agentId =
-        defaultAgent === undefined
-          ? undefined
-          : defaultAgent
-            ? findAgent(
-                defaultAgent,
-                ((await client.listAgents()) as AgentRow[]).filter((a) => a.scope !== "user"),
-                proj._id
-              )._id
-            : "";
+        defaultAgent === undefined ? undefined : defaultAgent ? defaultAgentId(defaultAgent, (await client.listAgents()) as AgentRow[], proj._id) : "";
       const full = await client.getProject(proj._id);
       const data: Record<string, unknown> = Object.fromEntries(named);
       if (estimateField !== undefined) {

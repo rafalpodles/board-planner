@@ -637,7 +637,7 @@ export class PlannerClient {
     };
   }
 
-    async listMyMachines(): Promise<Record<string, unknown>[]> {
+  async listMyMachines(): Promise<Record<string, unknown>[]> {
     return (await this.request("GET", "/api/users/me/machines")) as Record<string, unknown>[];
   }
 

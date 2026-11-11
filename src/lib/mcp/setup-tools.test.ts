@@ -93,11 +93,29 @@ describe("update_project", () => {
     expect(setDefault).not.toHaveBeenCalled();
   });
 
+  it("refuses an empty agent as the default before writing the rest", async () => {
+    board();
+    spy("listAgents").mockResolvedValue([{ _id: "a1", name: "Draft", scope: "project", projectId: "p1", composition: { analysis: [] } }]);
+    const update = spy("updateProject");
+    const setDefault = spy("setDefaultAgent");
+
+    await expect(run("update_project", { project: "BP", name: "New", defaultAgent: "draft" })).rejects.toThrow(/has no steps yet/);
+    expect(update).not.toHaveBeenCalled();
+    expect(setDefault).not.toHaveBeenCalled();
+  });
+
+  it("says a personal agent cannot be a default, rather than that it does not exist", async () => {
+    board();
+    spy("listAgents").mockResolvedValue([{ _id: "a2", name: "Mine", scope: "user", projectId: null, composition: { analysis: [{ key: "x" }] } }]);
+
+    await expect(run("update_project", { project: "BP", defaultAgent: "mine" })).rejects.toThrow(/is a personal agent/);
+  });
+
   it("does not count a personal agent of the same name as a rival default", async () => {
     board();
     spy("listAgents").mockResolvedValue([
-      { _id: "a1", name: "Ship", scope: "global", projectId: null },
-      { _id: "a2", name: "Ship", scope: "user", projectId: null },
+      { _id: "a1", name: "Ship", scope: "global", projectId: null, composition: { implementation: [{ key: "x" }] } },
+      { _id: "a2", name: "Ship", scope: "user", projectId: null, composition: { implementation: [{ key: "x" }] } },
     ]);
     const setDefault = spy("setDefaultAgent").mockResolvedValue({});
 
@@ -108,7 +126,7 @@ describe("update_project", () => {
 
   it("sets the default agent by name, and clears it with an empty string", async () => {
     board();
-    spy("listAgents").mockResolvedValue([{ _id: "a1", name: "Ship", scope: "project", projectId: "p1" }]);
+    spy("listAgents").mockResolvedValue([{ _id: "a1", name: "Ship", scope: "project", projectId: "p1", composition: { implementation: [{ key: "x" }] } }]);
     const setDefault = spy("setDefaultAgent").mockResolvedValue({});
     const update = spy("updateProject");
 

@@ -1,7 +1,7 @@
 import { echo } from "@/lib/echo";
 import { effectiveColumns, type AnyColumn } from "@/lib/columns";
 import { normalizeOptions } from "@/lib/custom-fields";
-import { AGENT_BUCKETS, type AgentBucket, type AgentComposition, type ApiAgentBlock, type ApiCustomField, type ColumnRole } from "@/types";
+import { AGENT_BUCKETS, type AgentBucket, type AgentComposition, type ApiAgentBlock, type ApiCustomField, type ColumnRole, type StoredComposition } from "@/types";
 import { findColumn } from "./board-config";
 
 export type CompositionInput = Partial<Record<AgentBucket, (string | { block: string; params?: Record<string, string> })[]>>;
@@ -13,6 +13,7 @@ export interface AgentRow {
   projectId: string | null;
   projectName?: string | null;
   builtIn?: boolean;
+  composition?: StoredComposition;
 }
 
 export function findBlock(ref: string, blocks: ApiAgentBlock[]): ApiAgentBlock {

@@ -1361,6 +1361,25 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
     expect(update).toEqual({ "pm.autonomy.reviewHour": 11 });
   });
 
+  it("fills the schedule keys a board stored before the schedule existed, so its reviews can run", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    reads({ enabled: true });
+    writes({ _id: PROJECT_ID, pm: { enabled: true } });
+
+    const res = await PUT(putRequest({ pm: { autonomy: { dailyReview: true } } }), ctx());
+
+    expect(res.status).toBe(200);
+    const [, update] = projectFindOneAndUpdate.mock.calls[0];
+    expect(Object.keys(update).sort()).toEqual([
+      "pm.autonomy.dailyReview",
+      "pm.autonomy.handleNeedsHumanReview",
+      "pm.autonomy.reviewHour",
+      "pm.autonomy.reviewIntervalHours",
+      "pm.autonomy.timezone",
+    ]);
+    expect(update["pm.autonomy.dailyReview"]).toBe(true);
+  });
+
   it("still refuses a schedule key out of range when only that key is sent", async () => {
     getAuthUser.mockResolvedValue(OWNER);
     check.mockResolvedValue(true);
