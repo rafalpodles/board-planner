@@ -1,8 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { plannerAppRegistration } from "./apps";
 import { z } from "zod";
 import { PlannerClient } from "./planner-client";
+import { clientFrom, json, type ToolExtra } from "./tool-kit";
+import { registerSetupTools } from "./setup-tools";
+import { registerAssistTools } from "./assist-tools";
 import { resolveFieldsByName } from "@/lib/custom-fields";
 import { COLUMN_ROLES, CUSTOM_FIELD_TYPES, DEPENDENCY_TYPES, OPTION_FIELD_TYPES, ROLE_LABELS } from "@/types";
 import { MAX_OPTIONS } from "@/lib/custom-fields";
@@ -36,7 +38,6 @@ import { noticeLines, runLines, searchLines, statsSummary } from "./discovery";
 import { activityLines, commentLines } from "./history";
 import { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, pageOf } from "./paging";
 import {
-  ADD_ONLY,
   COLOUR_PARAM,
   columnSummary,
   fieldSummary,
@@ -48,27 +49,6 @@ import {
 import { syncProvider, syncSummary } from "./sync-repository";
 import { effectiveColumns } from "@/lib/columns";
 import { BATCH_LIMIT, LINK_BATCH_LIMIT, MAX_BLOCKERS_PER_ITEM, failure, referencedKey } from "./batch";
-
-type ToolExtra = { authInfo?: AuthInfo; signal?: AbortSignal };
-
-// One client per call, so the lookups a batch repeats for every item — the board list, a roster, the
-// sprints — are made once. `extra` is made per request by the SDK, so the client does not outlive its call.
-const clients = new WeakMap<object, PlannerClient>();
-
-export function clientFrom(extra: ToolExtra): PlannerClient {
-  const auth = extra.authInfo;
-  if (!auth) throw new Error("Unauthorized");
-  const baseUrl = auth.extra?.baseUrl;
-  if (typeof baseUrl !== "string" || !baseUrl) {
-    throw new Error("Missing base URL in auth context");
-  }
-  let client = clients.get(extra);
-  if (!client) {
-    client = new PlannerClient(baseUrl, auth.token);
-    clients.set(extra, client);
-  }
-  return client;
-}
 
 const MINIMAL_PARAM = z
   .boolean()
@@ -95,9 +75,7 @@ function summarised(client: PlannerClient, task: { taskNumber?: number }, taskKe
   return taskSummary(task as Parameters<typeof taskSummary>[0], canonical, client.taskUrl(canonical));
 }
 
-function json(value: unknown) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
-}
+export { clientFrom };
 
 export function registerPlannerTools(server: McpServer): void {
   const registerTool = plannerAppRegistration(server);
@@ -149,11 +127,30 @@ export function registerPlannerTools(server: McpServer): void {
         "The people a board can hand work to, by the username assignee takes. Only people with access to the " +
         "board: a name that is not here is refused as an assignee, which is how a typo and somebody without " +
         "access are deliberately not told apart.",
-      inputSchema: strictInput({ project: z.string().describe("Project key (e.g. 'CP')") }),
+      inputSchema: strictInput({
+        project: z.string().describe("Project key (e.g. 'CP')"),
+        relations: z
+          .boolean()
+          .optional()
+          .describe("Also say what each holds — owner, member, or nothing of their own (an instance admin) — for the project owner"),
+      }),
     },
-    async ({ project }, extra) => {
+    async ({ project, relations }, extra) => {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
+      if (relations) {
+        requireOwner(proj, project, "read who holds what");
+        return json(
+          (await client.listProjectMembers(proj._id)).map((m) => ({
+            username: m.username,
+            fullName: m.fullName ?? "",
+            relation: m.relation,
+            ...(m.source === "idp" ? { fromGroup: true } : {}),
+            ...(m.instanceAdmin ? { instanceAdmin: true } : {}),
+            ...(m.deactivated ? { deactivated: true } : {}),
+          }))
+        );
+      }
       return json(memberLines((await client.listAssignableUsers(proj._id)) as { username: string }[]));
     }
   );
@@ -1465,7 +1462,7 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  // --- Board setup: configuration that can only be added to ---
+  // --- Board setup ---
 
   registerTool(
     "add_custom_field",
@@ -1473,8 +1470,8 @@ export function registerPlannerTools(server: McpServer): void {
       description:
         "Add a project field to a board: text, number, date, checkbox, or a dropdown or multiselect with its options. " +
         "update_task and create_task then take it by name in `fields`. As in the app, any member of the board may " +
-        `add one, and its name must be new on the board. ${ADD_ONLY} A field cannot be renamed, archived or deleted ` +
-        "here, nor an option removed — add_field_option adds one. Answers with the field and each option's id.",
+        "add one, and its name must be new on the board. update_custom_field renames or archives it, " +
+        "delete_custom_field deletes it, and add_field_option adds an option. Answers with the field and each option's id.",
       inputSchema: strictInput(
         {
           project: z.string().describe("Project key (e.g. 'CP')"),
@@ -1495,8 +1492,8 @@ export function registerPlannerTools(server: McpServer): void {
         {
           writes: true,
           hints: {
-            archived: "the app: a field is archived or deleted there",
-            order: "the app: fields are reordered there",
+            archived: "update_custom_field, once the field exists",
+            order: "nothing: fields keep the order they were added in",
           },
         }
       ),
@@ -1529,8 +1526,8 @@ export function registerPlannerTools(server: McpServer): void {
     {
       description:
         "Add one option to the end of a board's dropdown or multiselect field, in one update: the options it has, and " +
-        "every task's choice among them, are left alone. As in the app, any member of the board may. An option cannot " +
-        "be renamed, recoloured, reordered or removed here. Answers with the new option and the field's options, by id.",
+        "every task's choice among them, are left alone. As in the app, any member of the board may. update_field_option " +
+        "renames or recolours one, remove_field_option removes one. Answers with the new option and the field's options, by id.",
       inputSchema: strictInput(
         {
           project: z.string().describe("Project key (e.g. 'CP')"),
@@ -1562,8 +1559,8 @@ export function registerPlannerTools(server: McpServer): void {
     {
       description:
         "Add a category to a board, which tasks can then be filed under. As in the app, any member of the board may; " +
-        `the name must be new on the board (any case), and a board holds a limited number. ${ADD_ONLY} A category ` +
-        "cannot be renamed, recoloured or deleted here. Answers with the board's categories.",
+        "the name must be new on the board (any case), and a board holds a limited number. update_category renames or " +
+        "recolours one, delete_category deletes one. Answers with the board's categories.",
       inputSchema: strictInput(
         {
           project: z.string().describe("Project key (e.g. 'CP')"),
@@ -1591,8 +1588,8 @@ export function registerPlannerTools(server: McpServer): void {
         "Add one column to the end of a board, in one update that leaves the others alone. Needs the project owner, as " +
         "the Board settings do. The role is what automation follows — never the name: " +
         `${roleGuide} The id comes from the label and is what change_task_status takes. The column does not ask the ` +
-        `PM agent for a review (the app sets that). ${ADD_ONLY} A column cannot be removed, reordered or given another ` +
-        "role here. Answers with the new column and the board's columns.",
+        "PM agent for a review until update_column says so; reorder_columns moves it and remove_column removes it. " +
+        "Answers with the new column and the board's columns.",
       inputSchema: strictInput(
         {
           project: z.string().describe("Project key (e.g. 'CP')"),
@@ -1603,8 +1600,8 @@ export function registerPlannerTools(server: McpServer): void {
         {
           writes: true,
           hints: {
-            order: "the app: columns are reordered there",
-            triggersPmReview: "the app: Settings → Board",
+            order: "reorder_columns, once the column exists",
+            triggersPmReview: "update_column, once the column exists",
           },
         }
       ),
@@ -1626,8 +1623,8 @@ export function registerPlannerTools(server: McpServer): void {
     {
       description:
         "Change one column's label, in one update that leaves the rest of the board alone. Needs the project owner. " +
-        "The column's id, role and tasks do not change, so nothing that points at it breaks. Its role, colour and " +
-        "position cannot be changed here, and a column cannot be removed. Answers with the board's columns.",
+        "The column's id, role and tasks do not change, so nothing that points at it breaks. update_column changes its " +
+        "role and colour, reorder_columns its position. Answers with the board's columns.",
       inputSchema: strictInput(
         {
           project: z.string().describe("Project key (e.g. 'CP')"),
@@ -1636,7 +1633,7 @@ export function registerPlannerTools(server: McpServer): void {
         },
         {
           writes: true,
-          hints: { role: "the app: Settings → Board", color: "the app: Settings → Board", order: "the app: Settings → Board" },
+          hints: { role: "update_column", color: "update_column", order: "reorder_columns" },
         }
       ),
     },
@@ -1649,6 +1646,9 @@ export function registerPlannerTools(server: McpServer): void {
       return json({ renamed: columnSummary(columns.find((c) => c.id === found.id) ?? found), columns: columns.map(columnSummary) });
     }
   );
+
+  registerSetupTools(registerTool);
+  registerAssistTools(registerTool);
 
   // --- Repository ---
 

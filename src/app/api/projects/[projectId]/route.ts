@@ -328,9 +328,15 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
           { status: 403 }
         );
       }
-      // Only so validation passes; none of these is written
-      body.pm.enabled = existing.pm?.enabled ?? false;
     }
+    // Only so validation passes: what was not sent is not written, so a save that leaves the
+    // switch or part of the schedule out cannot put back a value somebody else changed meanwhile
+    if (body.pm.enabled === undefined) body.pm.enabled = existing.pm?.enabled ?? false;
+    const autonomySent = body.pm.autonomy;
+    const sentAutonomy =
+      typeof autonomySent === "object" && autonomySent !== null && !Array.isArray(autonomySent)
+        ? new Set(Object.keys(autonomySent))
+        : null;
     const pmResult = validatePmConfig(body.pm);
     if (!pmResult.valid) {
       return NextResponse.json({ error: pmResult.error }, { status: 400 });
@@ -344,9 +350,10 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
     for (const key of PM_SAVED_FIELDS) {
       if (sent.has(key)) updates[`pm.${key}`] = pm[key];
     }
-    if (sent.has("autonomy") && pm.autonomy) {
+    if (sentAutonomy && pm.autonomy) {
       for (const key of PM_SAVED_AUTONOMY_FIELDS) {
-        updates[`pm.autonomy.${key}`] = pm.autonomy[key];
+        const stored = (existing.pm?.autonomy as Record<string, unknown> | undefined)?.[key];
+        if (sentAutonomy.has(key) || stored === undefined) updates[`pm.autonomy.${key}`] = pm.autonomy[key];
       }
     }
     if (sent.has("mcpServers")) {

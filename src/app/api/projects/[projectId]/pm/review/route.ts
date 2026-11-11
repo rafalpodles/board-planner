@@ -18,10 +18,6 @@ export const maxDuration = 300;
  * what it would say (BP-471).
  */
 export const POST = withProjectOwner(async (_request, { params, user, db }) => {
-  // It spends the project's turn and token budget, which a person should decide to do
-  if (user.viaMachineCredential) {
-    return NextResponse.json({ error: "This action requires an interactive session" }, { status: 403 });
-  }
   // Without a model key a review would still take a turn and post a warning to the
   // thread; the chat route refuses the same way for the same reason
   const gate = await openGate(db, { error: organisationDomain() ? "The PM agent is unavailable right now." : "The PM agent is not configured on this instance", status: 503 });

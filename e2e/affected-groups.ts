@@ -132,7 +132,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   { prefix: "src/app/api/tokens/", groups: ["project"] },
   { prefix: "src/app/api/auth/", groups: ["people"] },
   { prefix: "src/app/api/users/", groups: ["people"] },
-  { prefix: "src/app/api/users/me/machines/", groups: ["automation"] },
+  { prefix: "src/app/api/users/me/machines/", groups: ["automation", "project"] },
 ];
 
 // A file under any of these can affect every group, so the OWNED table must not be trusted for it:

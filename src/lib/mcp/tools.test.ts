@@ -2121,17 +2121,18 @@ describe("board setup", () => {
     });
   });
 
-  it("says in every description what stays in the app, and which tools need the owner", () => {
+  it("points every add tool at the tools that change and remove what it adds, and says which need the owner", () => {
     const said = descriptions();
 
-    expect(said.get("add_custom_field")).toMatch(/cannot be renamed, archived or deleted here, nor an option removed/);
-    expect(said.get("add_field_option")).toMatch(/cannot be renamed, recoloured, reordered or removed here/);
-    expect(said.get("add_category")).toMatch(/cannot be renamed, recoloured or deleted here/);
+    expect(said.get("add_custom_field")).toMatch(/update_custom_field renames or archives it, delete_custom_field deletes it/);
+    expect(said.get("add_field_option")).toMatch(/update_field_option renames or recolours one, remove_field_option removes one/);
+    expect(said.get("add_category")).toMatch(/update_category renames or recolours one, delete_category deletes one/);
     expect(said.get("add_column")).toMatch(/Needs the project owner/);
-    expect(said.get("add_column")).toMatch(/cannot be removed, reordered or given another role here/);
+    expect(said.get("add_column")).toMatch(/reorder_columns moves it and remove_column removes it/);
     expect(said.get("add_column")).toContain("approved (Ready to pick up");
     expect(said.get("rename_column")).toMatch(/Needs the project owner/);
-    expect(said.get("rename_column")).toMatch(/a column cannot be removed/);
+    expect(said.get("rename_column")).toMatch(/update_column changes its role and colour, reorder_columns its position/);
+    for (const name of [...said.keys()]) expect(said.get(name), name).not.toMatch(/only ever adds/);
     expect(said.get("sync_repository")).toMatch(/no repository or no stored token is refused/);
   });
 });

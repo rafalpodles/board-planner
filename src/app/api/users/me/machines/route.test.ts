@@ -125,14 +125,14 @@ describe("GET /api/users/me/machines", () => {
     expect((await read()).body).toEqual([]);
   });
 
-  it("refuses a machine credential, and reads nothing", async () => {
+  it("lists the same own machines to the reader's machine credential (BP-1150)", async () => {
     getAuthUser.mockResolvedValue({ _id: READER, role: "member", viaMachineCredential: true });
+    workerRows.push(machine(), machine({ _id: "6a7309535eb49af333b85a05", name: "Theirs", owner: COLLEAGUE }));
 
     const { status, body } = await read();
 
-    expect(status).toBe(403);
-    expect(body.error).toBe("Interactive session required");
-    expect(workerQueries).toEqual([]);
+    expect(status).toBe(200);
+    expect(body.map((m: { name: string }) => m.name)).toEqual(["MacBook"]);
   });
 
   it("refuses somebody signed out", async () => {
