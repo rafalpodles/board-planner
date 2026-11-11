@@ -1,5 +1,14 @@
-import type { ApiCustomField, ApiProjectCategory, ApiProjectColumn } from "@/types";
+import type {
+  ApiAgent,
+  ApiAgentBlock,
+  ApiCustomField,
+  ApiProjectCategory,
+  ApiProjectColumn,
+  ApiTaskTemplate,
+  ApiTaskTriage,
+} from "@/types";
 import { echo } from "@/lib/echo";
+import type { AnyColumn } from "@/lib/columns";
 import { isValidProjectKey } from "@/lib/identifiers";
 import { MCP_CLIENT_HEADER, MCP_CLIENT_VALUE } from "@/lib/activity-source";
 /** Only what the tools read: the id, and the field definitions the `fields` parameter resolves against */
@@ -45,6 +54,73 @@ const seg = (value: string) => {
   return encodeURIComponent(value);
 };
 
+export interface McpPerson {
+  _id: string;
+  username: string;
+  fullName?: string;
+}
+
+export interface McpMember extends McpPerson {
+  relation: string | null;
+  source?: string;
+  instanceAdmin?: boolean;
+  deactivated?: boolean;
+}
+
+export interface GroupRoles {
+  map: { group: string; role: string }[];
+  hasProvider: boolean;
+}
+
+export interface PmTurn {
+  ok: boolean;
+  message: string;
+  error?: string;
+  interrupted?: boolean;
+  actions: unknown[];
+}
+
+async function errorOf(res: Response): Promise<string> {
+  const err = await res.json().catch(() => ({ error: res.statusText }));
+  return (err as { error?: string }).error || `HTTP ${res.status}`;
+}
+
+/** The events of one turn; comments (`: ping`) and the streamed text deltas are not part of the answer. */
+export function readPmTurn(stream: string): PmTurn {
+  const turn: PmTurn = { ok: false, message: "", actions: [] };
+  let ended = false;
+  for (const frame of stream.split("\n\n")) {
+    let event = "";
+    const data: string[] = [];
+    for (const line of frame.split("\n")) {
+      if (line.startsWith("event: ")) event = line.slice(7);
+      else if (line.startsWith("data: ")) data.push(line.slice(6));
+    }
+    if (!event || data.length === 0) continue;
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(data.join("\n"));
+    } catch {
+      continue;
+    }
+    if (event === "action") turn.actions.push(payload);
+    if (event === "done") {
+      ended = true;
+      turn.ok = true;
+      turn.message = typeof payload.message === "string" ? payload.message : "";
+      turn.interrupted = payload.interrupted === true;
+    }
+    if (event === "error") {
+      ended = true;
+      turn.ok = false;
+      turn.error = typeof payload.error === "string" ? payload.error : "The PM turn failed";
+      turn.message = typeof payload.message === "string" ? payload.message : "";
+    }
+  }
+  if (!ended) turn.error = "The PM turn ended without an answer";
+  return turn;
+}
+
 export class PlannerClient {
   private baseUrl: string;
   private token: string;
@@ -67,21 +143,22 @@ export class PlannerClient {
     this.token = token;
   }
 
+  private headers(): Record<string, string> {
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${this.token}`,
+      [MCP_CLIENT_HEADER]: MCP_CLIENT_VALUE,
+    };
+  }
+
   private async request(method: string, path: string, body?: unknown): Promise<unknown> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.token}`,
-        [MCP_CLIENT_HEADER]: MCP_CLIENT_VALUE,
-      },
+      headers: this.headers(),
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error((err as { error?: string }).error || `HTTP ${res.status}`);
-    }
+    if (!res.ok) throw new Error(await errorOf(res));
 
     return res.json();
   }
@@ -342,6 +419,202 @@ export class PlannerClient {
 
   async syncRepository(projectId: string, provider: "github" | "gitlab"): Promise<Record<string, unknown>> {
     return (await this.request("POST", `/api/projects/${seg(projectId)}/${provider}/sync`, {})) as Record<string, unknown>;
+  }
+
+  async createProject(data: Record<string, unknown>): Promise<McpProject & { key: string; name: string }> {
+    this.memo.delete("projects");
+    return (await this.request("POST", "/api/projects", data)) as McpProject & { key: string; name: string };
+  }
+
+  async updateProject(projectId: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
+    this.memo.delete("projects");
+    return (await this.request("PUT", `/api/projects/${seg(projectId)}`, data)) as Record<string, unknown>;
+  }
+
+  async setDefaultAgent(projectId: string, agentId: string): Promise<unknown> {
+    return this.request("PUT", `/api/projects/${seg(projectId)}/agent`, { agentId });
+  }
+
+  async listProjectMembers(projectId: string): Promise<McpMember[]> {
+    return (await this.request("GET", `/api/projects/${seg(projectId)}/members`)) as McpMember[];
+  }
+
+  async findMemberCandidates(projectId: string, query: string): Promise<McpPerson[]> {
+    const q = encodeURIComponent(query);
+    return (await this.request("GET", `/api/projects/${seg(projectId)}/members/candidates?q=${q}`)) as McpPerson[];
+  }
+
+  async setMember(projectId: string, userId: string, relation: string): Promise<unknown> {
+    this.memo.delete(`members:${projectId}`);
+    return this.request("PUT", `/api/projects/${seg(projectId)}/members`, { userId, relation });
+  }
+
+  async removeMember(projectId: string, userId: string): Promise<unknown> {
+    this.memo.delete(`members:${projectId}`);
+    return this.request("DELETE", `/api/projects/${seg(projectId)}/members?userId=${seg(userId)}`);
+  }
+
+  async getGroupRoles(projectId: string): Promise<GroupRoles> {
+    return (await this.request("GET", `/api/projects/${seg(projectId)}/group-roles`)) as GroupRoles;
+  }
+
+  async setGroupRoles(projectId: string, map: { group: string; role: string }[]): Promise<GroupRoles> {
+    return (await this.request("PUT", `/api/projects/${seg(projectId)}/group-roles`, map)) as GroupRoles;
+  }
+
+  async createAgent(data: Record<string, unknown>): Promise<ApiAgent> {
+    return (await this.request("POST", "/api/agents", data)) as ApiAgent;
+  }
+
+  async updateAgent(agentId: string, data: Record<string, unknown>): Promise<ApiAgent> {
+    return (await this.request("PUT", `/api/agents/${seg(agentId)}`, data)) as ApiAgent;
+  }
+
+  async listAgentBlocks(): Promise<ApiAgentBlock[]> {
+    return this.remember("agent-blocks", () => this.request("GET", "/api/agent-blocks") as Promise<ApiAgentBlock[]>);
+  }
+
+  async createAgentBlock(data: Record<string, unknown>): Promise<ApiAgentBlock> {
+    this.memo.delete("agent-blocks");
+    return (await this.request("POST", "/api/agent-blocks", data)) as ApiAgentBlock;
+  }
+
+  async updateAgentBlock(blockId: string, data: Record<string, unknown>): Promise<ApiAgentBlock> {
+    this.memo.delete("agent-blocks");
+    return (await this.request("PUT", `/api/agent-blocks/${seg(blockId)}`, data)) as ApiAgentBlock;
+  }
+
+  async deleteAgentBlock(blockId: string): Promise<unknown> {
+    this.memo.delete("agent-blocks");
+    return this.request("DELETE", `/api/agent-blocks/${seg(blockId)}`);
+  }
+
+  async replaceColumns(projectId: string, columns: AnyColumn[]): Promise<ApiProjectColumn[]> {
+    return (await this.request("PUT", `/api/projects/${seg(projectId)}/columns`, { columns })) as ApiProjectColumn[];
+  }
+
+  async updateCustomField(projectId: string, fieldId: string, changes: Record<string, unknown>): Promise<ApiCustomField[]> {
+    return (await this.request(
+      "PATCH",
+      `/api/projects/${seg(projectId)}/custom-fields/${seg(fieldId)}`,
+      changes
+    )) as ApiCustomField[];
+  }
+
+  async deleteCustomField(projectId: string, fieldId: string): Promise<ApiCustomField[]> {
+    return (await this.request(
+      "DELETE",
+      `/api/projects/${seg(projectId)}/custom-fields/${seg(fieldId)}`
+    )) as ApiCustomField[];
+  }
+
+  async updateCategory(
+    projectId: string,
+    change: { name: string; newName?: string; color?: string }
+  ): Promise<ApiProjectCategory[]> {
+    return (await this.request("PATCH", `/api/projects/${seg(projectId)}/categories`, change)) as ApiProjectCategory[];
+  }
+
+  async deleteCategory(projectId: string, name: string): Promise<ApiProjectCategory[]> {
+    return (await this.request("DELETE", `/api/projects/${seg(projectId)}/categories`, { name })) as ApiProjectCategory[];
+  }
+
+  async addTemplate(projectId: string, template: Record<string, unknown>): Promise<ApiTaskTemplate[]> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/templates`, template)) as ApiTaskTemplate[];
+  }
+
+  async updateTemplate(projectId: string, templateId: string, changes: Record<string, unknown>): Promise<ApiTaskTemplate[]> {
+    return (await this.request("PUT", `/api/projects/${seg(projectId)}/templates`, {
+      templateId,
+      ...changes,
+    })) as ApiTaskTemplate[];
+  }
+
+  async deleteTemplate(projectId: string, templateId: string): Promise<ApiTaskTemplate[]> {
+    return (await this.request("DELETE", `/api/projects/${seg(projectId)}/templates`, { templateId })) as ApiTaskTemplate[];
+  }
+
+  async getTriage(projectId: string, taskId: string): Promise<{ triage: ApiTaskTriage | null }> {
+    return (await this.request("GET", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/triage`)) as {
+      triage: ApiTaskTriage | null;
+    };
+  }
+
+  async actOnTriage(
+    projectId: string,
+    taskId: string,
+    suggestionId: string,
+    action: string
+  ): Promise<{ triage: ApiTaskTriage | null }> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/triage`, {
+      suggestionId,
+      action,
+    })) as { triage: ApiTaskTriage | null };
+  }
+
+  async findDuplicates(projectId: string, query: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/duplicates`, query)) as Record<string, unknown>;
+  }
+
+  async generateTask(projectId: string, prompt: string): Promise<Record<string, unknown>> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/ai/generate-task`, { prompt })) as Record<
+      string,
+      unknown
+    >;
+  }
+
+  async releaseNotes(projectId: string, query: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/release-notes`, query)) as Record<string, unknown>;
+  }
+
+  async summarize(
+    projectId: string,
+    query: Record<string, unknown>
+  ): Promise<{ markdown: string; noteDropped?: boolean; channels: number; sealed: string | null }> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/summaries`, query)) as never;
+  }
+
+  async postSummary(projectId: string, sealed: string): Promise<Record<string, unknown>> {
+    return (await this.request("POST", `/api/projects/${seg(projectId)}/summaries/post`, { sealed })) as Record<
+      string,
+      unknown
+    >;
+  }
+
+  async getInsights(projectId: string, query: Record<string, string>): Promise<Record<string, unknown>> {
+    const params = new URLSearchParams(query).toString();
+    return (await this.request("GET", `/api/projects/${seg(projectId)}/insights${params ? `?${params}` : ""}`)) as Record<
+      string,
+      unknown
+    >;
+  }
+
+  async startPmReview(projectId: string): Promise<unknown> {
+    return this.request("POST", `/api/projects/${seg(projectId)}/pm/review`, {});
+  }
+
+  async pmUsage(projectId: string): Promise<Record<string, unknown>> {
+    return (await this.request("GET", `/api/projects/${seg(projectId)}/pm/usage`)) as Record<string, unknown>;
+  }
+
+  /** One PM turn, read to its end: the route streams it as server-sent events and the tool answers once it is over. */
+  async askPm(projectId: string, message: string, signal?: AbortSignal): Promise<PmTurn> {
+    const res = await fetch(`${this.baseUrl}/api/projects/${seg(projectId)}/pm/chat`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({ message }),
+      signal,
+    });
+    if (!res.ok) throw new Error(await errorOf(res));
+    return readPmTurn(await res.text());
+  }
+
+  async listMyMachines(): Promise<Record<string, unknown>[]> {
+    return (await this.request("GET", "/api/users/me/machines")) as Record<string, unknown>[];
+  }
+
+  projectUrl(projectKey: string): string {
+    return `${this.baseUrl}/projects/${seg(projectKey.toUpperCase())}`;
   }
 
   /** The page a person opens for this task: what a minimal answer hands back so the work can be found. */

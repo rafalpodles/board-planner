@@ -6,12 +6,8 @@ import type { ApiMyMachine, IWorker } from "@/types";
 import { claimingMachineIds, isHeldByPlan } from "@/lib/machine-limit";
 
 // The reader's own machines and nobody else's: whoever enrols a machine owns it (BP-358), and the
-// fleet console that lists every machine is an instance admin's. Like the per-machine project picker
-// this answers only a person at a browser, never a machine credential.
+// fleet console that lists every machine is an instance admin's
 export const GET = withAuth(async (_request, { user, db }) => {
-  if (user.viaMachineCredential) {
-    return NextResponse.json({ error: "Interactive session required" }, { status: 403 });
-  }
   await connectDB();
 
   const [workers, claiming] = await Promise.all([

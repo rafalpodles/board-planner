@@ -211,12 +211,12 @@ describe("a parameter the tool does not declare is refused, not dropped", () => 
 
   // Not asserted through tools/list: zod-to-json-schema emits additionalProperties: false for a
   // stripping object too, so the advertised schema reads identically either way and cannot carry
-  // this. The schemas themselves can, and there are forty-six of them to keep honest.
+  // this. The schemas themselves can, and there are seventy-nine of them to keep honest.
   it("holds for every tool, not just the two that were reported", () => {
     const schemas = registeredSchemas();
 
     // guards the guard: an empty map would satisfy the loop below without proving anything
-    expect(schemas.size).toBe(46);
+    expect(schemas.size).toBe(79);
 
     const permissive = [...schemas.entries()].filter(([, schema]) => {
       const result = schema.safeParse({ __stray__: 1 });
@@ -297,9 +297,9 @@ describe("the board setup tools refuse what they cannot do, naming where it is d
     vi.spyOn(PlannerClient.prototype, "getProjectByKey").mockResolvedValue({ _id: "p1", canAdmin: true, columns: [] } as never);
 
   it.each([
-    ["add_custom_field", { project: "BP", name: "N", fieldType: "text", archived: true }, "archived", "the app"],
-    ["add_column", { project: "BP", label: "QA", role: "review", triggersPmReview: true }, "triggersPmReview", "Settings → Board"],
-    ["rename_column", { project: "BP", column: "todo", label: "X", role: "done" }, "role", "Settings → Board"],
+    ["add_custom_field", { project: "BP", name: "N", fieldType: "text", archived: true }, "archived", "update_custom_field"],
+    ["add_column", { project: "BP", label: "QA", role: "review", triggersPmReview: true }, "triggersPmReview", "update_column"],
+    ["rename_column", { project: "BP", column: "todo", label: "X", role: "done" }, "role", "update_column"],
   ])("%s names %s and writes nothing", async (tool, args, key, where) => {
     owner();
     const add = vi.spyOn(PlannerClient.prototype, "addCustomField");

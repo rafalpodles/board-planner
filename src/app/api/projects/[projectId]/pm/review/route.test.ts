@@ -82,11 +82,12 @@ describe("POST /api/projects/:projectId/pm/review", () => {
     expect(startBoardReview).not.toHaveBeenCalled();
   });
 
-  it("refuses a machine credential, which should not spend the project's budget on its own", async () => {
+  it("starts for an owner's machine credential, as the PM chat does on the same budget (BP-1150)", async () => {
     user = { _id: "owner", viaMachineCredential: true };
+    startBoardReview.mockResolvedValue({ status: "started", done: Promise.resolve() });
 
-    expect((await run()).status).toBe(403);
-    expect(startBoardReview).not.toHaveBeenCalled();
+    expect((await run()).status).toBe(202);
+    expect(startBoardReview).toHaveBeenCalledTimes(1);
   });
 
   it("refuses without a model key, rather than spending a turn on a warning", async () => {
