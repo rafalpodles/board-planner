@@ -33,7 +33,7 @@
     "geist": "1.8.1",
     "mcp-handler": "^1.1.0",
     "mdast-util-find-and-replace": "3.0.2",
-    "mongoose": "^9.10.3",
+    "mongoose": "^9.11.4",
     "next": "^16.4.5",
     "nodemailer": "^10.4.0",
     "openai": "^6.25.0",

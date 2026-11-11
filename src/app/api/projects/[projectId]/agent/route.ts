@@ -72,7 +72,7 @@ async function setDefaultAgent(
     { _id: projectId },
     { $set: { "worker.agent": next ? next.id : null } },
     { returnDocument: "before", projection: { "worker.agent": 1 } }
-  ).lean();
+  ).lean<{ worker?: { agent?: unknown } } | null>();
 
   const previousId = before?.worker?.agent ? String(before.worker.agent) : "";
   if (!before || previousId === (next?.id.toLowerCase() ?? "")) return;
