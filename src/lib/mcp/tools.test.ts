@@ -186,8 +186,9 @@ describe("update_task and the agent that runs it", () => {
     const handover = { willRun: false, why: "it waits for @bartek to accept it in the app" };
     vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({ taskNumber: 1, title: "T", handover });
 
-    const full = JSON.parse((await callUpdate({ agent: "Default" })).content[0].text);
-    const minimal = JSON.parse((await callUpdate({ agent: "Default", minimal: true })).content[0].text);
+    const text = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+    const full = text(await callUpdate({ agent: "Default" }));
+    const minimal = text(await callUpdate({ agent: "Default", minimal: true }));
 
     expect(full.handover).toEqual(handover);
     expect(minimal.handover).toEqual(handover);
