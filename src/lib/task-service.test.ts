@@ -5158,6 +5158,54 @@ describe("what a rewritten updateTask still tells the assignee", () => {
     expect(notification.email.taskNumber).toBe(4);
   });
 
+  // BP-420. A task carrying an agent runs on the assignee's machine once they accept it, so that is
+  // what the message asks for — and the plain wording stays for work with no agent on it
+  it("asks the new assignee to accept a task that carries an agent", async () => {
+    findOneAndUpdate.mockReturnValue({
+      populate: () =>
+        Promise.resolve({
+          _id: "t1",
+          taskNumber: 4,
+          status: "doing",
+          title: "Session cookie survives a change",
+          priority: "high",
+          assignee: { _id: "u2", username: "kuba" },
+          agent: { _id: "a1", name: "Default" },
+          execution: {},
+        }),
+    });
+
+    await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
+
+    const [, notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+    expect(notification.title).toBe("TP-4 handed to you — accept it to run it on your machine");
+    expect(notification.digestTitle).toBe("handed to you, waiting for you to accept it");
+    expect(notification.email.kicker).toBe("Handed to you");
+    expect(notification.email.taskMeta).toBe(
+      "Test Project · assigned by Ada Actor · accept it on the task to run it on your machine"
+    );
+  });
+
+  it("does not ask the PM's hand-over made on the assignee's own instruction to be accepted", async () => {
+    findOneAndUpdate.mockReturnValue({
+      populate: () =>
+        Promise.resolve({
+          _id: "t1",
+          taskNumber: 4,
+          status: "doing",
+          title: "Session cookie survives a change",
+          assignee: { _id: "u2", username: "kuba" },
+          agent: { _id: "a1", name: "Default" },
+          execution: {},
+        }),
+    });
+
+    await updateTask(db, "p1", "t1", { assignee: "kuba" }, "pm-id", false, "u2");
+
+    const [, notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+    expect(notification.title).toBe("TP-4 assigned to you");
+  });
+
   // The other half of the same arrangement: a guard that refuses must refuse BEFORE the write, so
   // there is nothing to announce. A guard moved below the notification would still return 400 and
   // still leave this mail sent.

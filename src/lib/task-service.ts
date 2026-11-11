@@ -1445,24 +1445,36 @@ export async function updateTask(
     ]);
     const taskKey = taskKeyOf(project?.key, task.taskNumber);
     const column = getProjectColumns(project).find((c) => c.id === String(task.status));
+    // A machine would run this the moment its assignee says yes, so the message says that is
+    // what is being asked — except where the PM handed it over on the assignee's own instruction
+    const waitsForAccept =
+      !!task.agent && newAssigneeId !== String(actorId) && onWhoseInstruction !== newAssigneeId;
     createNotifications(db, {
       type: "task_assigned",
       taskId,
       projectId,
       actorId,
-      title: `${taskKey} assigned to you`,
-      digestTitle: "assigned to you",
+      title: waitsForAccept
+        ? `${taskKey} handed to you — accept it to run it on your machine`
+        : `${taskKey} assigned to you`,
+      digestTitle: waitsForAccept ? "handed to you, waiting for you to accept it" : "assigned to you",
       body: task.title,
       recipientIds: [newAssigneeId],
       email: {
-        kicker: "Assigned to you",
+        kicker: waitsForAccept ? "Handed to you" : "Assigned to you",
         taskKey,
         taskTitle: task.title,
         taskPills: [
           { label: column?.label ?? String(task.status), tone: pillToneForRole(column?.role) },
           { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
         ],
-        taskMeta: [project?.name, `assigned by ${actor}`].filter(Boolean).join(" · "),
+        taskMeta: [
+          project?.name,
+          `assigned by ${actor}`,
+          waitsForAccept ? "accept it on the task to run it on your machine" : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
         projectRef: project?.key,
         taskNumber: task.taskNumber,
         assigneeId: newAssigneeId,
@@ -2020,9 +2032,9 @@ export async function claimNextTask(
       project: projectId,
       status: { $in: approved },
       ...NOT_ARCHIVED,
-      // Assigned to the owner, by the owner or by the PM. A *person* assigning you work is still a
-      // proposal, and the surface for accepting one does not exist yet — so it is refused rather
-      // than run unattended. The PM is not somebody else: it is a first-party actor on this
+      // Assigned to the owner, by the owner or by the PM. A *person* assigning you work is a
+      // proposal until its assignee accepts it on the task (acceptHandover, BP-420), which stamps
+      // them as the assigner — so it is refused rather than run unattended until then. The PM is not somebody else: it is a first-party actor on this
       // instance, and BP-419 is the decision that its assignment is a real hand-over rather than a
       // proposal nothing could ever accept. What that rests on: an actor able to steer the PM can
       // queue work onto a machine unattended, and BP-321 (injected text replayed to the model as
