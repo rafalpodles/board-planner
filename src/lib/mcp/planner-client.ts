@@ -72,6 +72,13 @@ export interface GroupRoles {
   hasProvider: boolean;
 }
 
+export interface PmMessageRow {
+  role: string;
+  content: string;
+  createdAt?: string;
+  actions?: { tool: string; taskKey?: string; summary?: string }[];
+}
+
 export interface PmTurn {
   ok: boolean;
   message: string;
@@ -83,6 +90,24 @@ export interface PmTurn {
 async function errorOf(res: Response): Promise<string> {
   const err = await res.json().catch(() => ({ error: res.statusText }));
   return (err as { error?: string }).error || `HTTP ${res.status}`;
+}
+
+function storedMessage(value: unknown): { content: string; actions?: unknown[] } {
+  if (typeof value === "string") return { content: value };
+  if (!value || typeof value !== "object") return { content: "" };
+  const message = value as { content?: unknown; actions?: unknown };
+  return {
+    content: typeof message.content === "string" ? message.content : "",
+    ...(Array.isArray(message.actions)
+      ? {
+          actions: message.actions.map((a: { tool?: string; taskKey?: string; summary?: string }) => ({
+            tool: a.tool,
+            ...(a.taskKey ? { taskKey: a.taskKey } : {}),
+            ...(a.summary ? { summary: a.summary } : {}),
+          })),
+        }
+      : {}),
+  };
 }
 
 /** The events of one turn; comments (`: ping`) and the streamed text deltas are not part of the answer. */
@@ -104,17 +129,14 @@ export function readPmTurn(stream: string): PmTurn {
       continue;
     }
     if (event === "action") turn.actions.push(payload);
-    if (event === "done") {
+    if (event === "done" || event === "error") {
       ended = true;
-      turn.ok = true;
-      turn.message = typeof payload.message === "string" ? payload.message : "";
-      turn.interrupted = payload.interrupted === true;
-    }
-    if (event === "error") {
-      ended = true;
-      turn.ok = false;
-      turn.error = typeof payload.error === "string" ? payload.error : "The PM turn failed";
-      turn.message = typeof payload.message === "string" ? payload.message : "";
+      turn.ok = event === "done";
+      const stored = storedMessage(payload.message);
+      turn.message = stored.content;
+      if (stored.actions) turn.actions = stored.actions;
+      if (event === "done") turn.interrupted = payload.interrupted === true;
+      else turn.error = typeof payload.error === "string" ? payload.error : "The PM turn failed";
     }
   }
   if (!ended) turn.error = "The PM turn ended without an answer";
@@ -609,7 +631,13 @@ export class PlannerClient {
     return readPmTurn(await res.text());
   }
 
-  async listMyMachines(): Promise<Record<string, unknown>[]> {
+  async pmMessages(projectId: string, limit: number): Promise<{ messages: PmMessageRow[] }> {
+    return (await this.request("GET", `/api/projects/${seg(projectId)}/pm/messages?limit=${limit}`)) as {
+      messages: PmMessageRow[];
+    };
+  }
+
+    async listMyMachines(): Promise<Record<string, unknown>[]> {
     return (await this.request("GET", "/api/users/me/machines")) as Record<string, unknown>[];
   }
 

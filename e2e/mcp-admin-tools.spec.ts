@@ -48,7 +48,7 @@ function refused(call: ToolCall) {
   expect(call.raw.result?.isError, call.text).toBe(true);
 }
 
-const projectCard = (page: Page, key: string) => page.locator(`a[href="/projects/${key}"]`);
+const projectCard = (page: Page, key: string) => page.locator("main").locator(`a[href="/projects/${key}"]`);
 
 test.beforeEach(async () => {
   await seed();
@@ -140,6 +140,12 @@ test("an owner reshapes the board over MCP, and the settings screens show it", a
   await test.step("what the owner may not do is refused, and nothing changes", async () => {
     refused(await owner.callTool("remove_column", { project: PROJECT_KEY, column: "done" }));
     refused(await owner.callTool("delete_custom_field", { project: PROJECT_KEY, field: "T-shirt", confirmName: "Size" }));
+
+    await page.goto(`${SETTINGS}?section=board`);
+    await expect(page.getByLabel("Column name")).toHaveCount(6);
+    await expect(page.getByLabel("Column name").last()).toHaveValue("Done");
+    await page.goto(`${SETTINGS}?section=fields`);
+    await expect(page.locator('span:text-is("T-shirt")')).toBeVisible();
   });
 });
 
@@ -149,8 +155,8 @@ test("an admin authors a step and composes an agent over MCP, and the Agents pag
   const step = await admin.callTool("create_agent_block", {
     kind: "step",
     name: "Tidy imports",
-    prompt: "Sort and dedupe the imports of every file you touched.",
-    capability: "edit",
+    prompt: "List the imports of every file that would need sorting.",
+    capability: "read-only",
   });
   accepted(step);
   const key: string = step.parsed.key;
@@ -158,10 +164,10 @@ test("an admin authors a step and composes an agent over MCP, and the Agents pag
   const agent = await admin.callTool("create_agent", {
     name: "Tidy and ship",
     project: PROJECT_KEY,
-    composition: { implementation: [key] },
+    composition: { analysis: [key] },
   });
   accepted(agent);
-  expect(agent.parsed.composition.implementation).toEqual([{ key }]);
+  expect(agent.parsed.composition.analysis).toEqual([{ key }]);
 
   accepted(await admin.callTool("update_project", { project: PROJECT_KEY, defaultAgent: "Tidy and ship" }));
 
@@ -177,12 +183,14 @@ test("an admin authors a step and composes an agent over MCP, and the Agents pag
   });
 });
 
-test("the two reads opened to a connection answer it instead of asking for a browser", async ({ request }) => {
-  const owner = await connected(request, OWNER_API_TOKEN);
+test("the two routes opened to a connection answer it instead of asking for a browser", async ({ request }) => {
+  const admin = await connected(request, API_TOKEN);
 
-  accepted(await owner.callTool("list_my_machines", {}));
+  accepted(await admin.callTool("list_my_machines", {}));
 
-  const review = await owner.callTool("run_pm_review", { project: PROJECT_KEY });
-  expect(review.status, review.text).toBe(200);
-  expect(review.text).not.toMatch(/interactive session/i);
+  // A board with the PM off, so the review is refused by the board's own rule rather than started into the next test
+  accepted(await admin.callTool("create_project", { name: "Quiet board", key: "QUIET" }));
+  const review = await admin.callTool("run_pm_review", { project: "QUIET" });
+  refused(review);
+  expect(review.text).toMatch(/PM agent is not enabled for this project/);
 });

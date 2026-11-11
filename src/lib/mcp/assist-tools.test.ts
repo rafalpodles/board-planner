@@ -88,6 +88,12 @@ describe("summarize", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it("tells a channel the instance cannot post to from no channel at all", async () => {
+    spy("summarize").mockResolvedValue({ markdown: "# Day", channels: 2, sealed: null });
+
+    await expect(run("summarize", { project: "BP", kind: "project", post: true })).rejects.toThrow(/cannot post summaries \(no ENCRYPTION_KEY\)/);
+  });
+
   it("refuses a sprint summary with no sprint, without spending a call", async () => {
     const write = spy("summarize");
     await expect(run("summarize", { project: "BP", kind: "sprint" })).rejects.toThrow(/names its sprint/);
@@ -102,6 +108,26 @@ describe("ask_pm", () => {
     expect(await run("ask_pm", { project: "BP", message: "tidy up" })).toEqual({ answer: "Moved BP-2", actions: [{ tool: "change_status" }] });
   });
 
+  it("answers that the PM is still working when the turn outlasts the wait, rather than failing", async () => {
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+      const waited = new AbortController();
+      setTimeout(() => waited.abort(), 5);
+      return waited.signal;
+    });
+    spy("askPm").mockImplementation(
+      (_p: string, _m: string, signal: AbortSignal) =>
+        new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))))
+    );
+
+    expect(await run("ask_pm", { project: "BP", message: "long" })).toMatchObject({ pending: true });
+  });
+
+  it("fails the call on a transport error that is not the wait running out", async () => {
+    spy("askPm").mockRejectedValue(new Error("Someone is already talking to the PM agent on this project"));
+
+    await expect(run("ask_pm", { project: "BP", message: "hi" })).rejects.toThrow(/already talking/);
+  });
+
   it("fails the call when the turn failed, with the PM's reason", async () => {
     spy("askPm").mockResolvedValue({ ok: false, message: "", error: "Someone is already talking to the PM agent", actions: [] });
 
@@ -109,17 +135,46 @@ describe("ask_pm", () => {
   });
 });
 
+describe("pm_messages", () => {
+  it("answers each message's role, text and actions, and nothing else the row carries", async () => {
+    const read = spy("pmMessages").mockResolvedValue({
+      messages: [
+        { role: "user", content: "hi", createdAt: "t1", triggeredBy: { username: "ola" } },
+        { role: "assistant", content: "Moved", createdAt: "t2", actions: [{ tool: "change_status", taskKey: "BP-2", summary: "s", at: "x" }], usage: { tokens: 9 } },
+      ],
+    });
+
+    expect(await run("pm_messages", { project: "BP", limit: 2 })).toEqual([
+      { role: "user", at: "t1", content: "hi" },
+      { role: "assistant", at: "t2", content: "Moved", actions: [{ tool: "change_status", taskKey: "BP-2", summary: "s" }] },
+    ]);
+    expect(read).toHaveBeenCalledWith("p1", 2);
+  });
+});
+
 describe("readPmTurn", () => {
   const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
-  it("keeps the actions and the final answer, and skips heartbeats and streamed deltas", () => {
-    const stream = `: accepted\n\n${frame("action", { tool: "create_task" })}: ping\n\n${frame("delta", { text: "Mo" })}${frame("done", { message: "Done.", interrupted: false })}`;
+  // The route sends the stored assistant message, an object, as `message` (pm/chat/route.ts)
+  it("answers with the stored message's text and actions, and skips heartbeats and streamed deltas", () => {
+    const stored = { _id: "m1", role: "assistant", content: "Moved BP-2.", actions: [{ tool: "change_status", taskKey: "BP-2", summary: "to done", at: "x" }] };
+    const stream = `: accepted\n\n${frame("action", { tool: "change_status" })}: ping\n\n${frame("delta", { text: "Mo" })}${frame("done", { message: stored, interrupted: false })}`;
 
-    expect(readPmTurn(stream)).toEqual({ ok: true, message: "Done.", interrupted: false, actions: [{ tool: "create_task" }] });
+    expect(readPmTurn(stream)).toEqual({
+      ok: true,
+      message: "Moved BP-2.",
+      interrupted: false,
+      actions: [{ tool: "change_status", taskKey: "BP-2", summary: "to done" }],
+    });
   });
 
-  it("reports an error event as a failed turn", () => {
-    expect(readPmTurn(frame("error", { error: "Budget used" }))).toMatchObject({ ok: false, error: "Budget used" });
+  it("reports an error event as a failed turn, with what the PM managed to say", () => {
+    expect(readPmTurn(frame("error", { error: "Budget used", message: { content: "Partly done" } }))).toMatchObject({
+      ok: false,
+      error: "Budget used",
+      message: "Partly done",
+    });
+    expect(readPmTurn(frame("error", { error: "Project not found", message: null }))).toMatchObject({ ok: false, message: "" });
   });
 
   it("does not take a stream cut off before its end for an answer", () => {

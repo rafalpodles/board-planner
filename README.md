@@ -19,7 +19,7 @@ and agents work the same tasks under the same rules.
 <img src="https://img.shields.io/badge/Next.js-16-000?logo=nextdotjs&logoColor=white" alt="Next.js 16">
 <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
 <img src="https://img.shields.io/badge/MongoDB-4.4%2B-47A248?logo=mongodb&logoColor=white" alt="MongoDB 4.4+">
-<img src="https://img.shields.io/badge/MCP-79%20tools-5b8cff" alt="MCP: 79 tools">
+<img src="https://img.shields.io/badge/MCP-80%20tools-5b8cff" alt="MCP: 80 tools">
 <img src="https://img.shields.io/badge/self--hosted-docker%20compose-2496ED?logo=docker&logoColor=white" alt="Self-hosted">
 
 <br><br>
@@ -173,7 +173,7 @@ fields you define per project, every comment and every change since it was creat
 
 ### Your agents work the same board
 
-Seventy-nine MCP tools over HTTP put the board in your terminal, so Claude Code reads the backlog, claims
+Eighty MCP tools over HTTP put the board in your terminal, so Claude Code reads the backlog, claims
 a task and moves it — through the same permissions a teammate gets. API tokens can be scoped to
 specific projects, and the scope is enforced centrally, so it holds for REST and MCP alike.
 
@@ -264,7 +264,7 @@ the client at one URL:
 }
 ```
 
-Seventy-nine tools, in the groups an agent works in — the full list and what each answers is on the
+Eighty tools, in the groups an agent works in — the full list and what each answers is on the
 [MCP page](https://board-planner.com/docs/ai/claude-code-and-mcp/):
 
 - **Projects and tasks:** `list_projects`, `get_project`, `create_project` (an instance admin), `update_project`
@@ -288,7 +288,7 @@ Seventy-nine tools, in the groups an agent works in — the full list and what e
   `remove_field_option`, `delete_category`, `delete_template`, `add_column`, `rename_column`, `update_column`,
   `reorder_columns`, `remove_column` (the project owner)
 - **AI and the PM agent:** `triage_task`, `find_duplicates`, `generate_task`, `release_notes`, `summarize`,
-  `ask_pm`, `run_pm_review`, `pm_usage`
+  `ask_pm`, `pm_messages`, `run_pm_review`, `pm_usage`
 - **Repository:** `sync_repository` refreshes a board's pull or merge requests and their CI badges, as the Sync
   button does
 
@@ -538,7 +538,7 @@ on merge, so a page there is never behind the product.
 | [What is Board Planner](https://board-planner.com/docs/getting-started/what-is-board-planner/) | The idea, who it is for, what it is not |
 | [Quick start](https://board-planner.com/docs/getting-started/quick-start/) | First project, first task, first agent |
 | [PM agent](https://board-planner.com/docs/ai/pm-agent/) | Turning it on, what it may change, the allowance it spends against |
-| [Claude Code and MCP](https://board-planner.com/docs/ai/claude-code-and-mcp/) | The seventy-nine tools, scoped tokens, the OAuth connector |
+| [Claude Code and MCP](https://board-planner.com/docs/ai/claude-code-and-mcp/) | The eighty tools, scoped tokens, the OAuth connector |
 | [Agents](https://board-planner.com/docs/ai/agents/) | Steps, gates, and what a run actually does |
 | [Execution workers](https://board-planner.com/docs/ai/execution-workers/) | Enrolling a machine, which tasks get picked up, how to stop one |
 | [Installing and running](https://board-planner.com/docs/administration/installing-and-running/) | Every environment variable, build and deploy |

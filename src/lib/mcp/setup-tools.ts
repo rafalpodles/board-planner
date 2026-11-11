@@ -31,6 +31,7 @@ import {
   type CompositionInput,
 } from "./setup-edit";
 
+const CANDIDATES_SHOWN = 10;
 const PROJECT_PARAM = z.string().describe("Project key (e.g. 'CP')");
 const SECRET_HINT = "the app: Settings → Integrations, so a token never passes through a conversation";
 
@@ -88,6 +89,15 @@ const templateLine = (t: ApiTaskTemplate) => ({
   acceptanceCriteria: t.acceptanceCriteria,
 });
 
+function storedCategory(name: string, categories: { name: string }[]): string {
+  const wanted = name.trim().toLowerCase();
+  const found = categories.find((c) => c.name.trim().toLowerCase() === wanted);
+  if (!found) {
+    throw new Error(`No category "${echo(name.trim())}". Categories: ${categories.map((c) => c.name).join(", ") || "none"}`);
+  }
+  return found.name;
+}
+
 async function ownedProject(client: PlannerClient, project: string, what: string): Promise<McpProject> {
   const proj = await client.getProjectByKey(project);
   requireOwner(proj, project, what);
@@ -102,6 +112,11 @@ async function personOnBoard(client: PlannerClient, projectId: string, username:
   const candidates = wanted.length >= 2 ? await client.findMemberCandidates(projectId, wanted) : [];
   const candidate = candidates.find((c) => c.username.toLowerCase() === wanted);
   if (candidate) return { ...candidate, relation: null };
+  if (candidates.length >= CANDIDATES_SHOWN) {
+    throw new Error(
+      `"${echo(username.trim())}" is part of more usernames than the search returns, and not among them. Add them in the app: Settings → Members.`
+    );
+  }
   throw new Error(
     `No active account "${echo(username.trim())}" in this organisation. Inviting somebody new is done in the app: Settings → Members.`
   );
@@ -207,6 +222,16 @@ export function registerSetupTools(registerTool: RegisterTool): void {
         throw new Error(`update_project ${NOTHING_TO_CHANGE}`);
       }
 
+      const agentId =
+        defaultAgent === undefined
+          ? undefined
+          : defaultAgent
+            ? findAgent(
+                defaultAgent,
+                ((await client.listAgents()) as AgentRow[]).filter((a) => a.scope !== "user"),
+                proj._id
+              )._id
+            : "";
       const full = await client.getProject(proj._id);
       const data: Record<string, unknown> = Object.fromEntries(named);
       if (estimateField !== undefined) {
@@ -214,21 +239,16 @@ export function registerSetupTools(registerTool: RegisterTool): void {
       }
       if (pm !== undefined) {
         const { enabled, contextNotes, ...schedule } = pm;
-        const storedPm = (full as { pm?: { enabled?: boolean; autonomy?: Record<string, unknown> } }).pm;
         const scheduled = Object.entries(schedule).filter(([, v]) => v !== undefined);
-        const admin = (await client.getMe()).role === "admin";
         data.pm = {
-          ...(enabled !== undefined ? { enabled } : admin ? { enabled: storedPm?.enabled ?? false } : {}),
+          ...(enabled !== undefined ? { enabled } : {}),
           ...(contextNotes !== undefined ? { contextNotes } : {}),
-          ...(scheduled.length > 0 ? { autonomy: { ...storedPm?.autonomy, ...Object.fromEntries(scheduled) } } : {}),
+          ...(scheduled.length > 0 ? { autonomy: Object.fromEntries(scheduled) } : {}),
         };
       }
       if (Object.keys(data).length > 0) await client.updateProject(proj._id, data);
 
-      if (defaultAgent !== undefined) {
-        const agentId = defaultAgent ? findAgent(defaultAgent, (await client.listAgents()) as AgentRow[], proj._id)._id : "";
-        await client.setDefaultAgent(proj._id, agentId);
-      }
+      if (agentId !== undefined) await client.setDefaultAgent(proj._id, agentId);
 
       const after = (await client.getProject(proj._id)) as McpProject & Record<string, unknown>;
       return json({
@@ -322,7 +342,7 @@ export function registerSetupTools(registerTool: RegisterTool): void {
           .array(z.object({ group: z.string(), role: z.enum(GRANT_RELATIONS) }).strict())
           .optional()
           .describe("The whole mapping"),
-      }),
+      }, { writes: true }),
     },
     async ({ project, map }, extra) => {
       const client = clientFrom(extra);
@@ -497,7 +517,8 @@ export function registerSetupTools(registerTool: RegisterTool): void {
       description:
         "Change one column's role, colour, or whether a task entering it asks the PM agent for a review. Needs the " +
         "project owner. The id and tasks stay; rename_column changes the label. A board must keep a column with the " +
-        "active role and one with the done role.",
+        "active role and one with the done role. update_column, reorder_columns and remove_column save the whole column " +
+        "list, so run them one at a time, not alongside another column change.",
       inputSchema: strictInput(
         {
           project: PROJECT_PARAM,
@@ -568,7 +589,7 @@ export function registerSetupTools(registerTool: RegisterTool): void {
     {
       description:
         "Rename a project-defined field or change how it shows: required, on the card, in the list, filterable, or " +
-        "archived (hidden, values kept), or move it. Any member of the board may, as in the app. Only what is named changes.",
+        "archived (hidden, values kept). Any member of the board may, as in the app. Only what is named changes.",
       inputSchema: strictInput(
         {
           project: PROJECT_PARAM,
@@ -579,7 +600,6 @@ export function registerSetupTools(registerTool: RegisterTool): void {
           showInList: z.boolean().optional(),
           filterable: z.boolean().optional(),
           archived: z.boolean().optional(),
-          order: z.number().int().min(0).optional().describe("Its position among the board's fields, from 0"),
         },
         { writes: true, hints: { options: "update_field_option, remove_field_option and add_field_option" } }
       ),
@@ -627,7 +647,8 @@ export function registerSetupTools(registerTool: RegisterTool): void {
     {
       description:
         "Rename or recolour one option of a dropdown or multiselect field. Tasks holding it keep it under the new name. " +
-        "Any member of the board may.",
+        "Any member of the board may. It saves the field's whole option list, so do not run it alongside another " +
+        "option change on the same field.",
       inputSchema: strictInput(
         {
           project: PROJECT_PARAM,
@@ -653,7 +674,8 @@ export function registerSetupTools(registerTool: RegisterTool): void {
     "remove_field_option",
     {
       description:
-        "Remove one option from a dropdown or multiselect field; tasks holding it lose that value. Needs the project owner.",
+        "Remove one option from a dropdown or multiselect field; tasks holding it lose that value. Needs the project " +
+        "owner. It saves the field's whole option list, so do not run it alongside another option change on the same field.",
       inputSchema: strictInput(
         {
           project: PROJECT_PARAM,
@@ -692,7 +714,7 @@ export function registerSetupTools(registerTool: RegisterTool): void {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
       const categories = await client.updateCategory(proj._id, {
-        name: category,
+        name: storedCategory(category, (await client.getProject(proj._id)).categories ?? []),
         ...(name !== undefined ? { newName: name } : {}),
         ...(color !== undefined ? { color } : {}),
       });
@@ -710,7 +732,10 @@ export function registerSetupTools(registerTool: RegisterTool): void {
     async ({ project, category }, extra) => {
       const client = clientFrom(extra);
       const proj = await ownedProject(client, project, "delete a category");
-      const categories = await client.deleteCategory(proj._id, category);
+      const categories = await client.deleteCategory(
+        proj._id,
+        storedCategory(category, (await client.getProject(proj._id)).categories ?? [])
+      );
       return json({ categories: categories.map((c) => c.name) });
     }
   );

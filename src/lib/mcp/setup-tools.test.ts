@@ -72,26 +72,38 @@ describe("update_project", () => {
     expect(update).toHaveBeenCalledWith("p1", { description: "d", estimateFieldId: FIELD._id });
   });
 
-  it("merges a schedule change into the stored one, which the route would otherwise reset to defaults", async () => {
+  it("sends only the schedule keys and PM fields named, never a copy of what it read", async () => {
     board({ pm: { enabled: true, autonomy: { dailyReview: true, reviewHour: 7, reviewIntervalHours: 24, timezone: "Europe/Warsaw" } } });
-    spy("getMe").mockResolvedValue({ username: "o", role: "member" });
     const update = spy("updateProject").mockResolvedValue({});
 
-    await run("update_project", { project: "BP", pm: { reviewHour: 9 } });
+    await run("update_project", { project: "BP", pm: { reviewHour: 9, contextNotes: "n" } });
 
-    expect(update).toHaveBeenCalledWith("p1", {
-      pm: { autonomy: { dailyReview: true, reviewHour: 9, reviewIntervalHours: 24, timezone: "Europe/Warsaw" } },
-    });
+    expect(update).toHaveBeenCalledWith("p1", { pm: { contextNotes: "n", autonomy: { reviewHour: 9 } } });
   });
 
-  it("repeats the stored PM switch for an admin, whose save the route validates whole", async () => {
-    board({ pm: { enabled: true, autonomy: {} } });
-    spy("getMe").mockResolvedValue({ username: "a", role: "admin" });
-    const update = spy("updateProject").mockResolvedValue({});
+  it("resolves the default agent before writing anything, so a wrong name leaves the board as it was", async () => {
+    board();
+    spy("listAgents").mockResolvedValue([{ _id: "a1", name: "Ship", scope: "project", projectId: "p1" }]);
+    const update = spy("updateProject");
+    const setDefault = spy("setDefaultAgent");
 
-    await run("update_project", { project: "BP", pm: { contextNotes: "n" } });
+    await expect(run("update_project", { project: "BP", name: "New", defaultAgent: "Shipp" })).rejects.toThrow(/not found/);
 
-    expect(update).toHaveBeenCalledWith("p1", { pm: { enabled: true, contextNotes: "n" } });
+    expect(update).not.toHaveBeenCalled();
+    expect(setDefault).not.toHaveBeenCalled();
+  });
+
+  it("does not count a personal agent of the same name as a rival default", async () => {
+    board();
+    spy("listAgents").mockResolvedValue([
+      { _id: "a1", name: "Ship", scope: "global", projectId: null },
+      { _id: "a2", name: "Ship", scope: "user", projectId: null },
+    ]);
+    const setDefault = spy("setDefaultAgent").mockResolvedValue({});
+
+    await run("update_project", { project: "BP", defaultAgent: "ship" });
+
+    expect(setDefault).toHaveBeenCalledWith("p1", "a1");
   });
 
   it("sets the default agent by name, and clears it with an empty string", async () => {
@@ -105,6 +117,70 @@ describe("update_project", () => {
 
     expect(setDefault.mock.calls).toEqual([["p1", "a1"], ["p1", ""]]);
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("tools that need the project owner", () => {
+  it.each([
+    ["update_column", { project: "BP", column: "todo", color: "#000000" }, "replaceColumns"],
+    ["reorder_columns", { project: "BP", columns: ["done", "doing", "todo"] }, "replaceColumns"],
+    ["delete_category", { project: "BP", category: "bug" }, "deleteCategory"],
+    ["delete_template", { project: "BP", name: "Bug" }, "deleteTemplate"],
+    ["remove_field_option", { project: "BP", field: "Size", option: "Small" }, "updateCustomField"],
+    ["delete_custom_field", { project: "BP", field: "Size", confirmName: "Size" }, "deleteCustomField"],
+    ["set_member", { project: "BP", username: "x", relation: "member" }, "setMember"],
+    ["remove_member", { project: "BP", username: "x" }, "removeMember"],
+    ["find_people", { project: "BP", query: "xy" }, "findMemberCandidates"],
+    ["group_roles", { project: "BP", map: [] }, "setGroupRoles"],
+  ] as const)("%s refuses a member without a request", async (tool, args, method) => {
+    board({ owner: false });
+    const write = spy(method as keyof PlannerClient);
+
+    await expect(run(tool, args)).rejects.toThrow(/Only a project owner/);
+    expect(write).not.toHaveBeenCalled();
+  });
+});
+
+describe("categories", () => {
+  it("are named in any case, and sent as the board stores them", async () => {
+    board({ categories: [{ name: "Bug", color: "#ff0000" }] });
+    const update = spy("updateCategory").mockResolvedValue([{ name: "Defect", color: "#ff0000" }]);
+    const remove = spy("deleteCategory").mockResolvedValue([]);
+
+    await run("update_category", { project: "BP", category: "bug", name: "Defect" });
+    await run("delete_category", { project: "BP", category: "BUG" });
+
+    expect(update).toHaveBeenCalledWith("p1", { name: "Bug", newName: "Defect" });
+    expect(remove).toHaveBeenCalledWith("p1", "Bug");
+  });
+
+  it("names the board's categories for one it does not have, without a write", async () => {
+    board({ categories: [{ name: "Bug", color: "#ff0000" }] });
+    const update = spy("updateCategory");
+
+    await expect(run("update_category", { project: "BP", category: "story", color: "#000000" })).rejects.toThrow(/Categories: Bug/);
+    expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("group_roles and find_people", () => {
+  it("read without a map, replace with one", async () => {
+    board();
+    const read = spy("getGroupRoles").mockResolvedValue({ map: [], hasProvider: true });
+    const write = spy("setGroupRoles").mockResolvedValue({ map: [{ group: "eng", role: "member" }], hasProvider: true });
+
+    await run("group_roles", { project: "BP" });
+    await run("group_roles", { project: "BP", map: [{ group: "eng", role: "member" }] });
+
+    expect(read).toHaveBeenCalledWith("p1");
+    expect(write).toHaveBeenCalledWith("p1", [{ group: "eng", role: "member" }]);
+  });
+
+  it("find_people answers names only, never an id", async () => {
+    board();
+    spy("findMemberCandidates").mockResolvedValue([{ _id: "u7", username: "janek", fullName: "Jan K" }]);
+
+    expect(await run("find_people", { project: "BP", query: "jan" })).toEqual([{ username: "janek", fullName: "Jan K" }]);
   });
 });
 
@@ -149,6 +225,14 @@ describe("set_member and remove_member", () => {
 
     await expect(run("set_member", { project: "BP", username: "jan", relation: "member" })).rejects.toThrow(/Settings → Members/);
     expect(set).not.toHaveBeenCalled();
+  });
+
+  it("says the search was crowded out rather than that the account does not exist", async () => {
+    board();
+    spy("listProjectMembers").mockResolvedValue(MEMBERS);
+    spy("findMemberCandidates").mockResolvedValue(Array.from({ length: 10 }, (_, i) => ({ _id: `u${i}`, username: `abob${i}` })));
+
+    await expect(run("set_member", { project: "BP", username: "bob", relation: "member" })).rejects.toThrow(/more usernames than the search returns/);
   });
 
   it("removes only a grant the person holds, not an instance admin's standing", async () => {

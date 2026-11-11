@@ -1487,7 +1487,7 @@ export function registerPlannerTools(server: McpServer): void {
           writes: true,
           hints: {
             archived: "update_custom_field, once the field exists",
-            order: "update_custom_field, once the field exists",
+            order: "nothing: fields keep the order they were added in",
           },
         }
       ),

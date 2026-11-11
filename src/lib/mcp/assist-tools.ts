@@ -9,6 +9,7 @@ import { clientFrom, json, type RegisterTool } from "./tool-kit";
 import { strictInput } from "./strict-input";
 import { findSprint, type SprintRow } from "./sprints";
 
+export const ASK_PM_WAIT_MS = 45_000;
 const PROJECT_PARAM = z.string().describe("Project key (e.g. 'CP')");
 const SPRINT_PARAM = z.string().describe("A sprint, by name or id — list_sprints lists them");
 
@@ -24,6 +25,7 @@ const triageLines = (triage: ApiTaskTriage | null) =>
         suggestions: triage.suggestions.map((s) => ({
           id: s._id,
           field: s.field,
+          ...(s.fieldId ? { fieldId: s.fieldId } : {}),
           value: s.value,
           reason: s.reason,
           outcome: s.outcome,
@@ -148,7 +150,13 @@ export function registerAssistTools(registerTool: RegisterTool): void {
       });
       let posted: unknown = undefined;
       if (post) {
-        if (!written.sealed) throw new Error(`${echo(project.toUpperCase())} has no team channel to post to. The summary is below:\n\n${written.markdown}`);
+        if (!written.sealed) {
+          const why =
+            written.channels > 0
+              ? "this instance cannot post summaries (no ENCRYPTION_KEY)"
+              : `${echo(project.toUpperCase())} has no team channel to post to`;
+          throw new Error(`Not posted: ${why}. The summary is below:\n\n${written.markdown}`);
+        }
         posted = await client.postSummary(proj._id, written.sealed);
       }
       return json({ markdown: written.markdown, ...(post ? { posted } : {}) });
@@ -187,16 +195,52 @@ export function registerAssistTools(registerTool: RegisterTool): void {
     {
       description:
         "Send the board's PM agent one message and wait for its answer, with the actions it took — the same as the PM " +
-        "chat in the app. It acts as the pm account and may change tasks. One conversation at a time per board; a turn " +
-        "can take minutes. Counted in the organisation's AI allowance.",
+        "chat in the app. It acts as the pm account and may change tasks. One conversation at a time per board. A turn " +
+        `still running after ${ASK_PM_WAIT_MS / 1000} seconds keeps running: the answer says so, and pm_messages reads ` +
+        "it once it is done. Counted in the organisation's AI allowance.",
       inputSchema: strictInput({ project: PROJECT_PARAM, message: z.string().max(10_000) }, { writes: true }),
     },
     async ({ project, message }, extra) => {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
-      const turn = await client.askPm(proj._id, message, extra.signal);
+      const waited = AbortSignal.timeout(ASK_PM_WAIT_MS);
+      const turn = await client
+        .askPm(proj._id, message, extra.signal ? AbortSignal.any([extra.signal, waited]) : waited)
+        .catch((err) => {
+          if (waited.aborted) return null;
+          throw err;
+        });
+      if (!turn) {
+        return json({ pending: true, note: "The PM is still working on this. Its answer and actions arrive in pm_messages." });
+      }
       if (!turn.ok) throw new Error(turn.error ?? "The PM turn failed");
       return json({ answer: turn.message, actions: turn.actions, ...(turn.interrupted ? { interrupted: true } : {}) });
+    }
+  );
+
+  registerTool(
+    "pm_messages",
+    {
+      description:
+        "The board's PM conversation, newest last: what each person asked, the PM's answers, and the actions it " +
+        "took. Reads the caller's own conversation with the PM, as the PM chat in the app shows it.",
+      inputSchema: strictInput({
+        project: PROJECT_PARAM,
+        limit: z.number().int().min(1).max(100).optional().describe("How many of the latest messages (default 20)"),
+      }),
+    },
+    async ({ project, limit }, extra) => {
+      const client = clientFrom(extra);
+      const proj = await client.getProjectByKey(project);
+      const { messages } = await client.pmMessages(proj._id, limit ?? 20);
+      return json(
+        messages.map((m) => ({
+          role: m.role,
+          at: m.createdAt,
+          content: m.content,
+          ...(m.actions?.length ? { actions: m.actions.map((a) => ({ tool: a.tool, taskKey: a.taskKey, summary: a.summary })) } : {}),
+        }))
+      );
     }
   );
 
