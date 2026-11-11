@@ -16,6 +16,7 @@ struct CPMenubarApp: App {
         // has to run from inside the .app bundle, which is exactly the configuration whose
         // behaviour this is checking — SMAppService reads the main bundle, not the executable.
         LoginItemCommand.runIfRequested()
+        ConnectCommand.runIfRequested()
 
         let model = AppModel()
         _model = State(initialValue: model)
