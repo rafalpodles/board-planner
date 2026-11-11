@@ -158,6 +158,7 @@ export const GROUPS = {
     "project-settings-controls.spec.ts",
     "dark-theme.spec.ts",
     "mcp-config.spec.ts",
+    "mcp-admin-tools.spec.ts",
   ],
   people: [
     "account-deletion-residue.spec.ts",

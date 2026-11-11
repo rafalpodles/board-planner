@@ -8,5 +8,6 @@ export const SERVER_INSTRUCTIONS = `Board Planner is a task board; these tools r
 - Put the task key (e.g. ABC-12) in the branch name and pull request title; the board links them from it.
 - When the work is ready for review, move the task to a review column and comment what changed and how it was verified. After the pull request merges, comment the links and move it to the done column.
 - Project-defined fields go through fields, keyed by name. A task a worker machine is running refuses to leave its column; do not try to force it.
+- Inviting people, enabling workers, integration tokens, instance settings and exports are done by a person in the app; no tool does them, so say so rather than look for one.
 
 The full workflow is the board-planner agent skill: https://board-planner.com/docs/ai/agent-skill/`;
