@@ -95,7 +95,7 @@ export function registerAssistTools(registerTool: RegisterTool): void {
     async ({ project, prompt }, extra) => {
       const client = clientFrom(extra);
       const proj = await client.getProjectByKey(project);
-      return json(await client.generateTask(proj._id, prompt));
+      return json(await client.draftTask(proj._id, prompt));
     }
   );
 

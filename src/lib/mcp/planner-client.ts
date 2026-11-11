@@ -556,7 +556,7 @@ export class PlannerClient {
     return (await this.request("POST", `/api/projects/${seg(projectId)}/duplicates`, query)) as Record<string, unknown>;
   }
 
-  async generateTask(projectId: string, prompt: string): Promise<Record<string, unknown>> {
+  async draftTask(projectId: string, prompt: string): Promise<Record<string, unknown>> {
     return (await this.request("POST", `/api/projects/${seg(projectId)}/ai/generate-task`, { prompt })) as Record<
       string,
       unknown
