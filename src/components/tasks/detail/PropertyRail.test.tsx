@@ -903,8 +903,8 @@ describe("the agent picker says when nothing will run the task", () => {
   // BP-420. Only the assignee can accept, so everybody else — the person who handed it over
   // included — is told who it waits for, and offered nothing to press
   it.each([
-    ["assigned-by-someone-else", { assignedBy: { _id: "u2", username: "kmk", fullName: "Krzysiek" } }, /Krzysiek handed it to Owner Name; waiting for them to accept it/],
-    ["pm-assigned-for-someone-else", { assignedBy: { _id: "pm", username: "pm", fullName: "PM" }, pmAssignedFor: "u2" }, /The PM handed it to Owner Name on somebody else's instruction; waiting for them/],
+    ["assigned-by-someone-else", { assignedBy: { _id: "u2", username: "kmk", fullName: "Krzysiek" } }, /Waiting for Owner Name to accept it — their machine won't run it until they do/],
+    ["pm-assigned-for-someone-else", { assignedBy: { _id: "pm", username: "pm", fullName: "PM" }, pmAssignedFor: "u2" }, /The PM handed it over on somebody else's instruction; waiting for Owner Name to accept it/],
     ["assigner-unrecorded", { assignedBy: undefined }, /waiting for Owner Name to accept it/],
   ] as const)("tells anybody else that %s waits for the assignee, with no Accept", (reason, stored, said) => {
     withStored(stored as Partial<ApiTask>, {}, { currentUsername: "kmk" });

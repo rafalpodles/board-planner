@@ -258,7 +258,7 @@ interface TaskDetailViewProps {
   users: ApiUserSummary[];
   readiness: ApiHandoverReadiness | null;
   onClose: () => void;
-  onReload: () => void;
+  onReload: () => void | Promise<void>;
   onTaskChange: (updater: (prev: ApiTask | null) => ApiTask | null) => void;
   onAutosaved: () => void;
   onRefused: (err: unknown) => boolean;
@@ -338,20 +338,19 @@ function TaskDetailView({
   const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);
   const projectDefaultAgent = project.worker?.agent ? String(project.worker.agent) : undefined;
 
-  // Reloaded either way: on success that clears the notice asking for it, and a refusal means the
-  // task changed hands underneath this view, which is then showing somebody else's hand-over
+  // Reloaded either way, and awaited so the button does not come back before the notice changes. Not
+  // through onRefused: its 403 means a lost board, and here it only means the task changed hands
   const acceptHandover = useCallback(async () => {
     try {
       await api.post(`/api/projects/${projectId}/tasks/${task._id}/accept`, {});
       wroteHistory();
       emitBoardRefresh(projectId);
     } catch (err) {
-      if (onRefused(err)) return;
       toast(err instanceof Error && err.message ? err.message : "Failed to accept the hand-over", "error");
     }
-    onReload();
+    await onReload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, projectId, task._id, onRefused, onReload, toast]);
+  }, [api, projectId, task._id, onReload, toast]);
 
   const handleFileUpload = useCallback(
     async (file: File): Promise<string> => {

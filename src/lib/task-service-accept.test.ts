@@ -24,29 +24,39 @@ type Doc = Record<string, unknown>;
  * point, so a fake that matched by hand could agree with a filter the database would reject.
  * `beforeWrite` lands between the read and the write, which is where a concurrent reassignment does.
  */
-function fakeDb(task: Doc, { beforeWrite }: { beforeWrite?: (doc: Doc) => void } = {}) {
+function fakeDb(
+  task: Doc,
+  { beforeWrite, agents = {} }: { beforeWrite?: (doc: Doc) => void; agents?: Record<string, Doc> } = {}
+) {
   const doc: Doc = { _id: TASK, project: PROJECT, ...task };
+  // A projection is honoured, so a field the code forgets to select is absent here as in MongoDB
+  const picked = (value: Doc, projection?: string) =>
+    projection
+      ? Object.fromEntries(Object.entries(value).filter(([k]) => k === "_id" || projection.split(/\s+/).includes(k)))
+      : { ...value };
   const query = (value: Doc | null) => ({
-    lean: async () => (value ? { ...value } : null),
-    populate: async () => (value ? { ...value } : null),
-    then: (resolve: (v: unknown) => void) => resolve(value ? { ...value } : null),
+    lean: async () => value,
+    populate: async () => value,
+    then: (resolve: (v: unknown) => void) => resolve(value),
   });
   const writes: Doc[] = [];
   const db = {
     Task: {
-      findOne: vi.fn((filter: Doc) => query(sift(filter)(doc) ? doc : null)),
-      findOneAndUpdate: vi.fn((filter: Doc, update: { $set: Doc }) => {
+      findOne: vi.fn((filter: Doc, projection?: string) => query(sift(filter)(doc) ? picked(doc, projection) : null)),
+      findOneAndUpdate: vi.fn((filter: Doc, update: { $set: Doc }, options: { returnDocument?: string } = {}) => {
         beforeWrite?.(doc);
-        const hit = sift(filter)(doc);
-        if (hit) {
-          Object.assign(doc, update.$set);
-          writes.push(update.$set);
-        }
-        return query(hit ? doc : null);
+        if (!sift(filter)(doc)) return query(null);
+        const before = { ...doc };
+        Object.assign(doc, update.$set);
+        writes.push(update.$set);
+        return query(options.returnDocument === "after" ? { ...doc } : before);
       }),
     },
     User: {
       findById: vi.fn((id: string) => ({ lean: async () => ({ username: id.replace("u-", "") }) })),
+    },
+    Agent: {
+      findById: vi.fn((id: string) => ({ lean: async () => agents[id] ?? null })),
     },
   };
   return { db, doc, writes };
@@ -68,6 +78,7 @@ describe("acceptHandover", () => {
     const result = await accept(db);
 
     expect(result.ok).toBe(true);
+    expect(result.ok && result.data.assignedBy).toBe(BARTEK);
     expect(doc.assignedBy).toBe(BARTEK);
     expect(doc.pmAssignedFor).toBeNull();
     expect(logActivity).toHaveBeenCalledWith(db, PROJECT, TASK, BARTEK, "handover_accepted", "assignedBy", "ania", "");
@@ -134,6 +145,43 @@ describe("acceptHandover", () => {
 
     expect(await accept(db)).toEqual({ ok: false, error: CHANGED_HANDS, status: 409 });
     expect(writes).toHaveLength(0);
+  });
+
+  it("refuses when the PM re-hands it to the same person for somebody else in between", async () => {
+    const { db, writes } = fakeDb(
+      { assignee: BARTEK, assignedBy: PM, pmAssignedFor: ANIA },
+      { beforeWrite: (d) => Object.assign(d, { pmAssignedFor: CELINA }) }
+    );
+
+    expect(await accept(db)).toEqual({ ok: false, error: CHANGED_HANDS, status: 409 });
+    expect(writes).toHaveLength(0);
+  });
+
+  // The same rule updateTask applies to a hand-over: a personal agent its acceptor could not have
+  // chosen has no standing on the task, and a claim would only hand it back unrunnable
+  it("drops somebody else's personal agent, and says so in the history", async () => {
+    const { db, doc } = fakeDb(
+      { assignee: BARTEK, assignedBy: ANIA, agent: "ag-ania" },
+      { agents: { "ag-ania": { scope: "user", owner: ANIA, name: "Ania's own" } } }
+    );
+
+    expect((await accept(db)).ok).toBe(true);
+    expect(doc.agent).toBeNull();
+    expect(logActivity).toHaveBeenCalledWith(db, PROJECT, TASK, BARTEK, "updated", "agent", expect.any(String), "");
+  });
+
+  it.each([
+    ["the acceptor's own personal agent", { scope: "user", owner: BARTEK }],
+    ["a project agent", { scope: "project", owner: null }],
+  ])("keeps %s", async (_label, agent) => {
+    const { db, doc } = fakeDb(
+      { assignee: BARTEK, assignedBy: ANIA, agent: "ag-1" },
+      { agents: { "ag-1": { ...agent, name: "Kept" } } }
+    );
+
+    expect((await accept(db)).ok).toBe(true);
+    expect(doc.agent).toBe("ag-1");
+    expect(logActivity).toHaveBeenCalledTimes(1);
   });
 
   it("answers as accepted when a second click landed first", async () => {

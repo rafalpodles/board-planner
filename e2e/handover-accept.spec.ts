@@ -191,7 +191,7 @@ test("the colleague who handed it over sees it waiting, with nothing to press", 
   await openTask(page, task.number);
 
   await expect(notice(page)).toHaveAttribute("data-reason", /assigned-by-someone-else/);
-  await expect(notice(page)).toContainText("handed it to E2E Admin; waiting for them to accept it");
+  await expect(notice(page)).toContainText("Waiting for E2E Admin to accept it");
   await expect(acceptButton(page)).toHaveCount(0);
 });
 
@@ -214,7 +214,7 @@ test("handing a task over on the task screen says it waits, without reopening th
     why: expect.stringContaining("it waits for @admin to accept it in the app"),
   });
   await expect(notice(page)).toHaveAttribute("data-reason", /assigned-by-someone-else/);
-  await expect(notice(page)).toContainText("handed it to E2E Admin; waiting for them to accept it");
+  await expect(notice(page)).toContainText("Waiting for E2E Admin to accept it");
 });
 
 test("only the assignee, in a session of their own, can accept", async ({ page, request }) => {
@@ -231,7 +231,7 @@ test("only the assignee, in a session of their own, can accept", async ({ page, 
     await signIn(page, "member");
     const res = await page.request.post(url, { headers: SAME_ORIGIN });
     expect(res.status(), await res.text()).toBe(403);
-    expect((await res.json()).error).toMatch(/only the task's assignee/);
+    expect((await res.json()).error).toMatch(/Only the task's assignee/);
   });
 
   expect(String((await read(task.id)).assignedBy)).toBe(String(MEMBER_ID));

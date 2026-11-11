@@ -5186,6 +5186,48 @@ describe("what a rewritten updateTask still tells the assignee", () => {
     );
   });
 
+  // BP-420 review: assignee first, agent second is the order the rail lays them out in, and the
+  // second write is when the hand-over comes into being
+  describe("when the agent arrives after the assignee", () => {
+    const AGENT_ID = "69a52e3b399b27d3cbb2c5a9";
+    function agentLands(assignedBy: unknown) {
+      const stored = { _id: "t1", taskNumber: 4, status: "doing", title: "T", assignee: { _id: "u2", username: "kuba" }, assignedBy, agent: null };
+      findOne.mockReturnValue({ lean: () => Promise.resolve(stored), populate: () => ({ lean: () => Promise.resolve(stored) }) });
+      findOneAndUpdate.mockReturnValue({
+        populate: () => Promise.resolve({ ...stored, agent: { _id: "a1", name: "Default" }, execution: {} }),
+      });
+      agentInTheCatalog({ _id: AGENT_ID, scope: "project", project: "p1", name: "Default", composition: { implementation: [{ key: "write-the-change" }] } });
+      pmUserIdMock.mockResolvedValue("pm-id");
+    }
+
+    it("asks the assignee to accept work somebody else handed over", async () => {
+      agentLands("actor");
+
+      const result = await updateTask(db, "p1", "t1", { agent: AGENT_ID }, "actor");
+      expect(result).toMatchObject({ ok: true });
+
+      const [, notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+      expect(notification.recipientIds).toEqual(["u2"]);
+      expect(notification.title).toBe("TP-4 handed to you — accept it to run it on your machine");
+    });
+
+    it("says nothing when the assignee handed it to themselves", async () => {
+      agentLands("u2");
+
+      await updateTask(db, "p1", "t1", { agent: AGENT_ID }, "actor");
+
+      expect(createNotificationsMock).not.toHaveBeenCalled();
+    });
+
+    it("says nothing when the assignee chooses the agent themselves", async () => {
+      agentLands("actor");
+
+      await updateTask(db, "p1", "t1", { agent: AGENT_ID }, "u2");
+
+      expect(createNotificationsMock).not.toHaveBeenCalled();
+    });
+  });
+
   it("does not ask the PM's hand-over made on the assignee's own instruction to be accepted", async () => {
     findOneAndUpdate.mockReturnValue({
       populate: () =>

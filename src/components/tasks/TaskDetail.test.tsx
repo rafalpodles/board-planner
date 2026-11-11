@@ -1157,6 +1157,7 @@ describe("TaskDetail, the Agent row's handover notice", () => {
  */
 describe("TaskDetail, accepting a hand-over somebody else made", () => {
   const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" };
+  const OTHER = { _id: "u3", username: "tomek", fullName: "Tomek" };
   const handedOver = {
     ...task,
     status: "todo",
@@ -1167,7 +1168,7 @@ describe("TaskDetail, accepting a hand-over somebody else made", () => {
 
   function serve(over: Record<string, unknown> = {}) {
     api.get.mockImplementation((url: string) => {
-      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([OWNER]);
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([OWNER, OTHER]);
       if (url.startsWith("/api/agent")) return Promise.resolve([]);
       if (url.includes("/tasks/")) return Promise.resolve({ ...handedOver, ...over });
       if (url.includes("/sprints")) return Promise.resolve([]);
@@ -1214,19 +1215,51 @@ describe("TaskDetail, accepting a hand-over somebody else made", () => {
     await waitFor(() => expect(taskReads()).toBeGreaterThan(before));
   });
 
+  // A 403 here means the task is no longer this reader's, not that the board is gone: the page
+  // must stay, say why, and show the task as it now is
+  it("keeps the page when the server says the reader is no longer the assignee", async () => {
+    api.post.mockRejectedValue(Object.assign(new Error("Only the task's assignee can accept its hand-over."), { status: 403 }));
+    serve();
+    renderDetail();
+    await loaded();
+    const before = taskReads();
+
+    await pressAccept();
+
+    expect(toast).toHaveBeenCalledWith("Only the task's assignee can accept its hand-over.", "error");
+    expect(screen.getByRole("complementary")).toBeTruthy();
+    await waitFor(() => expect(taskReads()).toBeGreaterThan(before));
+  });
+
   // The old repair forced a PUT of the assignee already on the task. Accept replaced it, so
-  // re-picking that person is back to what the diff makes it: nothing to send
+  // re-picking that person is back to what the diff makes it: nothing to send. Waited past the
+  // auto-save debounce, beside the control that picking somebody else does send
+  async function pickAndSettle(name: RegExp) {
+    const rail = within(screen.getByRole("complementary"));
+    await act(async () => rail.getByRole("combobox", { name: "Assignee" }).click());
+    const option = screen.getAllByRole("option").find((o) => name.test(o.textContent || ""));
+    await act(async () => option!.click());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1_000)));
+  }
+
   it("sends nothing when the assignee already on a task is picked again", async () => {
     serve({ assignedBy: undefined });
     renderDetail();
     await loaded();
 
-    const rail = within(screen.getByRole("complementary"));
-    await act(async () => rail.getByRole("combobox", { name: "Assignee" }).click());
-    const option = screen.getAllByRole("option").find((o) => /Owner Name/.test(o.textContent || ""));
-    await act(async () => option!.click());
+    await pickAndSettle(/Owner Name/);
 
     expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it("the control: picking somebody else is saved", async () => {
+    serve({ assignedBy: undefined });
+    renderDetail();
+    await loaded();
+
+    await pickAndSettle(/Tomek/);
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/TP/tasks/t1", { assignee: "tomek" });
   });
 });
 

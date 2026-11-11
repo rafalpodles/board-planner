@@ -1434,11 +1434,20 @@ export async function updateTask(
     });
   }
 
+  // Choosing the agent after the assignee is the same hand-over in two writes, so it is announced
+  // when the agent arrives on work somebody else already handed over
+  const assigneeAfterWrite = task.assignee ? refId(task.assignee) : "";
+  const agentArrivesOnAHandover =
+    !refId(oldTask.agent) &&
+    !!refId(task.agent) &&
+    !assigneeMoved &&
+    !!assigneeAfterWrite &&
+    assigneeAfterWrite !== String(actorId) &&
+    !handoverIsTheirs(task, assigneeAfterWrite, await pmUserId(db));
+
   // In-app notification: assignee changed
-  if (updates.assignee !== undefined && task.assignee && assigneeMoved) {
-    const newAssigneeId = typeof task.assignee === "object" && "_id" in task.assignee
-      ? String(task.assignee._id)
-      : String(task.assignee);
+  if ((updates.assignee !== undefined && task.assignee && assigneeMoved) || agentArrivesOnAHandover) {
+    const newAssigneeId = assigneeAfterWrite;
     const [project, actor] = await Promise.all([
       db.Project.findById(projectId, "key name columns").lean(),
       displayNameOf(db, actorId),
@@ -1485,8 +1494,8 @@ export async function updateTask(
   return { ok: true, data: task as ITask };
 }
 
-export const NOT_THE_ASSIGNEE = "only the task's assignee can accept its hand-over";
-export const CHANGED_HANDS = "the task changed hands while you were accepting it — reload it and look again";
+export const NOT_THE_ASSIGNEE = "Only the task's assignee can accept its hand-over.";
+export const CHANGED_HANDS = "The task changed hands while you were accepting it.";
 
 function handoverIsTheirs(
   task: { assignedBy?: unknown; pmAssignedFor?: unknown },
@@ -1510,7 +1519,7 @@ export async function acceptHandover(
   actorId: string
 ): Promise<TaskServiceResult> {
   await connectDB();
-  const current = await db.Task.findOne({ _id: taskId, project: projectId }, "assignee assignedBy pmAssignedFor").lean();
+  const current = await db.Task.findOne({ _id: taskId, project: projectId }, "assignee assignedBy pmAssignedFor agent").lean();
   if (!current) return { ok: false, error: "Task not found", status: 404 };
   if (refId(current.assignee) !== actorId) return { ok: false, error: NOT_THE_ASSIGNEE, status: 403 };
 
@@ -1521,6 +1530,9 @@ export async function acceptHandover(
     return task ? { ok: true, data: task as ITask } : { ok: false, error: "Task not found", status: 404 };
   }
 
+  // Accepting is a hand-over coming into being, as re-assigning is in updateTask: somebody else's
+  // personal agent has no standing on it, and a claim could only hand it back unrunnable
+  const dropsAgent = !!current.agent && (await personalAgentAlienTo(db, current.agent, actorId));
   const accepted = await db.Task.findOneAndUpdate(
     {
       _id: taskId,
@@ -1528,8 +1540,9 @@ export async function acceptHandover(
       assignee: actorId,
       assignedBy: current.assignedBy ?? null,
       pmAssignedFor: current.pmAssignedFor ?? null,
+      agent: current.agent ?? null,
     },
-    { $set: { assignedBy: actorId, pmAssignedFor: null } },
+    { $set: { assignedBy: actorId, pmAssignedFor: null, ...(dropsAgent ? { agent: null } : {}) } },
     { returnDocument: "after" }
   ).populate(taskPopulateFields);
 
@@ -1547,6 +1560,9 @@ export async function acceptHandover(
     ? await db.User.findById(current.assignedBy, "username").lean<{ username?: string } | null>()
     : null;
   await logActivity(db, projectId, taskId, actorId, "handover_accepted", "assignedBy", previous?.username ?? "", "");
+  if (dropsAgent) {
+    await logActivity(db, projectId, taskId, actorId, "updated", "agent", await storedAgentName(db, current.agent), "");
+  }
   return { ok: true, data: accepted as ITask };
 }
 

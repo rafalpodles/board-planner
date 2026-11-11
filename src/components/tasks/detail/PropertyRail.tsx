@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import {
   ApiCustomField,
   ApiProjectCategory,
@@ -149,8 +149,8 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
         </>
       ) : (
         <>
-          The PM handed it to {ctx.assigneeName} on somebody else&apos;s instruction; waiting for
-          them to accept it.
+          The PM handed it over on somebody else&apos;s instruction; waiting for {ctx.assigneeName}{" "}
+          to accept it.
         </>
       );
     case "assigned-by-someone-else": {
@@ -158,9 +158,7 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
       return ctx.viewerIsAssignee ? (
         <>{by} handed this to you — accept it to run it on your machine.</>
       ) : (
-        <>
-          {by} handed it to {ctx.assigneeName}; waiting for them to accept it.
-        </>
+        <>Waiting for {ctx.assigneeName} to accept it — their machine won&apos;t run it until they do.</>
       );
     }
     case "blocked": {
@@ -545,7 +543,7 @@ interface PropertyRailProps {
   projectKey?: string | null;
   /** Only an instance admin lifts a lock on agent runs */
   viewerIsInstanceAdmin?: boolean;
-  /** The assignee taking on a hand-over somebody else made; resolves once the task is read again */
+  /** The assignee taking on a hand-over somebody else made; resolves once the task has been read again */
   onAcceptHandover: () => Promise<void>;
   /**
    * Whoever is reading. Required rather than optional: a call site that forgot it would silently
@@ -609,6 +607,7 @@ export function PropertyRail({
    * re-sending the assignee already stored is allowed, and only a move to somebody who cannot
    * reach the board is refused. Offering a control that 400s on click would be worse than either.
    */
+  const handoverLive = useRef<HTMLDivElement>(null);
   const shown = assigneeToShow(users, draft.assignee, stored.assignee);
   const offeredUsers =
     shown && !users.some((u) => u.username === shown.username) ? [...users, shown] : users;
@@ -773,8 +772,9 @@ export function PropertyRail({
           </p>
         )}
 
-        {/* Always rendered, so a screen reader hears the reasons change as the task is fixed */}
-        <div aria-live="polite" data-testid="handover-live">
+        {/* Always rendered, so a screen reader hears the reasons change as the task is fixed. Focus
+            lands here after Accept, since the button it was on is gone */}
+        <div aria-live="polite" data-testid="handover-live" ref={handoverLive} tabIndex={-1} className="outline-none">
           <HandoverNotice
             handover={handover}
             awaiting={awaiting}
@@ -784,7 +784,10 @@ export function PropertyRail({
             viewer={currentUsername}
             viewerIsInstanceAdmin={viewerIsInstanceAdmin}
             projectKey={projectKey}
-            onAccept={onAcceptHandover}
+            onAccept={async () => {
+              await onAcceptHandover();
+              handoverLive.current?.focus();
+            }}
           />
         </div>
         {!notOffered && <HandoverRules />}

@@ -198,6 +198,11 @@ export async function eraseAccountTraces(db: ScopedDb, user: ErasedAccount): Pro
   // The assignee is written into history as a username, not as a reference
   await db.ActivityLog.updateMany({ field: "assignee", oldValue: user.username }, { $set: { oldValue: label } });
   await db.ActivityLog.updateMany({ field: "assignee", newValue: user.username }, { $set: { newValue: label } });
+  // And whoever handed over a task somebody then accepted (BP-420)
+  await db.ActivityLog.updateMany(
+    { action: "handover_accepted", oldValue: user.username },
+    { $set: { oldValue: label } }
+  );
 
   await scrubInstanceAudit(db, user, label);
   await scrubBoardAccessAudit(db, user, label);
