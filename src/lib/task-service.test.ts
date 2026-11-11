@@ -5214,7 +5214,7 @@ describe("what a rewritten updateTask still tells the assignee", () => {
     it("says nothing when the assignee handed it to themselves", async () => {
       agentLands("u2");
 
-      await updateTask(db, "p1", "t1", { agent: AGENT_ID }, "actor");
+      expect(await updateTask(db, "p1", "t1", { agent: AGENT_ID }, "actor")).toMatchObject({ ok: true });
 
       expect(createNotificationsMock).not.toHaveBeenCalled();
     });
@@ -5222,7 +5222,7 @@ describe("what a rewritten updateTask still tells the assignee", () => {
     it("says nothing when the assignee chooses the agent themselves", async () => {
       agentLands("actor");
 
-      await updateTask(db, "p1", "t1", { agent: AGENT_ID }, "u2");
+      expect(await updateTask(db, "p1", "t1", { agent: AGENT_ID }, "u2")).toMatchObject({ ok: true });
 
       expect(createNotificationsMock).not.toHaveBeenCalled();
     });

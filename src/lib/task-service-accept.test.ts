@@ -56,7 +56,9 @@ function fakeDb(
       findById: vi.fn((id: string) => ({ lean: async () => ({ username: id.replace("u-", "") }) })),
     },
     Agent: {
-      findById: vi.fn((id: string) => ({ lean: async () => agents[id] ?? null })),
+      findById: vi.fn((id: string, projection?: string) => ({
+        lean: async () => (agents[id] ? picked(agents[id], projection) : null),
+      })),
     },
   };
   return { db, doc, writes };
@@ -182,6 +184,19 @@ describe("acceptHandover", () => {
     expect((await accept(db)).ok).toBe(true);
     expect(doc.agent).toBe("ag-1");
     expect(logActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses when the agent is swapped between the read and the write", async () => {
+    const { db, writes } = fakeDb(
+      { assignee: BARTEK, assignedBy: ANIA, agent: "ag-1" },
+      {
+        agents: { "ag-1": { scope: "project", owner: null, name: "Board" } },
+        beforeWrite: (d) => Object.assign(d, { agent: "ag-other" }),
+      }
+    );
+
+    expect(await accept(db)).toEqual({ ok: false, error: CHANGED_HANDS, status: 409 });
+    expect(writes).toHaveLength(0);
   });
 
   it("answers as accepted when a second click landed first", async () => {
