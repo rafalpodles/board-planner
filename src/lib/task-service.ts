@@ -1473,6 +1473,71 @@ export async function updateTask(
   return { ok: true, data: task as ITask };
 }
 
+export const NOT_THE_ASSIGNEE = "only the task's assignee can accept its hand-over";
+export const CHANGED_HANDS = "the task changed hands while you were accepting it — reload it and look again";
+
+function handoverIsTheirs(
+  task: { assignedBy?: unknown; pmAssignedFor?: unknown },
+  actorId: string,
+  pm: string | null
+): boolean {
+  const assigner = refId(task.assignedBy);
+  return assigner === actorId || (!!pm && assigner === pm && refId(task.pmAssignedFor) === actorId);
+}
+
+/**
+ * The assignee taking on work somebody else handed them, which is what a claim then runs (BP-420).
+ * Its own intent rather than a field on the PUT: every writer that echoes the assignee back would
+ * otherwise stamp consent nobody gave. Compared and set against exactly what was read, so a
+ * reassignment landing in between is refused instead of accepted on the new assignee's behalf.
+ */
+export async function acceptHandover(
+  db: ScopedDb,
+  projectId: string,
+  taskId: string,
+  actorId: string
+): Promise<TaskServiceResult> {
+  await connectDB();
+  const current = await db.Task.findOne({ _id: taskId, project: projectId }, "assignee assignedBy pmAssignedFor").lean();
+  if (!current) return { ok: false, error: "Task not found", status: 404 };
+  if (refId(current.assignee) !== actorId) return { ok: false, error: NOT_THE_ASSIGNEE, status: 403 };
+
+  const pm = await pmUserId(db);
+  const reread = () => db.Task.findOne({ _id: taskId, project: projectId }).populate(taskPopulateFields);
+  if (handoverIsTheirs(current, actorId, pm)) {
+    const task = await reread();
+    return task ? { ok: true, data: task as ITask } : { ok: false, error: "Task not found", status: 404 };
+  }
+
+  const accepted = await db.Task.findOneAndUpdate(
+    {
+      _id: taskId,
+      project: projectId,
+      assignee: actorId,
+      assignedBy: current.assignedBy ?? null,
+      pmAssignedFor: current.pmAssignedFor ?? null,
+    },
+    { $set: { assignedBy: actorId, pmAssignedFor: null } },
+    { returnDocument: "after" }
+  ).populate(taskPopulateFields);
+
+  if (!accepted) {
+    const now = await db.Task.findOne({ _id: taskId, project: projectId }, "assignee assignedBy pmAssignedFor").lean();
+    if (!now) return { ok: false, error: "Task not found", status: 404 };
+    if (refId(now.assignee) === actorId && handoverIsTheirs(now, actorId, pm)) {
+      const task = await reread();
+      if (task) return { ok: true, data: task as ITask };
+    }
+    return { ok: false, error: CHANGED_HANDS, status: 409 };
+  }
+
+  const previous = current.assignedBy
+    ? await db.User.findById(current.assignedBy, "username").lean<{ username?: string } | null>()
+    : null;
+  await logActivity(db, projectId, taskId, actorId, "handover_accepted", "assignedBy", previous?.username ?? "", "");
+  return { ok: true, data: accepted as ITask };
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function addComment(
   db: ScopedDb,

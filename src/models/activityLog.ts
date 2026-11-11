@@ -17,6 +17,7 @@ const ACTIONS = [
   "link_removed",
   "archived",
   "unarchived",
+  "handover_accepted",
   "criterion_added",
   "criterion_removed",
   "criterion_edited",

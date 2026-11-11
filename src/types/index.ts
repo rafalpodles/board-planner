@@ -1728,6 +1728,8 @@ export type ActivityAction =
   // Taken off every list, and put back
   | "archived"
   | "unarchived"
+  // The assignee consented to a hand-over somebody else made; `oldValue` is who made it (BP-420)
+  | "handover_accepted"
   // `field` holds the criterion's id, so an edit is folded per criterion rather than per list
   | CriterionAction;
 
