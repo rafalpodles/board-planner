@@ -88,6 +88,23 @@ variable the worker does:
 CP_STATE_DIR=$HOME/cp-rig/state ".build/Board Planner Worker.app/Contents/MacOS/CPMenubar"
 ```
 
+## Connect from the terminal
+
+The first-run window as one command, for a coding agent setting a Mac up (BP-1153):
+
+```
+"/Applications/Board Planner Worker.app/Contents/MacOS/CPMenubar" --connect https://acme.board-planner.com [--folder ~/board-planner]
+```
+
+It runs the machine checks, prints the approval link and opens it, waits for a person to approve the
+Mac on the board, clones the project they chose into the folder (default `~/board-planner`), and opens
+the app, which starts the worker. Every line is meant to be read by an agent: `✓`/`✗` per check, the
+link and code, then `✓ Connected.` and exit 0, or a `✗` line saying what to fix and exit 1. A Mac
+already connected to that board exits 0 without asking again; one connected to another board is
+refused. An open setup window is closed first, because its state would overwrite the command's. Only
+a copy inside an app bundle does that: a copy outside one shares no settings with the app and refuses
+instead.
+
 ## Layout
 
 `CPMenubarCore` is the logic and holds no SwiftUI import, which is what makes it testable:
