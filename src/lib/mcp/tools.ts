@@ -615,7 +615,9 @@ export function registerPlannerTools(server: McpServer): void {
           .describe(
             "Which agent runs this task on a machine, by name. Choosing one is the hand-over: the " +
               "machine belonging to the task's assignee takes it and runs that agent, and only when " +
-              "that person assigned it to themselves. Empty string means nobody — the default, and " +
+              "that person assigned it to themselves or accepted it in the app — work somebody else " +
+              "hands over waits for its assignee there, and the answer's `handover` says what is in " +
+              "the way. Empty string means nobody — the default, and " +
               "what a task somebody is doing by hand looks like. A project agent may be chosen by " +
               "anyone who can edit the task; a personal agent only by its owner, and only onto their " +
               "own task (refused otherwise, dropped again when the task is handed on); a global " +
@@ -741,8 +743,12 @@ export function registerPlannerTools(server: McpServer): void {
       // everything else, before the lookup
       if (Object.keys(data).length === 0) throw new Error(`update_task ${NOTHING_TO_CHANGE}`);
 
-      const updated = await client.updateTask(projectId, taskId, data);
-      return json(minimal ? summarised(client, updated as { taskNumber?: number }, taskKey) : updated);
+      const updated = (await client.updateTask(projectId, taskId, data)) as { taskNumber?: number; handover?: unknown };
+      if (!minimal) return json(updated);
+      // The verdict rides with the summary too: a hand-over that waits on somebody is the one thing
+      // a caller writing many tasks at once must not be left to discover later
+      const summary = summarised(client, updated, taskKey);
+      return json(updated.handover ? { ...summary, handover: updated.handover } : summary);
     }
   );
 
