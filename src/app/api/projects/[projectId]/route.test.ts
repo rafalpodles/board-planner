@@ -1347,6 +1347,50 @@ describe("PUT /api/projects/[projectId] PM settings", () => {
     ]);
   });
 
+  // BP-1150: a save naming part of the schedule writes that part, and an admin's save that leaves the
+  // switch out does not write it back from the read
+  it("writes only the schedule keys sent", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    reads(stored("old"));
+    writes({ _id: PROJECT_ID, pm: stored("old") });
+
+    const res = await PUT(putRequest({ pm: { autonomy: { reviewHour: 11 } } }), ctx());
+
+    expect(res.status).toBe(200);
+    const [, update] = projectFindOneAndUpdate.mock.calls[0];
+    expect(update).toEqual({ "pm.autonomy.reviewHour": 11 });
+  });
+
+  it("fills the schedule keys a board stored before the schedule existed, so its reviews can run", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    reads({ enabled: true });
+    writes({ _id: PROJECT_ID, pm: { enabled: true } });
+
+    const res = await PUT(putRequest({ pm: { autonomy: { dailyReview: true } } }), ctx());
+
+    expect(res.status).toBe(200);
+    const [, update] = projectFindOneAndUpdate.mock.calls[0];
+    expect(Object.keys(update).sort()).toEqual([
+      "pm.autonomy.dailyReview",
+      "pm.autonomy.handleNeedsHumanReview",
+      "pm.autonomy.reviewHour",
+      "pm.autonomy.reviewIntervalHours",
+      "pm.autonomy.timezone",
+    ]);
+    expect(update["pm.autonomy.dailyReview"]).toBe(true);
+  });
+
+  it("still refuses a schedule key out of range when only that key is sent", async () => {
+    getAuthUser.mockResolvedValue(OWNER);
+    check.mockResolvedValue(true);
+    reads(stored("old"));
+
+    const res = await PUT(putRequest({ pm: { autonomy: { reviewHour: 24 } } }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["the switch", { enabled: true }],
     ["the model", { model: "x/y" }],

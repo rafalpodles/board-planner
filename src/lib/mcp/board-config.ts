@@ -12,10 +12,6 @@ export const COLOUR_PARAM = z
 
 const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
 
-/** The same word the app's screens carry for what these tools leave to a person */
-export const ADD_ONLY =
-  "This only ever adds: removing or renaming configuration can erase what tasks hold, so that stays in the app.";
-
 /** The board's own owners and admins, as the Board settings screen has it; the route enforces the same */
 export function requireOwner(project: McpProject, projectKey: string, what: string): void {
   if (!project.canAdmin) {

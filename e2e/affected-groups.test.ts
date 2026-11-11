@@ -118,7 +118,10 @@ describe("computeAffectedGroups", () => {
     ]) {
       expect(computeAffectedGroups([file])).toEqual(["automation", "a11y"]);
     }
-    expect(computeAffectedGroups(["src/app/api/users/me/machines/route.ts"])).toEqual(["automation"]);
+  });
+
+  it("sends the machine list's route to project as well, whose MCP spec reads it with a token (BP-1150)", () => {
+    expect(computeAffectedGroups(["src/app/api/users/me/machines/route.ts"])).toEqual(["project", "automation"]);
   });
 
   it("adds the accessibility sweep for a file that renders a screen, and only for one", () => {
