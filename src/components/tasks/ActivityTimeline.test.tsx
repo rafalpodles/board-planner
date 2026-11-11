@@ -79,6 +79,17 @@ describe("ActivityTimeline", () => {
     await waitFor(() => expect(screen.getByText(`Owner Name ${sentence}`)).toBeTruthy());
   });
 
+  // BP-420. The consent a machine run rests on, so the record names who gave it and to whom
+  it.each([
+    ["kmk", "accepted the hand-over from kmk"],
+    ["pm", "accepted the hand-over the PM made"],
+    ["", "accepted the hand-over"],
+  ])("says who accepted a hand-over and who had made it (%s)", async (from, sentence) => {
+    api.get.mockResolvedValue([{ ...log, action: "handover_accepted", field: "assignedBy", oldValue: from, newValue: "" }]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(`Owner Name ${sentence}`)).toBeTruthy());
+  });
+
   it("counts a rewrite of many criteria in one row", async () => {
     api.get.mockResolvedValue([{ ...log, action: "updated", field: "checklist", newValue: "37" }]);
     render(<ActivityTimeline projectId="TP" taskId="t1" />);

@@ -7,7 +7,7 @@ import { LoadFailed } from "@/components/ui/LoadFailed";
 import { ApiActivityLog, DELETED_AGENT, LinkDirection, STATUS_LABELS, TaskStatus } from "@/types";
 import { timeAgo } from "@/lib/time";
 import { describeLinkChange } from "@/lib/link-phrasing";
-import { withAiMark } from "@/lib/pm/username";
+import { PM_USERNAME, withAiMark } from "@/lib/pm/username";
 import { nameOf, peopleByUsername, type MentionablePerson } from "@/lib/mention-names";
 import { SourceBadge } from "@/components/ui/SourceBadge";
 
@@ -53,6 +53,8 @@ function actionIcon(action: string) {
       return "▣";
     case "unarchived":
       return "↺";
+    case "handover_accepted":
+      return "✓";
     case "criterion_added":
       return "+";
     case "criterion_removed":
@@ -206,6 +208,11 @@ function describeAction(log: ApiActivityLog, people: ReadonlyMap<string, Mention
       return `${userName} archived this task`;
     case "unarchived":
       return `${userName} restored this task from the archive`;
+    case "handover_accepted":
+      if (log.oldValue === PM_USERNAME) return `${userName} accepted the hand-over the PM made`;
+      return log.oldValue
+        ? `${userName} accepted the hand-over from ${assigneeLabel(log.oldValue, people)}`
+        : `${userName} accepted the hand-over`;
     // Whole, not clipped: an edit past the sixtieth character would read as a change to nothing
     case "criterion_added":
       return `${userName} added criterion “${log.newValue}”`;

@@ -308,7 +308,7 @@ function TaskDetailView({
   const [historyWrites, setHistoryWrites] = useState(0);
   const wroteHistory = () => setHistoryWrites((n) => n + 1);
 
-  const { draft, set, autoSaveState, autoSaveError, retry, resend, savedCount } = useTaskEditor(
+  const { draft, set, autoSaveState, autoSaveError, retry, savedCount } = useTaskEditor(
     projectId,
     task,
     onRefused,
@@ -338,16 +338,20 @@ function TaskDetailView({
   const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);
   const projectDefaultAgent = project.worker?.agent ? String(project.worker.agent) : undefined;
 
-  // Forces the write the diff-based auto-save would drop, which is how "assign it again" repairs a
-  // task whose assigner was never recorded. Reloaded straight after: that write is what clears the
-  // notice asking for it, and without this the reader repairs the task and watches it stay.
-  const repairAssigner = useCallback(
-    async (username: string | null) => {
-      await resend("assignee", username);
-      onReload();
-    },
-    [resend, onReload]
-  );
+  // Reloaded either way: on success that clears the notice asking for it, and a refusal means the
+  // task changed hands underneath this view, which is then showing somebody else's hand-over
+  const acceptHandover = useCallback(async () => {
+    try {
+      await api.post(`/api/projects/${projectId}/tasks/${task._id}/accept`, {});
+      wroteHistory();
+      emitBoardRefresh(projectId);
+    } catch (err) {
+      if (onRefused(err)) return;
+      toast(err instanceof Error && err.message ? err.message : "Failed to accept the hand-over", "error");
+    }
+    onReload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, projectId, task._id, onRefused, onReload, toast]);
 
   const handleFileUpload = useCallback(
     async (file: File): Promise<string> => {
@@ -722,7 +726,7 @@ function TaskDetailView({
               board={readiness}
               projectKey={project.key}
               viewerIsInstanceAdmin={isAdmin}
-              onRepairAssigner={repairAssigner}
+              onAcceptHandover={acceptHandover}
               currentUsername={currentUser?.username ?? null}
               categories={project.categories || []}
               customFields={project.customFields || []}
@@ -770,7 +774,7 @@ function TaskDetailView({
           board={readiness}
           projectKey={project.key}
           viewerIsInstanceAdmin={isAdmin}
-          onRepairAssigner={repairAssigner}
+          onAcceptHandover={acceptHandover}
           currentUsername={currentUser?.username ?? null}
           categories={project.categories || []}
           customFields={project.customFields || []}
