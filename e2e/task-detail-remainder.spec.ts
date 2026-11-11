@@ -308,19 +308,19 @@ test.describe("the handover notice", () => {
   test("assigner unrecorded", async ({ page }) => {
     await openTask(page, UNRECORDED_ASSIGNER_TASK_NUMBER, "admin");
     await expect(notice(page)).toHaveAttribute("data-reason", "assigner-unrecorded");
-    await expect(notice(page)).toContainText("assigning it to themselves again");
+    await expect(notice(page)).toContainText("accept it to run it on your machine");
   });
 
   test("PM assigned it for someone else", async ({ page }) => {
     await openTask(page, PM_FOR_SOMEONE_ELSE_TASK_NUMBER, "admin");
     await expect(notice(page)).toHaveAttribute("data-reason", "pm-assigned-for-someone-else");
-    await expect(notice(page)).toContainText("the person who asked for it");
+    await expect(notice(page)).toContainText("handed this to you on somebody else's instruction");
   });
 
   test("assigned by someone else", async ({ page }) => {
     await openTask(page, ASSIGNED_BY_SOMEONE_ELSE_TASK_NUMBER, "admin");
     await expect(notice(page)).toHaveAttribute("data-reason", "assigned-by-someone-else");
-    await expect(notice(page)).toContainText("E2E Member assigned it");
+    await expect(notice(page)).toContainText("E2E Member handed this to you");
   });
 });
 

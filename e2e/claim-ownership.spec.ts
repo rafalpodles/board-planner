@@ -179,8 +179,8 @@ test.describe("what a claim requires", () => {
     ).toBeNull();
   });
 
-  // Somebody else assigning you work is a proposal, and the surface for accepting one does not
-  // exist yet — refused rather than run unattended, even though the assignee names the right person
+  // Somebody else assigning you work is a proposal until you accept it on the task (BP-420) —
+  // refused rather than run unattended, even though the assignee names the right person
   test("a task assigned to the owner by somebody else is not taken", async () => {
     await addTask({ assignee: OWNER, assignedBy: MEMBER_ID });
 
