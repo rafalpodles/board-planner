@@ -24,6 +24,10 @@ and agents work the same tasks under the same rules.
 
 <br><br>
 
+<a href="https://board-planner.com/demo/"><img src="docs/images/demo.png" alt="Watch it in 32 seconds: a coding agent edited the CI workflow and the worker refused to push it" width="100%"></a>
+
+<br><br>
+
 <img src="docs/images/board.gif" alt="The board, a task opened from it, and two acceptance criteria ticked off" width="100%">
 
 </div>
