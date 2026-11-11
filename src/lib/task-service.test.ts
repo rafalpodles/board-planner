@@ -5209,6 +5209,10 @@ describe("what a rewritten updateTask still tells the assignee", () => {
       const [, notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
       expect(notification.recipientIds).toEqual(["u2"]);
       expect(notification.title).toBe("TP-4 handed to you — accept it to run it on your machine");
+      // Whoever chose the agent did not necessarily make the assignment
+      expect(notification.email.taskMeta).toBe(
+        "Test Project · agent chosen by Ada Actor · accept it on the task to run it on your machine"
+      );
     });
 
     it("says nothing when the assignee handed it to themselves", async () => {

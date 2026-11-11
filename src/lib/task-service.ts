@@ -1479,7 +1479,7 @@ export async function updateTask(
         ],
         taskMeta: [
           project?.name,
-          `assigned by ${actor}`,
+          agentArrivesOnAHandover ? `agent chosen by ${actor}` : `assigned by ${actor}`,
           waitsForAccept ? "accept it on the task to run it on your machine" : "",
         ]
           .filter(Boolean)
