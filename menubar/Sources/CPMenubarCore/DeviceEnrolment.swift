@@ -50,6 +50,7 @@ public struct DeviceEnrolmentClient: Sendable {
         guard let url = URL(string: apiURL + path) else { throw DeviceEnrolmentError.malformed }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 15
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("1", forHTTPHeaderField: "X-CP-Protocol")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
