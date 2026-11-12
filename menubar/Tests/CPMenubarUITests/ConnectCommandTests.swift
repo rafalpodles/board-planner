@@ -283,6 +283,26 @@ final class ConnectCommandTests: XCTestCase {
         XCTAssertEqual(rig.saved.last?.deviceCode, "dev", "the app's approval is not abandoned under it")
     }
 
+    func testAnAppOpenedJustBeforeTheApprovalIsClosedAndTheCredentialKept() async {
+        let rig = Rig(polls: [.approved(workerID: "w", credential: "c", heartbeatMs: 1, repositoryURL: "https://github.com/acme/api.git", projectKey: "PAY")])
+        rig.openedAfterPolls = 1
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 0)
+        XCTAssertNotNil(rig.identity)
+        XCTAssertTrue(rig.events.contains("close"))
+    }
+
+    func testOriginsCompareWithoutTheirDefaultPorts() {
+        XCTAssertTrue(ConnectCommand.sameOrigin("https://acme.example.com:443/enrol/X", as: "https://acme.example.com"))
+        XCTAssertEqual(try ConnectCommand.boardOrigin("https://acme.example.com:443").get(), "https://acme.example.com")
+        XCTAssertFalse(ConnectCommand.sameOrigin("https://acme.example.com:8443/enrol/X", as: "https://acme.example.com"))
+    }
+
+    func testLineSeparatorsAreCleanedToo() {
+        XCTAssertFalse(ConnectCommand.clean("a\u{2028}b\u{2029}c\nd").contains { $0.isNewline })
+    }
+
     func testAnApprovalTakenOverIsNotOverwritten() async {
         let rig = Rig(polls: [.finished])
         rig.takenOverAfterPolls = 1
@@ -349,6 +369,7 @@ private final class Rig: @unchecked Sendable {
     var userCode = "ABCD-EFGH"
     var openedDuringWait = false
     var beginFails = false
+    var openedAfterPolls: Int?
     var takenOverAfterPolls: Int?
     var staleWorker = false
     var stateAfterClose: OnboardingState?
@@ -394,7 +415,13 @@ private final class Rig: @unchecked Sendable {
             save: { next in self.locked { self.state = next; self.saved.append(next); self.events.append("save") } },
             insideTheApp: self.insideTheApp,
             stateDirectoryOnlyInShell: self.shellStateDirectory,
-            otherInstanceRunning: { self.locked { self.otherRunning || (self.openedDuringWait && self.polled > 0) } },
+            otherInstanceRunning: {
+                self.locked {
+                    if self.events.contains("close") { return false }
+                    if let after = self.openedAfterPolls { return self.polled >= after }
+                    return self.otherRunning || (self.openedDuringWait && self.polled > 0)
+                }
+            },
             closeOtherInstance: {
                 self.locked {
                     self.events.append("close")

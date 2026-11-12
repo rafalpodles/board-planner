@@ -127,18 +127,22 @@ enum ConnectCommand {
             return .failure(Problem(text: "\(clean(normalised)) is not https. Only a board on this Mac may use plain http."))
         }
         let shownHost = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
-        return .success("\(scheme)://\(shownHost)" + (parts.port.map { ":\($0)" } ?? ""))
+        let defaultPort = (scheme == "https" && parts.port == 443) || (scheme == "http" && parts.port == 80)
+        return .success("\(scheme)://\(shownHost)" + (defaultPort ? "" : parts.port.map { ":\($0)" } ?? ""))
     }
 
     static func sameOrigin(_ link: String, as board: String) -> Bool {
-        guard let parts = URLComponents(string: link), let scheme = parts.scheme, let host = parts.host else { return false }
+        guard let parts = URLComponents(string: link), let scheme = parts.scheme?.lowercased(), let host = parts.host
+        else { return false }
         let shownHost = host.contains(":") && !host.hasPrefix("[") ? "[\(host.lowercased())]" : host.lowercased()
-        return "\(scheme.lowercased())://\(shownHost)" + (parts.port.map { ":\($0)" } ?? "") == board
+        let defaultPort = (scheme == "https" && parts.port == 443) || (scheme == "http" && parts.port == 80)
+        let port = defaultPort ? "" : (parts.port.map { ":\($0)" } ?? "")
+        return "\(scheme)://\(shownHost)\(port)" == board
     }
 
     /// Text from the board or from git, made safe to print to an agent that reads every line
     static func clean(_ text: String) -> String {
-        let kept = text.unicodeScalars.map { CharacterSet.controlCharacters.contains($0) ? " " : String($0) }.joined()
+        let kept = text.unicodeScalars.map { CharacterSet.controlCharacters.union(.newlines).contains($0) ? " " : String($0) }.joined()
         return kept.count > 400 ? String(kept.prefix(400)) + "…" : kept
     }
 
@@ -223,7 +227,8 @@ enum ConnectCommand {
                 return 1
             }
             guard sameOrigin(started.verificationUrl, as: board), isUserCode(started.userCode) else {
-                say("✗ \(board) answered with an approval link or code that is not its own. Nothing was opened.")
+                say("✗ \(board) sent an approval link on another address, \(clean(started.verificationUrl)), or a malformed code. Nothing was opened.")
+                say("If the board is known by another address, run this again with that one.")
                 return 1
             }
             state = Onboarding.approvalStarted(
@@ -231,7 +236,7 @@ enum ConnectCommand {
                 verificationURL: started.verificationUrl)
             deps.save(state)
             deviceCode = started.deviceCode
-            intervalMs = max(500, started.intervalMs)
+            intervalMs = min(max(500, started.intervalMs), 10_000)
             say("Approve this Mac in your browser: \(clean(started.verificationUrl))")
             say("It shows the code \(started.userCode). Choose the board it should work on, then Approve.")
             deps.openBrowser(started.verificationUrl)
@@ -277,10 +282,7 @@ enum ConnectCommand {
                 say("✗ The approval was refused or expired. Run this command again for a new code.")
                 return 1
             case .approved(let workerID, let credential, let heartbeatMs, let repositoryURL, let projectKey):
-                guard stillOurs() else {
-                    say("✗ Board Planner Worker took this approval over. Finish in its window.")
-                    return 1
-                }
+                guard takeOverFromApp(deps) else { return 1 }
                 return await finish(
                     state: state, deps: deps, workerID: workerID,
                     identity: WorkerIdentity(workerId: workerID, credential: credential, heartbeatMs: heartbeatMs),
@@ -330,6 +332,7 @@ enum ConnectCommand {
             say("✗ Could not write repos.json: \(error.localizedDescription)")
             return 1
         }
+        guard takeOverFromApp(deps) else { return 1 }
         state = Onboarding.started(state)
         deps.save(state)
         guard deps.openApp() else {
@@ -343,6 +346,17 @@ enum ConnectCommand {
         say("✓ Connected. \(state.workerName) works on \(clean(projectKey)) tasks handed to you, in its own clone at \(clean(path)).")
         say("Board Planner Worker is running in the menu bar.")
         return 0
+    }
+
+    /// An app opened meanwhile holds older state in memory and would write it back, so it goes first
+    private static func takeOverFromApp(_ deps: Deps) -> Bool {
+        guard deps.otherInstanceRunning() else { return true }
+        deps.say("Closing Board Planner Worker, opened while this ran: setup finishes here.")
+        guard deps.closeOtherInstance() else {
+            deps.say("✗ Board Planner Worker did not quit. Quit it from the menu bar, then run this again.")
+            return false
+        }
+        return true
     }
 
     static func describe(_ error: Error) -> String {
@@ -450,6 +464,7 @@ extension ConnectCommand {
                 let git = Process()
                 git.executableURL = URL(fileURLWithPath: state.toolPaths["git"] ?? "/usr/bin/git")
                 git.arguments = ["-C", checkout, "remote", "get-url", "origin"]
+                git.environment = GitSafeEnvironment.apply(to: ProcessInfo.processInfo.environment)
                 let out = Pipe()
                 git.standardOutput = out
                 git.standardError = Pipe()
