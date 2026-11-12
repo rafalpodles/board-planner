@@ -27,7 +27,7 @@ enum ConnectCommand {
         var folder = (home as NSString).appendingPathComponent("board-planner")
         while let flag = rest.first {
             rest.removeFirst()
-            guard flag == "--folder", let value = rest.first, !value.hasPrefix("--") else { return .usage }
+            guard flag == "--folder", let value = rest.first, !value.isEmpty, !value.hasPrefix("--") else { return .usage }
             rest.removeFirst()
             let expanded = (value as NSString).expandingTildeInPath
             folder = URL(fileURLWithPath: expanded, relativeTo: URL(fileURLWithPath: workingDirectory, isDirectory: true))
@@ -42,7 +42,8 @@ enum ConnectCommand {
         var save: @Sendable (OnboardingState) -> Void
         var insideTheApp: Bool
         var otherInstanceRunning: @Sendable () -> Bool
-        var closeOtherInstance: @Sendable () -> Void
+        /// Whether every other instance is gone afterwards
+        var closeOtherInstance: @Sendable () -> Bool
         var makeFolder: @Sendable (String) throws -> Void
         var resolve: @Sendable (String) -> String
         var inspect: @Sendable (String) -> RepositoryInspection
@@ -56,36 +57,52 @@ enum ConnectCommand {
         var writeIdentity: @Sendable (WorkerIdentity) throws -> Void
         var clone: @Sendable (_ state: OnboardingState, _ repositoryURL: String, _ projectKey: String) -> CloneOutcome
         var grant: @Sendable (String) throws -> Void
-        var openApp: @Sendable () -> Void
+        /// Whether the app was launched
+        var openApp: @Sendable () -> Bool
+        var workerListening: @Sendable () async -> Bool
     }
 
     static let unreachablePollLimit = 30
+    static let installedBinary = "\"/Applications/Board Planner Worker.app/Contents/MacOS/CPMenubar\""
 
     static func run(_ options: Options, _ deps: Deps) async -> Int32 {
         let say = deps.say
-        let board = BoardURL.normalise(options.boardURL)
-        var state = deps.load()
-
-        if state.isOnboarded {
-            if BoardURL.normalise(state.apiURL) == board {
-                say("This Mac is already connected to \(board) as \(state.workerName). Nothing to do.")
-                deps.openApp()
-                return 0
-            }
-            say("✗ This Mac is connected to \(state.apiURL), not \(board).")
-            say("To move it, choose Change board in the Board Planner Worker menu, then run this again.")
+        guard deps.insideTheApp else {
+            say("✗ This copy of the command is not inside the app, so it cannot share the app's settings.")
+            say("Run the installed one: \(installedBinary) --connect \(options.boardURL)")
             return 1
         }
+        let board = BoardURL.normalise(options.boardURL)
+        if let answered = alreadyConnected(deps.load(), board: board, deps: deps) { return answered }
 
-        if deps.otherInstanceRunning() {
-            guard deps.insideTheApp else {
-                say("✗ Board Planner Worker is open, and this copy of the command does not share its settings.")
-                say("Run the command from inside the installed app: \"/Applications/Board Planner Worker.app/Contents/MacOS/CPMenubar\" --connect …")
-                return 1
-            }
-            say("Closing the Board Planner Worker setup window: setup continues here.")
-            deps.closeOtherInstance()
+        guard deps.otherInstanceRunning() else { return await connect(options, board: board, deps: deps) }
+        say("Closing the Board Planner Worker setup window: setup continues here.")
+        guard deps.closeOtherInstance() else {
+            say("✗ Board Planner Worker did not quit. Quit it from the menu bar, then run this again.")
+            return 1
         }
+        if let answered = alreadyConnected(deps.load(), board: board, deps: deps) { return answered }
+        let code = await connect(options, board: board, deps: deps)
+        if code != 0 { _ = deps.openApp() }
+        return code
+    }
+
+    private static func alreadyConnected(_ state: OnboardingState, board: String, deps: Deps) -> Int32? {
+        guard state.isOnboarded else { return nil }
+        if BoardURL.normalise(state.apiURL) == board {
+            deps.say("This Mac is already connected to \(board) as \(state.workerName). Nothing to do.")
+            _ = deps.openApp()
+            return 0
+        }
+        deps.say("✗ This Mac is connected to \(state.apiURL), not \(board).")
+        deps.say("To move it, choose Change board in the Board Planner Worker menu, then run this again.")
+        return 1
+    }
+
+    private static func connect(_ options: Options, board: String, deps: Deps) async -> Int32 {
+        let say = deps.say
+        var state = deps.load()
+        let resumable = Onboarding.resumesApproval(state) && BoardURL.normalise(state.apiURL) == board
 
         do {
             try deps.makeFolder(options.folder)
@@ -121,33 +138,45 @@ enum ConnectCommand {
         state = Onboarding.folderChosen(state, path: folder)
         deps.save(state)
 
-        let started: DeviceEnrolmentStart
-        do {
-            started = try await deps.begin(board, name, deps.host)
-        } catch {
-            say("✗ Could not reach \(board): \(error.localizedDescription)")
-            return 1
+        let deviceCode: String
+        let intervalMs: Int
+        if resumable {
+            deviceCode = state.deviceCode
+            intervalMs = DeviceEnrolmentStart.defaultIntervalMs
+            say("Still waiting for the approval started earlier: \(state.verificationURL)")
+            say("It shows the code \(state.userCode). Choose the board it should work on, then Approve.")
+            deps.openBrowser(state.verificationURL)
+        } else {
+            let started: DeviceEnrolmentStart
+            do {
+                started = try await deps.begin(board, name, deps.host)
+            } catch {
+                say("✗ Could not reach \(board): \(describe(error))")
+                return 1
+            }
+            state = Onboarding.approvalStarted(
+                state, deviceCode: started.deviceCode, userCode: started.userCode,
+                verificationURL: started.verificationUrl)
+            deps.save(state)
+            deviceCode = started.deviceCode
+            intervalMs = started.intervalMs
+            say("Approve this Mac in your browser: \(started.verificationUrl)")
+            say("It shows the code \(started.userCode). Choose the board it should work on, then Approve.")
+            deps.openBrowser(started.verificationUrl)
         }
-        state = Onboarding.approvalStarted(
-            state, deviceCode: started.deviceCode, userCode: started.userCode,
-            verificationURL: started.verificationUrl)
-        deps.save(state)
-
-        say("Approve this Mac in your browser: \(started.verificationUrl)")
-        say("It shows the code \(started.userCode). Choose the board it should work on, then Approve.")
-        deps.openBrowser(started.verificationUrl)
+        say("Waiting for the approval. If this command is stopped, run it again: it picks the same code up.")
 
         var unreachable = 0
         while true {
-            await deps.sleep(started.intervalMs)
+            await deps.sleep(intervalMs)
             let result: DeviceEnrolmentPoll
             do {
-                result = try await deps.poll(board, started.deviceCode)
+                result = try await deps.poll(board, deviceCode)
                 unreachable = 0
             } catch {
                 unreachable += 1
                 if unreachable >= unreachablePollLimit {
-                    say("✗ Lost the connection to \(board) while waiting: \(error.localizedDescription)")
+                    say("✗ Lost the connection to \(board) while waiting: \(describe(error))")
                     say("Run this command again once it is reachable.")
                     return 1
                 }
@@ -163,7 +192,7 @@ enum ConnectCommand {
                 say("✗ The approval was refused or expired. Run this command again for a new code.")
                 return 1
             case .approved(let workerID, let credential, let heartbeatMs, let repositoryURL, let projectKey):
-                return finish(
+                return await finish(
                     state: state, deps: deps, workerID: workerID,
                     identity: WorkerIdentity(workerId: workerID, credential: credential, heartbeatMs: heartbeatMs),
                     repositoryURL: repositoryURL, projectKey: projectKey)
@@ -174,7 +203,7 @@ enum ConnectCommand {
     private static func finish(
         state approvedState: OnboardingState, deps: Deps, workerID: String, identity: WorkerIdentity,
         repositoryURL: String, projectKey: String
-    ) -> Int32 {
+    ) async -> Int32 {
         let say = deps.say
         var state = approvedState
         do {
@@ -203,10 +232,28 @@ enum ConnectCommand {
             }
             state = Onboarding.started(state)
             deps.save(state)
-            deps.openApp()
+            guard deps.openApp() else {
+                say("✗ Connected, but Board Planner Worker would not open. Open it from Applications to start the worker.")
+                return 1
+            }
+            guard await deps.workerListening() else {
+                say("✗ Connected, but the worker did not start. Open Board Planner Worker in the menu bar to see why.")
+                return 1
+            }
             say("✓ Connected. \(state.workerName) works on \(projectKey) tasks handed to you, in its own clone at \(path).")
             say("Board Planner Worker is running in the menu bar.")
             return 0
+        }
+    }
+
+    static func describe(_ error: Error) -> String {
+        switch error {
+        case DeviceEnrolmentError.badResponse(let status):
+            return "it answered HTTP \(status). Is this the board's address, without a path?"
+        case DeviceEnrolmentError.malformed:
+            return "its answer could not be read. Is this the board's address?"
+        default:
+            return error.localizedDescription
         }
     }
 }
@@ -261,12 +308,17 @@ extension ConnectCommand {
             insideTheApp: insideTheApp,
             otherInstanceRunning: { !others().isEmpty },
             closeOtherInstance: {
-                let running = others()
-                running.forEach { $0.terminate() }
-                let deadline = Date().addingTimeInterval(5)
-                while running.contains(where: { !$0.isTerminated }), Date() < deadline {
-                    Thread.sleep(forTimeInterval: 0.1)
+                let pids = others().map(\.processIdentifier)
+                func alive() -> Bool { pids.contains { kill($0, 0) == 0 } }
+                func waitUntilGone(_ seconds: Double) -> Bool {
+                    let deadline = Date().addingTimeInterval(seconds)
+                    while alive(), Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+                    return !alive()
                 }
+                others().forEach { $0.terminate() }
+                if waitUntilGone(5) { return true }
+                others().forEach { $0.forceTerminate() }
+                return waitUntilGone(3)
             },
             makeFolder: { path in
                 try FileManager.default.createDirectory(
@@ -299,12 +351,21 @@ extension ConnectCommand {
                 try file.write(repos)
             },
             openApp: {
-                guard insideTheApp else { return }
+                CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
                 let open = Process()
                 open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
                 open.arguments = [Bundle.main.bundlePath]
-                try? open.run()
+                guard (try? open.run()) != nil else { return false }
                 open.waitUntilExit()
+                return open.terminationStatus == 0
+            },
+            workerListening: {
+                let client = SocketClient(socketPath: SocketClient.defaultSocketPath(), transport: POSIXTransport())
+                for _ in 0..<40 {
+                    if (try? await client.status()) != nil { return true }
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
+                return false
             }
         )
     }

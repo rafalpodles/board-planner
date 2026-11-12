@@ -21,6 +21,7 @@ final class ConnectCommandTests: XCTestCase {
         XCTAssertEqual(ConnectCommand.parse(["app", "--connect", "--folder", "x"], home: "/h", workingDirectory: "/"), .usage)
         XCTAssertEqual(ConnectCommand.parse(["app", "--connect", "https://b", "--folder"], home: "/h", workingDirectory: "/"), .usage)
         XCTAssertEqual(ConnectCommand.parse(["app", "--connect", "https://b", "--repo", "x"], home: "/h", workingDirectory: "/"), .usage)
+        XCTAssertEqual(ConnectCommand.parse(["app", "--connect", "https://b", "--folder", ""], home: "/h", workingDirectory: "/"), .usage)
         XCTAssertEqual(ConnectCommand.parse(["app", "--preflight"], home: "/h", workingDirectory: "/"), .notRequested)
         XCTAssertEqual(ConnectCommand.parse(["app"], home: "/h", workingDirectory: "/"), .notRequested)
     }
@@ -110,13 +111,86 @@ final class ConnectCommandTests: XCTestCase {
         XCTAssertEqual(rig.events.dropFirst().first, "save")
     }
 
-    func testACopyOutsideTheAppNeverClosesTheRunningApp() async {
+    func testACopyOutsideTheAppRefusesBeforeTouchingAnything() async {
         let rig = Rig(polls: [], otherRunning: true, insideTheApp: false)
         let code = await ConnectCommand.run(rig.options, rig.deps)
 
         XCTAssertEqual(code, 1)
         XCTAssertFalse(rig.events.contains("close"))
         XCTAssertEqual(rig.saved, [])
+        XCTAssertEqual(rig.preflights, 0)
+    }
+
+    func testAnApprovalStartedEarlierIsPickedUpRatherThanStartedAgain() async {
+        var waiting = OnboardingState(step: .awaitingApproval, apiURL: "https://acme.example.com", workerName: "Mac")
+        waiting.deviceCode = "old-device"
+        waiting.userCode = "OLD-CODE"
+        waiting.verificationURL = "https://acme.example.com/enrol/OLDCODE"
+        let rig = Rig(
+            polls: [.approved(workerID: "w1", credential: "c", heartbeatMs: 1, repositoryURL: "https://github.com/acme/api.git", projectKey: "PAY")],
+            initial: waiting)
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 0)
+        XCTAssertEqual(rig.begun, 0)
+        XCTAssertEqual(rig.polledCodes, ["old-device"])
+        XCTAssertEqual(rig.opened, ["https://acme.example.com/enrol/OLDCODE"])
+    }
+
+    func testAnApprovalForAnotherBoardIsNotPickedUp() async {
+        var waiting = OnboardingState(step: .awaitingApproval, apiURL: "https://other.example.com", workerName: "Mac")
+        waiting.deviceCode = "old-device"
+        let rig = Rig(polls: [.finished], initial: waiting)
+        _ = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(rig.begun, 1)
+        XCTAssertEqual(rig.polledCodes, ["dev"])
+    }
+
+    func testAWindowThatWillNotQuitStopsTheCommand() async {
+        let rig = Rig(polls: [], otherRunning: true)
+        rig.closes = false
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 1)
+        XCTAssertEqual(rig.saved, [])
+        XCTAssertEqual(rig.begun, 0)
+    }
+
+    func testTheStateIsReadAgainAfterTheWindowQuits() async {
+        let rig = Rig(polls: [], otherRunning: true)
+        rig.stateAfterClose = OnboardingState(step: .running, apiURL: "https://acme.example.com", workerName: "Mac")
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 0)
+        XCTAssertEqual(rig.begun, 0)
+        XCTAssertEqual(rig.saved, [])
+    }
+
+    func testAFailureAfterClosingTheWindowOpensTheAppAgain() async {
+        let rig = Rig(polls: [], preflightOK: false, otherRunning: true)
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 1)
+        XCTAssertEqual(rig.appOpened, 1)
+    }
+
+    func testAWorkerThatNeverStartsIsNotReportedAsConnected() async {
+        let rig = Rig(polls: [.approved(workerID: "w1", credential: "c", heartbeatMs: 1, repositoryURL: "https://github.com/acme/api.git", projectKey: "PAY")])
+        rig.listening = false
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 1)
+        XCTAssertFalse(rig.lines.contains { $0.hasPrefix("✓ Connected") })
+    }
+
+    func testAnAppThatWillNotOpenIsNotReportedAsConnected() async {
+        let rig = Rig(polls: [.approved(workerID: "w1", credential: "c", heartbeatMs: 1, repositoryURL: "https://github.com/acme/api.git", projectKey: "PAY")])
+        rig.opens = false
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 1)
+        XCTAssertFalse(rig.lines.contains { $0.hasPrefix("✓ Connected") })
     }
 
     func testTheFolderIsStoredWithItsLinksResolved() async {
@@ -146,6 +220,10 @@ private final class Rig: @unchecked Sendable {
     private let otherRunning: Bool
     private let pollFails: Bool
     private let insideTheApp: Bool
+    var closes = true
+    var opens = true
+    var listening = true
+    var stateAfterClose: OnboardingState?
     private var state: OnboardingState
 
     var lines: [String] = []
@@ -158,6 +236,7 @@ private final class Rig: @unchecked Sendable {
     var begun = 0
     var preflights = 0
     var polled = 0
+    var polledCodes: [String] = []
 
     init(
         polls: [DeviceEnrolmentPoll], preflightOK: Bool = true, folderIsCheckout: Bool = false,
@@ -187,7 +266,13 @@ private final class Rig: @unchecked Sendable {
             save: { next in self.locked { self.state = next; self.saved.append(next); self.events.append("save") } },
             insideTheApp: self.insideTheApp,
             otherInstanceRunning: { self.otherRunning },
-            closeOtherInstance: { self.locked { self.events.append("close") } },
+            closeOtherInstance: {
+                self.locked {
+                    self.events.append("close")
+                    if let next = self.stateAfterClose { self.state = next }
+                    return self.closes
+                }
+            },
             makeFolder: { _ in },
             resolve: { $0.replacingOccurrences(of: "/link/", with: "/real/") },
             inspect: { path in
@@ -214,9 +299,10 @@ private final class Rig: @unchecked Sendable {
                     DeviceEnrolmentStart.self,
                     from: Data(#"{"deviceCode":"dev","userCode":"ABCD-EFGH","verificationUrl":"\#(board)/enrol/ABCD-EFGH","intervalMs":1}"#.utf8))
             },
-            poll: { _, _ in
+            poll: { _, code in
                 try self.locked {
                     self.polled += 1
+                    self.polledCodes.append(code)
                     if self.pollFails { throw URLError(.notConnectedToInternet) }
                     return self.polls.isEmpty ? .finished : self.polls.removeFirst()
                 }
@@ -228,7 +314,8 @@ private final class Rig: @unchecked Sendable {
                 self.cloneOutcome ?? .cloned(path: CloneStep.destination(parent: state.checkoutsFolder, projectKey: key))
             },
             grant: { path in self.locked { self.granted.append(path) } },
-            openApp: { self.locked { self.appOpened += 1 } }
+            openApp: { self.locked { self.appOpened += 1; return self.opens } },
+            workerListening: { self.listening }
         )
     }
 }
