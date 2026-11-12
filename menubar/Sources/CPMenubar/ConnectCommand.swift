@@ -395,15 +395,17 @@ extension ConnectCommand {
                 do {
                     _ = try await client.status()
                     return .answered
-                } catch {
+                } catch SocketError.io(let code) where code == ENOENT || code == ECONNREFUSED {
                     return Task.isCancelled ? .silent : .absent
+                } catch {
+                    return .silent
                 }
             }
             group.addTask {
                 try? await Task.sleep(for: .seconds(timeoutSeconds))
                 return .silent
             }
-            let first = await group.next() ?? .absent
+            let first = await group.next() ?? .silent
             group.cancelAll()
             return first
         }

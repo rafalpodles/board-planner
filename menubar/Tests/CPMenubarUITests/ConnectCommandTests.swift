@@ -359,7 +359,7 @@ final class WorkerProbeTests: XCTestCase {
         XCTAssertEqual(probe, .absent)
     }
 
-    func testASocketThatAcceptsAndNeverAnswersIsSilentAndDoesNotHang() async {
+    private func listen() {
         listener = socket(AF_UNIX, SOCK_STREAM, 0)
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
@@ -370,11 +370,30 @@ final class WorkerProbeTests: XCTestCase {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
         XCTAssertEqual(bound, 0)
-        XCTAssertEqual(listen(listener, 4), 0)
+        XCTAssertEqual(Darwin.listen(listener, 4), 0)
+    }
 
+    func testASocketThatAcceptsAndNeverAnswersIsSilentAndDoesNotHang() async {
+        listen()
         let started = Date()
         let probe = await ConnectCommand.probeWorker(socketPath: path, timeoutSeconds: 0.5)
         XCTAssertEqual(probe, .silent)
         XCTAssertLessThan(Date().timeIntervalSince(started), 5)
+    }
+
+    func testASocketAnsweringSomethingElseCountsAsTaken() async {
+        listen()
+        let server = listener
+        Thread.detachNewThread {
+            let peer = accept(server, nil, nil)
+            guard peer >= 0 else { return }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            _ = read(peer, &buffer, buffer.count)
+            let reply = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
+            _ = reply.withCString { write(peer, $0, strlen($0)) }
+            close(peer)
+        }
+        let probe = await ConnectCommand.probeWorker(socketPath: path, timeoutSeconds: 3)
+        XCTAssertEqual(probe, .silent)
     }
 }
