@@ -101,9 +101,14 @@ Mac on the board, clones the project they chose into the folder (default `~/boar
 the app, which starts the worker. Every line is meant to be read by an agent: `✓`/`✗` per check, the
 link and code, then `✓ Connected.` and exit 0, or a `✗` line saying what to fix and exit 1. A Mac
 already connected to that board exits 0 without asking again; one connected to another board is
-refused. An open setup window is closed first, because its state would overwrite the command's. Only
-a copy inside an app bundle does that: a copy outside one shares no settings with the app and refuses
-instead.
+refused. An open setup window is closed first, because its state would overwrite the command's, and so is
+an app opened while the command runs. A copy outside an app bundle shares no settings with the app
+and refuses.
+
+The address comes from a prompt rather than a person, so it is held to an origin: https, plain http
+only on this machine, nothing after the host, and the approval link must be on the same origin.
+Everything the board or git sends is printed with its control characters removed. A command stopped
+while waiting picks the same code up when run again; the wait ends after 20 minutes.
 
 ## Layout
 
