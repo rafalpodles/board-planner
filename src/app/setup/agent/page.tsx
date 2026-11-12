@@ -161,7 +161,7 @@ function AgentSetup() {
         </section>
 
         <section
-          className="min-w-0 rounded-xl border border-border bg-bg-card p-5"
+          className="min-w-0 self-start rounded-xl border border-border bg-bg-card p-5"
           aria-labelledby="progress-title"
           aria-live="polite"
         >

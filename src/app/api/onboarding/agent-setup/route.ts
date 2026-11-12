@@ -8,6 +8,7 @@ import { machineReadinessFor } from "@/lib/worker-service";
 import { claimingMachineIds } from "@/lib/machine-limit";
 import { columnIdsWithRole } from "@/lib/columns";
 import { taskKeyOf } from "@/lib/task-key";
+import { NOT_ARCHIVED } from "@/lib/task-archive";
 import { agentSetupPrompt, agentSetupSteps } from "@/lib/agent-setup";
 import type { ApiAgentSetup } from "@/types";
 
@@ -44,7 +45,7 @@ export const GET = withAuth(async (request, { user, db }) => {
   if (project) {
     const [agentRow, taskRow, workers, claiming] = await Promise.all([
       project.worker?.agent ? db.Agent.findById(project.worker.agent, "_id name").lean() : null,
-      db.Task.findOne({ project: project._id }, "_id taskNumber title").sort({ taskNumber: 1 }).lean(),
+      db.Task.findOne({ project: project._id, ...NOT_ARCHIVED }, "_id taskNumber title").sort({ taskNumber: 1 }).lean(),
       db.Worker.find(
         { owner: user._id },
         "enabled owner lastSeenAt repos preflight command commandIssuedAt commandAckedAt bindingError halt"
