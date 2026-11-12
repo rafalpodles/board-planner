@@ -59,6 +59,8 @@ enum ConnectCommand {
         var grant: @Sendable (String) throws -> Void
         /// Whether the app was launched
         var openApp: @Sendable () -> Bool
+        /// Whether something holds this state directory's socket, answering or not
+        var socketTaken: @Sendable () async -> Bool
         /// Whether a worker answers on this state directory's socket within that many seconds
         var workerAnswers: @Sendable (_ withinSeconds: Int) async -> Bool
     }
@@ -107,8 +109,8 @@ enum ConnectCommand {
 
     private static func connect(_ options: Options, board: String, deps: Deps) async -> Int32 {
         let say = deps.say
-        guard await !deps.workerAnswers(0) else {
-            say("✗ A worker is already running from this Mac's state folder, outside the app.")
+        guard await !deps.socketTaken() else {
+            say("✗ A worker is already running from this Mac's state folder, and the app did not start it.")
             say("Stop it first, then run this again: this command starts the app's own worker.")
             return 1
         }
@@ -370,15 +372,40 @@ extension ConnectCommand {
                 open.waitUntilExit()
                 return open.terminationStatus == 0
             },
+            socketTaken: { await probeWorker() != .absent },
             workerAnswers: { seconds in
-                let client = SocketClient(socketPath: SocketClient.defaultSocketPath(), transport: POSIXTransport())
                 let deadline = Date().addingTimeInterval(TimeInterval(seconds))
                 repeat {
-                    if (try? await client.status()) != nil { return true }
+                    if await probeWorker() == .answered { return true }
                     if Date() >= deadline { return false }
                     try? await Task.sleep(for: .milliseconds(500))
                 } while true
             }
         )
+    }
+
+    enum Probe: Sendable { case answered, silent, absent }
+
+    static func probeWorker(
+        socketPath: String = SocketClient.defaultSocketPath(), timeoutSeconds: Double = 2
+    ) async -> Probe {
+        let client = SocketClient(socketPath: socketPath, transport: POSIXTransport())
+        return await withTaskGroup(of: Probe.self) { group in
+            group.addTask {
+                do {
+                    _ = try await client.status()
+                    return .answered
+                } catch {
+                    return Task.isCancelled ? .silent : .absent
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(timeoutSeconds))
+                return .silent
+            }
+            let first = await group.next() ?? .absent
+            group.cancelAll()
+            return first
+        }
     }
 }

@@ -243,7 +243,6 @@ private final class Rig: @unchecked Sendable {
     var opens = true
     var listening = true
     var staleWorker = false
-    var workerChecks: [Int] = []
     var stateAfterClose: OnboardingState?
     private var state: OnboardingState
 
@@ -336,12 +335,46 @@ private final class Rig: @unchecked Sendable {
             },
             grant: { path in self.locked { self.granted.append(path) } },
             openApp: { self.locked { self.appOpened += 1; return self.opens } },
-            workerAnswers: { seconds in
-                self.locked {
-                    self.workerChecks.append(seconds)
-                    return seconds == 0 ? self.staleWorker : self.listening
-                }
-            }
+            socketTaken: { self.staleWorker },
+            workerAnswers: { _ in self.listening }
         )
+    }
+}
+
+final class WorkerProbeTests: XCTestCase {
+    private var path = ""
+    private var listener: Int32 = -1
+
+    override func setUp() {
+        path = "/tmp/cpq-\(getpid())-\(Int.random(in: 0..<1_000_000)).sock"
+    }
+
+    override func tearDown() {
+        if listener >= 0 { close(listener) }
+        unlink(path)
+    }
+
+    func testNoSocketIsAbsent() async {
+        let probe = await ConnectCommand.probeWorker(socketPath: path, timeoutSeconds: 0.5)
+        XCTAssertEqual(probe, .absent)
+    }
+
+    func testASocketThatAcceptsAndNeverAnswersIsSilentAndDoesNotHang() async {
+        listener = socket(AF_UNIX, SOCK_STREAM, 0)
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &address.sun_path) { raw in
+            _ = path.utf8CString.withUnsafeBytes { raw.copyMemory(from: $0) }
+        }
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        XCTAssertEqual(bound, 0)
+        XCTAssertEqual(listen(listener, 4), 0)
+
+        let started = Date()
+        let probe = await ConnectCommand.probeWorker(socketPath: path, timeoutSeconds: 0.5)
+        XCTAssertEqual(probe, .silent)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5)
     }
 }
