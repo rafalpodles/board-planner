@@ -156,6 +156,9 @@ describe("parseProjectSetup", () => {
 
     it("trims the repository address and refuses one that is not text", () => {
       expect(ok({ repositoryUrl: " https://github.com/acme/web " }).repositoryUrl).toBe("https://github.com/acme/web");
+      expect(ok({ repositoryUrl: "https://alex:ghp_secret@github.com/acme/web.git" }).repositoryUrl).toBe("https://github.com/acme/web.git");
+      expect(ok({ repositoryUrl: "https://x-access-token@github.com/acme/web" }).repositoryUrl).toBe("https://github.com/acme/web");
+      expect(ok({ repositoryUrl: "git@github.com:acme/web.git" }).repositoryUrl).toBe("git@github.com:acme/web.git");
       expect(refusal({ repositoryUrl: { url: "x" } })).toMatch(/string/);
       expect(refusal({ repositoryUrl: "x".repeat(2049) })).toMatch(/valid address/);
       expect(refusal({ repositoryUrl: "https://example.com/a\nb" })).toMatch(/valid address/);

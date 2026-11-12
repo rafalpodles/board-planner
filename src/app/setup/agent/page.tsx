@@ -16,6 +16,7 @@ import type { ApiAgentSetup } from "@/types";
 
 const POLL_MS = 3000;
 const SINCE_KEY = "agent-setup-since";
+const SINCE_KEPT_MS = 24 * 60 * 60_000;
 
 const TITLES: Record<SetupStepKey, string> = {
   agent: "Your coding agent connected",
@@ -27,15 +28,17 @@ const TITLES: Record<SetupStepKey, string> = {
 
 function readSince(): string | null {
   try {
-    return sessionStorage.getItem(SINCE_KEY);
+    const since = localStorage.getItem(SINCE_KEY);
+    return since && Date.now() - new Date(since).getTime() < SINCE_KEPT_MS ? since : null;
   } catch {
     return null;
   }
 }
 
-function keepSince(since: string) {
+function keepSince(since: string | null) {
   try {
-    sessionStorage.setItem(SINCE_KEY, since);
+    if (since) localStorage.setItem(SINCE_KEY, since);
+    else localStorage.removeItem(SINCE_KEY);
   } catch {
     /* a private window keeps nothing; the screen still works for this visit */
   }
@@ -81,11 +84,12 @@ function AgentSetup() {
   }, [load]);
 
   const complete = setup ? agentSetupComplete(setup.steps) : false;
+  const started = setup !== null;
   useEffect(() => {
-    if (complete) return;
+    if (!started) return;
     const timer = setInterval(load, POLL_MS);
     return () => clearInterval(timer);
-  }, [complete, load]);
+  }, [started, load]);
 
   async function copy() {
     if (!setup) return;
@@ -111,6 +115,7 @@ function AgentSetup() {
         assignee: user.username,
         status: target.status,
       });
+      keepSince(null);
       router.push(taskPath(target.projectKey, target.taskNumber));
     } catch (err) {
       toast(err instanceof Error ? err.message : "Could not hand the task over", "error");
@@ -129,6 +134,13 @@ function AgentSetup() {
         Open your coding agent in the repository you want on a board, and paste this prompt. It installs the Board
         Planner skill, creates the board and connects this Mac. You watch it here.
       </p>
+
+      {user && user.role !== "admin" && (
+        <p className="mt-6 rounded-lg border border-border bg-bg-card p-3 text-sm text-text-muted">
+          Creating a board needs an instance admin. Ask one to make the board and add you to it; your coding agent
+          can then do the rest.
+        </p>
+      )}
 
       {error && (
         <p role="alert" className="mt-6 rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm text-danger">

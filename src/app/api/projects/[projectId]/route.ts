@@ -1,5 +1,6 @@
 import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
+import { withoutHttpCredentials } from "@/lib/project-setup";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
 import { entitlementRefusal, withProjectAccess, withProjectOwner, withProjectAccessOrWorker } from "@/lib/middleware";
@@ -256,6 +257,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
       { status: 400 }
     );
   }
+  if (typeof updates.repositoryUrl === "string") updates.repositoryUrl = withoutHttpCredentials(updates.repositoryUrl.trim());
 
   if (body.worker !== undefined) {
     // withProjectOwner has already required the project-admin grant: the owner, or an instance

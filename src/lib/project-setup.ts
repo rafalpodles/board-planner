@@ -208,7 +208,7 @@ export function parseProjectSetup(input: Record<string, unknown>): ParsedSetup {
     if (url.length > MAX_REPOSITORY_URL_LENGTH || hasControlCharacters(url)) {
       return fail("repositoryUrl is not a valid address");
     }
-    value.repositoryUrl = url;
+    value.repositoryUrl = withoutHttpCredentials(url);
   }
 
   if (body.pm !== undefined) {
@@ -225,4 +225,18 @@ export function parseProjectSetup(input: Record<string, unknown>): ParsedSetup {
   }
 
   return { ok: true, value };
+}
+
+/** `https://user:token@host/…` as a git remote often reads; the token never belongs on a board */
+export function withoutHttpCredentials(url: string): string {
+  if (!/^https?:\/\//i.test(url)) return url;
+  try {
+    const parsed = new URL(url);
+    if (!parsed.username && !parsed.password) return url;
+    parsed.username = "";
+    parsed.password = "";
+    return parsed.toString();
+  } catch {
+    return url;
+  }
 }

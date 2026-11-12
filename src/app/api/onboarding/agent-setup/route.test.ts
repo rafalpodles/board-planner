@@ -16,6 +16,8 @@ vi.mock("@/lib/organisation-host", async (importOriginal) => ({
   originFor,
 }));
 vi.mock("@/lib/machine-limit", () => ({ claimingMachineIds: async () => null }));
+const check = vi.fn();
+vi.mock("@/lib/grants", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/grants")>()), check }));
 vi.mock("@/models/project", () => ({
   Project: {
     findOne: (...a: unknown[]) => (projectFindOne(...a), { sort: () => ({ lean: projectLean }) }),
@@ -42,6 +44,7 @@ beforeEach(() => {
   agentLean.mockResolvedValue(null);
   taskLean.mockResolvedValue(null);
   workerLean.mockResolvedValue([]);
+  check.mockResolvedValue(true);
 });
 
 async function read(query = "") {
@@ -89,7 +92,7 @@ describe("GET /api/onboarding/agent-setup", () => {
       worker: { enabled: true, agent: AGENT },
     });
     agentLean.mockResolvedValue({ _id: AGENT, name: "Default" });
-    taskLean.mockResolvedValue({ _id: TASK, taskNumber: 1, title: "README section" });
+    taskLean.mockResolvedValue({ _id: TASK, taskNumber: 1, title: "README section", status: "planned" });
 
     const { body } = await read();
     expect(body.run).toEqual({
@@ -106,7 +109,48 @@ describe("GET /api/onboarding/agent-setup", () => {
 
   it("offers no Run while the board names no default agent", async () => {
     projectLean.mockResolvedValue({ _id: PROJECT, key: "PAY", name: "P", repositoryUrl: "https://github.com/a/b", worker: {} });
-    taskLean.mockResolvedValue({ _id: TASK, taskNumber: 1, title: "t" });
+    taskLean.mockResolvedValue({ _id: TASK, taskNumber: 1, title: "t", status: "planned" });
     expect((await read()).body.run).toBeNull();
   });
+
+  it("offers no Run for a first task that already moved past approval", async () => {
+    projectLean.mockResolvedValue({ _id: PROJECT, key: "PAY", name: "P", repositoryUrl: "https://github.com/a/b", worker: { agent: AGENT } });
+    agentLean.mockResolvedValue({ _id: AGENT, name: "Default" });
+    taskLean.mockResolvedValue({ _id: TASK, taskNumber: 1, title: "t", status: "done" });
+    expect((await read()).body.run).toBeNull();
+  });
+
+  it("does not show a board its creator can no longer reach", async () => {
+    projectLean.mockResolvedValue({ _id: PROJECT, key: "PAY", name: "Secret", repositoryUrl: "https://github.com/a/b", worker: {} });
+    check.mockResolvedValue(false);
+    const { body } = await read("?since=2020-01-01T00:00:00Z");
+    expect(JSON.stringify(body.steps)).not.toContain("Secret");
+  });
+
+  it("refuses a machine credential: this is a person's screen", async () => {
+    getAuthUser.mockResolvedValue({ _id: USER, role: "admin", username: "alex", viaMachineCredential: true });
+    expect((await read()).status).toBe(403);
+  });
+
+  it("offers no Run for a first task a machine is already running", async () => {
+    projectLean.mockResolvedValue({ _id: PROJECT, key: "PAY", name: "P", repositoryUrl: "https://github.com/a/b", worker: { agent: AGENT } });
+    agentLacksNothing();
+    taskLean.mockResolvedValue({ _id: TASK, taskNumber: 1, title: "t", status: "todo", execution: { runId: "run-1" } });
+    expect((await read()).body.run).toBeNull();
+  });
+
+  it("counts the agent as connected once its board exists, whatever credential it used", async () => {
+    projectLean.mockResolvedValue({ _id: PROJECT, key: "PAY", name: "P", repositoryUrl: "https://github.com/a/b", worker: {} });
+    const { body } = await read();
+    expect(body.steps.find((s: { key: string }) => s.key === "agent").state).toBe("done");
+  });
+
+  it("does not take an MCP connection made before the screen opened for this agent's", async () => {
+    await read("?since=2026-11-12T10:00:00.000Z");
+    expect(oauthExists.mock.calls[0][0].createdAt.$gte.toISOString()).toBe("2026-11-12T10:00:00.000Z");
+  });
 });
+
+function agentLacksNothing() {
+  agentLean.mockResolvedValue({ _id: AGENT, name: "Default" });
+}

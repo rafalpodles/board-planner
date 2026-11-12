@@ -23,16 +23,27 @@ const states = (facts: AgentSetupFacts) => agentSetupSteps(facts).map((s) => `${
 
 describe("agentSetupPrompt", () => {
   it("names this organisation's MCP server and connect command, and nothing hard-coded to another", () => {
-    const prompt = agentSetupPrompt("https://acme.board-planner.com");
+    const prompt = agentSetupPrompt("https://acme.board-planner.com", "1.14.0");
     expect(prompt).toContain("https://acme.board-planner.com/api/mcp");
-    expect(prompt).toContain("--connect https://acme.board-planner.com");
+    expect(prompt).toContain("--connect 'https://acme.board-planner.com'");
     expect(prompt).not.toContain("app.board-planner.com");
   });
 
   it("is one prompt that also installs the skill and asks before saving the gates", () => {
-    const prompt = agentSetupPrompt("https://x.example.com");
+    const prompt = agentSetupPrompt("https://x.example.com", "1.14.0");
     expect(prompt).toMatch(/Install the Board Planner skill/);
     expect(prompt).toMatch(/ask me which to keep/);
+  });
+
+  it("takes the skill from this release, not from whatever main holds", () => {
+    const prompt = agentSetupPrompt("https://x.example.com", "1.14.0");
+    expect(prompt).toContain("/tree/v1.14.0/plugins/board-planner/skills/board-planner");
+    expect(prompt).not.toContain("/tree/main/");
+  });
+
+  it("leaves trusting the Homebrew tap to the person", () => {
+    const prompt = agentSetupPrompt("https://x.example.com", "1.14.0");
+    expect(prompt).toMatch(/Trusting a third-party Homebrew tap is my decision, so show me this command and ask me to run it/);
   });
 });
 
@@ -61,7 +72,7 @@ describe("agentSetupSteps", () => {
 
   it("says why a connected machine is not live yet", () => {
     const machine = agentSetupSteps({ ...EVERYTHING, machine: "unbound" }).find((s) => s.key === "machine");
-    expect(machine?.detail).toMatch(/no checkout/);
+    expect(machine?.detail).toMatch(/refused its checkout/);
   });
 
   it("is complete only when every row is read as done", () => {

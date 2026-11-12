@@ -352,6 +352,16 @@ describe("PUT /api/projects/[projectId] deploymentEnvironment", () => {
     expect(projectUpdateOne.mock.calls[0][1].$set["deploymentSync.syncedThrough"]).toBeNull();
   });
 
+  it("stores a repository address without the credentials a git remote can carry", async () => {
+    projectFindOneAndUpdate.mockReturnValue({
+      lean: () => Promise.resolve({ _id: PROJECT_ID, name: "Test Project", repositoryUrl: "https://github.com/new/repo" }),
+    });
+
+    await PUT(putRequest({ repositoryUrl: "https://alex:ghp_secret@github.com/new/repo" }), ctx());
+
+    expect(JSON.stringify(projectFindOneAndUpdate.mock.calls[0])).not.toContain("ghp_secret");
+  });
+
   it("the same repository written another way is not a move", async () => {
     projectFindOneAndUpdate.mockReturnValue({
       lean: () => Promise.resolve({ _id: PROJECT_ID, name: "Test Project", repositoryUrl: "https://github.com/Old/Repo" }),
