@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import {
   ApiCustomField,
   ApiProjectCategory,
@@ -21,6 +21,7 @@ import { roundForDisplay } from "@/lib/estimates";
 import { EXECUTION_DOCS_URL } from "@/lib/docs-urls";
 import { Switch } from "@/components/ui/Switch";
 import { LoadFailed } from "@/components/ui/LoadFailed";
+import { Button } from "@/components/ui/Button";
 import { Avatar, PriorityBars, SectionLabel } from "./atoms";
 import {
   ComboboxRow,
@@ -113,6 +114,9 @@ interface BlockerContext {
   agentLacks: string[];
   /** Each of them runs on one of the reader's machines, but no machine runs them all */
   agentLacksTogether: boolean;
+  /** The one person who can accept a hand-over somebody else made */
+  viewerIsAssignee: boolean;
+  assigneeName: string;
 }
 
 const SIGN_IN_COMMAND: Record<string, string> = { claude: "claude auth login", codex: "codex login" };
@@ -129,28 +133,34 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
     case "unassigned":
       return <>A machine takes only work its owner assigned to themselves — assign it to yourself.</>;
     case "assigner-unrecorded":
-      // Named rather than addressed to the reader: the server records the assigner only when the
-      // person doing the assigning is the one being assigned
-      return (
+      return ctx.viewerIsAssignee ? (
+        <>The board has no record of who handed this to you — accept it to run it on your machine.</>
+      ) : (
         <>
-          It was assigned before the board recorded who hands work over; its assignee can record
-          that by assigning it to themselves again.
+          It was assigned before the board recorded who hands work over; waiting for{" "}
+          {ctx.assigneeName} to accept it.
         </>
       );
     case "pm-assigned-for-someone-else":
-      return (
+      return ctx.viewerIsAssignee ? (
         <>
-          The PM assigned it on somebody else&apos;s instruction — a machine runs a PM hand-over
-          only for the person who asked for it.
+          The PM handed this to you on somebody else&apos;s instruction — accept it to run it on
+          your machine.
+        </>
+      ) : (
+        <>
+          The PM handed it over on somebody else&apos;s instruction; waiting for {ctx.assigneeName}{" "}
+          to accept it.
         </>
       );
-    case "assigned-by-someone-else":
-      return (
-        <>
-          {("by" in blocker && blocker.by) || "Somebody else"} assigned it, and a machine takes only
-          work its owner assigned to themselves.
-        </>
+    case "assigned-by-someone-else": {
+      const by = ("by" in blocker && blocker.by) || "Somebody else";
+      return ctx.viewerIsAssignee ? (
+        <>{by} handed this to you — accept it to run it on your machine.</>
+      ) : (
+        <>Waiting for {ctx.assigneeName} to accept it — their machine won&apos;t run it until they do.</>
       );
+    }
     case "blocked": {
       const keys = (("blockers" in blocker && blocker.blockers) || []).map((n) =>
         ctx.projectKey ? `${ctx.projectKey}-${n}` : `#${n}`
@@ -335,6 +345,35 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
   }
 }
 
+const ACCEPTABLE = new Set<string>([
+  "assigned-by-someone-else",
+  "pm-assigned-for-someone-else",
+  "assigner-unrecorded",
+]);
+
+function AcceptHandover({ onAccept }: { onAccept: () => Promise<void> }) {
+  const [accepting, setAccepting] = useState(false);
+  return (
+    <Button
+      size="sm"
+      variant="secondary"
+      className="mt-2"
+      data-testid="accept-handover"
+      disabled={accepting}
+      onClick={async () => {
+        setAccepting(true);
+        try {
+          await onAccept();
+        } finally {
+          setAccepting(false);
+        }
+      }}
+    >
+      {accepting ? "Accepting…" : "Accept — run it on my machine"}
+    </Button>
+  );
+}
+
 // The claim takes a task or it does not, and logs nothing either way. An agent chosen on a task no
 // machine will touch is the one state nobody could diagnose: the card looks entirely normal.
 function HandoverNotice({
@@ -346,6 +385,7 @@ function HandoverNotice({
   viewer,
   viewerIsInstanceAdmin,
   projectKey,
+  onAccept,
 }: {
   handover: Handover | null;
   awaiting: boolean;
@@ -355,6 +395,7 @@ function HandoverNotice({
   viewer: string | null;
   viewerIsInstanceAdmin: boolean;
   projectKey: string | null;
+  onAccept: () => Promise<void>;
 }) {
   // "No agent" is the ordinary case and the default — it is what the picker already says, and
   // repeating it as a warning would put a notice on almost every task on the board. Past the
@@ -395,7 +436,13 @@ function HandoverNotice({
     missingRepositories: board?.machineMissing ?? [],
     agentLacks,
     agentLacksTogether: outOfReach?.together === true,
+    viewerIsAssignee,
+    assigneeName: assignee ? assignee.fullName || assignee.username : "its assignee",
   };
+  const accept =
+    viewerIsAssignee && blockers.some((b) => ACCEPTABLE.has(b.reason)) ? (
+      <AcceptHandover onAccept={onAccept} />
+    ) : null;
 
   if (blockers.length === 0) {
     if (!board || !assignee) return null;
@@ -411,22 +458,28 @@ function HandoverNotice({
   const reasons = blockers.map((b) => b.reason).join(" ");
   if (blockers.length === 1) {
     return (
-      <p data-testid="handover-notice" data-reason={reasons} className="mt-1 text-xs text-warning">
-        Nothing will run this yet. <BlockerText blocker={blockers[0]} ctx={ctx} />
-      </p>
+      <>
+        <p data-testid="handover-notice" data-reason={reasons} className="mt-1 text-xs text-warning">
+          Nothing will run this yet. <BlockerText blocker={blockers[0]} ctx={ctx} />
+        </p>
+        {accept}
+      </>
     );
   }
   return (
-    <div data-testid="handover-notice" data-reason={reasons} className="mt-1 text-xs text-warning">
-      <p>Nothing will run this yet:</p>
-      <ul className="mt-1 flex list-disc flex-col gap-1 pl-4">
-        {blockers.map((b) => (
-          <li key={b.reason} data-testid="handover-problem" data-reason={b.reason}>
-            <BlockerText blocker={b} ctx={ctx} />
-          </li>
-        ))}
-      </ul>
-    </div>
+    <>
+      <div data-testid="handover-notice" data-reason={reasons} className="mt-1 text-xs text-warning">
+        <p>Nothing will run this yet:</p>
+        <ul className="mt-1 flex list-disc flex-col gap-1 pl-4">
+          {blockers.map((b) => (
+            <li key={b.reason} data-testid="handover-problem" data-reason={b.reason}>
+              <BlockerText blocker={b} ctx={ctx} />
+            </li>
+          ))}
+        </ul>
+      </div>
+      {accept}
+    </>
   );
 }
 
@@ -439,7 +492,7 @@ function HandoverRules() {
       <ol className="mt-1 flex list-decimal flex-col gap-1 pl-4">
         <li>
           Pick an agent, assign the task to yourself, and move it to the column work is approved
-          in. A task somebody else assigned to you is a proposal; nothing runs it unattended.
+          in. A task somebody else hands you runs only once you accept it.
         </li>
         <li>
           It runs on your own machine, which needs a checkout of the board&apos;s repository, and
@@ -490,12 +543,8 @@ interface PropertyRailProps {
   projectKey?: string | null;
   /** Only an instance admin lifts a lock on agent runs */
   viewerIsInstanceAdmin?: boolean;
-  /**
-   * Writes the assignee a task already carries. Auto-save sends the diff, so re-picking the person
-   * already on the task sends nothing at all — and that is the repair the notice below prints for a
-   * task whose assigner was never recorded, which made the instruction untrue in the view giving it.
-   */
-  onRepairAssigner: (username: string | null) => void;
+  /** The assignee taking on a hand-over somebody else made; resolves once the task has been read again */
+  onAcceptHandover: () => Promise<void>;
   /**
    * Whoever is reading. Required rather than optional: a call site that forgot it would silently
    * stop offering this person their own agents everywhere, which looks exactly like having none.
@@ -534,7 +583,7 @@ export function PropertyRail({
   board = null,
   projectKey = null,
   viewerIsInstanceAdmin = false,
-  onRepairAssigner,
+  onAcceptHandover,
   currentUsername,
   categories,
   customFields,
@@ -558,6 +607,7 @@ export function PropertyRail({
    * re-sending the assignee already stored is allowed, and only a move to somebody who cannot
    * reach the board is refused. Offering a control that 400s on click would be worse than either.
    */
+  const handoverLive = useRef<HTMLDivElement>(null);
   const shown = assigneeToShow(users, draft.assignee, stored.assignee);
   const offeredUsers =
     shown && !users.some((u) => u.username === shown.username) ? [...users, shown] : users;
@@ -572,10 +622,6 @@ export function PropertyRail({
     (draft.assignee ?? null) !== (stored.assignee?.username ?? null);
   const handover = pending ? null : handoverOf(stored, columns);
   const awaiting = !columns || awaitingClaim(columns, stored.status);
-  // Read off the stored task rather than off `handover`, which is suppressed mid-edit and orders
-  // the column requirement first: the repair is about what the document is missing, not about
-  // which sentence won the right to be shown.
-  const assignerUnrecorded = !!stored.assignee && !stored.assignedBy;
   /**
    * A personal agent is a composition nobody vetted — anyone may compose one out of the admin's
    * blocks — so the server runs it only on a task its owner assigned to themselves. Offering one
@@ -634,13 +680,7 @@ export function PropertyRail({
             adornment: <Avatar name={user.fullName} username={user.username} size={20} />,
           }))}
           emptyOption="Unassigned"
-          onChange={(username) => {
-            const picked = username || null;
-            if (assignerUnrecorded && picked === (stored.assignee?.username ?? null)) {
-              onRepairAssigner(picked);
-            }
-            set("assignee", picked);
-          }}
+          onChange={(username) => set("assignee", username || null)}
         >
           {(selected) => (
             <span className="flex items-center gap-2">
@@ -732,8 +772,9 @@ export function PropertyRail({
           </p>
         )}
 
-        {/* Always rendered, so a screen reader hears the reasons change as the task is fixed */}
-        <div aria-live="polite" data-testid="handover-live">
+        {/* Always rendered, so a screen reader hears the reasons change as the task is fixed. Focus
+            lands here after Accept, since the button it was on is gone */}
+        <div aria-live="polite" data-testid="handover-live" ref={handoverLive} tabIndex={-1} className="focus-ring rounded">
           <HandoverNotice
             handover={handover}
             awaiting={awaiting}
@@ -743,6 +784,10 @@ export function PropertyRail({
             viewer={currentUsername}
             viewerIsInstanceAdmin={viewerIsInstanceAdmin}
             projectKey={projectKey}
+            onAccept={async () => {
+              await onAcceptHandover();
+              handoverLive.current?.focus();
+            }}
           />
         </div>
         {!notOffered && <HandoverRules />}

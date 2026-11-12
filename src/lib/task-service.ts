@@ -1434,35 +1434,56 @@ export async function updateTask(
     });
   }
 
+  // Choosing the agent after the assignee is the same hand-over in two writes, so it is announced
+  // when the agent arrives on work somebody else already handed over
+  const assigneeAfterWrite = task.assignee ? refId(task.assignee) : "";
+  const agentArrivesOnAHandover =
+    !refId(oldTask.agent) &&
+    !!refId(task.agent) &&
+    !assigneeMoved &&
+    !!assigneeAfterWrite &&
+    assigneeAfterWrite !== String(actorId) &&
+    !handoverIsTheirs(task, assigneeAfterWrite, await pmUserId(db));
+
   // In-app notification: assignee changed
-  if (updates.assignee !== undefined && task.assignee && assigneeMoved) {
-    const newAssigneeId = typeof task.assignee === "object" && "_id" in task.assignee
-      ? String(task.assignee._id)
-      : String(task.assignee);
+  if ((updates.assignee !== undefined && task.assignee && assigneeMoved) || agentArrivesOnAHandover) {
+    const newAssigneeId = assigneeAfterWrite;
     const [project, actor] = await Promise.all([
       db.Project.findById(projectId, "key name columns").lean(),
       displayNameOf(db, actorId),
     ]);
     const taskKey = taskKeyOf(project?.key, task.taskNumber);
     const column = getProjectColumns(project).find((c) => c.id === String(task.status));
+    // A machine would run this the moment its assignee says yes, so the message says that is
+    // what is being asked — except where the PM handed it over on the assignee's own instruction
+    const waitsForAccept =
+      !!task.agent && newAssigneeId !== String(actorId) && onWhoseInstruction !== newAssigneeId;
     createNotifications(db, {
       type: "task_assigned",
       taskId,
       projectId,
       actorId,
-      title: `${taskKey} assigned to you`,
-      digestTitle: "assigned to you",
+      title: waitsForAccept
+        ? `${taskKey} handed to you — accept it to run it on your machine`
+        : `${taskKey} assigned to you`,
+      digestTitle: waitsForAccept ? "handed to you, waiting for you to accept it" : "assigned to you",
       body: task.title,
       recipientIds: [newAssigneeId],
       email: {
-        kicker: "Assigned to you",
+        kicker: waitsForAccept ? "Handed to you" : "Assigned to you",
         taskKey,
         taskTitle: task.title,
         taskPills: [
           { label: column?.label ?? String(task.status), tone: pillToneForRole(column?.role) },
           { label: capitalise(String(task.priority ?? DEFAULT_PRIORITY)), tone: "neutral" },
         ],
-        taskMeta: [project?.name, `assigned by ${actor}`].filter(Boolean).join(" · "),
+        taskMeta: [
+          project?.name,
+          agentArrivesOnAHandover ? `agent chosen by ${actor}` : `assigned by ${actor}`,
+          waitsForAccept ? "accept it on the task to run it on your machine" : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
         projectRef: project?.key,
         taskNumber: task.taskNumber,
         assigneeId: newAssigneeId,
@@ -1471,6 +1492,78 @@ export async function updateTask(
   }
 
   return { ok: true, data: task as ITask };
+}
+
+export const NOT_THE_ASSIGNEE = "Only the task's assignee can accept its hand-over.";
+export const CHANGED_HANDS = "The task changed hands while you were accepting it.";
+
+function handoverIsTheirs(
+  task: { assignedBy?: unknown; pmAssignedFor?: unknown },
+  actorId: string,
+  pm: string | null
+): boolean {
+  const assigner = refId(task.assignedBy);
+  return assigner === actorId || (!!pm && assigner === pm && refId(task.pmAssignedFor) === actorId);
+}
+
+/**
+ * The assignee taking on work somebody else handed them, which is what a claim then runs (BP-420).
+ * Its own intent rather than a field on the PUT: every writer that echoes the assignee back would
+ * otherwise stamp consent nobody gave. Compared and set against exactly what was read, so a
+ * reassignment landing in between is refused instead of accepted on the new assignee's behalf.
+ */
+export async function acceptHandover(
+  db: ScopedDb,
+  projectId: string,
+  taskId: string,
+  actorId: string
+): Promise<TaskServiceResult> {
+  await connectDB();
+  const current = await db.Task.findOne({ _id: taskId, project: projectId }, "assignee assignedBy pmAssignedFor agent").lean();
+  if (!current) return { ok: false, error: "Task not found", status: 404 };
+  if (refId(current.assignee) !== actorId) return { ok: false, error: NOT_THE_ASSIGNEE, status: 403 };
+
+  const pm = await pmUserId(db);
+  const reread = () => db.Task.findOne({ _id: taskId, project: projectId }).populate(taskPopulateFields);
+  if (handoverIsTheirs(current, actorId, pm)) {
+    const task = await reread();
+    return task ? { ok: true, data: task as ITask } : { ok: false, error: "Task not found", status: 404 };
+  }
+
+  // Accepting is a hand-over coming into being, as re-assigning is in updateTask: somebody else's
+  // personal agent has no standing on it, and a claim could only hand it back unrunnable
+  const dropsAgent = !!current.agent && (await personalAgentAlienTo(db, current.agent, actorId));
+  const accepted = await db.Task.findOneAndUpdate(
+    {
+      _id: taskId,
+      project: projectId,
+      assignee: actorId,
+      assignedBy: current.assignedBy ?? null,
+      pmAssignedFor: current.pmAssignedFor ?? null,
+      agent: current.agent ?? null,
+    },
+    { $set: { assignedBy: actorId, pmAssignedFor: null, ...(dropsAgent ? { agent: null } : {}) } },
+    { returnDocument: "after" }
+  ).populate(taskPopulateFields);
+
+  if (!accepted) {
+    const now = await db.Task.findOne({ _id: taskId, project: projectId }, "assignee assignedBy pmAssignedFor").lean();
+    if (!now) return { ok: false, error: "Task not found", status: 404 };
+    if (refId(now.assignee) === actorId && handoverIsTheirs(now, actorId, pm)) {
+      const task = await reread();
+      if (task) return { ok: true, data: task as ITask };
+    }
+    return { ok: false, error: CHANGED_HANDS, status: 409 };
+  }
+
+  const previous = current.assignedBy
+    ? await db.User.findById(current.assignedBy, "username").lean<{ username?: string } | null>()
+    : null;
+  await logActivity(db, projectId, taskId, actorId, "handover_accepted", "assignedBy", previous?.username ?? "", "");
+  if (dropsAgent) {
+    await logActivity(db, projectId, taskId, actorId, "updated", "agent", await storedAgentName(db, current.agent), "");
+  }
+  return { ok: true, data: accepted as ITask };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1955,9 +2048,9 @@ export async function claimNextTask(
       project: projectId,
       status: { $in: approved },
       ...NOT_ARCHIVED,
-      // Assigned to the owner, by the owner or by the PM. A *person* assigning you work is still a
-      // proposal, and the surface for accepting one does not exist yet — so it is refused rather
-      // than run unattended. The PM is not somebody else: it is a first-party actor on this
+      // Assigned to the owner, by the owner or by the PM. A *person* assigning you work is a
+      // proposal until its assignee accepts it on the task (acceptHandover, BP-420), which stamps
+      // them as the assigner — so it is refused rather than run unattended until then. The PM is not somebody else: it is a first-party actor on this
       // instance, and BP-419 is the decision that its assignment is a real hand-over rather than a
       // proposal nothing could ever accept. What that rests on: an actor able to steer the PM can
       // queue work onto a machine unattended, and BP-321 (injected text replayed to the model as

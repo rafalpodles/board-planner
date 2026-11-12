@@ -178,6 +178,28 @@ describe("update_task and the agent that runs it", () => {
     expect(description).not.toMatch(/admin/i);
     expect(description).toMatch(/a project agent may be chosen by anyone who can edit the task/i);
   });
+
+  // BP-420. A hand-over the caller made to somebody else waits for that person, and the caller is
+  // told so in the answer instead of reading back a task that only looks handed over
+  it("answers with the hand-over verdict, the minimal summary included", async () => {
+    vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([{ _id: "a1", name: "Default" }]);
+    const handover = { willRun: false, why: "it waits for @bartek to accept it in the app" };
+    vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({ taskNumber: 1, title: "T", handover });
+
+    const text = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0].text);
+    const full = text(await callUpdate({ agent: "Default" }));
+    const minimal = text(await callUpdate({ agent: "Default", minimal: true }));
+
+    expect(full.handover).toEqual(handover);
+    expect(minimal.handover).toEqual(handover);
+    expect(minimal.key).toBe("BP-1");
+  });
+
+  it("says in the agent's description that a hand-over to somebody else waits for them to accept it", () => {
+    const description = (registered().get("update_task")!.schema.shape.agent as z.ZodType).description;
+
+    expect(description).toMatch(/accepted it in the app/);
+  });
 });
 
 /**

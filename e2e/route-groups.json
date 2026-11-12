@@ -364,6 +364,9 @@
   "src/app/api/projects/[projectId]/summaries/route.ts": [
     "project"
   ],
+  "src/app/api/projects/[projectId]/tasks/[taskId]/accept/route.ts": [
+    "automation"
+  ],
   "src/app/api/projects/[projectId]/tasks/[taskId]/activity/route.ts": [
     "tasks",
     "project",

@@ -96,6 +96,8 @@ describe("erasing the traces of a deleted account", () => {
         { _id: "a2", field: "assignee", oldValue: "jan", newValue: "ola" },
         { _id: "a3", field: "assignee", oldValue: "ola", newValue: "" },
         { _id: "a4", field: "title", oldValue: "jan", newValue: "Jan's task" },
+        { _id: "a5", action: "handover_accepted", field: "assignedBy", oldValue: "jan", newValue: "" },
+        { _id: "a6", action: "handover_accepted", field: "assignedBy", oldValue: "ola", newValue: "" },
       ],
     });
     await eraseAccountTraces(db, USER);
@@ -104,6 +106,8 @@ describe("erasing the traces of a deleted account", () => {
       [LABEL, "ola"],
       ["ola", ""],
       ["jan", "Jan's task"],
+      [LABEL, ""],
+      ["ola", ""],
     ]);
   });
 

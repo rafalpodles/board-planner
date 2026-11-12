@@ -79,7 +79,7 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
       ]}
       customFields={[]}
       stored={{ agent: null, assignee: null, assignedBy: null, status: "todo" }}
-      onRepairAssigner={() => {}}
+      onAcceptHandover={async () => {}}
       currentUsername="owner"
       reporter="Claude Code"
       archived={false}
@@ -796,7 +796,8 @@ describe("the agent picker says when nothing will run the task", () => {
   // board deliberately uses none of them
   function withStored(
     stored: Partial<Omit<ApiTask, "status">> & { status?: string },
-    over: Partial<TaskDraft> = {}
+    over: Partial<TaskDraft> = {},
+    rail: Partial<React.ComponentProps<typeof PropertyRail>> = {}
   ) {
     renderRail({
       agents: AGENT,
@@ -809,6 +810,7 @@ describe("the agent picker says when nothing will run the task", () => {
         status: "ready",
         ...stored,
       } as ApiTask,
+      ...rail,
     });
   }
 
@@ -861,25 +863,22 @@ describe("the agent picker says when nothing will run the task", () => {
   });
 
   // The legacy case, and the visible half of refusing to backfill assignedBy
-  it("says a task assigned before the board recorded who assigns will not run", () => {
+  it("asks the assignee to accept a task assigned before the board recorded who assigns", () => {
     withStored({ assignedBy: undefined });
 
     const notice = screen.getByTestId("handover-notice");
     expect(notice.dataset.reason).toBe("assigner-unrecorded");
-    // Who can perform it, not only that a repair exists: the server records the assigner only for
-    // the person being assigned, so a sentence addressed to whoever is reading would be wrong for
-    // everybody else on the board
-    expect(notice.textContent).toMatch(/its assignee can record that by assigning it to themselves/i);
+    expect(notice.textContent).toMatch(/no record of who handed this to you — accept it to run it on your machine/i);
+    expect(screen.getByTestId("accept-handover")).toBeTruthy();
   });
 
-  it("names whoever else handed it over", () => {
+  it("names whoever else handed it over, and offers the assignee Accept", () => {
     withStored({ assignedBy: { _id: "u2", username: "kmk", fullName: "Krzysiek" } });
 
     const notice = screen.getByTestId("handover-notice");
     expect(notice.dataset.reason).toBe("assigned-by-someone-else");
-    expect(notice.textContent).toMatch(
-      /Krzysiek assigned it, and a machine takes only work its owner assigned to themselves/i
-    );
+    expect(notice.textContent).toMatch(/Krzysiek handed this to you — accept it to run it on your machine/i);
+    expect(screen.getByTestId("accept-handover").textContent).toBe("Accept — run it on my machine");
   });
 
   // The fallback nothing asserted: an assignedBy the server answered as a bare id has no name to
@@ -889,7 +888,55 @@ describe("the agent picker says when nothing will run the task", () => {
 
     const notice = screen.getByTestId("handover-notice");
     expect(notice.dataset.reason).toBe("assigned-by-someone-else");
-    expect(notice.textContent).toMatch(/Somebody else assigned it/i);
+    expect(notice.textContent).toMatch(/Somebody else handed this to you/i);
+  });
+
+  it("asks the assignee to accept a PM hand-over made on somebody else's instruction", () => {
+    withStored({ assignedBy: { _id: "pm", username: "pm", fullName: "PM" }, pmAssignedFor: "u2" });
+
+    const notice = screen.getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe("pm-assigned-for-someone-else");
+    expect(notice.textContent).toMatch(/The PM handed this to you on somebody else's instruction/i);
+    expect(screen.getByTestId("accept-handover")).toBeTruthy();
+  });
+
+  // BP-420. Only the assignee can accept, so everybody else — the person who handed it over
+  // included — is told who it waits for, and offered nothing to press
+  it.each([
+    ["assigned-by-someone-else", { assignedBy: { _id: "u2", username: "kmk", fullName: "Krzysiek" } }, /Waiting for Owner Name to accept it — their machine won't run it until they do/],
+    ["pm-assigned-for-someone-else", { assignedBy: { _id: "pm", username: "pm", fullName: "PM" }, pmAssignedFor: "u2" }, /The PM handed it over on somebody else's instruction; waiting for Owner Name to accept it/],
+    ["assigner-unrecorded", { assignedBy: undefined }, /waiting for Owner Name to accept it/],
+  ] as const)("tells anybody else that %s waits for the assignee, with no Accept", (reason, stored, said) => {
+    withStored(stored as Partial<ApiTask>, {}, { currentUsername: "kmk" });
+
+    const notice = screen.getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe(reason);
+    expect(notice.textContent).toMatch(said);
+    expect(screen.queryByTestId("accept-handover")).toBeNull();
+  });
+
+  it("offers no Accept for a reason accepting would not fix", () => {
+    withStored({ assignee: null }, { assignee: null });
+
+    expect(screen.getByTestId("handover-notice").dataset.reason).toBe("unassigned");
+    expect(screen.queryByTestId("accept-handover")).toBeNull();
+  });
+
+  it("accepts once on a press, and cannot be pressed again until the task is read back", async () => {
+    let finish: () => void = () => {};
+    const onAcceptHandover = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    withStored({ assignedBy: { _id: "u2", username: "kmk", fullName: "Krzysiek" } }, {}, { onAcceptHandover });
+
+    const button = screen.getByTestId("accept-handover") as HTMLButtonElement;
+    await act(async () => fireEvent.click(button));
+    fireEvent.click(button);
+
+    expect(onAcceptHandover).toHaveBeenCalledTimes(1);
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toBe("Accepting…");
+
+    await act(async () => finish());
+    expect(button.disabled).toBe(false);
   });
 
   // The verdict depends on assignedBy, which only the server writes. Judging an unsaved draft
@@ -909,70 +956,6 @@ describe("the agent picker says when nothing will run the task", () => {
     expect(screen.queryByTestId("handover-notice")).toBeNull();
   });
 
-});
-
-/**
- * The Agent row tells the reader to "assign it again to record that", and the detail view saves by
- * diff — so re-picking the person already on the task produced no request at all, and the recovery
- * the product printed was a no-op in the view printing it. The e2e that proves the repair calls
- * updateTask directly, stepping straight over this seam.
- *
- * What the forced write reaches is asserted in TaskDetail.test.tsx: this half only says when the
- * rail asks for one.
- */
-describe("re-assigning to record an assigner the board never had", () => {
-  const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" } as ApiUser;
-
-  function railFor(stored: Partial<Omit<ApiTask, "status">> & { status?: string }) {
-    const onRepairAssigner = vi.fn();
-    renderRail({
-      agents: [{ _id: "a1", name: "Default" }] as React.ComponentProps<typeof PropertyRail>["agents"],
-      columns: BOARD,
-      draft: { ...draft, agent: "a1", assignee: "owner" },
-      stored: { agent: "a1", assignee: OWNER, assignedBy: { ...OWNER }, status: "ready", ...stored } as ApiTask,
-      onRepairAssigner,
-    });
-    return onRepairAssigner;
-  }
-
-  it("forces the write when the assignee already on the task is picked again", async () => {
-    const repair = railFor({ assignedBy: undefined });
-    await openRow("Assignee");
-    await pick(/Owner Name/);
-
-    expect(repair).toHaveBeenCalledWith("owner");
-  });
-
-  // Nothing to record, so nothing to force: the ordinary diff already declines to write this, and
-  // forcing it would put a save on the wire every time somebody opened the picker and changed
-  // their mind
-  it("leaves a task whose assigner is recorded alone", async () => {
-    const repair = railFor({});
-    await openRow("Assignee");
-    await pick(/Owner Name/);
-
-    expect(repair).not.toHaveBeenCalled();
-  });
-
-  // Picking somebody else is an ordinary edit: it differs from the stored value, so auto-save
-  // sends it, and stamping the assigner is then the server's ordinary behaviour
-  it("leaves a genuine change to the ordinary save", async () => {
-    const repair = railFor({ assignedBy: undefined });
-    await openRow("Assignee");
-    await pick(/Claude Code/);
-
-    expect(repair).not.toHaveBeenCalled();
-  });
-
-  // Unassigning is a change too, and it is the one case where the picked value is null on both
-  // sides if the guard compared the wrong things
-  it("does not mistake unassigning for re-picking the same person", async () => {
-    const repair = railFor({ assignedBy: undefined });
-    await openRow("Assignee");
-    await pick(/Unassigned/);
-
-    expect(repair).not.toHaveBeenCalled();
-  });
 });
 
 /**

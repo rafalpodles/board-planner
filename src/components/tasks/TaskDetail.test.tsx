@@ -1151,79 +1151,115 @@ describe("TaskDetail, the Agent row's handover notice", () => {
 });
 
 /**
- * The notice above tells the reader to "assign it again to record that", and this is the view that
- * prints it. Auto-save sends the diff, so re-picking the person already on the task sent nothing at
- * all: no PUT, no toast, no change — the recovery the product documents was a no-op exactly where
- * it was documented. The e2e that proves the repair calls updateTask directly and steps over this.
- *
- * Asserted on the request rather than on a callback, because the callback is the half that already
- * worked: what broke is between the picker and the wire.
+ * BP-420. Accept is its own request — never inferred from a PUT — and the task is read again either
+ * way: on success that clears the notice asking for it, and a refusal means the task changed hands
+ * under this view.
  */
-describe("TaskDetail, re-assigning a task whose assigner was never recorded", () => {
+describe("TaskDetail, accepting a hand-over somebody else made", () => {
   const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" };
-  const legacy = {
+  const OTHER = { _id: "u3", username: "tomek", fullName: "Tomek" };
+  const handedOver = {
     ...task,
     status: "todo",
     agent: "ag1",
     assignee: OWNER,
-    // The absence itself. A null would take the same branch, but an old document has no key at all.
-    assignedBy: undefined,
+    assignedBy: { _id: "u2", username: "kmk", fullName: "Krzysiek" },
   };
 
   function serve(over: Record<string, unknown> = {}) {
     api.get.mockImplementation((url: string) => {
-      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([OWNER, { _id: "u2", username: "claude", fullName: "Claude Code" }]);
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([OWNER, OTHER]);
       if (url.startsWith("/api/agent")) return Promise.resolve([]);
-      if (url.includes("/tasks/")) return Promise.resolve({ ...legacy, ...over });
+      if (url.includes("/tasks/")) return Promise.resolve({ ...handedOver, ...over });
       if (url.includes("/sprints")) return Promise.resolve([]);
       return Promise.resolve(project);
     });
   }
 
-  async function pickAssignee(name: RegExp) {
+  const taskReads = () => api.get.mock.calls.filter((c: unknown[]) => String(c[0]).includes("/tasks/")).length;
+
+  async function pressAccept() {
+    const rail = within(screen.getByRole("complementary"));
+    await act(async () => rail.getByTestId("accept-handover").click());
+  }
+
+  beforeEach(() => {
+    api.post.mockReset();
+    toast.mockReset();
+  });
+
+  it("asks the accept route, and reads the task again", async () => {
+    api.post.mockResolvedValue({});
+    serve();
+    renderDetail();
+    await loaded();
+    const before = taskReads();
+
+    await pressAccept();
+
+    expect(api.post).toHaveBeenCalledWith("/api/projects/TP/tasks/t1/accept", {});
+    expect(api.put).not.toHaveBeenCalled();
+    await waitFor(() => expect(taskReads()).toBeGreaterThan(before));
+  });
+
+  it("says what the server refused, and reads the task again", async () => {
+    api.post.mockRejectedValue(Object.assign(new Error("the task changed hands while you were accepting it"), { status: 409 }));
+    serve();
+    renderDetail();
+    await loaded();
+    const before = taskReads();
+
+    await pressAccept();
+
+    expect(toast).toHaveBeenCalledWith("the task changed hands while you were accepting it", "error");
+    await waitFor(() => expect(taskReads()).toBeGreaterThan(before));
+  });
+
+  // A 403 here means the task is no longer this reader's, not that the board is gone: the page
+  // must stay, say why, and show the task as it now is
+  it("keeps the page when the server says the reader is no longer the assignee", async () => {
+    api.post.mockRejectedValue(Object.assign(new Error("Only the task's assignee can accept its hand-over."), { status: 403 }));
+    serve();
+    renderDetail();
+    await loaded();
+    const before = taskReads();
+
+    await pressAccept();
+
+    expect(toast).toHaveBeenCalledWith("Only the task's assignee can accept its hand-over.", "error");
+    expect(screen.getByRole("complementary")).toBeTruthy();
+    await waitFor(() => expect(taskReads()).toBeGreaterThan(before));
+  });
+
+  // The old repair forced a PUT of the assignee already on the task. Accept replaced it, so
+  // re-picking that person is back to what the diff makes it: nothing to send. Waited past the
+  // auto-save debounce, beside the control that picking somebody else does send
+  async function pickAndSettle(name: RegExp) {
     const rail = within(screen.getByRole("complementary"));
     await act(async () => rail.getByRole("combobox", { name: "Assignee" }).click());
     const option = screen.getAllByRole("option").find((o) => name.test(o.textContent || ""));
     await act(async () => option!.click());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1_000)));
   }
 
-  it("sends the assignee it already has, which the diff would have dropped", async () => {
-    serve();
+  it("sends nothing when the assignee already on a task is picked again", async () => {
+    serve({ assignedBy: undefined });
     renderDetail();
     await loaded();
 
-    await pickAssignee(/Owner Name/);
-
-    expect(api.put).toHaveBeenCalledWith("/api/projects/TP/tasks/t1", { assignee: "owner" });
-  });
-
-  // The task is re-read afterwards, or the reader performs the repair and watches the complaint it
-  // fixed stay on screen until they navigate away
-  it("re-reads the task, so the notice it just fixed goes", async () => {
-    serve();
-    renderDetail();
-    await loaded();
-    const readsBefore = api.get.mock.calls.filter((c: unknown[]) => String(c[0]).includes("/tasks/")).length;
-
-    await pickAssignee(/Owner Name/);
-
-    await waitFor(() =>
-      expect(
-        api.get.mock.calls.filter((c: unknown[]) => String(c[0]).includes("/tasks/")).length
-      ).toBeGreaterThan(readsBefore)
-    );
-  });
-
-  // The forced write is for the missing assigner and nothing else. A task that records one is
-  // already correct, and re-picking on it must stay the no-op the diff makes it.
-  it("sends nothing when the assigner is already recorded", async () => {
-    serve({ assignedBy: OWNER });
-    renderDetail();
-    await loaded();
-
-    await pickAssignee(/Owner Name/);
+    await pickAndSettle(/Owner Name/);
 
     expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it("the control: picking somebody else is saved", async () => {
+    serve({ assignedBy: undefined });
+    renderDetail();
+    await loaded();
+
+    await pickAndSettle(/Tomek/);
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/TP/tasks/t1", { assignee: "tomek" });
   });
 });
 

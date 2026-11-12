@@ -18,6 +18,7 @@ import { epicProgressFor } from "@/lib/epics";
 import { releaseUploads, uploadIdsIn } from "@/lib/upload-cleanup";
 import { ITaskExecution } from "@/types";
 import { withApiExecution } from "@/lib/task-execution-view";
+import { handoverVerdict } from "@/lib/handover-verdict";
 import {
   mayDecide,
   toApiDecision,
@@ -137,7 +138,12 @@ export const PUT = withProjectAccess(async (request, { params, user, db }) => {
     );
   }
 
-  return NextResponse.json(await withApiExecution(db, result.data));
+  const answer = await withApiExecution(db, result.data);
+  // Only where this write could have made or unmade a hand-over: it costs a read of the board
+  if ("agent" in updates || "assignee" in updates) {
+    answer.handover = await handoverVerdict(db, projectId, result.data);
+  }
+  return NextResponse.json(answer);
 });
 
 export const DELETE = withProjectAccess(async (request, { params, user, db }) => {

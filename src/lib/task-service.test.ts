@@ -5158,6 +5158,100 @@ describe("what a rewritten updateTask still tells the assignee", () => {
     expect(notification.email.taskNumber).toBe(4);
   });
 
+  // BP-420. A task carrying an agent runs on the assignee's machine once they accept it, so that is
+  // what the message asks for — and the plain wording stays for work with no agent on it
+  it("asks the new assignee to accept a task that carries an agent", async () => {
+    findOneAndUpdate.mockReturnValue({
+      populate: () =>
+        Promise.resolve({
+          _id: "t1",
+          taskNumber: 4,
+          status: "doing",
+          title: "Session cookie survives a change",
+          priority: "high",
+          assignee: { _id: "u2", username: "kuba" },
+          agent: { _id: "a1", name: "Default" },
+          execution: {},
+        }),
+    });
+
+    await updateTask(db, "p1", "t1", { assignee: "kuba" }, "actor");
+
+    const [, notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+    expect(notification.title).toBe("TP-4 handed to you — accept it to run it on your machine");
+    expect(notification.digestTitle).toBe("handed to you, waiting for you to accept it");
+    expect(notification.email.kicker).toBe("Handed to you");
+    expect(notification.email.taskMeta).toBe(
+      "Test Project · assigned by Ada Actor · accept it on the task to run it on your machine"
+    );
+  });
+
+  // BP-420 review: assignee first, agent second is the order the rail lays them out in, and the
+  // second write is when the hand-over comes into being
+  describe("when the agent arrives after the assignee", () => {
+    const AGENT_ID = "69a52e3b399b27d3cbb2c5a9";
+    function agentLands(assignedBy: unknown) {
+      const stored = { _id: "t1", taskNumber: 4, status: "doing", title: "T", assignee: { _id: "u2", username: "kuba" }, assignedBy, agent: null };
+      findOne.mockReturnValue({ lean: () => Promise.resolve(stored), populate: () => ({ lean: () => Promise.resolve(stored) }) });
+      findOneAndUpdate.mockReturnValue({
+        populate: () => Promise.resolve({ ...stored, agent: { _id: "a1", name: "Default" }, execution: {} }),
+      });
+      agentInTheCatalog({ _id: AGENT_ID, scope: "project", project: "p1", name: "Default", composition: { implementation: [{ key: "write-the-change" }] } });
+      pmUserIdMock.mockResolvedValue("pm-id");
+    }
+
+    it("asks the assignee to accept work somebody else handed over", async () => {
+      agentLands("actor");
+
+      const result = await updateTask(db, "p1", "t1", { agent: AGENT_ID }, "actor");
+      expect(result).toMatchObject({ ok: true });
+
+      const [, notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+      expect(notification.recipientIds).toEqual(["u2"]);
+      expect(notification.title).toBe("TP-4 handed to you — accept it to run it on your machine");
+      // Whoever chose the agent did not necessarily make the assignment
+      expect(notification.email.taskMeta).toBe(
+        "Test Project · agent chosen by Ada Actor · accept it on the task to run it on your machine"
+      );
+    });
+
+    it("says nothing when the assignee handed it to themselves", async () => {
+      agentLands("u2");
+
+      expect(await updateTask(db, "p1", "t1", { agent: AGENT_ID }, "actor")).toMatchObject({ ok: true });
+
+      expect(createNotificationsMock).not.toHaveBeenCalled();
+    });
+
+    it("says nothing when the assignee chooses the agent themselves", async () => {
+      agentLands("actor");
+
+      expect(await updateTask(db, "p1", "t1", { agent: AGENT_ID }, "u2")).toMatchObject({ ok: true });
+
+      expect(createNotificationsMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it("does not ask the PM's hand-over made on the assignee's own instruction to be accepted", async () => {
+    findOneAndUpdate.mockReturnValue({
+      populate: () =>
+        Promise.resolve({
+          _id: "t1",
+          taskNumber: 4,
+          status: "doing",
+          title: "Session cookie survives a change",
+          assignee: { _id: "u2", username: "kuba" },
+          agent: { _id: "a1", name: "Default" },
+          execution: {},
+        }),
+    });
+
+    await updateTask(db, "p1", "t1", { assignee: "kuba" }, "pm-id", false, "u2");
+
+    const [, notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
+    expect(notification.title).toBe("TP-4 assigned to you");
+  });
+
   // The other half of the same arrangement: a guard that refuses must refuse BEFORE the write, so
   // there is nothing to announce. A guard moved below the notification would still return 400 and
   // still leave this mail sent.

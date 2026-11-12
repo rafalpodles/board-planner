@@ -280,6 +280,7 @@ export const GROUPS = {
     "ai-generated-marker.spec.ts",
     "pm-trust-boundary.spec.ts",
     "pm-assignment-is-a-handover.spec.ts",
+    "handover-accept.spec.ts",
     "pm-autonomy.spec.ts",
     "pm-board-review.spec.ts",
     "pm-governance.spec.ts",

@@ -17,6 +17,7 @@ const severLinksToDeletedTask = vi.fn();
 const check = vi.fn();
 const epicProgressFor = vi.fn(async () => new Map());
 const parentsOf = vi.fn(async () => new Map());
+const handoverVerdict = vi.fn(async () => ({ willRun: false, why: "it waits for @bartek to accept it in the app" }));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/grants", () => ({ check }));
@@ -34,6 +35,8 @@ vi.mock("@/lib/task-links", () => ({ severLinksToDeletedTask }));
 vi.mock("@/lib/epics", () => ({ epicProgressFor }));
 // Which task is whose parent is task-parents.test.ts's job; here the route only has to ask for this one
 vi.mock("@/lib/task-parents", () => ({ parentsOf }));
+// What the sentence says is handover-verdict.test.ts's job; here the route only decides when to ask
+vi.mock("@/lib/handover-verdict", () => ({ handoverVerdict }));
 vi.mock("@/models/task", () => ({
   Task: { findOne: taskFindOne, find: taskFind, updateMany: taskUpdateMany, deleteOne: taskDeleteOne, findOneAndDelete: vi.fn() },
 }));
@@ -230,6 +233,39 @@ describe("PUT .../tasks/:taskId and the agent", () => {
     await PUT(roleOf("admin"), ctx());
 
     expect(updateTask.mock.calls[0]).toEqual(updateTask.mock.calls[1]);
+  });
+
+  // BP-420. A client handing a task over is told whether it will run, rather than handed back a task
+  // that only looks handed over
+  it("answers with the hand-over verdict when the write names the agent or the assignee", async () => {
+    for (const body of [{ agent: AGENT }, { assignee: "bartek" }]) {
+      handoverVerdict.mockClear();
+      const res = await PUT(
+        new Request(`https://app.example.com/api/projects/p1/tasks/${TASK}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        ctx()
+      );
+
+      expect((await res.json()).handover).toEqual({ willRun: false, why: "it waits for @bartek to accept it in the app" });
+      expect(handoverVerdict).toHaveBeenCalledWith(scopedToDefaultOrganisation(), "p1", { _id: TASK });
+    }
+  });
+
+  it("does not read the board for a write that cannot change the hand-over", async () => {
+    const res = await PUT(
+      new Request(`https://app.example.com/api/projects/p1/tasks/${TASK}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "renamed" }),
+      }),
+      ctx()
+    );
+
+    expect((await res.json()).handover).toBeUndefined();
+    expect(handoverVerdict).not.toHaveBeenCalled();
   });
 });
 
