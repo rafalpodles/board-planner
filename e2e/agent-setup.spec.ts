@@ -49,7 +49,7 @@ test("the prompt is built for this instance and the screen waits on the agent fi
   const origin = new URL(page.url()).origin;
 
   expect(setup.prompt).toContain(`${origin}/api/mcp`);
-  await expect(page.getByTestId("setup-prompt")).toContainText(`--connect ${origin}`);
+  await expect(page.getByTestId("setup-prompt")).toContainText(`--connect '${origin}'`);
   await expect(page.getByTestId("setup-prompt")).toContainText("Install the Board Planner skill");
   await expect(step(page, "agent")).toHaveAttribute("data-state", "waiting");
   await expect(step(page, "board")).toHaveAttribute("data-state", "todo");
