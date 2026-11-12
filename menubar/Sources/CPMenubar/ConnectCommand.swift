@@ -59,10 +59,12 @@ enum ConnectCommand {
         var grant: @Sendable (String) throws -> Void
         /// Whether the app was launched
         var openApp: @Sendable () -> Bool
-        var workerListening: @Sendable () async -> Bool
+        /// Whether a worker answers on this state directory's socket within that many seconds
+        var workerAnswers: @Sendable (_ withinSeconds: Int) async -> Bool
     }
 
     static let unreachablePollLimit = 30
+    static let workerStartSeconds = 60
     static let installedBinary = "\"/Applications/Board Planner Worker.app/Contents/MacOS/CPMenubar\""
 
     static func run(_ options: Options, _ deps: Deps) async -> Int32 {
@@ -73,7 +75,7 @@ enum ConnectCommand {
             return 1
         }
         let board = BoardURL.normalise(options.boardURL)
-        if let answered = alreadyConnected(deps.load(), board: board, deps: deps) { return answered }
+        if let answered = await alreadyConnected(deps.load(), board: board, deps: deps) { return answered }
 
         guard deps.otherInstanceRunning() else { return await connect(options, board: board, deps: deps) }
         say("Closing the Board Planner Worker setup window: setup continues here.")
@@ -81,17 +83,21 @@ enum ConnectCommand {
             say("✗ Board Planner Worker did not quit. Quit it from the menu bar, then run this again.")
             return 1
         }
-        if let answered = alreadyConnected(deps.load(), board: board, deps: deps) { return answered }
+        if let answered = await alreadyConnected(deps.load(), board: board, deps: deps) { return answered }
         let code = await connect(options, board: board, deps: deps)
         if code != 0 { _ = deps.openApp() }
         return code
     }
 
-    private static func alreadyConnected(_ state: OnboardingState, board: String, deps: Deps) -> Int32? {
+    private static func alreadyConnected(_ state: OnboardingState, board: String, deps: Deps) async -> Int32? {
         guard state.isOnboarded else { return nil }
         if BoardURL.normalise(state.apiURL) == board {
-            deps.say("This Mac is already connected to \(board) as \(state.workerName). Nothing to do.")
-            _ = deps.openApp()
+            guard deps.openApp(), await deps.workerAnswers(workerStartSeconds) else {
+                deps.say("✗ This Mac is connected to \(board) as \(state.workerName), but its worker is not running.")
+                deps.say("Open Board Planner Worker in the menu bar to see why.")
+                return 1
+            }
+            deps.say("This Mac is already connected to \(board) as \(state.workerName), and its worker is running.")
             return 0
         }
         deps.say("✗ This Mac is connected to \(state.apiURL), not \(board).")
@@ -101,6 +107,11 @@ enum ConnectCommand {
 
     private static func connect(_ options: Options, board: String, deps: Deps) async -> Int32 {
         let say = deps.say
+        guard await !deps.workerAnswers(0) else {
+            say("✗ A worker is already running from this Mac's state folder, outside the app.")
+            say("Stop it first, then run this again: this command starts the app's own worker.")
+            return 1
+        }
         var state = deps.load()
         let resumable = Onboarding.resumesApproval(state) && BoardURL.normalise(state.apiURL) == board
 
@@ -236,7 +247,7 @@ enum ConnectCommand {
                 say("✗ Connected, but Board Planner Worker would not open. Open it from Applications to start the worker.")
                 return 1
             }
-            guard await deps.workerListening() else {
+            guard await deps.workerAnswers(workerStartSeconds) else {
                 say("✗ Connected, but the worker did not start. Open Board Planner Worker in the menu bar to see why.")
                 return 1
             }
@@ -359,13 +370,14 @@ extension ConnectCommand {
                 open.waitUntilExit()
                 return open.terminationStatus == 0
             },
-            workerListening: {
+            workerAnswers: { seconds in
                 let client = SocketClient(socketPath: SocketClient.defaultSocketPath(), transport: POSIXTransport())
-                for _ in 0..<40 {
+                let deadline = Date().addingTimeInterval(TimeInterval(seconds))
+                repeat {
                     if (try? await client.status()) != nil { return true }
+                    if Date() >= deadline { return false }
                     try? await Task.sleep(for: .milliseconds(500))
-                }
-                return false
+                } while true
             }
         )
     }

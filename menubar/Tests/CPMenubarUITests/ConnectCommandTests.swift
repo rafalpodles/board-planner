@@ -85,6 +85,25 @@ final class ConnectCommandTests: XCTestCase {
         XCTAssertEqual(rig.appOpened, 0)
     }
 
+    func testAWorkerAlreadyRunningOutsideTheAppStopsTheCommand() async {
+        let rig = Rig(polls: [])
+        rig.staleWorker = true
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 1)
+        XCTAssertEqual(rig.begun, 0)
+        XCTAssertEqual(rig.saved, [])
+    }
+
+    func testAnAlreadyConnectedMacWhoseWorkerIsDownIsNotReportedAsFine() async {
+        let rig = Rig(polls: [], initial: OnboardingState(step: .running, apiURL: "https://acme.example.com", workerName: "Mac"))
+        rig.listening = false
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 1)
+        XCTAssertEqual(rig.begun, 0)
+    }
+
     func testAnAlreadyConnectedMacOnTheSameBoardDoesNothing() async {
         let rig = Rig(polls: [], initial: OnboardingState(step: .running, apiURL: "https://acme.example.com", workerName: "Mac"))
         let code = await ConnectCommand.run(rig.options, rig.deps)
@@ -223,6 +242,8 @@ private final class Rig: @unchecked Sendable {
     var closes = true
     var opens = true
     var listening = true
+    var staleWorker = false
+    var workerChecks: [Int] = []
     var stateAfterClose: OnboardingState?
     private var state: OnboardingState
 
@@ -315,7 +336,12 @@ private final class Rig: @unchecked Sendable {
             },
             grant: { path in self.locked { self.granted.append(path) } },
             openApp: { self.locked { self.appOpened += 1; return self.opens } },
-            workerListening: { self.listening }
+            workerAnswers: { seconds in
+                self.locked {
+                    self.workerChecks.append(seconds)
+                    return seconds == 0 ? self.staleWorker : self.listening
+                }
+            }
         )
     }
 }
