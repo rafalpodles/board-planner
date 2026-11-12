@@ -2254,3 +2254,22 @@ export interface ApiFleetRun extends ApiAgentRun {
   projectDeleted: boolean;
   workerName: string;
 }
+
+export interface ApiAgentSetup {
+  /** When this screen started counting; a board created before it is not the agent's */
+  since: string;
+  prompt: string;
+  /** The board the checklist is reading, once there is one */
+  projectKey: string | null;
+  steps: import("@/lib/agent-setup").SetupStep[];
+  /** What Run hands over once there is a board, its default agent and a first task */
+  run: {
+    projectId: string;
+    projectKey: string;
+    taskId: string;
+    taskNumber: number;
+    agentId: string;
+    /** The board's first approved column, or null when it has none */
+    status: string | null;
+  } | null;
+}

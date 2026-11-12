@@ -1,5 +1,6 @@
 import { readAuthenticatedJsonBody } from "@/lib/request-body";
 import { NextResponse } from "next/server";
+import { withoutHttpCredentials } from "@/lib/project-setup";
 import { connectDB } from "@/lib/db";
 import type { ScopedDb } from "@/lib/db-scope";
 import { entitlementRefusal, withProjectAccess, withProjectOwner, withProjectAccessOrWorker } from "@/lib/middleware";
@@ -256,6 +257,7 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
       { status: 400 }
     );
   }
+  if (typeof updates.repositoryUrl === "string") updates.repositoryUrl = withoutHttpCredentials(updates.repositoryUrl.trim());
 
   if (body.worker !== undefined) {
     // withProjectOwner has already required the project-admin grant: the owner, or an instance
@@ -457,7 +459,13 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
       stored: repositoriesBefore,
       legacyPrimary: projectRepositoryUrl(current as never),
       primary: typeof updates.repositoryUrl === "string" ? updates.repositoryUrl : undefined,
-      additional: body.additionalRepositories,
+      additional: Array.isArray(body.additionalRepositories)
+        ? body.additionalRepositories.map((entry: unknown) =>
+            entry && typeof entry === "object" && typeof (entry as { url?: unknown }).url === "string"
+              ? { ...entry, url: withoutHttpCredentials((entry as { url: string }).url) }
+              : entry
+          )
+        : body.additionalRepositories,
     });
     if ("error" in plan) return NextResponse.json({ error: plan.error }, { status: 400 });
     updates.repositories = plan.repositories;

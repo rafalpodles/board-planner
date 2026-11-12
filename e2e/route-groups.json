@@ -169,6 +169,9 @@
     "people",
     "automation"
   ],
+  "src/app/api/onboarding/agent-setup/route.ts": [
+    "tasks"
+  ],
   "src/app/api/organisation/route.ts": [
     "people"
   ],

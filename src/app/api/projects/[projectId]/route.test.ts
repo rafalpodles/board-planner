@@ -352,6 +352,16 @@ describe("PUT /api/projects/[projectId] deploymentEnvironment", () => {
     expect(projectUpdateOne.mock.calls[0][1].$set["deploymentSync.syncedThrough"]).toBeNull();
   });
 
+  it("stores a repository address without the credentials a git remote can carry", async () => {
+    projectFindOneAndUpdate.mockReturnValue({
+      lean: () => Promise.resolve({ _id: PROJECT_ID, name: "Test Project", repositoryUrl: "https://github.com/new/repo" }),
+    });
+
+    await PUT(putRequest({ repositoryUrl: "https://alex:ghp_secret@github.com/new/repo" }), ctx());
+
+    expect(JSON.stringify(projectFindOneAndUpdate.mock.calls[0])).not.toContain("ghp_secret");
+  });
+
   it("the same repository written another way is not a move", async () => {
     projectFindOneAndUpdate.mockReturnValue({
       lean: () => Promise.resolve({ _id: PROJECT_ID, name: "Test Project", repositoryUrl: "https://github.com/Old/Repo" }),
@@ -409,6 +419,15 @@ describe("PUT /api/projects/[projectId] deploymentEnvironment", () => {
       expect(written[1]).toEqual({ _id: api, url: "https://github.com/acme/api", name: "Backend" });
       expect(written[2]).toMatchObject({ url: "https://github.com/acme/docs", name: "" });
       expect(written[2]._id).toBeInstanceOf(mongoose.Types.ObjectId);
+    });
+
+    it("stores an entry without the credentials a git remote can carry", async () => {
+      listed(stored);
+
+      await PUT(putRequest({ additionalRepositories: [{ url: "https://alex:ghp_other@github.com/acme/docs", name: "Docs" }] }), ctx());
+
+      const written = projectFindOneAndUpdate.mock.calls[0][1].repositories;
+      expect(written[1]).toMatchObject({ url: "https://github.com/acme/docs", name: "Docs" });
     });
 
     it("removes every extra entry when the list is empty, leaving the primary", async () => {
