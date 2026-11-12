@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.15.0](https://github.com/rafalpodles/board-planner/compare/v1.14.0...v1.15.0) (2026-11-12)
+
+
+### Features
+
+* accept a hand-over somebody else made, and a write that hands a task over says whether it will run (BP-420) ([#800](https://github.com/rafalpodles/board-planner/issues/800)) ([793e0c6](https://github.com/rafalpodles/board-planner/commit/793e0c6c81ec983442fd8b696c98cd4789a8d57e))
+* **mcp:** cover what the REST API allows a machine credential — projects, people, agents, board setup, AI and the PM (BP-1150) ([#801](https://github.com/rafalpodles/board-planner/issues/801)) ([7565963](https://github.com/rafalpodles/board-planner/commit/756596361bcb8be4c094a5e979bdf600d7f5dc7e))
+* **menubar:** connect this Mac from the terminal with --connect (BP-1153) ([#802](https://github.com/rafalpodles/board-planner/issues/802)) ([91c0d3a](https://github.com/rafalpodles/board-planner/commit/91c0d3a0d83b8e7f3826a84805e4829e848b0c7d))
+* owners confirm before saving their own No access on a board (BP-848) ([#795](https://github.com/rafalpodles/board-planner/issues/795)) ([e68dc72](https://github.com/rafalpodles/board-planner/commit/e68dc72f2eca1e84f47c45edb6905b05bee7522c))
+* **worker:** the agent's steps and the reviewer read with the home shut on every project (BP-307) ([#796](https://github.com/rafalpodles/board-planner/issues/796)) ([1d29af0](https://github.com/rafalpodles/board-planner/commit/1d29af02fd27107fd60552a28cdc5e5ecb3e8594))
+
+
+### Bug Fixes
+
+* **deps:** bump mongoose to 9.11.4 past two high advisories (BP-1148) ([#799](https://github.com/rafalpodles/board-planner/issues/799)) ([3ba02d1](https://github.com/rafalpodles/board-planner/commit/3ba02d149bed83c0a967dafe4384cf20ed4fedea))
+* **deps:** bump next to 16.4.5, nodemailer to 10.4.0 and transitive leaves past new advisories (BP-1142) ([#792](https://github.com/rafalpodles/board-planner/issues/792)) ([3a07aa1](https://github.com/rafalpodles/board-planner/commit/3a07aa120cb6864e03a5d802f2bf24ad53195302))
+
 ## [1.14.0](https://github.com/rafalpodles/board-planner/compare/v1.13.0...v1.14.0) (2026-11-09)
 
 
