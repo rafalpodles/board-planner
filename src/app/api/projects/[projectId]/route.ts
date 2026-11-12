@@ -459,7 +459,13 @@ export const PUT = withProjectOwner(async (request, { params, user, db }) => {
       stored: repositoriesBefore,
       legacyPrimary: projectRepositoryUrl(current as never),
       primary: typeof updates.repositoryUrl === "string" ? updates.repositoryUrl : undefined,
-      additional: body.additionalRepositories,
+      additional: Array.isArray(body.additionalRepositories)
+        ? body.additionalRepositories.map((entry: unknown) =>
+            entry && typeof entry === "object" && typeof (entry as { url?: unknown }).url === "string"
+              ? { ...entry, url: withoutHttpCredentials((entry as { url: string }).url) }
+              : entry
+          )
+        : body.additionalRepositories,
     });
     if ("error" in plan) return NextResponse.json({ error: plan.error }, { status: 400 });
     updates.repositories = plan.repositories;

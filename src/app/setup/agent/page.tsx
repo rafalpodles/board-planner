@@ -10,7 +10,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { agentSetupComplete, type SetupStep, type SetupStepKey } from "@/lib/agent-setup";
-import { taskPath } from "@/lib/urls";
+import { projectPath, taskPath } from "@/lib/urls";
 import { APP_NAME } from "@/lib/brand";
 import type { ApiAgentSetup } from "@/types";
 
@@ -87,7 +87,9 @@ function AgentSetup() {
   const started = setup !== null;
   useEffect(() => {
     if (!started) return;
-    const timer = setInterval(load, POLL_MS);
+    const timer = setInterval(() => {
+      if (!document.hidden) load();
+    }, POLL_MS);
     return () => clearInterval(timer);
   }, [started, load]);
 
@@ -137,8 +139,12 @@ function AgentSetup() {
 
       {user && user.role !== "admin" && (
         <p className="mt-6 rounded-lg border border-border bg-bg-card p-3 text-sm text-text-muted">
-          Creating a board needs an instance admin. Ask one to make the board and add you to it; your coding agent
-          can then do the rest.
+          This screen walks an instance admin through creating a board. If you were added to an existing board, connect
+          this Mac under{" "}
+          <Link href="/settings/machines" className="text-primary hover:underline">
+            Settings → Machines
+          </Link>
+          {" "}instead.
         </p>
       )}
 
@@ -185,6 +191,14 @@ function AgentSetup() {
               <StepRow key={step.key} step={step} />
             ))}
           </ol>
+          {setup && complete && !setup.run && setup.projectKey && (
+            <p className="mt-4 text-sm text-text-muted">
+              Its first task has already moved on.{" "}
+              <Link href={projectPath(setup.projectKey)} className="text-primary hover:underline">
+                Open the board
+              </Link>
+            </p>
+          )}
           {setup?.run && complete && (
             <Button className="mt-4 w-full" size="lg" onClick={run} disabled={running} data-testid="run-first-task">
               {running ? "Handing it over…" : `Run ${setup.run.projectKey}-${setup.run.taskNumber}`}

@@ -421,6 +421,15 @@ describe("PUT /api/projects/[projectId] deploymentEnvironment", () => {
       expect(written[2]._id).toBeInstanceOf(mongoose.Types.ObjectId);
     });
 
+    it("stores an entry without the credentials a git remote can carry", async () => {
+      listed(stored);
+
+      await PUT(putRequest({ additionalRepositories: [{ url: "https://alex:ghp_other@github.com/acme/docs", name: "Docs" }] }), ctx());
+
+      const written = projectFindOneAndUpdate.mock.calls[0][1].repositories;
+      expect(written[1]).toMatchObject({ url: "https://github.com/acme/docs", name: "Docs" });
+    });
+
     it("removes every extra entry when the list is empty, leaving the primary", async () => {
       listed(stored);
 

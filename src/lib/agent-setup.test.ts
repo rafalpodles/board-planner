@@ -44,6 +44,7 @@ describe("agentSetupPrompt", () => {
   it("leaves trusting the Homebrew tap to the person", () => {
     const prompt = agentSetupPrompt("https://x.example.com", "1.14.0");
     expect(prompt).toMatch(/Trusting a third-party Homebrew tap is my decision, so show me this command and ask me to run it/);
+    expect(prompt.indexOf("brew tap rafalpodles/tap")).toBeLessThan(prompt.indexOf("brew trust"));
   });
 });
 

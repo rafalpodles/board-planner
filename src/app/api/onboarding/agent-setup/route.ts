@@ -8,7 +8,7 @@ import { machineReadinessFor } from "@/lib/worker-service";
 import { claimingMachineIds } from "@/lib/machine-limit";
 import { columnIdsWithRole, roleOf } from "@/lib/columns";
 import { check } from "@/lib/grants";
-import { version } from "../../../../../package.json";
+import { getBuildInfo } from "@/lib/build-info";
 import { taskKeyOf } from "@/lib/task-key";
 import { NOT_ARCHIVED } from "@/lib/task-archive";
 import { agentSetupPrompt, agentSetupSteps } from "@/lib/agent-setup";
@@ -74,7 +74,8 @@ export const GET = withAuth(async (request, { user, db }) => {
 
   const body: ApiAgentSetup = {
     since: since.toISOString(),
-    prompt: agentSetupPrompt(origin, version),
+    prompt: agentSetupPrompt(origin, getBuildInfo().version),
+    projectKey: project?.key ?? null,
     steps,
     run:
       project && agent && firstTask && !firstTask.execution?.runId && ["backlog", "approved"].includes(roleOf(project, firstTask.status) ?? "")
