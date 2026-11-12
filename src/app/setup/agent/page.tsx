@@ -191,9 +191,9 @@ function AgentSetup() {
               <StepRow key={step.key} step={step} />
             ))}
           </ol>
-          {setup && complete && !setup.run && setup.projectKey && (
+          {setup && complete && !setup.run && !running && setup.projectKey && (
             <p className="mt-4 text-sm text-text-muted">
-              Its first task has already moved on.{" "}
+              Its first task is no longer waiting to start.{" "}
               <Link href={projectPath(setup.projectKey)} className="text-primary hover:underline">
                 Open the board
               </Link>
