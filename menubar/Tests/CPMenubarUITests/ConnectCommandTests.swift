@@ -303,6 +303,16 @@ final class ConnectCommandTests: XCTestCase {
         XCTAssertFalse(ConnectCommand.clean("a\u{2028}b\u{2029}c\nd").contains { $0.isNewline })
     }
 
+    func testACredentialOnlyThisCommandHoldsIsUsedEvenIfTheAppRewroteTheState() async {
+        let rig = Rig(polls: [.approved(workerID: "w", credential: "c", heartbeatMs: 1, repositoryURL: "https://github.com/acme/api.git", projectKey: "PAY")])
+        rig.takenOverAfterPolls = 1
+        let code = await ConnectCommand.run(rig.options, rig.deps)
+
+        XCTAssertEqual(code, 0)
+        XCTAssertNotNil(rig.identity)
+        XCTAssertEqual(rig.saved.last?.step, .running)
+    }
+
     func testAnApprovalTakenOverIsNotOverwritten() async {
         let rig = Rig(polls: [.finished])
         rig.takenOverAfterPolls = 1

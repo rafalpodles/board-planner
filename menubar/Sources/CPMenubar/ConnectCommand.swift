@@ -282,7 +282,6 @@ enum ConnectCommand {
                 say("✗ The approval was refused or expired. Run this command again for a new code.")
                 return 1
             case .approved(let workerID, let credential, let heartbeatMs, let repositoryURL, let projectKey):
-                guard takeOverFromApp(deps) else { return 1 }
                 return await finish(
                     state: state, deps: deps, workerID: workerID,
                     identity: WorkerIdentity(workerId: workerID, credential: credential, heartbeatMs: heartbeatMs),
