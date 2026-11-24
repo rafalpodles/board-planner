@@ -38,9 +38,10 @@ describe("the Node floor keeps CVE-2026-111497 out (BP-1160)", () => {
   it("has the image's install see that setting", () => {
     const dockerfile = read("Dockerfile").split("\n");
     const install = dockerfile.findIndex((line) => /^RUN npm ci\b/.test(line));
-    const copy = dockerfile.findIndex((line) => /^COPY\b.*\s\.npmrc\s/.test(line));
+    const stage = dockerfile.slice(0, install).findLastIndex((line) => /^FROM\b/.test(line));
+    const copy = dockerfile.findIndex((line) => /^COPY\s+(\S+\s+)*\.npmrc\s+(\S+\s+)*\.\/$/.test(line));
     expect(install).toBeGreaterThan(-1);
-    expect(copy).toBeGreaterThan(-1);
+    expect(copy).toBeGreaterThan(stage);
     expect(copy).toBeLessThan(install);
   });
 });
