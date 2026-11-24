@@ -233,7 +233,7 @@ way of running the image needs `PUBLIC_ORIGIN` itself.
 
 ### Without Docker
 
-Needs **Node 26** and a **MongoDB 4.4+** you provision yourself.
+Needs **Node 26.12.1** or later and a **MongoDB 4.4+** you provision yourself.
 
 ```bash
 npm install
